@@ -5,6 +5,8 @@ export type GeoDiagnosticPhase =
     | 'transform'
     | 'virtual-raster'
     | 'source'
+    | 'cache'
+    | 'demand'
     | 'residency'
     | 'sampling'
 

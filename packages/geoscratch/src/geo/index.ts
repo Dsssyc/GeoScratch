@@ -85,6 +85,48 @@ export type {
     WebMercatorTileSampleAddress,
 } from './web-mercator-quad.js'
 export {
+    VirtualRasterCache,
+    createVirtualRasterCache,
+    openIndexedDbVirtualRasterPersistentStore,
+    virtualRasterCacheKey,
+} from './virtual-raster-cache.js'
+export type {
+    IndexedDbVirtualRasterPersistentStoreDescriptor,
+    VirtualRasterCacheCoherence,
+    VirtualRasterCacheDeleteOutcome,
+    VirtualRasterCacheDescriptor,
+    VirtualRasterCacheFacts,
+    VirtualRasterCacheInvalidation,
+    VirtualRasterCacheKey,
+    VirtualRasterCacheKeyDescriptor,
+    VirtualRasterCachePolicy,
+    VirtualRasterCachePutOutcome,
+    VirtualRasterCachePutStatus,
+    VirtualRasterCacheRecord,
+    VirtualRasterCacheRecordDescriptor,
+    VirtualRasterPersistentEntry,
+    VirtualRasterPersistentStorageFacts,
+    VirtualRasterPersistentStore,
+} from './virtual-raster-cache.js'
+export {
+    VirtualRasterRequestScheduler,
+    virtualRasterDemandSet,
+} from './virtual-raster-demand.js'
+export type {
+    VirtualRasterDemandGenerationFacts,
+    VirtualRasterDemandHistoryEntry,
+    VirtualRasterDemandReconciliation,
+    VirtualRasterDemandSet,
+    VirtualRasterDemandSetDescriptor,
+    VirtualRasterDemandUsage,
+    VirtualRasterPageDemand,
+    VirtualRasterRequestExecution,
+    VirtualRasterRequestExecutionFacts,
+    VirtualRasterRequestExecutor,
+    VirtualRasterRequestSchedulerDescriptor,
+    VirtualRasterRequestSchedulerFacts,
+} from './virtual-raster-demand.js'
+export {
     VirtualRasterAccessor,
     VirtualRasterAddressSpace,
     VirtualRasterSnapshot,
@@ -98,6 +140,8 @@ export type {
     VirtualRasterAccessorDescriptor,
     VirtualRasterAccessorWgslOptions,
     VirtualRasterAddressSpaceDescriptor,
+    VirtualRasterCpuPage,
+    VirtualRasterCpuPageProvider,
     VirtualRasterFieldKind,
     VirtualRasterFilter,
     VirtualRasterOuterBoundary,
@@ -119,14 +163,35 @@ export type {
     VirtualRasterSourceDescriptor,
     VirtualRasterSourceLoadContext,
 } from './virtual-raster.js'
-export { VirtualRasterResidency } from './virtual-raster-residency.js'
+export {
+    VirtualRasterPublication,
+    VirtualRasterResidency,
+} from './virtual-raster-residency.js'
 export type {
     VirtualRasterHistoryEntry,
-    VirtualRasterRequestOutcome,
-    VirtualRasterRequestStatus,
+    VirtualRasterPublicationFacts,
+    VirtualRasterPublicationState,
     VirtualRasterResidencyDescriptor,
     VirtualRasterResidencyFacts,
+    VirtualRasterStageOptions,
+    VirtualRasterStageOutcome,
+    VirtualRasterStageStatus,
+    VirtualRasterUploadPage,
 } from './virtual-raster-residency.js'
+export {
+    adoptVirtualRasterPageTransfer,
+    discardOwnedVirtualRasterPagePayload,
+    discardVirtualRasterPageTransfer,
+    ownedVirtualRasterPagePayload,
+    prepareVirtualRasterPageTransfer,
+} from './virtual-raster-transfer.js'
+export type {
+    OwnedVirtualRasterPagePayload,
+    PreparedVirtualRasterPageTransfer,
+    VirtualRasterPageData,
+    VirtualRasterPagePayloadDescriptor,
+    VirtualRasterPageTransfer,
+} from './virtual-raster-transfer.js'
 export {
     VirtualRasterGpuState,
     createVirtualRasterGpuState,

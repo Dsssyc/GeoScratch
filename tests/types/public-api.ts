@@ -16,6 +16,7 @@ import {
     cellLocalF32Codec,
     coordinateDomain,
     localVector,
+    ownedVirtualRasterPagePayload,
     surfaceDomain,
     tileMatrixCoverage,
     wideFixedCodec,
@@ -23,7 +24,6 @@ import {
     virtualRasterAddressSpace,
     virtualRasterPlane,
     virtualRasterSamplingProfile,
-    virtualRasterSource,
     webMercatorQuadAddressCodec,
     type CellLocalPosition,
     type CoordinateDomain,
@@ -199,27 +199,21 @@ const typedRasterPlane = virtualRasterPlane({
     sampleType: 'unorm8',
     gpuFormat: 'r8unorm',
 })
-const typedRasterSource = virtualRasterSource({
-    id: 'typed-source',
-    async loadPage(page) {
-
-        return {
-            page,
-            width: 128,
-            height: 128,
-            channels: 1,
-            data: new Uint8Array(128 * 128),
-            contentVersion: 'typed',
-        }
-    },
-})
 const typedRasterResidency: VirtualRasterResidency = new VirtualRasterResidency({
     addressSpace: typedRasterAddressSpace,
     plane: typedRasterPlane,
-    source: typedRasterSource,
     maxPhysicalPages: 8,
-    maxCpuBytes: 128 * 128 * 8,
+    maxStagingBytes: 128 * 128 * 8,
 })
+const typedRasterData = new Uint8Array(128 * 128)
+typedRasterResidency.stage(ownedVirtualRasterPagePayload({
+    page: typedRasterPage,
+    width: 128,
+    height: 128,
+    channels: 1,
+    data: typedRasterData,
+    contentVersion: 'typed',
+}), { generation: 0 })
 const typedRasterProfile = virtualRasterSamplingProfile({
     filter: 'bilinear',
     level: 0,
@@ -232,6 +226,13 @@ const typedRasterAccessor = virtualRasterAccessor({
 const typedRasterSample: VirtualRasterSample = typedRasterAccessor.sample(
     typedRasterResidency.currentSnapshot,
     { texel: [ 0, 0 ], profile: typedRasterProfile },
+    { get: page => page.key === typedRasterPage.key ? {
+        page,
+        width: 128,
+        height: 128,
+        channels: 1,
+        data: typedRasterData,
+    } : undefined },
 )
 const typedRasterGpuState: VirtualRasterGpuState | undefined = undefined
 const typedTileCoverage: TileMatrixCoverage = tileMatrixCoverage({

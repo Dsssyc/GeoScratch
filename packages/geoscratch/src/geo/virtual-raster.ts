@@ -1,5 +1,9 @@
 import type { CoordinateDimension } from './coordinate-domain.js'
 import { throwGeoDiagnostic } from './diagnostics.js'
+import type {
+    OwnedVirtualRasterPagePayload,
+    VirtualRasterPageData,
+} from './virtual-raster-transfer.js'
 
 export type VirtualRasterFieldKind =
     | 'scalar'
@@ -77,13 +81,18 @@ export type VirtualRasterSamplingProfile = Readonly<{
     outerBoundary: VirtualRasterOuterBoundary
 }>
 
-export type VirtualRasterPagePayload = Readonly<{
+export type VirtualRasterPagePayload = OwnedVirtualRasterPagePayload
+
+export type VirtualRasterCpuPage = Readonly<{
     page: VirtualRasterPageIdentity
     width: number
     height: number
     channels: number
-    data: Uint8Array | Float32Array
-    contentVersion: string
+    data: VirtualRasterPageData
+}>
+
+export type VirtualRasterCpuPageProvider = Readonly<{
+    get(page: VirtualRasterPageIdentity): VirtualRasterCpuPage | undefined
 }>
 
 export type VirtualRasterSourceLoadContext = Readonly<{
@@ -151,7 +160,7 @@ const snapshotRecords = new WeakMap<
     VirtualRasterSnapshot,
     ReadonlyMap<string, VirtualRasterPageTableEntry>
 >()
-const snapshotPhysicalPages = new WeakMap<
+const snapshotPhysicalMappings = new WeakMap<
     VirtualRasterSnapshot,
     ReadonlyMap<number, VirtualRasterPhysicalPage>
 >()
@@ -161,7 +170,11 @@ export type VirtualRasterPhysicalPage = Readonly<{
     physicalSlot: number
     generation: number
     contentEpoch: number
-    payload: VirtualRasterPagePayload
+    byteLength: number
+    width: number
+    height: number
+    channels: number
+    contentVersion: string
 }>
 
 export class VirtualRasterAddressSpace {
@@ -366,7 +379,7 @@ export class VirtualRasterSnapshot {
         addressSpace: VirtualRasterAddressSpace,
         epoch: number,
         pageTable: readonly VirtualRasterPageTableEntry[],
-        physicalPages: ReadonlyMap<number, VirtualRasterPhysicalPage>
+        physicalMappings: ReadonlyMap<number, VirtualRasterPhysicalPage>
     ) {
 
         if (pageTable.length !== addressSpace.pageTableEntryCount) {
@@ -375,11 +388,11 @@ export class VirtualRasterSnapshot {
         this.addressSpace = addressSpace
         this.epoch = epoch
         this.pageTable = Object.freeze([ ...pageTable ])
-        this.residentPageCount = physicalPages.size
+        this.residentPageCount = physicalMappings.size
         this.logicalGpuBytes = pageTable.length * 8 * 4 +
-            [ ...physicalPages.values() ].reduce((sum, page) => sum + page.payload.data.byteLength, 0)
+            [ ...physicalMappings.values() ].reduce((sum, page) => sum + page.byteLength, 0)
         snapshotRecords.set(this, new Map(pageTable.map(entry => [ entry.requestedPage.key, entry ])))
-        snapshotPhysicalPages.set(this, new Map(physicalPages))
+        snapshotPhysicalMappings.set(this, new Map(physicalMappings))
         Object.freeze(this)
     }
 
@@ -418,7 +431,11 @@ export class VirtualRasterAccessor {
         Object.freeze(this)
     }
 
-    sample(snapshot: VirtualRasterSnapshot, descriptor: VirtualRasterSampleDescriptor): VirtualRasterSample {
+    sample(
+        snapshot: VirtualRasterSnapshot,
+        descriptor: VirtualRasterSampleDescriptor,
+        cpuPages: VirtualRasterCpuPageProvider
+    ): VirtualRasterSample {
 
         if (snapshot.addressSpace !== this.addressSpace) {
             return throwGeoDiagnostic({
@@ -441,8 +458,8 @@ export class VirtualRasterAccessor {
             })
         }
         return descriptor.profile.filter === 'nearest'
-            ? this.#nearest(snapshot, descriptor.texel, descriptor.profile)
-            : this.#bilinear(snapshot, descriptor.texel, descriptor.profile)
+            ? this.#nearest(snapshot, descriptor.texel, descriptor.profile, cpuPages)
+            : this.#bilinear(snapshot, descriptor.texel, descriptor.profile, cpuPages)
     }
 
     wgslModule(options: VirtualRasterAccessorWgslOptions): string {
@@ -531,20 +548,22 @@ export class VirtualRasterAccessor {
     #nearest(
         snapshot: VirtualRasterSnapshot,
         texel: readonly [number, number],
-        profile: VirtualRasterSamplingProfile
+        profile: VirtualRasterSamplingProfile,
+        cpuPages: VirtualRasterCpuPageProvider
     ): VirtualRasterSample {
 
         const resolved = this.#loadTexel(snapshot, [
             Math.floor(texel[0] + 0.5),
             Math.floor(texel[1] + 0.5),
-        ], profile)
+        ], profile, cpuPages)
         return sampleFromResolved([ resolved ], profile.level, resolved.value)
     }
 
     #bilinear(
         snapshot: VirtualRasterSnapshot,
         texel: readonly [number, number],
-        profile: VirtualRasterSamplingProfile
+        profile: VirtualRasterSamplingProfile,
+        cpuPages: VirtualRasterCpuPageProvider
     ): VirtualRasterSample {
 
         const x = Math.floor(texel[0])
@@ -552,10 +571,10 @@ export class VirtualRasterAccessor {
         const fx = texel[0] - x
         const fy = texel[1] - y
         const samples = [
-            this.#loadTexel(snapshot, [ x, y ], profile),
-            this.#loadTexel(snapshot, [ x + 1, y ], profile),
-            this.#loadTexel(snapshot, [ x, y + 1 ], profile),
-            this.#loadTexel(snapshot, [ x + 1, y + 1 ], profile),
+            this.#loadTexel(snapshot, [ x, y ], profile, cpuPages),
+            this.#loadTexel(snapshot, [ x + 1, y ], profile, cpuPages),
+            this.#loadTexel(snapshot, [ x, y + 1 ], profile, cpuPages),
+            this.#loadTexel(snapshot, [ x + 1, y + 1 ], profile, cpuPages),
         ]
         if (samples.some(sample => sample.status === 'missing' || sample.status === 'no-data')) {
             return sampleFromResolved(samples, profile.level, undefined)
@@ -568,7 +587,8 @@ export class VirtualRasterAccessor {
     #loadTexel(
         snapshot: VirtualRasterSnapshot,
         inputTexel: readonly [number, number],
-        profile: VirtualRasterSamplingProfile
+        profile: VirtualRasterSamplingProfile,
+        cpuPages: VirtualRasterCpuPageProvider
     ): ResolvedCpuTexel {
 
         const extent = this.addressSpace.levelExtent(profile.level)
@@ -592,7 +612,10 @@ export class VirtualRasterAccessor {
             entry.physicalSlot === undefined || entry.resolvedLevel === undefined) {
             return { status: 'missing', resolvedLevel: profile.level }
         }
-        const physical = snapshotPhysicalPages.get(snapshot)?.get(entry.physicalSlot)
+        if (entry.resolvedPage === undefined) {
+            return { status: 'missing', resolvedLevel: profile.level }
+        }
+        const physical = cpuPages.get(entry.resolvedPage)
         if (physical === undefined) return { status: 'missing', resolvedLevel: profile.level }
         const levelScale = 2 ** (entry.resolvedLevel - profile.level)
         const resolvedTexel = [
@@ -603,10 +626,10 @@ export class VirtualRasterAccessor {
             resolvedTexel[0]! % this.addressSpace.pageSize[0]!,
             resolvedTexel[1]! % this.addressSpace.pageSize[1]!,
         ]
-        const pixel = local[1]! * physical.payload.width + local[0]!
+        const pixel = local[1]! * physical.width + local[0]!
         const value: number[] = []
         for (let channel = 0; channel < this.plane.channels; channel++) {
-            const raw = physical.payload.data[pixel * this.plane.channels + channel]
+            const raw = physical.data[pixel * this.plane.channels + channel]
             if (raw === undefined || (this.plane.noData !== undefined && raw === this.plane.noData)) {
                 return {
                     status: 'no-data',
@@ -732,7 +755,7 @@ export function physicalPagesForSnapshot(
     snapshot: VirtualRasterSnapshot
 ): ReadonlyMap<number, VirtualRasterPhysicalPage> {
 
-    const pages = snapshotPhysicalPages.get(snapshot)
+    const pages = snapshotPhysicalMappings.get(snapshot)
     if (pages === undefined) throw new TypeError('Virtual raster snapshot physical pages are unavailable.')
     return pages
 }

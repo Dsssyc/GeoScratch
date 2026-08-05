@@ -4,11 +4,11 @@ import {
     VirtualRasterResidency,
     cellLocalF32Codec,
     createVirtualRasterGpuState,
+    ownedVirtualRasterPagePayload,
     surfaceDomain,
     virtualRasterAccessor,
     virtualRasterAddressSpace,
     virtualRasterPlane,
-    virtualRasterSource,
 } from 'geoscratch/geo'
 import type {
     VirtualRasterGpuState,
@@ -92,27 +92,11 @@ export async function runGeoVirtualRasterDynamicFlowProof() {
             gpuFormat: 'rg32float',
             auxiliaryAxes: [ { name: 'field-lod', value: 'explicit-level' } ],
         })
-        const source = virtualRasterSource({
-            id: 'geoscratch.proof.generated-vector-pages',
-            async loadPage(page, { signal }) {
-                if (signal.aborted) throw signal.reason
-                await Promise.resolve()
-                return Object.freeze({
-                    page,
-                    width: FIELD_PAGE_SIZE,
-                    height: FIELD_PAGE_SIZE,
-                    channels: 2,
-                    data: createVectorPage(page),
-                    contentVersion: 'dynamic-vector-field-v1',
-                })
-            },
-        })
         residency = new VirtualRasterResidency({
             addressSpace,
             plane,
-            source,
             maxPhysicalPages: MAX_PHYSICAL_PAGES,
-            maxCpuBytes: MAX_PHYSICAL_PAGES * FIELD_PAGE_SIZE * FIELD_PAGE_SIZE * 2 * 4,
+            maxStagingBytes: MAX_PHYSICAL_PAGES * FIELD_PAGE_SIZE * FIELD_PAGE_SIZE * 2 * 4,
             maxHistory: 48,
         })
         const rootPage = addressSpace.page({ level: 2, x: 0, y: 0 })
@@ -262,15 +246,18 @@ export async function runGeoVirtualRasterDynamicFlowProof() {
             dispatch.id,
         ])
 
-        await residency.request(rootPage)
-        const initialSnapshot = residency.publishSnapshot()
-        const initialUpdate = gpu.stage(initialSnapshot)
+        let pageRequestCount = 0
+        residency.reconcileGeneration(1, [ rootPage ])
+        stageGeneratedPage(residency, rootPage, 1)
+        pageRequestCount++
+        const initialPublication = residency.publish()
+        const initialUpdate = gpu.stage(initialPublication)
         const initialWork = submitUploads(runtime, [
             stateUpload,
             parameterUpload,
             ...initialUpdate.commands,
         ])
-        gpu.acknowledge(initialSnapshot)
+        await gpu.acknowledge(initialPublication, initialWork)
         await observe(initialWork)
         stateUpload.dispose()
         initialState.fill(0)
@@ -286,8 +273,10 @@ export async function runGeoVirtualRasterDynamicFlowProof() {
             residency,
             gpu,
             levelOnePage,
-            stateBuffer
+            stateBuffer,
+            2
         )
+        pageRequestCount++
         cameraRequestEpochProofs.push(firstCameraUpdate)
 
         const snapshotEpochs: number[] = []
@@ -301,8 +290,10 @@ export async function runGeoVirtualRasterDynamicFlowProof() {
                     residency,
                     gpu,
                     levelZeroPage,
-                    stateBuffer
+                    stateBuffer,
+                    3
                 )
+                pageRequestCount++
                 cameraRequestEpochProofs.push(secondCameraUpdate)
                 currentSnapshot = residency.currentSnapshot
             }
@@ -361,7 +352,7 @@ export async function runGeoVirtualRasterDynamicFlowProof() {
             supportedOperations: positionCodec.facts.supportedOperations,
             counters,
             sampledPositions: Object.freeze(sampledPositions),
-            pageRequestCount: residency.inspect().pageRequestCount,
+            pageRequestCount,
             fallbackCount: residency.inspect().fallbackCount,
             evictionCount: residency.inspect().evictionCount,
             residency: residency.inspect(),
@@ -400,7 +391,6 @@ export async function runGeoVirtualRasterDynamicFlowProof() {
     } finally {
         readback?.dispose()
         residency?.dispose()
-        await residency?.whenIdle()
         gpu?.dispose()
         await runtime.dispose()
     }
@@ -411,18 +401,21 @@ async function publishCameraRequest(
     residency: VirtualRasterResidency,
     gpu: VirtualRasterGpuState,
     page: VirtualRasterPageIdentity,
-    positions: BufferResource
+    positions: BufferResource,
+    generation: number
 ) {
 
     const beforePositionEpoch = positions.contentEpoch
-    const outcome = await residency.request(page)
+    residency.reconcileGeneration(generation, [ page ])
+    const outcome = stageGeneratedPage(residency, page, generation)
     if (outcome.status !== 'staged' && outcome.status !== 'resident') {
         throw new Error(`Dynamic Flow virtual page ${page.key} failed: ${outcome.status}`)
     }
-    const snapshot = residency.publishSnapshot()
-    const update = gpu.stage(snapshot)
+    const publication = residency.publish()
+    const snapshot = publication.snapshot
+    const update = gpu.stage(publication)
     const work = submitUploads(runtime, update.commands)
-    gpu.acknowledge(snapshot)
+    await gpu.acknowledge(publication, work)
     await observe(work)
     return Object.freeze({
         requestedLevel: page.level,
@@ -430,6 +423,22 @@ async function publishCameraRequest(
         afterPositionEpoch: positions.contentEpoch,
         snapshotEpoch: snapshot.epoch,
     })
+}
+
+function stageGeneratedPage(
+    residency: VirtualRasterResidency,
+    page: VirtualRasterPageIdentity,
+    generation: number
+) {
+
+    return residency.stage(ownedVirtualRasterPagePayload({
+        page,
+        width: FIELD_PAGE_SIZE,
+        height: FIELD_PAGE_SIZE,
+        channels: 2,
+        data: createVectorPage(page),
+        contentVersion: 'dynamic-vector-field-v1',
+    }), { generation })
 }
 
 function submitUploads(

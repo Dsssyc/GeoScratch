@@ -150,7 +150,8 @@ function validate(value) {
         proof.residency?.pendingCount !== 0 || proof.residency?.stagedCount !== 0 ||
         proof.residency?.history?.length > 48 || proof.residency?.failedCount !== 0 ||
         proof.residency?.staleResponseCount !== 0 ||
-        proof.residency?.cpuBytes > proof.residency?.maxCpuBytes) {
+        proof.residency?.stagingBytes !== 0 ||
+        proof.residency?.stagingBytes > proof.residency?.maxStagingBytes) {
         failures.push('virtual vector field residency was not finite and clean')
     }
     if (proof.gpu?.snapshotEpoch !== 3 || proof.gpu?.maxPhysicalPages !== 5 ||

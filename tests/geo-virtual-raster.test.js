@@ -3,11 +3,11 @@ import { ScratchRuntime } from 'geoscratch'
 import {
     VirtualRasterResidency,
     createVirtualRasterGpuState,
+    ownedVirtualRasterPagePayload,
     virtualRasterAccessor,
     virtualRasterAddressSpace,
     virtualRasterPlane,
     virtualRasterSamplingProfile,
-    virtualRasterSource,
 } from 'geoscratch/geo'
 import { createFakeGpu } from './scratch-test-utils.js'
 
@@ -23,7 +23,7 @@ function scalarPage(page, values, contentVersion = 'v1') {
     })
 }
 
-function fixture({ maxPhysicalPages = 4, maxHistory = 8, loader } = {}) {
+function fixture({ maxPhysicalPages = 4, maxHistory = 8, pageValues } = {}) {
 
     const addressSpace = virtualRasterAddressSpace({
         id: 'test.raster',
@@ -43,29 +43,47 @@ function fixture({ maxPhysicalPages = 4, maxHistory = 8, loader } = {}) {
         scale: 2,
         offset: -10,
     })
-    const pages = new Map([
-        [ '2/0/0', scalarPage(addressSpace.page({ level: 2, x: 0, y: 0 }), [ 5, 5, 5, 5 ]) ],
-        [ '1/0/0', scalarPage(addressSpace.page({ level: 1, x: 0, y: 0 }), [ 10, 10, 10, 10 ]) ],
-        [ '0/0/0', scalarPage(addressSpace.page({ level: 0, x: 0, y: 0 }), [ 0, 10, 0, 10 ]) ],
-        [ '0/1/0', scalarPage(addressSpace.page({ level: 0, x: 1, y: 0 }), [ 20, 30, 20, 30 ]) ],
+    const defaults = new Map([
+        [ '2/0/0', [ 5, 5, 5, 5 ] ],
+        [ '1/0/0', [ 10, 10, 10, 10 ] ],
+        [ '0/0/0', [ 0, 10, 0, 10 ] ],
+        [ '0/1/0', [ 20, 30, 20, 30 ] ],
     ])
-    const source = virtualRasterSource({
-        id: 'test-source',
-        loadPage: loader ?? (async page => {
-            const result = pages.get(page.key)
-            if (result === undefined) throw new Error(`missing ${page.key}`)
-            return result
-        }),
-    })
+    const pages = new Map(addressSpace.pages().map(page => {
+        const values = pageValues?.(page) ?? defaults.get(page.key) ?? [ 0, 0, 0, 0 ]
+        return [ page.key, scalarPage(page, values) ]
+    }))
     const residency = new VirtualRasterResidency({
         addressSpace,
         plane,
-        source,
         maxPhysicalPages,
-        maxCpuBytes: maxPhysicalPages * 4,
+        maxStagingBytes: maxPhysicalPages * 4,
         maxHistory,
     })
-    return { addressSpace, plane, source, residency, pages }
+    const cpuPages = Object.freeze({
+        get(page) {
+            return pages.get(page.key)
+        },
+    })
+    return { addressSpace, plane, residency, pages, cpuPages }
+}
+
+function stage(residency, page, generation = 1) {
+
+    const payload = pagePayload(page)
+    return residency.stage(payload, { generation })
+}
+
+function pagePayload(page) {
+
+    return ownedVirtualRasterPagePayload({
+        page: page.page,
+        width: page.width,
+        height: page.height,
+        channels: page.channels,
+        data: Uint8Array.from(page.data),
+        contentVersion: page.contentVersion,
+    })
 }
 
 describe('Geo virtual raster', () => {
@@ -122,15 +140,16 @@ describe('Geo virtual raster', () => {
 
     it('publishes staged loads only at immutable snapshot boundaries', async() => {
 
-        const { addressSpace, residency } = fixture()
-        await residency.request(addressSpace.page({ level: 1, x: 0, y: 0 }))
+        const { addressSpace, residency, pages } = fixture()
+        stage(residency, pages.get('1/0/0'))
 
         expect(residency.inspect().stagedCount).to.equal(1)
         expect(residency.currentSnapshot.resolve(
             addressSpace.page({ level: 0, x: 1, y: 0 }),
         ).status).to.equal('missing')
 
-        const snapshot = residency.publishSnapshot()
+        const publication = residency.publish()
+        const snapshot = publication.snapshot
         const resolved = snapshot.resolve(addressSpace.page({ level: 0, x: 1, y: 0 }))
 
         expect(resolved).to.deep.include({
@@ -142,43 +161,52 @@ describe('Geo virtual raster', () => {
         expect(snapshot.epoch).to.equal(1)
         expect(Object.isFrozen(snapshot)).to.equal(true)
         expect(Object.isFrozen(snapshot.pageTable)).to.equal(true)
+        await publication.acknowledge()
     })
 
     it('uses deterministic bounded LRU eviction and bounded history', async() => {
 
-        const { addressSpace, residency } = fixture({ maxPhysicalPages: 2, maxHistory: 3 })
-        await residency.request(addressSpace.page({ level: 1, x: 0, y: 0 }))
-        await residency.request(addressSpace.page({ level: 0, x: 0, y: 0 }))
-        const first = residency.publishSnapshot()
-        first.resolve(addressSpace.page({ level: 0, x: 0, y: 0 }))
+        const { addressSpace, residency, pages } = fixture({
+            maxPhysicalPages: 2,
+            maxHistory: 3,
+        })
+        stage(residency, pages.get('1/0/0'))
+        stage(residency, pages.get('0/0/0'))
+        const first = residency.publish()
+        first.snapshot.resolve(addressSpace.page({ level: 0, x: 0, y: 0 }))
+        await first.acknowledge()
         residency.markUsed(addressSpace.page({ level: 0, x: 0, y: 0 }))
 
-        await residency.request(addressSpace.page({ level: 0, x: 1, y: 0 }))
-        const second = residency.publishSnapshot()
+        stage(residency, pages.get('0/1/0'), 2)
+        const second = residency.publish()
 
-        expect(second.resolve(addressSpace.page({ level: 0, x: 0, y: 0 })).status)
+        expect(second.snapshot.resolve(addressSpace.page({ level: 0, x: 0, y: 0 })).status)
             .to.equal('resident')
-        expect(second.resolve(addressSpace.page({ level: 1, x: 0, y: 0 })).status)
+        expect(second.snapshot.resolve(addressSpace.page({ level: 1, x: 0, y: 0 })).status)
             .to.equal('missing')
         const facts = residency.inspect()
         expect(facts.residentCount).to.equal(2)
-        expect(facts.cpuBytes).to.equal(8)
+        expect(facts.residentGpuBytes).to.equal(8)
+        expect(facts.stagingBytes).to.equal(4)
         expect(facts.evictionCount).to.equal(1)
         expect(facts.history.length).to.be.at.most(3)
+        await second.acknowledge()
     })
 
     it('pins a coarse fallback page while deterministically evicting unpinned detail', async() => {
 
-        const { addressSpace, residency } = fixture({ maxPhysicalPages: 2 })
+        const { addressSpace, residency, pages } = fixture({ maxPhysicalPages: 2 })
         const parent = addressSpace.page({ level: 1, x: 0, y: 0 })
         const firstDetail = addressSpace.page({ level: 0, x: 0, y: 0 })
         const secondDetail = addressSpace.page({ level: 0, x: 1, y: 0 })
         residency.pin(parent)
-        await Promise.all([ residency.request(parent), residency.request(firstDetail) ])
-        residency.publishSnapshot()
+        stage(residency, pages.get(parent.key))
+        stage(residency, pages.get(firstDetail.key))
+        await residency.publish().acknowledge()
 
-        await residency.request(secondDetail)
-        const snapshot = residency.publishSnapshot()
+        stage(residency, pages.get(secondDetail.key), 2)
+        const publication = residency.publish()
+        const snapshot = publication.snapshot
 
         expect(snapshot.resolve(parent).status).to.equal('resident')
         expect(snapshot.resolve(firstDetail).status).to.equal('fallback')
@@ -189,39 +217,32 @@ describe('Geo virtual raster', () => {
             residentCount: 2,
             evictionCount: 1,
         })
+        await publication.acknowledge()
     })
 
-    it('rejects a stale async response after cancellation', async() => {
+    it('rejects an obsolete generation before publication', async() => {
 
-        let resolveLoad
-        const delayed = new Promise(resolve => { resolveLoad = resolve })
-        const { addressSpace, residency } = fixture({
-            loader: async page => {
-                await delayed
-                return scalarPage(page, [ 1, 2, 3, 4 ], 'late')
-            },
-        })
+        const { addressSpace, residency, pages } = fixture()
         const page = addressSpace.page({ level: 0, x: 0, y: 0 })
-        const request = residency.request(page)
-        residency.cancel(page)
-        resolveLoad()
+        residency.reconcileGeneration(2, [ page ])
+        const outcome = stage(residency, pages.get(page.key), 1)
 
-        expect(await request).to.deep.include({ status: 'stale', page })
+        expect(outcome).to.deep.include({ status: 'stale', page })
         expect(residency.inspect()).to.deep.include({
             pendingCount: 0,
             stagedCount: 0,
             staleResponseCount: 1,
         })
+        await residency.publish().acknowledge()
     })
 
     it('reconstructs bilinear footprints across physical page boundaries', async() => {
 
-        const { addressSpace, plane, residency } = fixture()
-        await Promise.all([
-            residency.request(addressSpace.page({ level: 0, x: 0, y: 0 })),
-            residency.request(addressSpace.page({ level: 0, x: 1, y: 0 })),
-        ])
-        const snapshot = residency.publishSnapshot()
+        const { addressSpace, plane, residency, pages, cpuPages } = fixture()
+        stage(residency, pages.get('0/0/0'))
+        stage(residency, pages.get('0/1/0'))
+        const publication = residency.publish()
+        const snapshot = publication.snapshot
         const accessor = virtualRasterAccessor({ addressSpace, plane })
         const profile = virtualRasterSamplingProfile({
             filter: 'bilinear',
@@ -231,22 +252,24 @@ describe('Geo virtual raster', () => {
         const sample = accessor.sample(snapshot, {
             texel: [ 1.5, 0 ],
             profile,
-        })
+        }, cpuPages)
 
         expect(sample.status).to.equal('resident')
         expect(sample.value).to.deep.equal([ 20 ])
         expect(sample.physicalSlots).to.deep.equal([ 0, 1 ])
         expect(sample.requestedLevel).to.equal(0)
         expect(sample.resolvedLodRange).to.deep.equal([ 0, 0 ])
+        await publication.acknowledge()
     })
 
     it('decodes NoData and parent fallback without NaN propagation', async() => {
 
-        const { addressSpace, plane, residency } = fixture({
-            loader: async page => scalarPage(page, [ 255, 10, 10, 10 ]),
+        const { addressSpace, plane, residency, pages, cpuPages } = fixture({
+            pageValues: () => [ 255, 10, 10, 10 ],
         })
-        await residency.request(addressSpace.page({ level: 1, x: 0, y: 0 }))
-        const snapshot = residency.publishSnapshot()
+        stage(residency, pages.get('1/0/0'))
+        const publication = residency.publish()
+        const snapshot = publication.snapshot
         const accessor = virtualRasterAccessor({ addressSpace, plane })
         const sample = accessor.sample(snapshot, {
             texel: [ 0, 0 ],
@@ -255,11 +278,12 @@ describe('Geo virtual raster', () => {
                 level: 0,
                 outerBoundary: 'no-data',
             }),
-        })
+        }, cpuPages)
 
         expect(sample.status).to.equal('no-data')
         expect(sample.value).to.equal(undefined)
         expect(sample.resolvedLodRange).to.deep.equal([ 1, 1 ])
+        await publication.acknowledge()
     })
 
     it('generates one explicit-level accessor contract for all shader stages', () => {
@@ -285,16 +309,15 @@ describe('Geo virtual raster', () => {
         expect(wgsl).to.not.include('textureSample(')
     })
 
-    it('lowers a snapshot into stable Scratch atlas/page-table resources and uploads', async() => {
+    it('lowers a publication into stable Scratch atlas/page-table resources and uploads', async() => {
 
         const fake = createFakeGpu()
         const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
-        const { addressSpace, plane, residency } = fixture({ maxPhysicalPages: 2 })
-        await Promise.all([
-            residency.request(addressSpace.page({ level: 0, x: 0, y: 0 })),
-            residency.request(addressSpace.page({ level: 0, x: 1, y: 0 })),
-        ])
-        const snapshot = residency.publishSnapshot()
+        const { addressSpace, plane, residency, pages } = fixture({ maxPhysicalPages: 2 })
+        stage(residency, pages.get('0/0/0'))
+        stage(residency, pages.get('0/1/0'))
+        const publication = residency.publish()
+        const snapshot = publication.snapshot
         const gpuState = await createVirtualRasterGpuState(runtime, {
             addressSpace,
             plane,
@@ -302,23 +325,26 @@ describe('Geo virtual raster', () => {
         })
         const stableAtlas = gpuState.atlas
         const stablePageTable = gpuState.pageTable
-        const update = gpuState.stage(snapshot)
+        const update = gpuState.stage(publication)
 
         expect(update.atlasUploads).to.have.length(2)
         expect(update.pageTableUpload).to.exist
         expect(update.commands).to.have.length(3)
-        const submitted = runtime.createSubmission({ validation: 'throw' })
-        for (const command of update.commands) submitted.upload(command)
-        const work = submitted.submit()
+        const builder = runtime.createSubmission({ validation: 'throw' })
+        for (const command of update.commands) builder.upload(command)
+        const work = builder.submit()
         await work.nativeOutcome
         await work.done
-        gpuState.acknowledge(snapshot)
+        await gpuState.acknowledge(publication, work)
 
         expect(update.atlasUploads.every(upload => upload.isDisposed)).to.equal(true)
         expect(update.pageTableUpload.isDisposed).to.equal(false)
         expect(gpuState.atlas).to.equal(stableAtlas)
         expect(gpuState.pageTable).to.equal(stablePageTable)
-        expect(gpuState.stage(snapshot).commands).to.deep.equal([])
+        const unchanged = residency.publish()
+        expect(gpuState.stage(unchanged).commands).to.deep.equal([])
+        const emptyWork = runtime.createSubmission({ validation: 'throw' }).submit()
+        await gpuState.acknowledge(unchanged, emptyWork)
         expect(fake.calls.queueTextureWrites).to.have.length(2)
         expect(fake.calls.queueWrites).to.have.length(1)
         expect(gpuState.facts()).to.deep.include({
@@ -334,25 +360,23 @@ describe('Geo virtual raster', () => {
         runtime.dispose()
     })
 
-    it('disposes pending work and converges without retaining unbounded facts', async() => {
+    it('disposes staged and published bytes without retaining unbounded facts', async() => {
 
-        const { addressSpace, residency } = fixture({
-            loader: (page, { signal }) => new Promise((resolve, reject) => {
-                void resolve
-                signal.addEventListener('abort', () => reject(new Error('aborted')))
-            }),
-        })
-        const request = residency.request(addressSpace.page({ level: 0, x: 0, y: 0 }))
+        const { residency, pages } = fixture()
+        const stagedPayload = pagePayload(pages.get('0/0/0'))
+        residency.stage(stagedPayload, { generation: 1 })
+        const publication = residency.publish()
+        expect(publication.inspect().stagingBytes).to.equal(4)
         residency.dispose()
-        const outcome = await request
+        await publication.abandon()
 
-        expect(outcome.status).to.equal('disposed')
-        await residency.whenIdle()
+        expect(stagedPayload.data.byteLength).to.equal(0)
         expect(residency.inspect()).to.deep.include({
             disposed: true,
             pendingCount: 0,
             stagedCount: 0,
             residentCount: 0,
+            stagingBytes: 0,
         })
     })
 })

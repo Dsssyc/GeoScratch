@@ -1,8 +1,11 @@
 import type { BufferResource } from '../scratch/buffer.js'
 import type { TextureUploadCommand, UploadCommand } from '../scratch/command.js'
 import type { ScratchRuntime } from '../scratch/runtime.js'
+import type { SubmittedWork } from '../scratch/submission.js'
 import type { TextureResource, TextureViewSpec } from '../scratch/texture.js'
 import { throwGeoDiagnostic } from './diagnostics.js'
+import { uploadPagesForPublication } from './virtual-raster-residency.js'
+import type { VirtualRasterPublication } from './virtual-raster-residency.js'
 import { physicalPagesForSnapshot } from './virtual-raster.js'
 import type {
     VirtualRasterAddressSpace,
@@ -62,6 +65,8 @@ export class VirtualRasterGpuState {
     #stagedSlotGenerations = new Map<number, number>()
     #uploadedSlotGenerations = new Map<number, number>()
     #stagedAtlasUploads: TextureUploadCommand[] = []
+    #stagedCommandIds = new Set<string>()
+    #stagedPublication: VirtualRasterPublication | undefined
 
     private constructor(
         runtime: ScratchRuntime,
@@ -148,9 +153,10 @@ export class VirtualRasterGpuState {
         )
     }
 
-    stage(snapshot: VirtualRasterSnapshot): VirtualRasterGpuUpdate {
+    stage(publication: VirtualRasterPublication): VirtualRasterGpuUpdate {
 
         this.#assertActive()
+        const snapshot = publication.snapshot
         if (snapshot.addressSpace !== this.addressSpace) {
             return throwGeoDiagnostic({
                 code: 'GEO_VIRTUAL_RASTER_SNAPSHOT_MISMATCH',
@@ -161,54 +167,99 @@ export class VirtualRasterGpuState {
                 actual: { addressSpaceId: snapshot.addressSpace.id },
             })
         }
+        if (this.#stagedPublication !== undefined) {
+            return throwGeoDiagnostic({
+                code: 'GEO_VIRTUAL_RASTER_GPU_PUBLICATION_PENDING',
+                phase: 'residency',
+                subject: { kind: 'virtual-raster-gpu-state', id: this.addressSpace.id },
+                message: 'The staged publication must be acknowledged or abandoned before staging another.',
+                expected: { stagedSnapshotEpoch: this.#stagedSnapshotEpoch },
+                actual: { snapshotEpoch: snapshot.epoch },
+            })
+        }
+        const publicationUploads = uploadPagesForPublication(publication)
         if (snapshot.epoch === this.#acknowledgedSnapshotEpoch) {
+            if (publicationUploads.length > 0) {
+                return throwGeoDiagnostic({
+                    code: 'GEO_VIRTUAL_RASTER_GPU_STATE_INVALID',
+                    phase: 'residency',
+                    subject: { kind: 'virtual-raster-gpu-state', id: this.addressSpace.id },
+                    message: 'An acknowledged snapshot epoch cannot introduce new upload payloads.',
+                    actual: { snapshotEpoch: snapshot.epoch, uploadPageCount: publicationUploads.length },
+                })
+            }
+            this.#stagedSnapshotEpoch = snapshot.epoch
+            this.#stagedPublication = publication
             return Object.freeze({
                 snapshotEpoch: snapshot.epoch,
                 commands: Object.freeze([]),
                 atlasUploads: Object.freeze([]),
             })
         }
-        this.#releaseStagedAtlasUploads()
         const physicalPages = physicalPagesForSnapshot(snapshot)
         const atlasUploads: TextureUploadCommand[] = []
         const stagedGenerations = new Map<number, number>()
-        for (const [ slot, physical ] of [ ...physicalPages.entries() ].sort((a, b) => a[0] - b[0])) {
-            if (slot < 0 || slot >= this.maxPhysicalPages) {
-                return throwGeoDiagnostic({
-                    code: 'GEO_VIRTUAL_RASTER_GPU_STATE_INVALID',
-                    phase: 'residency',
-                    subject: { kind: 'virtual-raster-gpu-state', id: this.addressSpace.id },
-                    message: 'Snapshot physical slot exceeds the GPU atlas budget.',
-                    expected: { maximumSlot: this.maxPhysicalPages - 1 },
-                    actual: { slot },
-                })
+        const uploadsBySlot = new Map(publicationUploads.map(upload => [
+            upload.facts.physicalSlot,
+            upload,
+        ]))
+        try {
+            for (const [ slot, physical ] of [ ...physicalPages.entries() ].sort((a, b) => a[0] - b[0])) {
+                if (slot < 0 || slot >= this.maxPhysicalPages) {
+                    return throwGeoDiagnostic({
+                        code: 'GEO_VIRTUAL_RASTER_GPU_STATE_INVALID',
+                        phase: 'residency',
+                        subject: { kind: 'virtual-raster-gpu-state', id: this.addressSpace.id },
+                        message: 'Snapshot physical slot exceeds the GPU atlas budget.',
+                        expected: { maximumSlot: this.maxPhysicalPages - 1 },
+                        actual: { slot },
+                    })
+                }
+                stagedGenerations.set(slot, physical.generation)
+                if (this.#uploadedSlotGenerations.get(slot) === physical.generation) continue
+                const upload = uploadsBySlot.get(slot)
+                if (upload === undefined ||
+                    upload.facts.generation !== physical.generation ||
+                    upload.facts.page.key !== physical.page.key) {
+                    return throwGeoDiagnostic({
+                        code: 'GEO_VIRTUAL_RASTER_UPLOAD_BYTES_UNAVAILABLE',
+                        phase: 'residency',
+                        subject: { kind: 'virtual-raster-page', id: physical.page.key },
+                        message: 'A changed GPU slot requires matching bytes from the same publication.',
+                        expected: { slot, generation: physical.generation },
+                        actual: upload?.facts,
+                    })
+                }
+                const slotX = slot % this.atlasColumns
+                const slotY = Math.floor(slot / this.atlasColumns)
+                atlasUploads.push(this.runtime.createTextureUploadCommand({
+                    label: `${this.plane.id} page ${physical.page.key} slot ${slot}`,
+                    target: this.atlas,
+                    data: upload.payload.data,
+                    layout: {
+                        bytesPerRow: upload.payload.data.byteLength / upload.payload.height,
+                        rowsPerImage: upload.payload.height,
+                    },
+                    size: {
+                        width: upload.payload.width,
+                        height: upload.payload.height,
+                    },
+                    origin: {
+                        x: slotX * this.addressSpace.pageSize[0]!,
+                        y: slotY * this.addressSpace.pageSize[1]!,
+                    },
+                }))
             }
-            stagedGenerations.set(slot, physical.generation)
-            if (this.#uploadedSlotGenerations.get(slot) === physical.generation) continue
-            const slotX = slot % this.atlasColumns
-            const slotY = Math.floor(slot / this.atlasColumns)
-            atlasUploads.push(this.runtime.createTextureUploadCommand({
-                label: `${this.plane.id} page ${physical.page.key} slot ${slot}`,
-                target: this.atlas,
-                data: physical.payload.data,
-                layout: {
-                    bytesPerRow: physical.payload.data.byteLength / physical.payload.height,
-                    rowsPerImage: physical.payload.height,
-                },
-                size: {
-                    width: physical.payload.width,
-                    height: physical.payload.height,
-                },
-                origin: {
-                    x: slotX * this.addressSpace.pageSize[0]!,
-                    y: slotY * this.addressSpace.pageSize[1]!,
-                },
-            }))
+        } catch (error) {
+            for (const upload of atlasUploads) upload.dispose()
+            throw error
         }
         this.#encodePageTable(snapshot)
         this.#stagedSnapshotEpoch = snapshot.epoch
         this.#stagedSlotGenerations = stagedGenerations
         this.#stagedAtlasUploads = [ ...atlasUploads ]
+        this.#stagedCommandIds = new Set([ ...atlasUploads, this.#pageTableUpload ].map(command => command.id))
+        this.#stagedPublication = publication
         return Object.freeze({
             snapshotEpoch: snapshot.epoch,
             commands: Object.freeze([ ...atlasUploads, this.#pageTableUpload ]),
@@ -217,25 +268,76 @@ export class VirtualRasterGpuState {
         })
     }
 
-    acknowledge(snapshot: VirtualRasterSnapshot): void {
+    async acknowledge(publication: VirtualRasterPublication, submitted: SubmittedWork): Promise<void> {
 
         this.#assertActive()
+        const snapshot = publication.snapshot
         if (snapshot.addressSpace !== this.addressSpace ||
-            this.#stagedSnapshotEpoch !== snapshot.epoch) {
+            this.#stagedPublication !== publication ||
+            this.#stagedSnapshotEpoch !== snapshot.epoch ||
+            submitted.runtime !== this.runtime) {
             return throwGeoDiagnostic({
                 code: 'GEO_VIRTUAL_RASTER_SNAPSHOT_MISMATCH',
                 phase: 'residency',
                 subject: { kind: 'virtual-raster-gpu-state', id: this.addressSpace.id },
                 message: 'Only the currently staged snapshot can be acknowledged.',
-                expected: { stagedSnapshotEpoch: this.#stagedSnapshotEpoch },
-                actual: { snapshotEpoch: snapshot.epoch },
+                expected: {
+                    stagedSnapshotEpoch: this.#stagedSnapshotEpoch,
+                    runtimeId: this.runtime.id,
+                },
+                actual: {
+                    snapshotEpoch: snapshot.epoch,
+                    runtimeId: submitted.runtime?.id,
+                },
+            })
+        }
+        const submittedCommandIds = new Set(
+            submitted.resourceAccesses
+                .filter(access => access.stepKind === 'upload')
+                .map(access => access.commandId)
+                .filter((id): id is string => id !== undefined)
+        )
+        const missingCommandIds = [ ...this.#stagedCommandIds ]
+            .filter(commandId => !submittedCommandIds.has(commandId))
+        if (missingCommandIds.length > 0) {
+            return throwGeoDiagnostic({
+                code: 'GEO_VIRTUAL_RASTER_UPLOAD_NOT_SUBMITTED',
+                phase: 'residency',
+                subject: { kind: 'virtual-raster-publication', id: String(snapshot.epoch) },
+                message: 'Publication acknowledgement requires SubmittedWork containing every staged upload.',
+                expected: { commandIds: Object.freeze([ ...this.#stagedCommandIds ]) },
+                actual: { missingCommandIds: Object.freeze(missingCommandIds) },
             })
         }
         this.#acknowledgedSnapshotEpoch = snapshot.epoch
         this.#uploadedSlotGenerations = new Map(this.#stagedSlotGenerations)
         this.#stagedSnapshotEpoch = undefined
+        this.#stagedPublication = undefined
         this.#stagedSlotGenerations.clear()
+        this.#stagedCommandIds.clear()
         this.#releaseStagedAtlasUploads()
+        await publication.acknowledge()
+    }
+
+    async abandon(publication: VirtualRasterPublication): Promise<void> {
+
+        this.#assertActive()
+        if (this.#stagedPublication !== publication) {
+            return throwGeoDiagnostic({
+                code: 'GEO_VIRTUAL_RASTER_SNAPSHOT_MISMATCH',
+                phase: 'residency',
+                subject: { kind: 'virtual-raster-gpu-state', id: this.addressSpace.id },
+                message: 'Only the currently staged publication can be abandoned.',
+                expected: { stagedSnapshotEpoch: this.#stagedSnapshotEpoch },
+                actual: { snapshotEpoch: publication.snapshot.epoch },
+            })
+        }
+        this.#stagedSnapshotEpoch = undefined
+        this.#stagedPublication = undefined
+        this.#stagedSlotGenerations.clear()
+        this.#stagedCommandIds.clear()
+        this.#releaseStagedAtlasUploads()
+        await publication.abandon()
     }
 
     facts(): VirtualRasterGpuFacts {
@@ -275,6 +377,8 @@ export class VirtualRasterGpuState {
         this.atlas.dispose()
         this.#stagedSlotGenerations.clear()
         this.#uploadedSlotGenerations.clear()
+        this.#stagedCommandIds.clear()
+        this.#stagedPublication = undefined
         this.#releaseStagedAtlasUploads()
     }
 
