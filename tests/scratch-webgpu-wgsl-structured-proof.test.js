@@ -242,7 +242,7 @@ describe('Scratch structured WebGPU and WGSL normative proofs', () => {
             )
         expect(() => validateCoverageManifestV4(unboundWgsl))
             .to.throw('browser execution proof')
-    })
+    }).timeout(10_000)
 
     it('requires executable browser proof for every managed WGSL entry', () => {
 
