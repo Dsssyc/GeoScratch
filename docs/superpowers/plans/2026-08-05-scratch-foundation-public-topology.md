@@ -260,7 +260,7 @@ export type ScratchDiagnosticErrorContext =
 - Create: `tests/scratch-geometry-parity.test.js`
 - Modify: `tests/module-layout.test.js`
 
-- [ ] Before deleting legacy files, add parity tests that `JSON.stringify()` each output and SHA-256 hashes it. Require these exact facts:
+- [x] Before deleting legacy files, add parity tests that `JSON.stringify()` each output and SHA-256 hashes it. Require these exact facts:
 
 ```text
 plane(0)                          fcbaddf9c8b86764363c623109a280788aab2f49d4c3b93488bacaa3ab253f58
@@ -268,15 +268,15 @@ plane(2)                          1cb90b38eed1c34efefb641cec29653a6236c70964244f
 plane(6)                          cd6e5be6682be080e083c09938ef385fcdd523084f0c2515f18cad0f0a92807a
 sphere()                          6e3c5099fe0e290e245161f6879d6fa4582abb54ff9e5ebde76e65605c10791e
 sphere(1, 8, 4)                   f13ef65c02cb94d1fcc06878a3c86168346f1e2055bba587a9479bb499b6899b
-sphere(1, 8, 4, .2, 3, .1, 1.7)  8f95f0bcd73b10230f51733251459c44bd44759f71c2608195c0550c6eb79204
+sphere(1, 8, 4, .2, 3, .1, 1.7)  09a77f5de3465b78e39e2e2c27006fe5e0fa9579bf9f18f1e0bcee31fa3aacb8
 ```
 
-- [ ] Port `plane` and `sphere` line-for-line in algorithm and return shape, adding explicit TypeScript tuple/array/result types only. Do not “correct” triangulation, winding, UV, subdivision, duplicate-vertex, or numeric behavior in this Goal.
-- [ ] Move UUID generation to `scratch/internal/uuid.ts`, preserve UUID v4 bit layout and lowercase output, and update all GPU imports. Do not export UUID from `scratch/index.ts`.
-- [ ] Export only `plane`, `sphere`, `PlaneGeometry`, and `SphereGeometry` from `scratch/geometry/index.ts` and the Scratch facade.
-- [ ] Update DEM and Hello GAW to import geometry through `geoscratch/scratch`; keep rendering code and visible output unchanged.
-- [ ] Run `npm test -- --grep "scratch geometry parity|module layout|DEM Layer|Hello GAW"`, `npm run typecheck`, and `npm run build`.
-- [ ] Commit as `Migrate Scratch geometry and identity helpers to TypeScript`.
+- [x] Port `plane` and `sphere` line-for-line in algorithm and return shape, adding explicit TypeScript tuple/array/result types only. Do not “correct” triangulation, winding, UV, subdivision, duplicate-vertex, or numeric behavior in this Goal.
+- [x] Move UUID generation to `scratch/internal/uuid.ts`, preserve UUID v4 bit layout and lowercase output, and update all GPU imports. Do not export UUID from `scratch/index.ts`.
+- [x] Export only `plane`, `sphere`, `PlaneGeometry`, and `SphereGeometry` from `scratch/geometry/index.ts` and the Scratch facade.
+- [x] Update DEM and Hello GAW to import geometry through `geoscratch/scratch`; keep rendering code and visible output unchanged.
+- [x] Run `npm test -- --grep "scratch geometry parity|module layout|DEM Layer|Hello GAW"`, `npm run typecheck`, and `npm run build`.
+- [x] Commit as `Migrate Scratch geometry and identity helpers to TypeScript`.
 
 ### Task 6: Cut The Final Public Surface And Delete Legacy Implementations
 

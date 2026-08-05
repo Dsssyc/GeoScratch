@@ -17,6 +17,10 @@ describe('module layout', () => {
         expect(exists('packages', 'geoscratch', 'src', 'geometry', 'index.js')).to.equal(true)
         expect(exists('packages', 'geoscratch', 'src', 'geometry', 'sphere', 'sphere.js')).to.equal(true)
         expect(exists('packages', 'geoscratch', 'src', 'geometry', 'plane', 'plane.js')).to.equal(true)
+        expect(exists('packages', 'geoscratch', 'src', 'scratch', 'geometry', 'index.ts')).to.equal(true)
+        expect(exists('packages', 'geoscratch', 'src', 'scratch', 'geometry', 'sphere.ts')).to.equal(true)
+        expect(exists('packages', 'geoscratch', 'src', 'scratch', 'geometry', 'plane.ts')).to.equal(true)
+        expect(exists('packages', 'geoscratch', 'src', 'scratch', 'internal', 'uuid.ts')).to.equal(true)
 
         const removedGeoSources = [
             [ 'geo', 'index.js' ],

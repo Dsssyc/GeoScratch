@@ -1,4 +1,4 @@
-import { UUID } from '../../core/utils/uuid.js'
+import { UUID } from '../internal/uuid.js'
 import { throwGPUDiagnostic } from './diagnostics.js'
 import {
     findMissingScratchFeatureDependency,

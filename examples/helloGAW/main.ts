@@ -2,7 +2,7 @@ import {
     GPURuntime,
     layoutCodec,
     sphere,
-} from 'geoscratch'
+} from 'geoscratch/scratch'
 import { mat4, utils } from 'wgpu-matrix'
 import type {
     BindLayout,
@@ -28,7 +28,7 @@ import type {
     StaticDispatchCount,
     TextureResource,
     UploadCommand,
-} from 'geoscratch'
+} from 'geoscratch/scratch'
 import bloomBlurXShader from './shaders/bloom-blur-x.wgsl?raw'
 import bloomBlurYShader from './shaders/bloom-blur-y.wgsl?raw'
 import bloomCombineShader from './shaders/bloom-combine.wgsl?raw'

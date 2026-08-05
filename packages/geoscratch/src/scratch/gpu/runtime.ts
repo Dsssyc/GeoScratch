@@ -1,4 +1,4 @@
-import { UUID } from '../../core/utils/uuid.js'
+import { UUID } from '../internal/uuid.js'
 import {
     createBindLayout as createScratchBindLayout,
     createBindSet as createScratchBindSet,

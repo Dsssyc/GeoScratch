@@ -1,4 +1,4 @@
-import { UUID } from '../../core/utils/uuid.js'
+import { UUID } from '../internal/uuid.js'
 import { BufferRegion, isBufferRegion } from './buffer.js'
 import { assertBufferAvailableForGpuUse } from './buffer-mapping-authority.js'
 import { isScratchDiagnosticError, throwGPUDiagnostic } from './diagnostics.js'

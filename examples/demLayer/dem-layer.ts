@@ -2,7 +2,7 @@ import {
     GPURuntime,
     layoutCodec,
     plane,
-} from 'geoscratch'
+} from 'geoscratch/scratch'
 import { mat4 } from 'wgpu-matrix'
 import type {
     BindLayoutEntry,
@@ -16,7 +16,7 @@ import type {
     Surface,
     SurfaceSize,
     TextureResource,
-} from 'geoscratch'
+} from 'geoscratch/scratch'
 import {
     MAX_TERRAIN_NODES,
     TERRAIN_BOUNDARY,

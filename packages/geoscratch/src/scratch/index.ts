@@ -18,6 +18,8 @@ export type {
     ScratchDiagnosticSuggestion,
 } from './diagnostics/index.js'
 export type { GPUDiagnostic, GPUDiagnosticPhase } from './gpu/diagnostics.js'
+export { plane, sphere } from './geometry/index.js'
+export type { PlaneGeometry, SphereGeometry } from './geometry/index.js'
 export type {
     GPUAttributionConfidence,
     GPUDescriptorEvidence,

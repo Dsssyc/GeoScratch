@@ -1,4 +1,4 @@
-import { UUID } from '../../core/utils/uuid.js'
+import { UUID } from '../internal/uuid.js'
 import { isBindLayout } from './binding.js'
 import { throwGPUDiagnostic } from './diagnostics.js'
 import { isLayoutArtifact } from './layout-codec.js'
