@@ -44,7 +44,7 @@ resource epochs, stable identities, resize behavior, and at least 240 observed f
 
 | Legacy resource or state | Fixed-baseline role | Scratch replacement | Lifetime and proof requirement | Status |
 | --- | --- | --- | --- | --- |
-| `StartDash`, global device, `screen` | Device initialization and presentation | One awaited `ScratchRuntime` plus one owned `Surface` | Page lifetime; no global runtime or second Surface | Verified |
+| `StartDash`, global device, `screen` | Device initialization and presentation | One awaited `GPURuntime` plus one owned `Surface` | Page lifetime; no global runtime or second Surface | Verified |
 | `timeCount`, radius, link limits, colors, numeric wrappers | Scalar/vector constants and mutable frame values | Plain numbers, typed arrays, and immutable descriptors | No `f32`/`u32`/`aRef`/`as*` wrapper | Verified |
 | `viewMatrix`, `projectionMatrix`, `modelMatrix`, `normalMatrix` | Camera/model transforms | Stateless matrix helper output packed by `LayoutCodec` | CPU values may change; GPU buffer and upload identity remain stable | Verified |
 | Sphere index vertex buffer | One `u32` index attribute per generated sphere vertex | `BufferResource` with `VERTEX | COPY_DST` plus one `BufferRegion` | Uploaded once; persistent | Verified |

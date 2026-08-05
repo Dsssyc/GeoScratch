@@ -39,7 +39,7 @@ current-contract change is enumerated.
 | Shared CARTO dark style | Yes in normal mode | `ScratchMap` | `dem-map.js` | Preserved | Same four CARTO endpoints and opacity 0.92 | Normal route retains style; proof uses local background | Deterministic proof intentionally does not test CARTO availability |
 | Center, zoom 9, Mercator, max zoom 18, antialias | Yes | `ScratchMap` | `DEM_MAP_DEFAULTS` and `createDemMap()` | Preserved | Constants and constructor descriptor | Initial proof selection is zoom-9 baseline | MapLibre internal camera math remains external |
 | Underwater far-plane anchor and relative-to-eye matrix | Yes | `ScratchMap.update()` | `readDemCameraState()` | Preserved | Same `-80.06899999999999 * 30`, high/low split, and matrix sequence | Nonblank underwater terrain | Uses current MapLibre transform surface, as before |
-| Global `StartDash`, `director`, `screen` | Yes as execution mechanism | Shared legacy runtime | ScratchRuntime, Surface, SubmissionBuilder | Replaced | No legacy symbol remains; explicit two-stage submission | Stage order and observations published | None |
+| Global `StartDash`, `director`, `screen` | Yes as execution mechanism | Shared legacy runtime | GPURuntime, Surface, SubmissionBuilder | Replaced | No legacy symbol remains; explicit two-stage submission | Stage order and observations published | None |
 | Shared legacy depth attachment and implicit pipeline depth defaults | Yes; `createTargetState()` changed undefined `depthTest` to true when the pass supplied depth | Shared map output pass and legacy pipeline wrapper | DEM-owned depth TextureResource, terrain PassSpec, and explicit terrain pipeline state | Preserved and made explicit | `depth32float`, `depthWriteEnabled: true`, `depthCompare: 'less'`; stable logical depth and explicit resize | Native attachment compatibility and resize allocation version | The current API refuses the legacy wrapper's implicit pass-to-pipeline mutation |
 | `LocalTerrain` constructor constants | Yes | Library application class | `dem-layer.js` and selector constants | Preserved | max 14, capacity 5000, sector 64, exaggeration 50, elevation and terrain bounds | Facts published in graph/selection | Constants remain example policy |
 | Two level-zero roots | Yes | `registerRenderableNode()` | `selectTerrainNodes()` | Preserved | Stack begins with `(0,0)` and `(0,1)` | Unit snapshots at zoom 2/9/10/12 | None |
@@ -137,7 +137,7 @@ Terminal order is:
 2. settle issued observations;
 3. close any still-owned external image;
 4. remove MapLibre;
-5. dispose ScratchRuntime.
+5. dispose GPURuntime.
 
 Unit tests prove shared disposal Promise identity, one cleanup invocation, late runtime
 and image release, tracked graph-creation/resize settlement before owner release, exact

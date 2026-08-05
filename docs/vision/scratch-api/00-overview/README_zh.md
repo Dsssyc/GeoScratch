@@ -5,7 +5,10 @@
 
 ## 目的
 
-新的 `scratch` API 应在保留直接 GPU 控制能力的同时，最大化"可局部验证的正确性"。它应补上裸 WebGPU 缺失的约束与检查，而不引入隐藏行为。它是 GPU 执行内核——compute 与图形是同级用途——而不是地理场景图，也不是为每种渲染技术准备的配置式 DSL。
+Scratch 基础层中的 GPU 能力域应在保留直接 GPU 控制能力的同时，最大化“可局部
+验证的正确性”。它应补上裸 WebGPU 缺失的约束与检查，而不引入隐藏行为。它是
+compute 与图形同级的 GPU 执行内核，而不是地理场景图，也不是为每种渲染技术准备
+的配置式 DSL。
 
 `scratch` 应降低这些重复低层工作的负担:
 
@@ -91,7 +94,7 @@ Buffer host mapping 同样是 temporal authority，而不是 descriptor shape：
 ## Command Immediate Data
 
 WGSL language feature、pipeline immediate range 与 command immediate value 使用三套
-彼此分离的 contract。`ScratchRuntime.wgslLanguageFeatures` 是冻结的 capability
+彼此分离的 contract。`GPURuntime.wgslLanguageFeatures` 是冻结的 capability
 snapshot；`Program.requiredLanguageFeatures` 声明调用方 WGSL 的需求；render 与
 compute Pipeline 声明 `immediateSize`，每个 Draw 或 Dispatch 则拥有一份完整的
 `CommandImmediateData` source。
@@ -111,7 +114,7 @@ creation-time specialization；buffer upload 转移 Resource 内容；immediate 
 
 新 API 应让这些边界很难被误解:
 
-- `ScratchRuntime` 拥有 GPU device 状态与缓存。
+- `GPURuntime` 拥有 GPU device 状态与缓存。
 - 被覆盖的原生 allocation 是返回 Promise 的 GPU operation。只有 validation、internal、out-of-memory scope 与 lifecycle recheck 都成功 settle 后，逻辑资源才会安装。
 - `Surface` 拥有呈现目标配置，不拥有 GPU 执行上下文。
 - `Resource` 拥有 logical identity、allocation lifecycle 与 disposal。只有 BufferResource 与 TextureResource 拥有 scalar content/readiness fact；SamplerResource 没有这些事实，QuerySetResource 则拥有 indexed slot facts。

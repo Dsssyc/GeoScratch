@@ -33,17 +33,11 @@ Open the Vite URL to browse examples. A WebGPU-capable browser is required for r
 
 | Path | Purpose |
 | --- | --- |
-| `src/index.ts` | TypeScript source for the main public package entrypoint. |
-| `src/scratch.ts` | TypeScript source for the `geoscratch/scratch` compatibility entrypoint. |
-| `src/scratch/` | TypeScript source-first Scratch API core. |
+| `src/index.ts` | Namespace-only package root exposing `scratch` and `geo`. |
+| `src/scratch.ts` | Formal `geoscratch/scratch` facade. |
+| `src/scratch/` | TypeScript source-first GPU, Worker, diagnostics, and geometry foundation. |
+| `src/geo/` | TypeScript source-first coordinates, tiling, and virtual-raster adaptation. |
 | `dist/` | Generated package JavaScript and declaration output. |
-| `src/core/` | Shared data references, math, object, and bounding box primitives. |
-| `src/geo/` | TypeScript source-first geospatial helpers and geographic tiling structures. |
-| `src/geometry/` | Reusable geometry generators such as sphere and plane meshes. |
-| `src/gpu/` | WebGPU device, buffers, bindings, passes, pipelines, shaders, textures, samplers, and director. |
-| `src/loaders/` | Image and shader loading helpers. |
-| `src/effects/` | Reusable postprocessing effects. |
-| `src/applications/` | Higher-level geospatial application modules, including terrain. |
 | `examples/` | Examples browser plus standalone demo pages. |
 | `docs/assets/` | Documentation and project branding assets. |
 | `examples/public/` | Large local demo data that must be fetched by stable absolute URL. |
@@ -51,29 +45,30 @@ Open the Vite URL to browse examples. A WebGPU-capable browser is required for r
 
 ## Package Entrypoints
 
-```js
-import * as scr from 'geoscratch'
-```
-
-The package also keeps a compatibility entrypoint:
+The package root exposes only the two architecture namespaces:
 
 ```js
-import * as scr from 'geoscratch/scratch'
+import { scratch, geo } from 'geoscratch'
 ```
 
-Focused subpaths are available for geospatial and geometry helpers:
+Use the formal subpaths for direct imports:
 
 ```js
-import { MercatorCoordinate } from 'geoscratch/geo'
-import { sphere } from 'geoscratch/geometry'
+import { GPURuntime, WorkerSystem, sphere } from 'geoscratch/scratch'
+import { MercatorCoordinate, WebMercatorQuad } from 'geoscratch/geo'
 ```
+
+Scratch is the domain-neutral TypeScript source-first capability foundation; Geo
+adapts those contracts for geographic semantics. The one-way dependency is summarized
+as **Geo from the Scratch**. `WorkerSystem` and `GPURuntime` remain independently
+constructed and share no mutable state or lifecycle authority.
 
 ## Scratch Async Resource Allocation
 
 Persistent Scratch buffer and texture allocation is acknowledged asynchronously. A resource is returned only after its native validation and out-of-memory scopes settle successfully; texture replacement follows the same transaction boundary.
 
 ```js
-const runtime = await scr.GPURuntime.create()
+const runtime = await GPURuntime.create()
 const vertices = await runtime.createBuffer({
     label: 'vertices',
     size: 4096,
@@ -135,7 +130,7 @@ application explicitly awaits `prepare()`. Submission never rebuilds bindings.
 asynchronous and is exposed explicitly:
 
 ```js
-const runtime = await scr.GPURuntime.create({
+const runtime = await GPURuntime.create({
     diagnostics: {
         submissionScopes: 'summary',
         maxPendingNativeObservations: 64,
@@ -223,7 +218,7 @@ not the classifier.
 The example below renders a hard-coded triangle onto a canvas.
 
 ```js
-import { GPURuntime } from 'geoscratch'
+import { GPURuntime } from 'geoscratch/scratch'
 
 const canvas = document.getElementById('GPUFrame')
 

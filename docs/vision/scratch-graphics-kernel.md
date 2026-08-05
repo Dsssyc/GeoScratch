@@ -10,9 +10,14 @@ Vision draft
 
 ## Purpose
 
-This document records the target design philosophy for the `scratch` layer so later ADRs, implementation plans, and living review notes can be checked against the same architectural north star.
+This document records the target design philosophy for the GPU capability domain
+inside the `scratch` foundation so later ADRs, implementation plans, and living
+review notes can be checked against the same architectural north star.
 
-`scratch` is the GPU execution kernel of GeoScratch — compute and graphics are co-equal uses. `geo` is the scene, space, layer, and geospatial resource-policy layer built on top of that kernel.
+The Scratch GPU domain is the GPU execution kernel of GeoScratch: compute and
+graphics are co-equal uses. The broader `scratch` facade also exposes independent
+domain-neutral capabilities such as Worker; `geo` is the geospatial semantic
+adaptation layer built on public Scratch contracts.
 
 This distinction matters because geographic visualization workloads vary widely:
 
@@ -31,7 +36,7 @@ The kernel must reduce low-level WebGPU burden without assuming one geospatial s
 
 ## Core Philosophy
 
-`scratch` should abstract stable GPU-kernel responsibilities:
+The Scratch GPU domain should abstract stable GPU-kernel responsibilities:
 
 - GPU resource identity, lifetime, and invalidation
 - CPU/GPU transfer operations, buffer host-mapping authority, and content epochs
@@ -43,7 +48,7 @@ The kernel must reduce low-level WebGPU burden without assuming one geospatial s
 - machine-readable validation diagnostics
 - escape hatches for direct WebGPU-like control
 
-`scratch` should not encode scene-layer responsibilities:
+The Scratch GPU domain should not encode scene-layer responsibilities:
 
 - map, globe, or Cartesian-space semantics
 - projection policy
@@ -54,7 +59,9 @@ The kernel must reduce low-level WebGPU burden without assuming one geospatial s
 - camera-to-resource policy for a specific layer
 - material, style, or symbolizer semantics
 
-The goal is not to build a high-level scene graph. The goal is to provide a composable GPU execution kernel that `geo` can use to build many incompatible geospatial scene models.
+The goal is not to build a high-level scene graph. The goal is to provide a
+composable GPU execution kernel, exposed through `geoscratch/scratch`, that `geo`
+can use to build many incompatible geospatial scene models.
 
 `scratch` also should not adopt a `Material` layer as a substitute for shader/program design. A material-style abstraction couples shader code, data values, visual surface meaning, and object assignment. That coupling belongs in `geo`, applications, or optional scene helpers. The kernel keeps `Program`, `BindSet`, `Pipeline`, `Command`, and `Submission` separate.
 

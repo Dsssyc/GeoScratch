@@ -49,8 +49,8 @@ type ScratchDiagnostic = {
     severity: DiagnosticSeverity
     phase: DiagnosticPhase
     message: string
-    subject: DiagnosticSubject
-    related?: DiagnosticSubject[]
+    subject: ScratchDiagnosticSubject
+    related?: ScratchDiagnosticSubject[]
     expected?: unknown
     actual?: unknown
     hint?: string
@@ -87,8 +87,8 @@ enter diagnostic-only recovery, attribution, or report-preservation paths.
 A diagnostic must identify the smallest useful subject. Use `related` for context instead of hiding references inside prose.
 
 ```ts
-type DiagnosticSubject =
-    | { kind: 'ScratchRuntime', id: string, label?: string }
+type ScratchDiagnosticSubject =
+    | { kind: 'GPURuntime', id: string, label?: string }
     | { kind: 'Surface', id: string, label?: string }
     | { kind: 'Resource', id: string, label?: string, resourceKind?: string }
     | {
@@ -682,7 +682,7 @@ Suggestions are optional and advisory. They should help tooling produce a local 
 type DiagnosticSuggestion = {
     kind: string
     confidence: 'low' | 'medium' | 'high'
-    target: DiagnosticSubject
+    target: ScratchDiagnosticSubject
     action?: 'edit' | 'add' | 'remove' | 'reorder' | 'declare' | 'dispose'
     set?: unknown
     note?: string
@@ -724,7 +724,7 @@ version 5. Versions 2 through 4 are not emitted or converted during `0.x.x`. Ope
 pending facts select one explicit macro target:
 
 ```ts
-type ScratchGpuResourceOperationTarget =
+type GPUResourceOperationTarget =
     | {
         kind: 'resource'
         resourceKind: 'BufferResource' | 'TextureResource'
@@ -749,8 +749,8 @@ type ScratchGpuResourceOperationTarget =
         slots: readonly { index: number; state: string; contentEpoch: number }[]
     }
 
-type ScratchGpuOperationTarget =
-    | ScratchGpuResourceOperationTarget
+type GPUOperationTarget =
+    | GPUResourceOperationTarget
     | { kind: 'bind-layout'; bindLayoutId: string; group: number; entries: readonly unknown[]; acknowledgementState: 'pending' }
     | { kind: 'bind-set'; bindSetId: string; bindLayoutId: string; preparationState: string; generation: number; snapshotHash: string; preparationStage: string }
     | { kind: 'shader-module'; shaderModuleId: string; sourceHash: string; sourcePartCount: number; compilationHintCount: number }
@@ -891,7 +891,7 @@ observation.
 Failure stages are structural and include:
 
 ```ts
-type ScratchReadbackFailureStage =
+type GPUReadbackFailureStage =
     | 'staging-allocation'
     | 'copy-issue'
     | 'queue-completion'

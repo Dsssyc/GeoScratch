@@ -19,7 +19,7 @@ scratch GPU execution primitives
 
 ## 与 scratch 的边界
 
-`scratch` 负责 GPU 执行内核:
+Scratch 中的 GPU 能力域负责 GPU 执行内核:
 
 ```text
 runtime

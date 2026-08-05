@@ -27,7 +27,7 @@ canonical high-precision position
 
 ## 冻结的所有权边界
 
-- `geoscratch/worker` 只拥有通用 Dedicated Worker、module、group、task、priority、
+- `geoscratch/scratch` 只拥有通用 Dedicated Worker、module、group、task、priority、
   cancellation、stateful context、Transferable、remote error 和有界诊断。它不认识
   Geo、Scratch、tile、camera 或 DEM。
 - `geoscratch/geo` 拥有 TileMatrixSet、canonical address translation、virtual raster、
@@ -115,7 +115,7 @@ type VirtualRasterPageDemand = {
 
 ## 通用 WorkerSystem
 
-Geo 的 request executor 可以使用公开 `geoscratch/worker`，但 Worker API 不能
+Geo 的 request executor 可以使用公开 `geoscratch/scratch`，但 Worker API 不能
 变成 tile 专用接口。`WorkerSystem` 必须显式构造且非单例；`WorkerGroup` 是 module
 trust、isolation、capacity、state affinity 和 reclamation 边界。用户可以加载自定义
 module，运行 stateless operation，或打开保留上下文的 stateful context。

@@ -53,9 +53,9 @@ package-root type names that are absent from the Goal-start TypeScript entrypoin
 - `QuerySetType`
 - `ResourceOptions`
 - `SamplerResourceDescriptor`
-- `ScratchComputePipelineDescriptor`
+- `ComputePipelineDescriptor`
 - `ScratchDiagnosticInput`
-- `ScratchRenderPipelineDescriptor`
+- `RenderPipelineDescriptor`
 - `SurfaceFormat`
 - `SurfaceOptions`
 - `SurfaceSize`
@@ -77,9 +77,9 @@ these ownership boundaries:
 
 | Native operation | Goal-start owner | Target owner |
 | --- | --- | --- |
-| `GPUDevice.createSampler()` | synchronous `SamplerResource` constructor | acknowledged `ScratchRuntime.createSampler()` transaction |
-| `GPUDevice.createQuerySet()` | synchronous `QuerySetResource` constructor | acknowledged `ScratchRuntime.createQuerySet()` transaction |
-| `GPUDevice.createBindGroupLayout()` | synchronous `BindLayout` constructor | acknowledged `ScratchRuntime.createBindLayout()` transaction |
+| `GPUDevice.createSampler()` | synchronous `SamplerResource` constructor | acknowledged `GPURuntime.createSampler()` transaction |
+| `GPUDevice.createQuerySet()` | synchronous `QuerySetResource` constructor | acknowledged `GPURuntime.createQuerySet()` transaction |
+| `GPUDevice.createBindGroupLayout()` | synchronous `BindLayout` constructor | acknowledged `GPURuntime.createBindLayout()` transaction |
 | `GPUTexture.createView()` for persistent binding | public `TextureResource.createView()` and lazy BindSet lowering | candidate-local `BindSet.prepare()` transaction |
 | `GPUDevice.createBindGroup()` | lazy `BindSet.getBindGroup()` | candidate-local `BindSet.prepare()` transaction |
 | `GPUTexture.createView()` for pass attachments | pass descriptor lowering | submission-scoped observed lowering |

@@ -31,7 +31,7 @@ contains a demonstrable defect.
 | Fixed source file | Target file | Classification | Evidence |
 | --- | --- | --- | --- |
 | `m_flowLayer/index.html` | `flowLayer/index.html` | Preserved and renamed | Same standalone canvas, MapLibre 4.7.1 assets, shared example CSS, and module startup; neutral title and route. |
-| `m_flowLayer/main.js` | `flowLayer/main.js` | Replaced | `startScratchMap()` and MapLibre custom-layer registration become explicit lifecycle, Worker stream, ScratchRuntime, Surface, map host, and frame scheduler ownership. |
+| `m_flowLayer/main.js` | `flowLayer/main.js` | Replaced | `startScratchMap()` and MapLibre custom-layer registration become explicit lifecycle, Worker stream, GPURuntime, Surface, map host, and frame scheduler ownership. |
 | `m_flowLayer/flowJson.worker.js` | `flowLayer/flow-worker.js` | Preserved and narrowed | Loads binary velocity fields, computes maximum speed, transfers the typed-array buffer, returns request/index/url identity, and reports structured failures. Dead JSON/station triangulation code and unused imports are removed. |
 | `m_flowLayer/steadyFlowLayer.js` | `flowLayer/flow-layer.js` | Replaced | The legacy custom layer, implicit director graph, numeric refs, executable flags, and implicit updates become persistent current-API objects and explicit submissions. |
 | `m_flowLayer/steadyFlowLayer.js` lifecycle portions | `flowLayer/flow-lifecycle.js` | Strengthened | Worker-only `onRemove()` becomes one authority for stop, settle, Worker, map, and runtime ordering, at-most-once cleanup, and primary/secondary failures. |
@@ -55,7 +55,7 @@ parallel implementation remains.
 | CARTO dark raster style | `darkMatterStyle` in `flow-map.js` | Preserved for normal execution. |
 | Center `120.980697, 31.684162`, zoom 9, Mercator projection, max zoom 18, antialias | `FLOW_MAP_DEFAULTS` plus `createFlowMap()` | Preserved. |
 | Separate map container behind `#GPUFrame` | `createFlowMap()` | Preserved with explicit page ownership. |
-| `StartDash()` | None | Removed; Flow creates one explicit async ScratchRuntime. |
+| `StartDash()` | None | Removed; Flow creates one explicit async GPURuntime. |
 | `ScratchMap extends MapLibre.Map` | Plain page-owned MapLibre map | Replaced; no hybrid WebGL/WebGPU ownership claim. |
 | Legacy dynamic uniform buffer | `FlowCameraUniform` BufferResource and persistent UploadCommand | Replaced with explicit CPU packing and upload. |
 | Legacy screen and shared depth texture | Surface plus Flow-owned depth TextureResource | Replaced with explicit Scratch ownership. |

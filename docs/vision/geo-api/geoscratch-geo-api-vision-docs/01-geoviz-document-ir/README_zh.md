@@ -38,7 +38,7 @@ Document 不应保存 volatile GPU 对象、当前 command buffer、具体 `GPUB
 ```text
 GeoVizDocument: source/layer/style/policy 的目标状态
 GeoRuntimeState: tile cache、resource residency、render products、diagnostics、metrics
-ScratchRuntime: GPU device/resource/submission 状态
+GPURuntime: GPU device/resource/submission 状态
 ```
 
 ### 2. 所有变更都是 patch

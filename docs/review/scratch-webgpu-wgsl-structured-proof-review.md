@@ -14,6 +14,10 @@ The proof system reviews whether Scratch can express and lower a formal
 capability. It does not redefine WebGPU/WGSL semantics, infer hidden runtime
 work, or expand the public Scratch API.
 
+ADR-057 places this proof system in the GPU domain of the broader Scratch
+foundation. Public-symbol evidence resolves through `geoscratch/scratch`; the
+package root contributes only the `scratch` and `geo` namespaces.
+
 ## Fixed Authority
 
 | Source | Pinned authority |

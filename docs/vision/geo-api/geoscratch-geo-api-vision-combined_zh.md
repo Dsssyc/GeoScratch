@@ -14,7 +14,12 @@
 状态: Vision draft  
 日期: 2026-07-06
 
-本目录是对 `GeoScratch` 上层 `geo` API 的智能友好设计补充。它假设 `scratch` 已经保持为显式 WebGPU/GPGPU 执行内核：runtime、resource、layout codec、transfer、bind layout、program、pipeline、command、submission、diagnostics 与 scheduler。`geo` 层不应反向污染 `scratch`，但必须把地理可视化中真正困难的部分——数据语义、瓦片流式加载、比例尺、样式、注记、约束求解、可解释性、可回放性与 agent 操作协议——纳入公开契约。
+本目录是对 `GeoScratch` 上层 `geo` API 的智能友好设计补充。Scratch 是领域无关
+基础能力层，其中 GPU 能力域提供显式 WebGPU/GPGPU 执行内核：runtime、resource、
+layout codec、transfer、bind layout、program、pipeline、command、submission、
+diagnostics 与 scheduler。`geo` 层不应反向污染 Scratch，但必须把地理可视化中真正
+困难的部分——数据语义、瓦片流式加载、比例尺、样式、注记、约束求解、可解释性、
+可回放性与 agent 操作协议——纳入公开契约。
 
 ## 设计目标
 
@@ -94,7 +99,7 @@ scratch GPU execution primitives
 
 ## 与 scratch 的边界
 
-`scratch` 负责 GPU 执行内核:
+Scratch 中的 GPU 能力域负责 GPU 执行内核:
 
 ```text
 runtime
@@ -246,7 +251,7 @@ Document 不应保存 volatile GPU 对象、当前 command buffer、具体 `GPUB
 ```text
 GeoVizDocument: source/layer/style/policy 的目标状态
 GeoRuntimeState: tile cache、resource residency、render products、diagnostics、metrics
-ScratchRuntime: GPU device/resource/submission 状态
+GPURuntime: GPU device/resource/submission 状态
 ```
 
 ### 2. 所有变更都是 patch

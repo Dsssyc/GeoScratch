@@ -445,7 +445,7 @@ The reviewer reported `issues-found` before correction:
 | Catch-all/self-certifying current-manifest mappings, including wrong mappings for discovery, immediate data, and public symbols | Replaced with explicit fail-closed coverage rules, exact exported symbols, located native operations, and no fallback |
 | Missing feature/language/limit conditions for conditional WebGPU domains | Added structured conditions for depth clipping, timestamps, swizzle, immediate data, dual-source blending, indirect first instance, compressed/storage/float texture formats, and tier dependencies |
 | Language proofs merely declared `requires` while executing unrelated constants | Replaced with feature-specific shaders intended to determine GPU readback; the final native gate then exposed two invalid proof programs listed below |
-| Capability discovery and proof runtimes could select different adapters, and incomplete proof rows could pass validation | Discovery now uses ScratchRuntime with the same power preference; validator requires the exact 19-row set, adapter facts, contracts, execution evidence, and clean terminals |
+| Capability discovery and proof runtimes could select different adapters, and incomplete proof rows could pass validation | Discovery now uses GPURuntime with the same power preference; validator requires the exact 19-row set, adapter facts, contracts, execution evidence, and clean terminals |
 | Final provenance, gate, and audit record were incomplete | Pinned source URLs/commits/hashes and completed this living audit |
 
 The reviewer also identified the stale 107/107 emitted-file snapshot. It is
@@ -829,7 +829,7 @@ The six fixed attribution regressions now resolve as follows:
 
 | Normative entry | Exact managed proof |
 | --- | --- |
-| `GPUDevice.createRenderBundleEncoder` | `RenderBundle`, `RenderBundleDescriptor`, and `ScratchRuntime` in `render-bundle.ts`; native `createRenderBundleEncoder` |
+| `GPUDevice.createRenderBundleEncoder` | `RenderBundle`, `RenderBundleDescriptor`, and `GPURuntime` in `render-bundle.ts`; native `createRenderBundleEncoder` |
 | `GPURenderPassEncoder.executeBundles` | `ExecuteRenderBundlesCommand` and `RenderBundle` in `render-bundle.ts`; native `executeBundles` |
 | `interface.GPUCommandBufferDescriptor` | `SubmissionBuilder` and `SubmittedWork` in `submission.ts`; native `GPUCommandEncoder.finish` |
 | `interface.GPUVertexBufferLayout` | render pipeline descriptor symbols in `pipeline-creation.ts`; native `createRenderPipelineAsync` |

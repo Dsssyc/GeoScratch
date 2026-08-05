@@ -299,7 +299,7 @@ Effect-free work 不使用 owner 或 native scope。
 JSON-serializable 的 version-5 result。status 只能是:
 
 ```ts
-type ScratchSubmissionNativeOutcomeStatus =
+type GPUSubmissionNativeOutcomeStatus =
     | 'no-native-work'
     | 'observed-succeeded'
     | 'observed-failed'

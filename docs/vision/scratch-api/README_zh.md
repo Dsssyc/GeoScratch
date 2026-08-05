@@ -1,11 +1,14 @@
-# Scratch API 重设计
+# Scratch GPU API 重设计
 
 状态: Vision draft
 日期: 2026-07-06
 
-本目录记录下一版 `scratch` API 的模块化目标设计。它把 `docs/vision/scratch-graphics-kernel.md` 中的 GPU 内核方向拆成更小的接口层级。
+本目录记录 Scratch 基础层中 GPU 能力域的模块化目标设计。它把
+`docs/vision/scratch-graphics-kernel.md` 中的 GPU 内核方向拆成更小的接口层级。
 
-这里的文档是设计参考，不代表实现已完成。修改 `packages/geoscratch/src/gpu/`、`packages/geoscratch/src/scratch.ts`、`packages/geoscratch/src/scratch/` 或公开 `scratch` API 形状前，应先阅读这些文档。
+这里的文档是设计参考，不代表实现已完成。修改
+`packages/geoscratch/src/scratch/gpu/`、正式 `geoscratch/scratch` 门面或公开 GPU
+契约形状前，应先阅读这些文档。
 
 ## 模块地图
 
@@ -24,11 +27,12 @@
 
 ## 已确认的顶层决策
 
-- `scratch` 是 GPU 执行内核(compute 与图形同级)。`geo` 负责场景、空间、图层、瓦片、加载和地理可视化策略。
+- `scratch` 中的 GPU 能力域是 GPU 执行内核(compute 与图形同级)。Scratch 门面
+  同时公开彼此独立的基础能力；`geo` 负责地理语义，并且只依赖 Scratch 公开契约。
 - 在 `0.x.x` 阶段，允许并鼓励为了清理过时概念而进行破坏性 API 重设计。
 - 现有 API 只是需求样本和反例材料，不是兼容性约束。
-- 核心 API 使用显式异步 `ScratchRuntime`。内核契约中不保留隐式全局 device。
-- `Surface` 与 `ScratchRuntime` 分离；runtime 必须支持 compute-only 和 offscreen 工作流。
+- 核心 API 使用显式异步 `GPURuntime`。内核契约中不保留隐式全局 device。
+- `Surface` 与 `GPURuntime` 分离；runtime 必须支持 compute-only 和 offscreen 工作流。
 - Resource 是带 allocation lifecycle 的逻辑容器。只有 buffer/texture 拥有 scalar content facts；sampler 没有，query set 拥有 indexed slot facts。BufferRegion 与 TextureViewSpec 是不可变 non-resource value。
 - Layout codec 是连接 CPU packing、WGSL accessor、readback view 与 layout diagnostics 的准备期 artifact; submission hot path 只消费显式 artifact。
 - 资源缺失或未 ready 时的策略必须由 command 或 pass 使用点显式声明。

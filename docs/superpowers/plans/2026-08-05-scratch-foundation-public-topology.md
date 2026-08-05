@@ -347,14 +347,14 @@ export { geo, scratch }
 - Modify: `docs/review/scratch-api-intelligent-friendly-review.md`
 - Modify: `docs/review/scratch-webgpu-wgsl-structured-proof-review.md`
 
-- [ ] Write ADR-057 with the two public concepts, one-way `geo -> scratch` dependency, independent GPU/Worker lifecycle authorities, namespace-only root, diagnostic union, exact deleted subpaths, and explicit Goal 2/3 exclusions.
-- [ ] State that ADR-057 supersedes ADR-056 only for Worker public topology; retain ADR-056 scheduling/cancellation/context/transfer semantics.
-- [ ] Update user-facing docs to show only the three approved import forms. Explain `GPURuntime`, Worker independence, TypeScript source-first, and “Geo from the Scratch” without documenting removed compatibility paths.
-- [ ] Update active vision and living review documents to current names. Keep design history intact and mark `scratch-foundation-public-topology.md` implemented by ADR-057.
-- [ ] Build the historical-name allowlist as exact `{ path, symbol, reason }` entries. No directory glob, filename glob, wildcard symbol, or blanket `docs/decisions` exemption is allowed.
-- [ ] Add docs tests that fail when an old mapped name appears in active source/docs outside the allowlist, when an allowlisted occurrence disappears without manifest cleanup, or when README/package examples use root flat imports.
-- [ ] Run `npm test -- --grep "scratch foundation docs"`, `npm run typecheck`, and `npm run build`.
-- [ ] Commit as `Document Scratch foundation public topology`.
+- [x] Write ADR-057 with the two public concepts, one-way `geo -> scratch` dependency, independent GPU/Worker lifecycle authorities, namespace-only root, diagnostic union, exact deleted subpaths, and explicit Goal 2/3 exclusions.
+- [x] State that ADR-057 supersedes ADR-056 only for Worker public topology; retain ADR-056 scheduling/cancellation/context/transfer semantics.
+- [x] Update user-facing docs to show only the three approved import forms. Explain `GPURuntime`, Worker independence, TypeScript source-first, and “Geo from the Scratch” without documenting removed compatibility paths.
+- [x] Update active vision and living review documents to current names. Keep design history intact and mark `scratch-foundation-public-topology.md` implemented by ADR-057.
+- [x] Build the historical-name allowlist as exact `{ path, symbol, reason }` entries. No directory glob, filename glob, wildcard symbol, or blanket `docs/decisions` exemption is allowed.
+- [x] Add docs tests that fail when an old mapped name appears in active source/docs outside the allowlist, when an allowlisted occurrence disappears without manifest cleanup, or when README/package examples use root flat imports.
+- [x] Run `npm test -- --grep "scratch foundation docs"`, `npm run typecheck`, and `npm run build`.
+- [x] Commit as `Document Scratch foundation public topology`.
 
 ### Task 8: Execute Fixed Gates And One Bounded Final Review
 

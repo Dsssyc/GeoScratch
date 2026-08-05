@@ -5,7 +5,7 @@
 
 ## 决策
 
-核心 API 使用显式异步 `ScratchRuntime`。Runtime 不绑定 canvas。呈现目标由独立 `Surface` 对象建模。
+核心 API 使用显式异步 `GPURuntime`。Runtime 不绑定 canvas。呈现目标由独立 `Surface` 对象建模。
 
 这符合 WebGPU 生命周期:
 
@@ -19,7 +19,7 @@ canvas -> GPUCanvasContext -> configured presentation surface
 ## 目标形状
 
 ```ts
-const scratch = await ScratchRuntime.create({
+const scratch = await GPURuntime.create({
     powerPreference: 'high-performance',
     requiredFeatures: [],
     requiredLimits: {},
@@ -31,7 +31,7 @@ const surface = scratch.surface(canvas, {
 })
 ```
 
-`ScratchRuntime` 拥有:
+`GPURuntime` 拥有:
 
 - `GPUDevice`
 - `GPUQueue`
@@ -54,7 +54,7 @@ const surface = scratch.surface(canvas, {
 
 ## 所有权规则
 
-- 一个 resource 只属于一个 `ScratchRuntime`。
+- 一个 resource 只属于一个 `GPURuntime`。
 - runtime 的 `GPU`、adapter、device、queue 与 feature/limit snapshot 在创建后
   都是不可变 ownership fact；应用代码不能在 diagnostics 或 allocation
   底层替换 native device。
@@ -63,7 +63,7 @@ const surface = scratch.surface(canvas, {
   该 cell 的 observation；Scratch internal lifecycle check 直接调用私有 authority，
   因此实例同名属性遮蔽公开方法也不能跳过 lifecycle validation。
 - 一个 `GPUCanvasContext` 同一时间只由一个 live `Surface` claim，因此也只由
-  一个 `ScratchRuntime` 配置。
+  一个 `GPURuntime` 配置。
 - 一个 runtime 的资源不能被另一个 runtime 记录的 command 使用。
 - surface current texture 是 presentation-submission-scoped，不允许作为持久 resource 保存。
 - dispose surface 不会 dispose runtime。
@@ -200,7 +200,7 @@ Readback ownership 属于 runtime，不属于全局 queue helper 或 resource
 convenience method。Runtime 创建只接受已经实现的有限 policy:
 
 ```ts
-const runtime = await ScratchRuntime.create({
+const runtime = await GPURuntime.create({
     readback: {
         maxPendingOperations: 16,
         maxStagingBytes: 64 * 1024 * 1024,
@@ -235,7 +235,7 @@ Submission native observation 是 runtime-owned diagnostics policy。Runtime
 创建暴露完整 persistent policy surface:
 
 ```ts
-const runtime = await ScratchRuntime.create({
+const runtime = await GPURuntime.create({
     diagnostics: {
         submissionScopes: 'summary',
         maxPendingNativeObservations: 64,
@@ -272,7 +272,7 @@ transaction 中重新校验。Device feature 仍是另一套 capability domain�
 
 ## Device Loss
 
-`ScratchRuntime` 拥有 device-loss 处理。Device loss 后:
+`GPURuntime` 拥有 device-loss 处理。Device loss 后:
 
 - 物理 GPU 对象全部失效
 - 逻辑资源可以保留为可重建描述

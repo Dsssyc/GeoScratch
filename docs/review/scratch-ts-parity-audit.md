@@ -1,5 +1,8 @@
 # Scratch TypeScript Parity Audit
 
+Status: Historical migration evidence. ADR-057 supersedes its public-entrypoint and
+source-location conclusions; current implementation paths are shown below.
+
 ## Scope
 
 This audit checks the clean-cut Scratch TypeScript migration against the fixed branch-creation baseline.
@@ -70,7 +73,7 @@ Evidence:
 | pass | Render/compute pass descriptors, timestamp writes, occlusion query set validation, and pass disposal behavior preserved. |
 | submission | Explicit step ordering, pass/command compatibility checks, epoch advancement, and submitted work shape preserved. |
 | runtime | Async runtime creation, device/queue ownership, resource/surface factories, device-lost tracking, and disposal behavior preserved. |
-| index/scratch entrypoints | Public names and compatibility entrypoint preserved through generated dist outputs. |
+| index/scratch entrypoints | Current names resolve through the formal Scratch facade and generated dist outputs. |
 
 ## Declaration Coverage
 
@@ -78,7 +81,7 @@ Old hand-written declarations were removed from Scratch source. Generated declar
 
 - `packages/geoscratch/dist/index.d.ts`
 - `packages/geoscratch/dist/scratch.d.ts`
-- `packages/geoscratch/dist/scratch/*.d.ts`
+- `packages/geoscratch/dist/scratch/gpu/*.d.ts`
 
 Checklist:
 
@@ -86,28 +89,32 @@ Checklist:
 | --- | --- | --- |
 | `packages/geoscratch/src/index.d.ts` | `packages/geoscratch/dist/index.d.ts` | Complete |
 | `packages/geoscratch/src/scratch.d.ts` | `packages/geoscratch/dist/scratch.d.ts` | Complete |
-| `packages/geoscratch/src/scratch/diagnostics.d.ts` | `packages/geoscratch/dist/scratch/diagnostics.d.ts` | Complete |
-| `packages/geoscratch/src/scratch/resource.d.ts` | `packages/geoscratch/dist/scratch/resource.d.ts` | Complete |
-| `packages/geoscratch/src/scratch/buffer.d.ts` | `packages/geoscratch/dist/scratch/buffer.d.ts` | Complete |
-| `packages/geoscratch/src/scratch/texture.d.ts` | `packages/geoscratch/dist/scratch/texture.d.ts` | Complete |
-| `packages/geoscratch/src/scratch/sampler.d.ts` | `packages/geoscratch/dist/scratch/sampler.d.ts` | Complete |
-| `packages/geoscratch/src/scratch/surface.d.ts` | `packages/geoscratch/dist/scratch/surface.d.ts` | Complete |
-| `packages/geoscratch/src/scratch/query-set.d.ts` | `packages/geoscratch/dist/scratch/query-set.d.ts` | Complete |
-| `packages/geoscratch/src/scratch/readback.d.ts` | `packages/geoscratch/dist/scratch/readback.d.ts` | Complete |
-| `packages/geoscratch/src/scratch/binding.d.ts` | `packages/geoscratch/dist/scratch/binding.d.ts` | Complete |
-| `packages/geoscratch/src/scratch/program.d.ts` | `packages/geoscratch/dist/scratch/program.d.ts` | Complete |
-| `packages/geoscratch/src/scratch/pipeline.d.ts` | `packages/geoscratch/dist/scratch/pipeline.d.ts` | Complete |
-| `packages/geoscratch/src/scratch/command.d.ts` | `packages/geoscratch/dist/scratch/command.d.ts` | Complete |
-| `packages/geoscratch/src/scratch/pass.d.ts` | `packages/geoscratch/dist/scratch/pass.d.ts` | Complete |
-| `packages/geoscratch/src/scratch/submission.d.ts` | `packages/geoscratch/dist/scratch/submission.d.ts` | Complete |
-| `packages/geoscratch/src/scratch/runtime.d.ts` | `packages/geoscratch/dist/scratch/runtime.d.ts` | Complete |
+| `packages/geoscratch/src/scratch/diagnostics.d.ts` | `packages/geoscratch/dist/scratch/gpu/diagnostics.d.ts` | Complete |
+| `packages/geoscratch/src/scratch/resource.d.ts` | `packages/geoscratch/dist/scratch/gpu/resource.d.ts` | Complete |
+| `packages/geoscratch/src/scratch/buffer.d.ts` | `packages/geoscratch/dist/scratch/gpu/buffer.d.ts` | Complete |
+| `packages/geoscratch/src/scratch/texture.d.ts` | `packages/geoscratch/dist/scratch/gpu/texture.d.ts` | Complete |
+| `packages/geoscratch/src/scratch/sampler.d.ts` | `packages/geoscratch/dist/scratch/gpu/sampler.d.ts` | Complete |
+| `packages/geoscratch/src/scratch/surface.d.ts` | `packages/geoscratch/dist/scratch/gpu/surface.d.ts` | Complete |
+| `packages/geoscratch/src/scratch/query-set.d.ts` | `packages/geoscratch/dist/scratch/gpu/query-set.d.ts` | Complete |
+| `packages/geoscratch/src/scratch/readback.d.ts` | `packages/geoscratch/dist/scratch/gpu/readback.d.ts` | Complete |
+| `packages/geoscratch/src/scratch/binding.d.ts` | `packages/geoscratch/dist/scratch/gpu/binding.d.ts` | Complete |
+| `packages/geoscratch/src/scratch/program.d.ts` | `packages/geoscratch/dist/scratch/gpu/program.d.ts` | Complete |
+| `packages/geoscratch/src/scratch/pipeline.d.ts` | `packages/geoscratch/dist/scratch/gpu/pipeline.d.ts` | Complete |
+| `packages/geoscratch/src/scratch/command.d.ts` | `packages/geoscratch/dist/scratch/gpu/command.d.ts` | Complete |
+| `packages/geoscratch/src/scratch/pass.d.ts` | `packages/geoscratch/dist/scratch/gpu/pass.d.ts` | Complete |
+| `packages/geoscratch/src/scratch/submission.d.ts` | `packages/geoscratch/dist/scratch/gpu/submission.d.ts` | Complete |
+| `packages/geoscratch/src/scratch/runtime.d.ts` | `packages/geoscratch/dist/scratch/gpu/runtime.d.ts` | Complete |
 
-The generated declarations keep all old exported type/class/function names. Some implementation helper types now appear in generated module declarations because TypeScript emits structural support for source-defined unions. They do not represent new runtime behavior.
+The migration audit originally proved old-name parity. ADR-057 later applied the
+approved clean-cut rename map; current generated declarations expose only those
+renamed contracts. Some implementation helper types appear in generated module
+declarations because TypeScript emits structural support for source-defined unions.
+They do not represent new runtime behavior.
 
 ## Intentional Structural Differences
 
 - Source files are not line-by-line translations. TypeScript interfaces and type aliases were added in the same modules so the compiler can check runtime ownership, resource descriptors, command compatibility, and diagnostic reports.
-- `ScratchRuntime` now emits its private constructor from TypeScript source while preserving `ScratchRuntime.create(...)` as the public construction path.
+- `GPURuntime` now emits its private constructor from TypeScript source while preserving `GPURuntime.create(...)` as the public construction path.
 - Package source no longer includes Scratch hand-written declarations. Declarations are generated under `dist`.
 - The old package source wildcard export was removed. ADR-006 records the new package boundary.
 - Two legacy JavaScript modules received JSDoc typedef imports so their generated declarations remain valid while legacy directories stay JavaScript.

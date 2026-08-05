@@ -120,7 +120,7 @@ This revision resolves the remaining open review item by making `09-diagnostics-
 - **`BindSet` name is kept** (not renamed to `BindGroup`). `BindSet` does more than `GPUBindGroup`: it freezes logical BufferRegion/TextureViewSpec bindings, exposes readiness and allocation staleness, and owns an explicitly acknowledged preparation lifecycle (`03-bindings`). The semantic difference is exactly why it must be named differently. Submission never rebuilds it lazily.
 - **`Material` is not introduced.** The kernel keeps `Program`, `BindSet`, `Pipeline`, and `Command` separate. Material-like scene concepts remain above scratch.
 - **Diagnostics do not auto-repair.** Structured suggestions may guide tooling, but resource usage, bind layouts, shader code, and submission order remain explicit user or tooling edits.
-- The explicit `ScratchRuntime` / `Surface` split, explicit resource access and transfer declarations, `whenMissing` at the usage point, and `SubmissionValidationMode` (`off` / `warn` / `throw`) are kept. They are already AI-aligned: no hidden global state, local reasoning, and an error surface the agentic loop can iterate against.
+- The explicit `GPURuntime` / `Surface` split, explicit resource access and transfer declarations, `whenMissing` at the usage point, and `SubmissionValidationMode` (`off` / `warn` / `throw`) are kept. They are already AI-aligned: no hidden global state, local reasoning, and an error surface the agentic loop can iterate against.
 
 ## Part 2 — General-Purpose Compute Parity
 

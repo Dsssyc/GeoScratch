@@ -297,7 +297,7 @@ buffer-view contract 派生 requirement：`shader-f16` 是 device feature；
 language feature。
 
 WGSL `enable` extension 继续由 caller-authored directive 表达。对应 WebGPU
-capability 分别保留在 `ScratchRuntime.create({ requiredFeatures })` 与
+capability 分别保留在 `GPURuntime.create({ requiredFeatures })` 与
 `Program.requiredFeatures`；Scratch 不增加平行的
 `requiredEnableExtensions` 字段，不解析 WGSL 推导 capability，也不注入缺失
 feature。正式 WebGPU feature dependency 共用一份本地 contract。具体而言，

@@ -313,7 +313,7 @@ provenance. Effect-free work uses no owner or native scope.
 JSON-serializable version-5 result. Its status is exactly:
 
 ```ts
-type ScratchSubmissionNativeOutcomeStatus =
+type GPUSubmissionNativeOutcomeStatus =
     | 'no-native-work'
     | 'observed-succeeded'
     | 'observed-failed'

@@ -3,7 +3,11 @@
 状态: Vision draft  
 日期: 2026-07-06
 
-本目录是对 `GeoScratch` 上层 `geo` API 的智能友好设计补充。它假设 `scratch` 已经保持为显式 WebGPU/GPGPU 执行内核：runtime、resource、layout codec、transfer、bind layout、program、pipeline、command、submission、diagnostics 与 scheduler。`geo` 层不应反向污染 `scratch`，但必须把地理可视化中真正困难的部分——数据语义、瓦片流式加载、比例尺、样式、注记、约束求解、可解释性、可回放性与 agent 操作协议——纳入公开契约。
+本目录是对 `GeoScratch` 上层 `geo` API 的智能友好设计补充。Scratch 是领域无关
+基础能力层，其中 GPU 能力域提供显式 WebGPU/GPGPU 执行内核：runtime、resource、
+layout codec、transfer、bind layout、program、pipeline、command、submission、
+diagnostics 与 scheduler。`geo` 只依赖 Scratch 公开契约，不能反向污染基础能力层；
+同时必须把地理可视化中真正困难的部分纳入公开契约。
 
 ## 设计目标
 

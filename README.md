@@ -34,18 +34,11 @@ Open the Vite URL to browse examples. A WebGPU-capable browser is required for r
 | Path | Purpose |
 | --- | --- |
 | `packages/geoscratch/` | Publishable library package. |
-| `packages/geoscratch/src/index.ts` | TypeScript source for the main public package entrypoint. |
-| `packages/geoscratch/src/scratch.ts` | TypeScript source for the `geoscratch/scratch` compatibility entrypoint. |
-| `packages/geoscratch/src/scratch/` | TypeScript source-first Scratch API core. |
-| `packages/geoscratch/src/worker/` | Generic TypeScript WorkerSystem, module, task, context, transfer, and diagnostic contracts. |
+| `packages/geoscratch/src/index.ts` | Namespace-only package root exposing `scratch` and `geo`. |
+| `packages/geoscratch/src/scratch.ts` | Formal `geoscratch/scratch` facade. |
+| `packages/geoscratch/src/scratch/` | TypeScript source-first GPU, Worker, diagnostics, and geometry foundation. |
+| `packages/geoscratch/src/geo/` | TypeScript source-first coordinates, tiling, and virtual-raster adaptation. |
 | `packages/geoscratch/dist/` | Generated package JavaScript and declaration output. |
-| `packages/geoscratch/src/core/` | Shared data references, math, object, and bounding box primitives. |
-| `packages/geoscratch/src/geo/` | TypeScript source-first geospatial helpers and geographic tiling structures. |
-| `packages/geoscratch/src/geometry/` | Reusable geometry generators such as sphere and plane meshes. |
-| `packages/geoscratch/src/gpu/` | WebGPU device, buffers, bindings, passes, pipelines, shaders, textures, samplers, and director. |
-| `packages/geoscratch/src/loaders/` | Image and shader loading helpers. |
-| `packages/geoscratch/src/effects/` | Reusable postprocessing effects. |
-| `packages/geoscratch/src/applications/` | Higher-level geospatial application modules, including terrain. |
 | `examples/` | Examples workspace, examples browser, and standalone demo pages. |
 | `docs/assets/` | Documentation and project branding assets. |
 | `examples/public/` | Large local demo data that must be fetched by stable absolute URL. |
@@ -53,23 +46,22 @@ Open the Vite URL to browse examples. A WebGPU-capable browser is required for r
 
 ## Package Entrypoints
 
-```js
-import * as scr from 'geoscratch'
-```
-
-The package also keeps a compatibility entrypoint:
+The package root exposes only the two architecture namespaces:
 
 ```js
-import * as scr from 'geoscratch/scratch'
+import { scratch, geo } from 'geoscratch'
 ```
 
-Focused subpaths are available for geospatial, worker, and geometry helpers:
+Use the formal subpaths for direct imports:
 
 ```js
-import { MercatorCoordinate } from 'geoscratch/geo'
-import { WorkerSystem } from 'geoscratch/worker'
-import { sphere } from 'geoscratch/geometry'
+import { GPURuntime, WorkerSystem, sphere } from 'geoscratch/scratch'
+import { MercatorCoordinate, WebMercatorQuad } from 'geoscratch/geo'
 ```
+
+Scratch is the domain-neutral TypeScript source-first capability foundation; Geo
+adapts those contracts for geographic semantics. The one-way dependency is summarized
+as **Geo from the Scratch**.
 
 ## Geo Streaming And Workers
 
@@ -79,10 +71,12 @@ high-precision canonical coordinates, virtual-raster demand and residency, expli
 publication. Global tile identity is mapped through compact source coverage rather
 than a dense world page table.
 
-`geoscratch/worker` is an independent, explicitly constructed thread abstraction.
-It accepts URL-loaded custom modules, bounded priority groups, cooperative and hard
-cancellation, stale-result rejection, stateful contexts, Transferable ownership, and
-structured remote diagnostics. It has no Geo, tile, DEM, Scratch, or GPU dependency.
+`WorkerSystem`, imported from `geoscratch/scratch`, is an independent, explicitly
+constructed thread abstraction. It accepts URL-loaded custom modules, bounded
+priority groups, cooperative and hard cancellation, stale-result rejection,
+stateful contexts, Transferable ownership, and structured remote diagnostics. It
+shares no mutable state or lifecycle authority with `GPURuntime` and has no Geo,
+tile, DEM, or GPU dependency.
 
 The DEM Layer is the executable reference path: terrain demand resolves standard
 WebMercatorQuad tiles in Workers, transfers decoded pages into a finite atlas, and
@@ -95,7 +89,7 @@ full-image or legacy-tile fallback.
 Persistent Scratch buffer and texture allocation is acknowledged asynchronously. A resource is returned only after its native validation and out-of-memory scopes settle successfully; texture replacement follows the same transaction boundary.
 
 ```js
-const runtime = await scr.GPURuntime.create()
+const runtime = await GPURuntime.create()
 const vertices = await runtime.createBuffer({
     label: 'vertices',
     size: 4096,
@@ -157,7 +151,7 @@ application explicitly awaits `prepare()`. Submission never rebuilds bindings.
 asynchronous and is exposed explicitly:
 
 ```js
-const runtime = await scr.GPURuntime.create({
+const runtime = await GPURuntime.create({
     diagnostics: {
         submissionScopes: 'summary',
         maxPendingNativeObservations: 64,
@@ -268,7 +262,7 @@ not the classifier.
 The example below renders a hard-coded triangle onto a canvas.
 
 ```js
-import { GPURuntime } from 'geoscratch'
+import { GPURuntime } from 'geoscratch/scratch'
 
 const canvas = document.getElementById('GPUFrame')
 

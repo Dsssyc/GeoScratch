@@ -5,7 +5,7 @@ Date: 2026-07-12
 
 ## Decision
 
-The core API uses an explicit async `ScratchRuntime`. The runtime is not bound to a canvas. Presentation is modeled by separate `Surface` objects.
+The core API uses an explicit async `GPURuntime`. The runtime is not bound to a canvas. Presentation is modeled by separate `Surface` objects.
 
 This follows the WebGPU lifecycle:
 
@@ -19,7 +19,7 @@ Unlike WebGL, the GPU execution context is not the canvas context. This separati
 ## Target Shape
 
 ```ts
-const scratch = await ScratchRuntime.create({
+const scratch = await GPURuntime.create({
     powerPreference: 'high-performance',
     requiredFeatures: [],
     requiredLimits: {},
@@ -31,7 +31,7 @@ const surface = scratch.surface(canvas, {
 })
 ```
 
-`ScratchRuntime` owns:
+`GPURuntime` owns:
 
 - `GPUDevice`
 - `GPUQueue`
@@ -54,7 +54,7 @@ const surface = scratch.surface(canvas, {
 
 ## Ownership Rules
 
-- A resource belongs to exactly one `ScratchRuntime`.
+- A resource belongs to exactly one `GPURuntime`.
 - A runtime's `GPU`, adapter, device, queue, and feature/limit snapshots are
   immutable ownership facts after creation; application code cannot swap the
   native device underneath diagnostics or allocation.
@@ -64,7 +64,7 @@ const surface = scratch.surface(canvas, {
   invoke the private authority directly, so an own property that shadows a public
   method cannot suppress lifecycle validation.
 - A `GPUCanvasContext` is claimed by exactly one live `Surface`, and therefore
-  exactly one `ScratchRuntime`, at a time.
+  exactly one `GPURuntime`, at a time.
 - Resources from one runtime cannot be used by commands recorded on another runtime.
 - A surface current texture is presentation-submission-scoped and must not be stored as a persistent resource.
 - Disposing a surface does not dispose the runtime.
@@ -209,7 +209,7 @@ resource convenience method. Runtime creation accepts only the implemented
 finite policy:
 
 ```ts
-const runtime = await ScratchRuntime.create({
+const runtime = await GPURuntime.create({
     readback: {
         maxPendingOperations: 16,
         maxStagingBytes: 64 * 1024 * 1024,
@@ -246,7 +246,7 @@ Submission native observation is runtime-owned diagnostics policy. Runtime
 creation exposes the complete persistent policy surface:
 
 ```ts
-const runtime = await ScratchRuntime.create({
+const runtime = await GPURuntime.create({
     diagnostics: {
         submissionScopes: 'summary',
         maxPendingNativeObservations: 64,
@@ -285,7 +285,7 @@ nonzero render or compute pipeline immediate range can reach native creation.
 
 ## Device Loss
 
-`ScratchRuntime` owns device-loss handling. After device loss:
+`GPURuntime` owns device-loss handling. After device loss:
 
 - physical GPU objects are invalid
 - logical resources may remain as rehydratable descriptions

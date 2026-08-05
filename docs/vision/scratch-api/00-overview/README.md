@@ -5,7 +5,11 @@ Date: 2026-07-16
 
 ## Purpose
 
-The new `scratch` API should maximize locally-verifiable correctness while preserving direct GPU control. It should add the constraints and checks that raw WebGPU lacks, without adding hidden behavior. It is a GPU execution kernel — compute and graphics are co-equal uses — not a geospatial scene graph and not a configuration DSL for every rendering technique.
+The GPU domain inside the Scratch foundation should maximize locally-verifiable
+correctness while preserving direct GPU control. It should add the constraints and
+checks that raw WebGPU lacks, without adding hidden behavior. It is a GPU execution
+kernel where compute and graphics are co-equal uses, not a geospatial scene graph or
+a configuration DSL for every rendering technique.
 
 `scratch` should make repeated low-level work easier:
 
@@ -91,7 +95,7 @@ use `createMappedBuffer()` or `mapBuffer()` and receive a bounded-lifetime
 ## Immediate Command Data
 
 WGSL language features, pipeline immediate ranges, and command immediate values use
-three separate contracts. `ScratchRuntime.wgslLanguageFeatures` is a frozen capability
+three separate contracts. `GPURuntime.wgslLanguageFeatures` is a frozen capability
 snapshot. `Program.requiredLanguageFeatures` states what caller-authored WGSL needs.
 Render and compute Pipelines declare `immediateSize`, while each Draw or Dispatch owns
 one complete `CommandImmediateData` source.
@@ -112,7 +116,7 @@ rasterization state.
 
 The new API should make these boundaries hard to miss:
 
-- `ScratchRuntime` owns GPU device state and caches.
+- `GPURuntime` owns GPU device state and caches.
 - Covered native allocation is a Promise-returning GPU operation. A logical resource is installed only after validation, internal, and out-of-memory scopes plus lifecycle rechecks settle successfully.
 - `Surface` owns presentation target configuration, not GPU execution.
 - `Resource` owns logical identity, allocation lifecycle, and disposal. Only BufferResource and TextureResource own scalar content/readiness facts; SamplerResource owns none, and QuerySetResource owns indexed slot facts.

@@ -120,7 +120,7 @@ ScratchDiagnostic = stable code + phase + subject + related + expected/actual + 
 - **保留 `BindSet` 命名**(不改名为 `BindGroup`)。`BindSet` 比 `GPUBindGroup` 做得更多：它冻结逻辑 BufferRegion/TextureViewSpec binding，暴露 readiness 与 allocation staleness，并拥有显式 acknowledged preparation lifecycle(`03-bindings`)。语义不同正是它必须命名不同的理由。Submission 绝不惰性重建它。
 - **不引入 `Material`。** kernel 保持 `Program`、`BindSet`、`Pipeline` 与 `Command` 分离。material-like scene concepts 留在 scratch 之上。
 - **Diagnostics 不自动修复。** 结构化 suggestions 可以指导 tooling，但 resource usage、bind layouts、shader code 与 submission order 仍然必须是显式的用户或工具编辑。
-- 保留显式的 `ScratchRuntime` / `Surface` 拆分、显式 resource access 与 transfer 声明、使用点上的 `whenMissing`、以及 `SubmissionValidationMode`(`off` / `warn` / `throw`)。它们本就与 AI 契合: 无隐藏全局状态、可局部推理、且提供了 agentic 闭环可以迭代对抗的错误面。
+- 保留显式的 `GPURuntime` / `Surface` 拆分、显式 resource access 与 transfer 声明、使用点上的 `whenMissing`、以及 `SubmissionValidationMode`(`off` / `warn` / `throw`)。它们本就与 AI 契合: 无隐藏全局状态、可局部推理、且提供了 agentic 闭环可以迭代对抗的错误面。
 
 ## 第二部分 — 通用 compute 对等性
 

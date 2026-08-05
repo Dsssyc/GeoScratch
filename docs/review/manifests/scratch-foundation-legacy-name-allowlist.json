@@ -1,0 +1,1365 @@
+{
+  "schemaVersion": 1,
+  "entries": [
+    {
+      "path": "docs/decisions/ADR-004-default-runtime-and-package-boundaries.md",
+      "symbol": "geoscratch/geometry",
+      "reason": "Historical ADR preserves the API name used when that decision was accepted."
+    },
+    {
+      "path": "docs/decisions/ADR-006-scratch-typescript-source-dist-boundary.md",
+      "symbol": "geoscratch/geometry",
+      "reason": "Historical ADR preserves the API name used when that decision was accepted."
+    },
+    {
+      "path": "docs/decisions/ADR-026-scratch-readback-command-ordered-staging.md",
+      "symbol": "ScratchRuntime",
+      "reason": "Historical ADR preserves the API name used when that decision was accepted."
+    },
+    {
+      "path": "docs/decisions/ADR-032-scratch-gpu-operation-provenance.md",
+      "symbol": "ScratchRuntime",
+      "reason": "Historical ADR preserves the API name used when that decision was accepted."
+    },
+    {
+      "path": "docs/decisions/ADR-033-scratch-async-pipeline-creation.md",
+      "symbol": "ScratchGpuOperationTarget",
+      "reason": "Historical ADR preserves the API name used when that decision was accepted."
+    },
+    {
+      "path": "docs/decisions/ADR-034-scratch-readback-staging-mapping-provenance.md",
+      "symbol": "ScratchGpuOperationTarget",
+      "reason": "Historical ADR preserves the API name used when that decision was accepted."
+    },
+    {
+      "path": "docs/decisions/ADR-034-scratch-readback-staging-mapping-provenance.md",
+      "symbol": "ScratchGpuPipelineOperationTarget",
+      "reason": "Historical ADR preserves the API name used when that decision was accepted."
+    },
+    {
+      "path": "docs/decisions/ADR-034-scratch-readback-staging-mapping-provenance.md",
+      "symbol": "ScratchGpuResourceOperationTarget",
+      "reason": "Historical ADR preserves the API name used when that decision was accepted."
+    },
+    {
+      "path": "docs/decisions/ADR-034-scratch-readback-staging-mapping-provenance.md",
+      "symbol": "ScratchReadbackFailureStage",
+      "reason": "Historical ADR preserves the API name used when that decision was accepted."
+    },
+    {
+      "path": "docs/decisions/ADR-035-scratch-submission-native-outcome-provenance.md",
+      "symbol": "ScratchGpuOperationTarget",
+      "reason": "Historical ADR preserves the API name used when that decision was accepted."
+    },
+    {
+      "path": "docs/decisions/ADR-035-scratch-submission-native-outcome-provenance.md",
+      "symbol": "ScratchRuntime",
+      "reason": "Historical ADR preserves the API name used when that decision was accepted."
+    },
+    {
+      "path": "docs/decisions/ADR-039-scratch-exclusive-surface-context-ownership.md",
+      "symbol": "ScratchRuntime",
+      "reason": "Historical ADR preserves the API name used when that decision was accepted."
+    },
+    {
+      "path": "docs/decisions/ADR-040-scratch-lifecycle-authority-stamps.md",
+      "symbol": "ScratchRuntime",
+      "reason": "Historical ADR preserves the API name used when that decision was accepted."
+    },
+    {
+      "path": "docs/decisions/ADR-043-hello-gaw-initialization-ownership.md",
+      "symbol": "ScratchRuntime",
+      "reason": "Historical ADR preserves the API name used when that decision was accepted."
+    },
+    {
+      "path": "docs/decisions/ADR-045-dem-layer-scratch-api-clean-cut.md",
+      "symbol": "ScratchRuntime",
+      "reason": "Historical ADR preserves the API name used when that decision was accepted."
+    },
+    {
+      "path": "docs/decisions/ADR-046-scratch-render-pass-native-parity.md",
+      "symbol": "ScratchRuntime",
+      "reason": "Historical ADR preserves the API name used when that decision was accepted."
+    },
+    {
+      "path": "docs/decisions/ADR-047-scratch-immediate-data.md",
+      "symbol": "ScratchRuntime",
+      "reason": "Historical ADR preserves the API name used when that decision was accepted."
+    },
+    {
+      "path": "docs/decisions/ADR-048-scratch-buffer-host-mapping-authority.md",
+      "symbol": "ScratchRuntime",
+      "reason": "Historical ADR preserves the API name used when that decision was accepted."
+    },
+    {
+      "path": "docs/decisions/ADR-050-scratch-shader-module-and-pipeline-decomposition.md",
+      "symbol": "ScratchRuntime",
+      "reason": "Historical ADR preserves the API name used when that decision was accepted."
+    },
+    {
+      "path": "docs/decisions/ADR-056-generic-worker-webmercator-virtual-raster-cache.md",
+      "symbol": "geoscratch/worker",
+      "reason": "Historical ADR preserves the API name used when that decision was accepted."
+    },
+    {
+      "path": "docs/decisions/ADR-057-scratch-foundation-public-topology.md",
+      "symbol": "ScratchRuntime",
+      "reason": "Accepted topology ADR names the deleted predecessor while explaining the clean cut."
+    },
+    {
+      "path": "docs/decisions/ADR-057-scratch-foundation-public-topology.md",
+      "symbol": "geoscratch/geometry",
+      "reason": "Accepted topology ADR names the deleted predecessor while explaining the clean cut."
+    },
+    {
+      "path": "docs/decisions/ADR-057-scratch-foundation-public-topology.md",
+      "symbol": "geoscratch/worker",
+      "reason": "Accepted topology ADR names the deleted predecessor while explaining the clean cut."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "DiagnosticSubject",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "GpuAttributionConfidence",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "GpuDescriptorEvidence",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "GpuNativeErrorCategory",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "GpuOperationKind",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "GpuOperationStatus",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchAdapterInfoSnapshot",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchBufferMappingFailureStage",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchComputePipeline",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchComputePipelineDescriptor",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchDeviceLostInfo",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchDiagnosticCapture",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchDiagnosticCaptureOptions",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchDiagnosticCaptureReport",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchDiagnosticCaptureStopReason",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchFeatureLevel",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchGpuBindLayoutOperationRecord",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchGpuBindLayoutOperationTarget",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchGpuBindSetOperationRecord",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchGpuBindSetOperationTarget",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchGpuBindSetPreparationStage",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchGpuBufferMappingIncidentReport",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchGpuCommandOperationRecord",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchGpuCommandOperationTarget",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchGpuContentResourceOperationTarget",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchGpuIncidentEvidenceCompleteness",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchGpuIncidentFailureStage",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchGpuIncidentKind",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchGpuIncidentOutcome",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchGpuIncidentQuery",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchGpuIncidentReport",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchGpuIncidentTarget",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchGpuOperationQuery",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchGpuOperationRecord",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchGpuOperationTarget",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchGpuPipelineFailureStage",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchGpuPipelineOperationRecord",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchGpuPipelineOperationTarget",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchGpuPressureContributor",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchGpuPressureEvidence",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchGpuQuerySetOperationTarget",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchGpuQuerySetSlotFact",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchGpuReadbackIncidentReport",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchGpuReadbackOperationRecord",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchGpuReadbackOperationTarget",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchGpuRenderBundleOperationRecord",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchGpuRenderBundleOperationTarget",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchGpuResourceOperationRecord",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchGpuResourceOperationTarget",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchGpuRuntimeIncidentTarget",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchGpuSamplerOperationTarget",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchGpuShaderModuleOperationRecord",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchGpuShaderModuleOperationTarget",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchGpuSubmissionIncidentReport",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchGpuSubmissionOperationRecord",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchGpuSubmissionOperationTarget",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchGpuSupportingObjectIncidentReport",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchNativeGpuErrorFacts",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchPendingGpuOperationFact",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchPipelineNativeLabelEvidence",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchPipelineNativeLabelFact",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchReadbackCommandState",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchReadbackFailureStage",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchReadbackNativeOutcome",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchReadbackNativeOutcomeFact",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchReadbackNativeOutcomeInput",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchReadbackNativeStage",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchReadbackOptions",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchReadbackPolicy",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchRenderPipeline",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchRenderPipelineDescriptor",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchRuntime",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchRuntimeAdapterRequestFacts",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchRuntimeBindLayoutFact",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchRuntimeBindSetFact",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchRuntimeBufferMappingFact",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchRuntimeContentResourceFact",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchRuntimeCreateOptions",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchRuntimeDeviceRequestFacts",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchRuntimeDiagnostics",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchRuntimeDiagnosticsEvidence",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchRuntimeDiagnosticsOptions",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchRuntimeDiagnosticsSnapshot",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchRuntimePipelineFact",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchRuntimeQuerySetResourceFact",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchRuntimeReadbackCommandFact",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchRuntimeReadbackOperationFact",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchRuntimeRequestFacts",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchRuntimeResourceFact",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchRuntimeSamplerResourceFact",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchSubmissionFailureStage",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchSubmissionNativeLocation",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchSubmissionNativeOutcome",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchSubmissionNativeOutcomeFact",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchSubmissionNativeOutcomeInput",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchSubmissionNativeOutcomeMode",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchSubmissionNativeOutcomeStatus",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchSubmissionNativeStage",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchSubmissionQueueActionKind",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchSubmissionScopeMode",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "ScratchSupportingObjectFailureStage",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "WorkerDiagnosticError",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
+      "symbol": "createWorkerDiagnostic",
+      "reason": "Baseline disposition manifest must retain the exact predecessor symbol."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-06-16-architecture-ts-migration.md",
+      "symbol": "geoscratch/geometry",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-07-10-scratch-readback-command.md",
+      "symbol": "ScratchRuntime",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-07-12-scratch-readback-staging-mapping-provenance.md",
+      "symbol": "ScratchGpuCommandOperationTarget",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-07-12-scratch-readback-staging-mapping-provenance.md",
+      "symbol": "ScratchGpuReadbackOperationTarget",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-07-13-scratch-submission-native-provenance.md",
+      "symbol": "ScratchGpuSubmissionOperationTarget",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-07-13-scratch-submission-native-provenance.md",
+      "symbol": "ScratchSubmissionNativeLocation",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-07-13-scratch-submission-native-provenance.md",
+      "symbol": "ScratchSubmissionNativeOutcome",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "DiagnosticSubject",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "GpuAttributionConfidence",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "GpuDescriptorEvidence",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "GpuNativeErrorCategory",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "GpuOperationKind",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "GpuOperationStatus",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchAdapterInfoSnapshot",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchBufferMappingFailureStage",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchComputePipeline",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchComputePipelineDescriptor",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchDeviceLostInfo",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchDiagnosticCapture",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchDiagnosticCaptureOptions",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchDiagnosticCaptureReport",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchDiagnosticCaptureStopReason",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchFeatureLevel",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchGpuBindLayoutOperationRecord",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchGpuBindLayoutOperationTarget",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchGpuBindSetOperationRecord",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchGpuBindSetOperationTarget",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchGpuBindSetPreparationStage",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchGpuBufferMappingIncidentReport",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchGpuCommandOperationRecord",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchGpuCommandOperationTarget",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchGpuContentResourceOperationTarget",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchGpuIncidentEvidenceCompleteness",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchGpuIncidentFailureStage",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchGpuIncidentKind",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchGpuIncidentOutcome",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchGpuIncidentQuery",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchGpuIncidentReport",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchGpuIncidentTarget",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchGpuOperationQuery",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchGpuOperationRecord",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchGpuOperationTarget",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchGpuPipelineFailureStage",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchGpuPipelineOperationRecord",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchGpuPipelineOperationTarget",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchGpuPressureContributor",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchGpuPressureEvidence",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchGpuQuerySetOperationTarget",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchGpuQuerySetSlotFact",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchGpuReadbackIncidentReport",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchGpuReadbackOperationRecord",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchGpuReadbackOperationTarget",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchGpuRenderBundleOperationRecord",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchGpuRenderBundleOperationTarget",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchGpuResourceOperationRecord",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchGpuResourceOperationTarget",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchGpuRuntimeIncidentTarget",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchGpuSamplerOperationTarget",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchGpuShaderModuleOperationRecord",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchGpuShaderModuleOperationTarget",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchGpuSubmissionIncidentReport",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchGpuSubmissionOperationRecord",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchGpuSubmissionOperationTarget",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchGpuSupportingObjectIncidentReport",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchNativeGpuErrorFacts",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchPendingGpuOperationFact",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchPipelineNativeLabelEvidence",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchPipelineNativeLabelFact",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchReadbackCommandState",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchReadbackFailureStage",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchReadbackNativeOutcome",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchReadbackNativeOutcomeFact",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchReadbackNativeOutcomeInput",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchReadbackNativeStage",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchReadbackOptions",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchReadbackPolicy",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchRenderPipeline",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchRenderPipelineDescriptor",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchRuntime",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchRuntimeAdapterRequestFacts",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchRuntimeBindLayoutFact",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchRuntimeBindSetFact",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchRuntimeBufferMappingFact",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchRuntimeContentResourceFact",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchRuntimeCreateOptions",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchRuntimeDeviceRequestFacts",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchRuntimeDiagnostics",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchRuntimeDiagnosticsEvidence",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchRuntimeDiagnosticsOptions",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchRuntimeDiagnosticsSnapshot",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchRuntimePipelineFact",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchRuntimeQuerySetResourceFact",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchRuntimeReadbackCommandFact",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchRuntimeReadbackOperationFact",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchRuntimeRequestFacts",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchRuntimeResourceFact",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchRuntimeSamplerResourceFact",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchSubmissionFailureStage",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchSubmissionNativeLocation",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchSubmissionNativeOutcome",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchSubmissionNativeOutcomeFact",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchSubmissionNativeOutcomeInput",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchSubmissionNativeOutcomeMode",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchSubmissionNativeOutcomeStatus",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchSubmissionNativeStage",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchSubmissionQueueActionKind",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchSubmissionScopeMode",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "ScratchSupportingObjectFailureStage",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "WorkerDiagnosticError",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "createWorkerDiagnostic",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "geoscratch/geometry",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md",
+      "symbol": "geoscratch/worker",
+      "reason": "Historical implementation plan preserves its original migration contract."
+    },
+    {
+      "path": "docs/vision/scratch-foundation-public-topology.md",
+      "symbol": "ScratchComputePipeline",
+      "reason": "Implemented design record retains the approved clean-cut rationale and mapping."
+    },
+    {
+      "path": "docs/vision/scratch-foundation-public-topology.md",
+      "symbol": "ScratchDiagnosticCapture",
+      "reason": "Implemented design record retains the approved clean-cut rationale and mapping."
+    },
+    {
+      "path": "docs/vision/scratch-foundation-public-topology.md",
+      "symbol": "ScratchGpuIncidentReport",
+      "reason": "Implemented design record retains the approved clean-cut rationale and mapping."
+    },
+    {
+      "path": "docs/vision/scratch-foundation-public-topology.md",
+      "symbol": "ScratchGpuOperationRecord",
+      "reason": "Implemented design record retains the approved clean-cut rationale and mapping."
+    },
+    {
+      "path": "docs/vision/scratch-foundation-public-topology.md",
+      "symbol": "ScratchRenderPipeline",
+      "reason": "Implemented design record retains the approved clean-cut rationale and mapping."
+    },
+    {
+      "path": "docs/vision/scratch-foundation-public-topology.md",
+      "symbol": "ScratchRuntime",
+      "reason": "Implemented design record retains the approved clean-cut rationale and mapping."
+    },
+    {
+      "path": "docs/vision/scratch-foundation-public-topology.md",
+      "symbol": "ScratchRuntimeDiagnostics",
+      "reason": "Implemented design record retains the approved clean-cut rationale and mapping."
+    },
+    {
+      "path": "docs/vision/scratch-foundation-public-topology.md",
+      "symbol": "WorkerDiagnosticError",
+      "reason": "Implemented design record retains the approved clean-cut rationale and mapping."
+    },
+    {
+      "path": "docs/vision/scratch-foundation-public-topology.md",
+      "symbol": "createWorkerDiagnostic",
+      "reason": "Implemented design record retains the approved clean-cut rationale and mapping."
+    },
+    {
+      "path": "docs/vision/scratch-foundation-public-topology.md",
+      "symbol": "geoscratch/geometry",
+      "reason": "Implemented design record retains the approved clean-cut rationale and mapping."
+    },
+    {
+      "path": "docs/vision/scratch-foundation-public-topology.md",
+      "symbol": "geoscratch/worker",
+      "reason": "Implemented design record retains the approved clean-cut rationale and mapping."
+    },
+    {
+      "path": "tests/audits/scratch-foundation-public-topology.mjs",
+      "symbol": "WorkerDiagnosticError",
+      "reason": "Topology audit identifies predecessor exports and verifies their exact dispositions."
+    },
+    {
+      "path": "tests/audits/scratch-foundation-public-topology.mjs",
+      "symbol": "createWorkerDiagnostic",
+      "reason": "Topology audit identifies predecessor exports and verifies their exact dispositions."
+    },
+    {
+      "path": "tests/audits/scratch-persistent-binding-views-final-parity.mjs",
+      "symbol": "ScratchComputePipelineDescriptor",
+      "reason": "Fixed-history parity audit compares predecessor names with approved replacements."
+    },
+    {
+      "path": "tests/audits/scratch-persistent-binding-views-final-parity.mjs",
+      "symbol": "ScratchRenderPipelineDescriptor",
+      "reason": "Fixed-history parity audit compares predecessor names with approved replacements."
+    },
+    {
+      "path": "tests/scratch-foundation-public-topology.test.js",
+      "symbol": "geoscratch/geometry",
+      "reason": "Negative package contract proves the removed entrypoint or predecessor type is absent."
+    },
+    {
+      "path": "tests/scratch-foundation-public-topology.test.js",
+      "symbol": "geoscratch/worker",
+      "reason": "Negative package contract proves the removed entrypoint or predecessor type is absent."
+    },
+    {
+      "path": "tests/scratch-gpu-naming.test.js",
+      "symbol": "ScratchComputePipeline",
+      "reason": "Negative naming contract proves predecessor GPU identifiers are absent."
+    },
+    {
+      "path": "tests/scratch-gpu-naming.test.js",
+      "symbol": "ScratchDiagnosticCapture",
+      "reason": "Negative naming contract proves predecessor GPU identifiers are absent."
+    },
+    {
+      "path": "tests/scratch-gpu-naming.test.js",
+      "symbol": "ScratchRenderPipeline",
+      "reason": "Negative naming contract proves predecessor GPU identifiers are absent."
+    },
+    {
+      "path": "tests/scratch-gpu-naming.test.js",
+      "symbol": "ScratchRuntime",
+      "reason": "Negative naming contract proves predecessor GPU identifiers are absent."
+    },
+    {
+      "path": "tests/scratch-gpu-naming.test.js",
+      "symbol": "ScratchRuntimeDiagnostics",
+      "reason": "Negative naming contract proves predecessor GPU identifiers are absent."
+    },
+    {
+      "path": "tests/scratch-persistent-binding-final-parity.test.js",
+      "symbol": "ScratchDiagnosticCapture",
+      "reason": "Fixed-history test asserts the exact predecessor export removals."
+    },
+    {
+      "path": "tests/scratch-persistent-binding-final-parity.test.js",
+      "symbol": "ScratchRuntime",
+      "reason": "Fixed-history test asserts the exact predecessor export removals."
+    },
+    {
+      "path": "tests/scratch-persistent-binding-final-parity.test.js",
+      "symbol": "ScratchRuntimeDiagnostics",
+      "reason": "Fixed-history test asserts the exact predecessor export removals."
+    },
+    {
+      "path": "tests/types/scratch-foundation-public-api.ts",
+      "symbol": "ScratchRenderPipeline",
+      "reason": "Negative package contract proves the removed entrypoint or predecessor type is absent."
+    },
+    {
+      "path": "tests/types/scratch-foundation-public-api.ts",
+      "symbol": "ScratchRuntime",
+      "reason": "Negative package contract proves the removed entrypoint or predecessor type is absent."
+    },
+    {
+      "path": "tests/types/scratch-foundation-public-api.ts",
+      "symbol": "geoscratch/geometry",
+      "reason": "Negative package contract proves the removed entrypoint or predecessor type is absent."
+    },
+    {
+      "path": "tests/types/scratch-foundation-public-api.ts",
+      "symbol": "geoscratch/worker",
+      "reason": "Negative package contract proves the removed entrypoint or predecessor type is absent."
+    },
+    {
+      "path": "tests/types/scratch-gpu-naming.ts",
+      "symbol": "ScratchComputePipeline",
+      "reason": "Negative naming contract proves predecessor GPU identifiers are absent."
+    },
+    {
+      "path": "tests/types/scratch-gpu-naming.ts",
+      "symbol": "ScratchDiagnosticCapture",
+      "reason": "Negative naming contract proves predecessor GPU identifiers are absent."
+    },
+    {
+      "path": "tests/types/scratch-gpu-naming.ts",
+      "symbol": "ScratchRenderPipeline",
+      "reason": "Negative naming contract proves predecessor GPU identifiers are absent."
+    },
+    {
+      "path": "tests/types/scratch-gpu-naming.ts",
+      "symbol": "ScratchRuntime",
+      "reason": "Negative naming contract proves predecessor GPU identifiers are absent."
+    },
+    {
+      "path": "tests/types/scratch-gpu-naming.ts",
+      "symbol": "ScratchRuntimeDiagnostics",
+      "reason": "Negative naming contract proves predecessor GPU identifiers are absent."
+    }
+  ]
+}

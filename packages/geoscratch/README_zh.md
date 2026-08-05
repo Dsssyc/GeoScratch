@@ -33,17 +33,11 @@ npm run dev
 
 | 路径 | 作用 |
 | --- | --- |
-| `src/index.ts` | 包主要公开入口的 TypeScript 源文件。 |
-| `src/scratch.ts` | `geoscratch/scratch` 兼容入口的 TypeScript 源文件。 |
-| `src/scratch/` | TypeScript source-first 的 Scratch API 核心。 |
+| `src/index.ts` | 只公开 `scratch` 与 `geo` namespace 的包根入口。 |
+| `src/scratch.ts` | 正式的 `geoscratch/scratch` 门面。 |
+| `src/scratch/` | TypeScript source-first 的 GPU、Worker、诊断和几何基础能力。 |
+| `src/geo/` | TypeScript source-first 的坐标、瓦片和虚拟栅格适配层。 |
 | `dist/` | 生成的包 JavaScript 和声明文件输出。 |
-| `src/core/` | 共享数据引用、数学、对象和包围盒基础类型。 |
-| `src/geo/` | TypeScript source-first 的地理坐标辅助工具和地理瓦片结构。 |
-| `src/geometry/` | sphere、plane 等可复用几何生成器。 |
-| `src/gpu/` | WebGPU device、buffer、binding、pass、pipeline、shader、texture、sampler 和 director。 |
-| `src/loaders/` | 图片和 shader 加载工具。 |
-| `src/effects/` | 可复用的后处理效果。 |
-| `src/applications/` | 更高层的地理应用模块，包括地形。 |
 | `examples/` | 示例浏览器和各示例的独立页面。 |
 | `docs/assets/` | 文档和项目品牌资源。 |
 | `examples/public/` | 需要稳定绝对 URL fetch 的大型本地示例数据。 |
@@ -51,29 +45,29 @@ npm run dev
 
 ## 包入口
 
-```js
-import * as scr from 'geoscratch'
-```
-
-兼容入口仍然可用：
+包根入口只公开两个架构 namespace：
 
 ```js
-import * as scr from 'geoscratch/scratch'
+import { scratch, geo } from 'geoscratch'
 ```
 
-地理和几何辅助模块也提供独立子入口：
+直接使用能力时通过正式子入口导入：
 
 ```js
-import { MercatorCoordinate } from 'geoscratch/geo'
-import { sphere } from 'geoscratch/geometry'
+import { GPURuntime, WorkerSystem, sphere } from 'geoscratch/scratch'
+import { MercatorCoordinate, WebMercatorQuad } from 'geoscratch/geo'
 ```
+
+Scratch 是领域无关的 TypeScript source-first 基础能力层，Geo 在其上适配地理
+语义；单向依赖可以概括为 **Geo from the Scratch**。`WorkerSystem` 与 `GPURuntime`
+保持独立构造，不共享可变状态或 lifecycle authority。
 
 ## Scratch 异步资源分配
 
 持久 Scratch buffer 与 texture allocation 需要异步确认。只有原生 validation 与 out-of-memory scope 都成功 settle 后才返回资源；texture replacement 使用同一 transaction boundary。
 
 ```js
-const runtime = await scr.GPURuntime.create()
+const runtime = await GPURuntime.create()
 const vertices = await runtime.createBuffer({
     label: 'vertices',
     size: 4096,
@@ -134,7 +128,7 @@ creation 前失败。Submission 绝不重建 binding。
 `SubmissionBuilder.submit()` 保持同步。异步 native validation 通过显式结果暴露:
 
 ```js
-const runtime = await scr.GPURuntime.create({
+const runtime = await GPURuntime.create({
     diagnostics: {
         submissionScopes: 'summary',
         maxPendingNativeObservations: 64,
@@ -220,7 +214,7 @@ evidence，不是 classifier。
 下面的代码在 canvas 上渲染一个硬编码三角形。
 
 ```js
-import { GPURuntime } from 'geoscratch'
+import { GPURuntime } from 'geoscratch/scratch'
 
 const canvas = document.getElementById('GPUFrame')
 

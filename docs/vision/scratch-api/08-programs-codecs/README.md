@@ -313,7 +313,7 @@ also derives requirements from attached layout and buffer-view contracts:
 `immediate_address_space` are WGSL language features as applicable.
 
 WGSL `enable` extensions remain caller-authored directives. Their matching
-WebGPU capabilities stay in `ScratchRuntime.create({ requiredFeatures })` and
+WebGPU capabilities stay in `GPURuntime.create({ requiredFeatures })` and
 `Program.requiredFeatures`; Scratch does not add a parallel
 `requiredEnableExtensions` field, parse WGSL to infer capabilities, or inject
 missing features. Formal WebGPU feature dependencies use one shared local

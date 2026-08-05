@@ -20,14 +20,14 @@ graph, or claim OOM/device-loss coverage.
 
 The implementation uses only an example-local lifetime helper, test-only fault
 configuration, browser proof publication, and documentation. Scratch resources remain
-owned transitively by `ScratchRuntime`; decoded `ImageBitmap` values remain owned by
+owned transitively by `GPURuntime`; decoded `ImageBitmap` values remain owned by
 the page.
 
 ## Ownership And Settlement Contract
 
 | Acquired state | Registration boundary | Owner | Terminal action | Evidence |
 | --- | --- | --- | --- | --- |
-| `ScratchRuntime` | Immediately after awaited creation | Page lifetime | `runtime.dispose()` once | Created, dispose-attempt, and public `isDisposed` facts |
+| `GPURuntime` | Immediately after awaited creation | Page lifetime | `runtime.dispose()` once | Created, dispose-attempt, and public `isDisposed` facts |
 | `Surface` | Immediately after synchronous creation | Runtime | Transitive runtime disposal | Created and public `isDisposed` facts |
 | Decoded `ImageBitmap` | Immediately after each decode | Page lifetime | `close()` once | Created, close-attempt, closed, and duplicate-attempt counts |
 | Initial `SubmittedWork` observation | Immediately after `submit()` | Page lifetime | Await terminal settlement | Pending before/after counts |

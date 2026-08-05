@@ -5,7 +5,10 @@ Date: 2026-07-06
 
 This file tracks open design issues for the `scratch` API's "intelligent-friendly" goal: maximize locally-verifiable correctness while preserving direct GPU control. It is temporary in the sense that items should be revised, resolved, or replaced as the architecture matures. It is not a legacy archive.
 
-Accepted vision still lives under `docs/vision/scratch-api/`. This review file is the working basis for follow-up design passes and should be updated whenever an item is resolved or a sharper issue appears.
+Accepted GPU-domain vision lives under `docs/vision/scratch-api/`; the accepted
+Scratch/Geo public topology is ADR-057. This review file is the working basis for
+follow-up design passes and should be updated whenever an item is resolved or a
+sharper issue appears.
 
 ## Recently Resolved
 
@@ -39,7 +42,8 @@ Coverage check for this pass:
 - Throw/skip-command/skip-pass/fallback readiness, no-lookahead behavior, read-before-own-write ordering, validation modes, and indeterminate hard failure: covered by the focused current-content suite.
 - Shader, vertex, index, and indirect reads use the same mode: covered by focused compute and fixed-function tests.
 - Authored-vs-resolved immutable ledger facts and stable command/upload identities: covered by focused tests, the 20,000-submission fake-GPU stress proof, and the 120-frame headed Chrome proof.
-- Public root and compatibility type surfaces reject aliases and callbacks: covered by `tests/types/public-api.ts`.
+- The formal Scratch facade rejects aliases and callbacks; the package root exposes
+  only `scratch` and `geo` namespaces: covered by `tests/types/public-api.ts`.
 
 ### GPU Operation Provenance And Fallible Allocation
 
@@ -256,7 +260,7 @@ orders stop, observation settlement, external release, and runtime disposal expl
 
 This real rendering workload confirms where the intelligent-friendly design helped:
 
-- `ScratchRuntime` provides one transitive disposal boundary, so the page does not
+- `GPURuntime` provides one transitive disposal boundary, so the page does not
   need to reconstruct or duplicate the GPU resource graph.
 - Promise-returning factories make every acquisition boundary explicit enough to
   register ownership immediately after settlement.

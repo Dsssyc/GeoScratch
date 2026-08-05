@@ -76,9 +76,9 @@ three implementation-normalization helpers remain internal.
 | `QuerySetType` | Public, restored | Core timestamp/occlusion discriminator | Complete |
 | `ResourceOptions` | Internal | Base-resource construction is closed | Complete |
 | `SamplerResourceDescriptor` | Public, restored | Promise-only sampler creation input | Complete |
-| `ScratchComputePipelineDescriptor` | Public root alias, restored | Avoids collision with the older package pipeline | Complete |
+| `ComputePipelineDescriptor` | Public root alias, restored | Avoids collision with the older package pipeline | Complete |
 | `ScratchDiagnosticInput` | Public, restored | Structured diagnostic construction input | Complete |
-| `ScratchRenderPipelineDescriptor` | Public root alias, restored | Avoids collision with the older package pipeline | Complete |
+| `RenderPipelineDescriptor` | Public root alias, restored | Avoids collision with the older package pipeline | Complete |
 | `SurfaceFormat` | Public, restored | Surface format policy | Complete |
 | `SurfaceOptions` | Public, restored | Surface creation options | Complete |
 | `SurfaceSize` | Public, restored | Surface sizing contract | Complete |
@@ -113,13 +113,13 @@ method/getter/setter entries.
 | `BufferResource.layout/layoutByteLength/elementCount` | `BufferRegion` owns every typed interpretation fact |
 | `BufferResource.layoutSubject` | `BufferRegion.subject` and region-owned layout |
 | `QuerySetResource._advanceSlotContentEpoch()` | Module-private indexed-slot epoch helper |
-| `QuerySetResource` constructor / `create()` | Promise-only `ScratchRuntime.createQuerySet()` |
+| `QuerySetResource` constructor / `create()` | Promise-only `GPURuntime.createQuerySet()` |
 | `ReadbackCommand.range` | `source.region: BufferRegion` |
 | `ReadbackOperation.range` | `source: BufferRegion` |
 | `RenderPassSpec.createRenderPassDescriptor()` | Submission-scoped internal `lowerRenderPassDescriptor()` so native attachments stay observed |
 | `Resource` constructor | Protected subclass allocation lifecycle |
 | `Resource.state/contentEpoch/isReady` | Buffer/Texture content owners and indexed QuerySet slots only |
-| `SamplerResource` constructor / `create()` | Promise-only `ScratchRuntime.createSampler()` |
+| `SamplerResource` constructor / `create()` | Promise-only `GPURuntime.createSampler()` |
 | `TextureResource.createView()` | Logical `TextureResource.view(): TextureViewSpec` |
 
 The 10 changed class-member signatures are also explicit: `BindLayout.entrySubject()` accepts

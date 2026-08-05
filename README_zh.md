@@ -34,18 +34,11 @@ npm run dev
 | 路径 | 作用 |
 | --- | --- |
 | `packages/geoscratch/` | 可发布的库包。 |
-| `packages/geoscratch/src/index.ts` | 包主要公开入口的 TypeScript 源文件。 |
-| `packages/geoscratch/src/scratch.ts` | `geoscratch/scratch` 兼容入口的 TypeScript 源文件。 |
-| `packages/geoscratch/src/scratch/` | TypeScript source-first 的 Scratch API 核心。 |
-| `packages/geoscratch/src/worker/` | 通用 TypeScript WorkerSystem、module、task、context、transfer 与诊断契约。 |
+| `packages/geoscratch/src/index.ts` | 只公开 `scratch` 与 `geo` namespace 的包根入口。 |
+| `packages/geoscratch/src/scratch.ts` | 正式的 `geoscratch/scratch` 门面。 |
+| `packages/geoscratch/src/scratch/` | TypeScript source-first 的 GPU、Worker、诊断和几何基础能力。 |
+| `packages/geoscratch/src/geo/` | TypeScript source-first 的坐标、瓦片和虚拟栅格适配层。 |
 | `packages/geoscratch/dist/` | 生成的包 JavaScript 和声明文件输出。 |
-| `packages/geoscratch/src/core/` | 共享数据引用、数学、对象和包围盒基础类型。 |
-| `packages/geoscratch/src/geo/` | TypeScript source-first 的地理坐标辅助工具和地理瓦片结构。 |
-| `packages/geoscratch/src/geometry/` | sphere、plane 等可复用几何生成器。 |
-| `packages/geoscratch/src/gpu/` | WebGPU device、buffer、binding、pass、pipeline、shader、texture、sampler 和 director。 |
-| `packages/geoscratch/src/loaders/` | 图片和 shader 加载工具。 |
-| `packages/geoscratch/src/effects/` | 可复用的后处理效果。 |
-| `packages/geoscratch/src/applications/` | 更高层的地理应用模块，包括地形。 |
 | `examples/` | 示例 workspace、示例浏览器和各示例的独立页面。 |
 | `docs/assets/` | 文档和项目品牌资源。 |
 | `examples/public/` | 需要稳定绝对 URL fetch 的大型本地示例数据。 |
@@ -53,23 +46,21 @@ npm run dev
 
 ## 包入口
 
-```js
-import * as scr from 'geoscratch'
-```
-
-兼容入口仍然可用：
+包根入口只公开两个架构 namespace：
 
 ```js
-import * as scr from 'geoscratch/scratch'
+import { scratch, geo } from 'geoscratch'
 ```
 
-地理、Worker 和几何辅助模块也提供独立子入口：
+直接使用能力时通过正式子入口导入：
 
 ```js
-import { MercatorCoordinate } from 'geoscratch/geo'
-import { WorkerSystem } from 'geoscratch/worker'
-import { sphere } from 'geoscratch/geometry'
+import { GPURuntime, WorkerSystem, sphere } from 'geoscratch/scratch'
+import { MercatorCoordinate, WebMercatorQuad } from 'geoscratch/geo'
 ```
+
+Scratch 是领域无关的 TypeScript source-first 基础能力层，Geo 在其上适配地理
+语义；单向依赖可以概括为 **Geo from the Scratch**。
 
 ## Geo Streaming 与 Worker
 
@@ -78,10 +69,11 @@ canonical coordinate、虚拟栅格 demand/residency、显式 `none`/memory/Inde
 缓存策略、owned page transfer 与 Scratch GPU publication。全局瓦片身份通过数据源
 的 compact coverage 映射，不会创建覆盖整个世界的 dense page table。
 
-`geoscratch/worker` 是独立且需要显式构造的线程抽象。它支持 URL module、自定义
-operation、有界优先级 group、cooperative/hard cancellation、stale-result rejection、
-stateful context、Transferable 所有权和结构化远端诊断，并且不依赖 Geo、tile、DEM、
-Scratch 或 GPU。
+从 `geoscratch/scratch` 导入的 `WorkerSystem` 是独立且需要显式构造的线程抽象。
+它支持 URL module、自定义 operation、有界优先级 group、cooperative/hard
+cancellation、stale-result rejection、stateful context、Transferable 所有权和结构化
+远端诊断。它与 `GPURuntime` 不共享可变状态或 lifecycle authority，也不依赖 Geo、
+tile、DEM 或 GPU。
 
 DEM Layer 是这条路径的可执行参考：terrain demand 在 Worker 中获取和解码标准
 WebMercatorQuad tile，将 decoded page 转移到有限 atlas，并在 vertex shader 中进行
@@ -93,7 +85,7 @@ WebMercatorQuad tile，将 decoded page 转移到有限 atlas，并在 vertex sh
 持久 Scratch buffer 与 texture allocation 需要异步确认。只有原生 validation 与 out-of-memory scope 都成功 settle 后才返回资源；texture replacement 使用同一 transaction boundary。
 
 ```js
-const runtime = await scr.GPURuntime.create()
+const runtime = await GPURuntime.create()
 const vertices = await runtime.createBuffer({
     label: 'vertices',
     size: 4096,
@@ -154,7 +146,7 @@ creation 前失败。Submission 绝不重建 binding。
 `SubmissionBuilder.submit()` 保持同步。异步 native validation 通过显式结果暴露:
 
 ```js
-const runtime = await scr.GPURuntime.create({
+const runtime = await GPURuntime.create({
     diagnostics: {
         submissionScopes: 'summary',
         maxPendingNativeObservations: 64,
@@ -263,7 +255,7 @@ evidence，不是 classifier。
 下面的代码在 canvas 上渲染一个硬编码三角形。
 
 ```js
-import { GPURuntime } from 'geoscratch'
+import { GPURuntime } from 'geoscratch/scratch'
 
 const canvas = document.getElementById('GPUFrame')
 

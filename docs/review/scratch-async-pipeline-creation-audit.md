@@ -7,7 +7,7 @@ Comparison baseline: `0de026b` (last synchronous Scratch pipeline implementation
 
 ADR-050 supersession, 2026-07-24: the Promise-only pipeline timing decision remains
 active, but shader-module creation, source composition, compilation information, and
-compilation reports now belong to `ScratchRuntime.createShaderModule()`. Program is an
+compilation reports now belong to `GPURuntime.createShaderModule()`. Program is an
 immutable stage contract, pipeline creation reuses acknowledged native modules, and
 pipeline evidence is a source-free creation report. Browser and benchmark consumers
 have been statically migrated; their new measurements are deferred to Phase 6. The
@@ -40,7 +40,7 @@ redaction and bounded Bloom implementation.
 | 12 | Draw and dispatch receive the same executable descriptor state as before. | Existing command code consumes the ready wrapper's unchanged native pipeline and normalized public facts. | Existing command/submission suite plus 11 headed Chrome examples. | Complete |
 | 13 | Submission has no pipeline instrumentation or hidden wait. | No pipeline imports or native pipeline/scope/compilation calls in `submission.ts`. | Source exclusion test and benchmark source review. | Complete |
 | 14 | Main and compatibility package declarations match emitted JavaScript. | TypeScript source-first package build; both entrypoints export the same classes/types. | TypeScript 6, TypeScript 5.9 WebGPU, package build, and runtime imports. | Complete |
-| 15 | Legacy calls remain classified and are not silently awaited or rewritten. | AST consumer allowlist distinguishes `scr.renderPipeline`/`computePipeline` from ScratchRuntime methods. | Consumer audit fails on a new unclassified or awaited legacy call. | Complete |
+| 15 | Legacy calls remain classified and are not silently awaited or rewritten. | AST consumer allowlist distinguishes `scr.renderPipeline`/`computePipeline` from GPURuntime methods. | Consumer audit fails on a new unclassified or awaited legacy call. | Complete |
 
 ## Native Scratch Pipeline Call Inventory
 
@@ -82,10 +82,10 @@ not `GPUDevice` calls.
 
 | Surface | Return/availability | Fact |
 | --- | --- | --- |
-| `ScratchRuntime.createRenderPipeline()` | `Promise<RenderPipeline>` | Canonical public render factory. |
-| `ScratchRuntime.renderPipeline()` | `Promise<RenderPipeline>` | Promise alias only; no alternate path. |
-| `ScratchRuntime.createComputePipeline()` | `Promise<ComputePipeline>` | Canonical public compute factory. |
-| `ScratchRuntime.computePipeline()` | `Promise<ComputePipeline>` | Promise alias only; no alternate path. |
+| `GPURuntime.createRenderPipeline()` | `Promise<RenderPipeline>` | Canonical public render factory. |
+| `GPURuntime.renderPipeline()` | `Promise<RenderPipeline>` | Promise alias only; no alternate path. |
+| `GPURuntime.createComputePipeline()` | `Promise<ComputePipeline>` | Canonical public compute factory. |
+| `GPURuntime.computePipeline()` | `Promise<ComputePipeline>` | Promise alias only; no alternate path. |
 | Internal `createRenderPipeline(runtime, descriptor)` | Package-internal module function | Not exported from `geoscratch` or `geoscratch/scratch`. |
 | Internal `createComputePipeline(runtime, descriptor)` | Package-internal module function | Not exported from package entrypoints. |
 | `RenderPipeline` class | Exported type/runtime class | Private token constructor; closed to direct/subclass construction. |

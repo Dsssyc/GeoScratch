@@ -49,8 +49,8 @@ type ScratchDiagnostic = {
     severity: DiagnosticSeverity
     phase: DiagnosticPhase
     message: string
-    subject: DiagnosticSubject
-    related?: DiagnosticSubject[]
+    subject: ScratchDiagnosticSubject
+    related?: ScratchDiagnosticSubject[]
     expected?: unknown
     actual?: unknown
     hint?: string
@@ -87,8 +87,8 @@ diagnostic-only recovery、attribution 或 report-preservation path。
 diagnostic 必须定位到最小有用 subject。上下文放进 `related`，不要藏在 prose 里。
 
 ```ts
-type DiagnosticSubject =
-    | { kind: 'ScratchRuntime', id: string, label?: string }
+type ScratchDiagnosticSubject =
+    | { kind: 'GPURuntime', id: string, label?: string }
     | { kind: 'Surface', id: string, label?: string }
     | { kind: 'Resource', id: string, label?: string, resourceKind?: string }
     | {
@@ -681,7 +681,7 @@ Suggestions 是可选建议。它们应帮助 tooling 产生局部编辑，但 s
 type DiagnosticSuggestion = {
     kind: string
     confidence: 'low' | 'medium' | 'high'
-    target: DiagnosticSubject
+    target: ScratchDiagnosticSubject
     action?: 'edit' | 'add' | 'remove' | 'reorder' | 'declare' | 'dispose'
     set?: unknown
     note?: string
@@ -723,7 +723,7 @@ version 5。`0.x.x` 期间不输出或转换 version 2 到 version 4。operation
 显式选择一种宏观 target:
 
 ```ts
-type ScratchGpuResourceOperationTarget =
+type GPUResourceOperationTarget =
     | {
         kind: 'resource'
         resourceKind: 'BufferResource' | 'TextureResource'
@@ -748,8 +748,8 @@ type ScratchGpuResourceOperationTarget =
         slots: readonly { index: number; state: string; contentEpoch: number }[]
     }
 
-type ScratchGpuOperationTarget =
-    | ScratchGpuResourceOperationTarget
+type GPUOperationTarget =
+    | GPUResourceOperationTarget
     | { kind: 'bind-layout'; bindLayoutId: string; group: number; entries: readonly unknown[]; acknowledgementState: 'pending' }
     | { kind: 'bind-set'; bindSetId: string; bindLayoutId: string; preparationState: string; generation: number; snapshotHash: string; preparationStage: string }
     | { kind: 'shader-module'; shaderModuleId: string; sourceHash: string; sourcePartCount: number; compilationHintCount: number }
@@ -881,7 +881,7 @@ copy issue 另外使用 `readback-native-observation`；它保留 readback targe
 Failure stage 是结构化事实:
 
 ```ts
-type ScratchReadbackFailureStage =
+type GPUReadbackFailureStage =
     | 'staging-allocation'
     | 'copy-issue'
     | 'queue-completion'

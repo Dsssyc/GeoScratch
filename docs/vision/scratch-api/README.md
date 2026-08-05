@@ -1,11 +1,15 @@
-# Scratch API Redesign
+# Scratch GPU API Redesign
 
 Status: Vision draft
 Date: 2026-07-06
 
-This directory records the modular target design for the next `scratch` API. It expands the GPU-kernel direction described in `docs/vision/scratch-graphics-kernel.md` into smaller interface layers.
+This directory records the modular target design for the GPU capability domain
+inside the Scratch foundation. It expands the GPU-kernel direction described in
+`docs/vision/scratch-graphics-kernel.md` into smaller interface layers.
 
-The documents here are design references, not implementation status. They should be read before changing `packages/geoscratch/src/gpu/`, `packages/geoscratch/src/scratch.ts`, `packages/geoscratch/src/scratch/`, or the public `scratch` API shape.
+The documents here are design references, not implementation status. They should be
+read before changing `packages/geoscratch/src/scratch/gpu/`, the formal
+`geoscratch/scratch` facade, or the public GPU contract shape.
 
 ## Module Map
 
@@ -24,11 +28,13 @@ Each module has an English `README.md` and a Chinese `README_zh.md`.
 
 ## Confirmed Top-Level Decisions
 
-- `scratch` is the GPU execution kernel (compute and graphics co-equal). `geo` owns scene, spatial, layer, tiling, loading, and geospatial policy.
+- The GPU domain inside `scratch` is the GPU execution kernel (compute and graphics
+  co-equal). The Scratch facade also exposes independent foundation capabilities;
+  `geo` owns geospatial semantics and depends only on public Scratch contracts.
 - During `0.x.x`, breaking API redesign is allowed and expected when it removes obsolete concepts.
 - Existing APIs are reference material, not compatibility constraints.
-- The core API uses an explicit async `ScratchRuntime`. There is no implicit global device in the kernel contract.
-- `Surface` is separate from `ScratchRuntime`; the runtime must support compute-only and offscreen workflows.
+- The core API uses an explicit async `GPURuntime`. There is no implicit global device in the kernel contract.
+- `Surface` is separate from `GPURuntime`; the runtime must support compute-only and offscreen workflows.
 - Resources are logical containers with allocation lifecycle. Only buffers/textures own scalar content facts; samplers do not, and query sets own indexed slot facts. BufferRegion and TextureViewSpec are immutable non-resource values.
 - Layout codecs are preparation artifacts connecting CPU packing, WGSL accessors, readback views, and layout diagnostics; submission hot paths consume explicit artifacts.
 - Resource missing/readiness policy must be declared by command or pass usage.

@@ -6,7 +6,11 @@ Scope: Preserve the current review outcome only. Do not treat the items below as
 
 ## Context
 
-The current `docs/vision/geo-api/` draft extends GeoScratch's forward-looking architecture docs from the `scratch` GPU kernel into the `geo` layer. Its core direction is sound: `geo` should be a geospatial visualization compiler and observable runtime above `scratch`, not a scene graph, ECS, material system, or hidden renderer.
+The current `docs/vision/geo-api/` draft extends GeoScratch's forward-looking
+architecture from the GPU capability domain in the Scratch foundation into the
+`geo` layer. Its core direction is sound: `geo` should be a geospatial visualization
+compiler and observable runtime above public Scratch contracts, not a scene graph,
+ECS, material system, or hidden renderer.
 
 The review conclusion is:
 

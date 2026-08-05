@@ -810,7 +810,7 @@ type ReadbackDiagnostic = ScratchDiagnostic & {
     subject: { kind: 'ReadbackOperation', id: string, label?: string }
     related?: [
         { kind: 'Resource', id: string, label?: string, resourceKind?: string },
-        ...DiagnosticSubject[],
+        ...ScratchDiagnosticSubject[],
     ]
     actual?: {
         state: ReadbackState
