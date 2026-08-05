@@ -190,12 +190,12 @@ export type ScratchDiagnosticErrorContext =
 - Modify: `tests/fixtures/worker-system.ts`
 - Modify: `tests/fixtures/worker-system-module.ts`
 
-- [ ] Extend the source-topology test with RED assertions that Worker production files exist only under `scratch/worker/` and do not import GPU, Geo, Cache, DOM canvas, or GPU runtime state.
-- [ ] Move the Worker source verbatim apart from necessary relative imports. Keep `packages/geoscratch/src/worker.ts` as the temporary old subpath forwarding file until Task 6 so this task can isolate physical movement from public deletion.
-- [ ] Re-export Worker values/types from `scratch/index.ts` while retaining the temporary `./worker` export only until Task 6.
-- [ ] Preserve module loading, priority ordering, queued/cooperative/stale/hard cancellation, context retention, transferable ownership, failure isolation, group disposal, system disposal, and worker reclamation assertions unchanged.
-- [ ] Run `npm test -- --grep "WorkerSystem|worker public API|worker bootstrap"`, `npm run typecheck`, and `node tests/browser/worker-system.mjs`.
-- [ ] Commit as `Move Worker into Scratch foundation`.
+- [x] Extend the source-topology test with RED assertions that Worker production files exist only under `scratch/worker/` and do not import GPU, Geo, Cache, DOM canvas, or GPU runtime state.
+- [x] Move the Worker source verbatim apart from necessary relative imports. Keep `packages/geoscratch/src/worker.ts` as the temporary old subpath forwarding file until Task 6 so this task can isolate physical movement from public deletion.
+- [x] Re-export Worker values/types from `scratch/index.ts` while retaining the temporary `./worker` export only until Task 6.
+- [x] Preserve module loading, priority ordering, queued/cooperative/stale/hard cancellation, context retention, transferable ownership, failure isolation, group disposal, system disposal, and worker reclamation assertions unchanged.
+- [x] Run `npm test -- --grep "WorkerSystem|worker public API|worker bootstrap"`, `npm run typecheck`, and `node tests/browser/worker-system.mjs`.
+- [x] Commit as `Move Worker into Scratch foundation`.
 
 ### Task 3: Unify Scratch Diagnostics Without Sharing Domain State
 

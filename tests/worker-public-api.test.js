@@ -22,11 +22,17 @@ describe('generic WorkerSystem public contract', () => {
         ]) expect(worker).to.have.property(name)
     })
 
-    it('keeps the worker package independent from Geo and Scratch', () => {
+    it('keeps the Worker implementation independent from Geo and GPU runtime state', () => {
 
         const workerEntrypoint = path.join(root, 'packages', 'geoscratch', 'src', 'worker.ts')
         expect(fs.existsSync(workerEntrypoint)).to.equal(true)
-        const source = read('packages', 'geoscratch', 'src', 'worker.ts')
-        expect(source).not.to.match(/\.\/geo|\.\/scratch|ScratchRuntime|GPUDevice|TileMatrix|DEM/)
+        expect(read('packages', 'geoscratch', 'src', 'worker.ts'))
+            .to.equal("export * from './scratch/worker/index.js'\n")
+
+        const workerRoot = path.join(root, 'packages', 'geoscratch', 'src', 'scratch', 'worker')
+        for (const name of fs.readdirSync(workerRoot).filter(name => name.endsWith('.ts'))) {
+            const source = fs.readFileSync(path.join(workerRoot, name), 'utf8')
+            expect(source, name).not.to.match(/\.\.\/gpu|\.\.\/\.\.\/geo|ScratchRuntime|GPUDevice|TileMatrix|DEM/)
+        }
     })
 })

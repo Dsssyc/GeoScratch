@@ -1,11 +1,11 @@
 import type {
     WorkerCancellationKind,
-} from '../worker/diagnostics.js'
+} from '../scratch/worker/diagnostics.js'
 import type {
     WorkerTaskPriority,
     WorkerTaskPriorityClass,
     WorkerTaskState,
-} from '../worker/worker-system.js'
+} from '../scratch/worker/worker-system.js'
 import { throwGeoDiagnostic } from './diagnostics.js'
 import type {
     VirtualRasterPublication,

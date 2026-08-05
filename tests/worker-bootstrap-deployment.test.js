@@ -6,7 +6,7 @@ describe('Worker bootstrap deployment', () => {
     it('emits as a standalone browser module without static sibling imports', async() => {
 
         const source = await readFile(new URL(
-            '../packages/geoscratch/dist/worker/worker-bootstrap.js',
+            '../packages/geoscratch/dist/scratch/worker/worker-bootstrap.js',
             import.meta.url
         ), 'utf8')
 

@@ -1,1 +1,1 @@
-export * from './worker/index.js'
+export * from './scratch/worker/index.js'

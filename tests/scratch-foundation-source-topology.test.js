@@ -5,6 +5,8 @@ import path from 'node:path'
 const root = process.cwd()
 const scratchRoot = path.join(root, 'packages', 'geoscratch', 'src', 'scratch')
 const gpuRoot = path.join(scratchRoot, 'gpu')
+const workerRoot = path.join(scratchRoot, 'worker')
+const legacyWorkerRoot = path.join(root, 'packages', 'geoscratch', 'src', 'worker')
 
 const gpuBasenames = [
     'binding-ownership.ts',
@@ -56,6 +58,15 @@ const gpuBasenames = [
     'type-utils.ts',
 ]
 
+const workerBasenames = [
+    'diagnostics.ts',
+    'index.ts',
+    'module.ts',
+    'protocol.ts',
+    'worker-bootstrap.ts',
+    'worker-system.ts',
+]
+
 describe('Scratch foundation source topology', () => {
 
     it('owns every current GPU implementation under scratch/gpu', () => {
@@ -75,6 +86,22 @@ describe('Scratch foundation source topology', () => {
         for (const basename of gpuBasenames) {
             const source = fs.readFileSync(path.join(gpuRoot, basename), 'utf8')
             expect(source, basename).not.to.match(/from ['"][^'"]*(?:worker|geo)[^'"]*['"]/) 
+        }
+    })
+
+    it('owns Worker only under scratch/worker without GPU, Geo, Cache, or Canvas coupling', () => {
+
+        expect(fs.existsSync(legacyWorkerRoot)).to.equal(false)
+        expect(fs.readdirSync(workerRoot).filter(name => name.endsWith('.ts')).sort())
+            .to.deep.equal(workerBasenames)
+
+        for (const basename of workerBasenames) {
+            const source = fs.readFileSync(path.join(workerRoot, basename), 'utf8')
+            const forbiddenDomainImport = /from ['"][^'"]*(?:gpu|geo|cache)[^'"]*['"]/
+            expect(source, basename).not.to.match(forbiddenDomainImport)
+            expect(source, basename).not.to.match(
+                /\b(?:GPUDevice|GPUCanvasContext|HTMLCanvasElement|OffscreenCanvas|ScratchRuntime)\b/
+            )
         }
     })
 })
