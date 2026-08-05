@@ -3,17 +3,54 @@ import fs from 'node:fs'
 import crypto from 'node:crypto'
 import path from 'node:path'
 import { ScratchRuntime } from 'geoscratch'
+import { virtualRasterSource } from 'geoscratch/geo'
 import { createDemLayer } from '../examples/demLayer/dem-layer.ts'
+import {
+    createDemVirtualRasterRuntime,
+    parseDemVirtualRasterManifest,
+} from '../examples/demLayer/dem-virtual-raster.ts'
 import { createDemLifecycle } from '../examples/demLayer/dem-lifecycle.ts'
 import { selectTerrainNodes } from '../examples/demLayer/terrain-selection.ts'
 import {
     createFakeCanvas,
-    createFakeExternalImageSource,
     createFakeGpu,
 } from './scratch-test-utils.js'
 
 const root = process.cwd()
 const read = (...parts) => fs.readFileSync(path.join(root, ...parts), 'utf8')
+const demManifest = parseDemVirtualRasterManifest({
+    schemaVersion: 1,
+    sourceHash: 'aa7a584830f198772d242df1ce1ae47e21b2bdc85bfc1f97101af8be986c57e1',
+    contentVersion: 'dem-aa7a584830f19877-cog-v1',
+    crs: 'EPSG:4326',
+    bounds: [ 120.04373606134682, 31.173901952209487, 121.96623240116922, 32.08401085804678 ],
+    rasterDimensions: { width: 1024, height: 558 },
+    tileMatrixSet: {
+        id: 'GeoScratchLocalRasterQuad',
+        origin: 'southwest',
+        axisOrder: [ 'east', 'north' ],
+    },
+    tileSize: 256,
+    minZoom: 0,
+    maxZoom: 3,
+    nodata: null,
+    sampleType: 'uint8',
+    scale: 0.3311509803921568,
+    offset: -80.06899999999999,
+    overviewLevels: [ 2, 4, 8 ],
+    pixelOrientation: {
+        source: 'south-up-row-major',
+        cog: 'north-up-row-major',
+        tile: 'south-up-row-major',
+    },
+    outerBoundary: 'clamp',
+    levels: [
+        { zoom: 0, decimation: 8, width: 128, height: 70, pagesX: 1, pagesY: 1 },
+        { zoom: 1, decimation: 4, width: 256, height: 140, pagesX: 1, pagesY: 1 },
+        { zoom: 2, decimation: 2, width: 512, height: 279, pagesX: 2, pagesY: 2 },
+        { zoom: 3, decimation: 1, width: 1024, height: 558, pagesX: 4, pagesY: 3 },
+    ],
+})
 
 function sha256(value) {
 
@@ -40,6 +77,33 @@ function leadingFacts(plan) {
         nodeLevels: plan.nodeLevels.slice(0, 16),
         nodeBoxes: plan.nodeBoxes.slice(0, 12),
     }
+}
+
+async function createTestVirtualRaster(runtime) {
+
+    let addressSpace
+    const source = virtualRasterSource({
+        id: 'test.dem.virtual-source',
+        async loadPage(page) {
+            return Object.freeze({
+                page,
+                width: 256,
+                height: 256,
+                channels: 1,
+                data: new Uint8Array(256 * 256).fill(128),
+                contentVersion: demManifest.contentVersion,
+            })
+        },
+    })
+    const virtualRaster = await createDemVirtualRasterRuntime({
+        runtime,
+        manifest: demManifest,
+        source,
+        maxPhysicalPages: 18,
+    })
+    addressSpace = virtualRaster.addressSpace
+    expect(addressSpace.levelCount).to.equal(4)
+    return virtualRaster
 }
 
 describe('DEM Layer clean cut', () => {
@@ -217,12 +281,10 @@ describe('DEM Layer clean cut', () => {
         const observation = new Promise(resolve => { settleObservation = resolve })
         const map = { remove: () => { actions.push('map') } }
         const runtime = { dispose: () => { actions.push('runtime') } }
-        const bitmap = { close: () => { actions.push('bitmap') } }
 
         lifecycle.deferStop({ label: 'scheduler', run: () => { actions.push('stop') } })
         lifecycle.ownMap(map)
         lifecycle.ownRuntime(runtime)
-        lifecycle.ownBitmap('DEM', bitmap)
         lifecycle.track(observation.then(() => { actions.push('settled') }), 'frame')
 
         const firstDisposal = lifecycle.dispose()
@@ -231,7 +293,7 @@ describe('DEM Layer clean cut', () => {
         settleObservation()
         const report = await firstDisposal
 
-        expect(actions).to.deep.equal([ 'stop', 'settled', 'bitmap', 'map', 'runtime' ])
+        expect(actions).to.deep.equal([ 'stop', 'settled', 'map', 'runtime' ])
         expect(report).to.include({
             cleanupInvocationCount: 1,
             pendingObservationsBefore: 1,
@@ -242,7 +304,6 @@ describe('DEM Layer clean cut', () => {
         expect(lifecycle.snapshot()).to.deep.include({
             state: 'disposed',
             pendingObservationCount: 0,
-            ownedBitmapCount: 0,
             ownsMap: false,
             ownsRuntime: false,
         })
@@ -280,40 +341,6 @@ describe('DEM Layer clean cut', () => {
         expect(report.cleanupInvocationCount).to.equal(1)
     })
 
-    it('releases a decoded image that settles after disposal', async() => {
-
-        const lifecycle = createDemLifecycle()
-        let resolveBitmap
-        let lateBitmapCloses = 0
-        const acquisition = new Promise(resolve => { resolveBitmap = resolve })
-        const guarded = lifecycle.acquireBitmap('DEM', acquisition)
-
-        const disposal = lifecycle.dispose()
-        resolveBitmap({ close: () => { lateBitmapCloses++ } })
-
-        let guardedFailure
-        try {
-            await guarded
-        } catch (error) {
-            guardedFailure = error
-        }
-        const report = await disposal
-
-        expect(guardedFailure).to.be.instanceOf(Error)
-        expect(guardedFailure.message).to.equal('DEM lifecycle disposal has started')
-        expect(lateBitmapCloses).to.equal(1)
-        expect(report.cleanupActions).to.deep.include({
-            phase: 'release',
-            label: 'late-external-image:DEM',
-            status: 'fulfilled',
-        })
-        expect(report.cleanupInvocationCount).to.equal(1)
-        expect(lifecycle.snapshot()).to.deep.include({
-            state: 'disposed',
-            ownedBitmapCount: 0,
-        })
-    })
-
     it('settles tracked initialization and resize work before releasing page owners', async() => {
 
         const actions = []
@@ -330,7 +357,6 @@ describe('DEM Layer clean cut', () => {
             resize.then(() => { actions.push('resize') }),
             'dem-render-task-1'
         )
-        lifecycle.ownBitmap('DEM', { close: () => { actions.push('bitmap') } })
         lifecycle.ownMap({ remove: () => { actions.push('map') } })
         lifecycle.ownRuntime({ dispose: () => { actions.push('runtime') } })
 
@@ -346,7 +372,6 @@ describe('DEM Layer clean cut', () => {
         expect(actions).to.deep.equal([
             'initialization',
             'resize',
-            'bitmap',
             'map',
             'runtime',
         ])
@@ -404,10 +429,19 @@ describe('DEM Layer clean cut', () => {
         expect(sha256(lodShader.replaceAll('var<storage, read>', 'var<storage>')))
             .to.equal('ba2a35ab1aac1d9cc08f30be3eaaf88fba856629859cc4ce316c626619540bdc')
         expect(sha256(terrainShader.replaceAll('var<storage, read>', 'var<storage>')))
-            .to.equal('248ae79a861bba63981176927b598f8a9b37516b8732b6311168625c6ae34b46')
+            .to.equal('5732022f4b7b3e70100843edbda385700e7fbc8e6012eb941d9480a2c48db141')
         expect(lodShader.match(/var<storage, read>/g)).to.have.length(2)
-        expect(terrainShader.match(/var<storage, read>/g)).to.have.length(4)
+        expect(terrainShader.match(/var<storage, read>/g)).to.have.length(6)
         expect(terrainShader).not.to.match(/\b(lSampler|palette|colorMap)\b/)
+        expect(terrainShader).not.to.include('demTexture')
+        expect(terrainShader).not.to.match(/coord\.[xy] == nodeBox/)
+        expect(terrainShader).to.include('DemHeight_sample_vertex')
+        expect(terrainShader).to.include('grid.x == 0u')
+        const layer = read('examples', 'demLayer', 'dem-layer.ts')
+        const main = read('examples', 'demLayer', 'main.ts')
+        expect(layer).not.to.include('createExternalImageUploadCommand')
+        expect(layer).not.to.include('DEM elevation texture')
+        expect(main).not.to.include("./assets/dem.png")
     })
 
     it('observes issued native work before surfacing a provenance failure', async() => {
@@ -422,14 +456,11 @@ describe('DEM Layer clean cut', () => {
             size: { width: 320, height: 180 },
         })
         const provenanceFailure = new Error('injected DEM provenance mismatch')
+        const virtualRaster = await createTestVirtualRaster(runtime)
         const graph = await createDemLayer({
             runtime,
             surface,
-            demImage: createFakeExternalImageSource('ImageBitmap', {
-                width: 1024,
-                height: 558,
-                close() {},
-            }),
+            virtualRaster,
             size: { width: 320, height: 180 },
             shaders: {
                 lodMap: read('examples', 'demLayer', 'shaders', 'lod-map.wgsl'),
@@ -439,7 +470,8 @@ describe('DEM Layer clean cut', () => {
                 throw provenanceFailure
             },
         })
-        await graph.initialize().observation
+        const initialized = await graph.initialize()
+        await initialized.observation
 
         const frame = graph.renderFrame(cameraState(9, [ 120.980697, 31.684162 ], [ 320, 180 ]))
         expect(frame.provenance).to.deep.equal([])
@@ -467,15 +499,11 @@ describe('DEM Layer clean cut', () => {
             alphaMode: 'premultiplied',
             size: { width: 320, height: 180 },
         })
-        const demImage = createFakeExternalImageSource('ImageBitmap', {
-            width: 1024,
-            height: 558,
-            close() {},
-        })
+        const virtualRaster = await createTestVirtualRaster(runtime)
         const graph = await createDemLayer({
             runtime,
             surface,
-            demImage,
+            virtualRaster,
             size: { width: 320, height: 180 },
             shaders: {
                 lodMap: read('examples', 'demLayer', 'shaders', 'lod-map.wgsl'),
@@ -486,7 +514,7 @@ describe('DEM Layer clean cut', () => {
         const initialIdentities = graph.stableIdentities
         const initialIdentityFacts = graph.stableIdentityFacts
         const initialPersistentFacts = graph.persistentFacts()
-        const initialized = graph.initialize()
+        const initialized = await graph.initialize()
         await initialized.observation
 
         const first = graph.renderFrame(cameraState(9, [ 120.980697, 31.684162 ], [ 320, 180 ]))
@@ -513,9 +541,9 @@ describe('DEM Layer clean cut', () => {
         expect(graph.currentIdentityFacts()).not.to.equal(graph.currentIdentityFacts())
         expect(initialIdentityFacts).to.deep.equal({
             hash: initialIdentityHash,
-            count: 42,
-            resources: 13,
-            uploads: 11,
+            count: 46,
+            resources: 16,
+            uploads: 12,
             bindLayouts: 5,
             bindSets: 5,
             programs: 2,

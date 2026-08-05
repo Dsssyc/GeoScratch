@@ -1,4 +1,3 @@
-
 struct VertexInput {
     @builtin(vertex_index) vertexIndex: u32,
     @builtin(instance_index) instanceIndex: u32,
@@ -6,21 +5,18 @@ struct VertexInput {
 
 struct VertexOutput {
     @builtin(position) position: vec4f,
-    @location(0) alpha: f32,
-    @location(1) depth: f32,
-    @location(2) level: f32,
-    @location(3) uv: vec2f,
-    @location(4) index: f32,
-};
-
-struct StaticUniformBlock {
-    terrainBox: vec4f,
-    e: vec2f,
+    @location(0) depth: f32,
+    @location(1) level: f32,
+    @location(2) uv: vec2f,
+    @location(3) sampleStatus: f32,
+    @location(4) resolvedHeightLevel: f32,
 };
 
 struct DynamicUniformBlock {
     far: f32,
     near: f32,
+    cameraLatitude: f32,
+    reserved: f32,
     uMatrix: mat4x4f,
     centerLow: vec3f,
     centerHigh: vec3f,
@@ -34,211 +30,212 @@ struct TileUniformBlock {
     exaggeration: f32,
 };
 
-// Uniform Bindings
+struct CanonicalNode {
+    minimum: DemCoordinatePosition,
+    maximum: DemCoordinatePosition,
+};
+
 @group(0) @binding(0) var<uniform> tileUniform: TileUniformBlock;
-@group(0) @binding(1) var<uniform> staticUniform: StaticUniformBlock;
-@group(0) @binding(2) var<uniform> dynamicUniform: DynamicUniformBlock;
+@group(0) @binding(1) var<uniform> dynamicUniform: DynamicUniformBlock;
 
-// Storage Bindings
 @group(1) @binding(0) var<storage, read> indices: array<u32>;
-@group(1) @binding(1) var<storage, read> positions: array<f32>;
-@group(1) @binding(2) var<storage, read> level: array<u32>;
-@group(1) @binding(3) var<storage, read> box: array<f32>;
+@group(1) @binding(1) var<storage, read> gridPositions: array<u32>;
+@group(1) @binding(2) var<storage, read> geometryLevels: array<u32>;
+@group(1) @binding(3) var<storage, read> geographicBoxes: array<f32>;
+@group(1) @binding(4) var<storage, read> canonicalNodes: array<CanonicalNode>;
+@group(1) @binding(5) var<storage, read> cameraCoordinate: array<DemCoordinatePosition>;
 
-// Texture Bindings
-@group(2) @binding(1) var demTexture: texture_2d<f32>;
 @group(2) @binding(2) var lodMap: texture_2d<f32>;
 
 const PI = 3.141592653;
-
-fn calcWebMercatorCoord(coord: vec2f) -> vec2f {
-
-    let lon = (180.0 + coord.x) / 360.0;
-    let lat = (180.0 - (180.0 / PI * log(tan(PI / 4.0 + coord.y * PI / 360.0)))) / 360.0;
-    return vec2f(lon, lat);
-}
-
-fn calcUVFromCoord(coord: vec2f) -> vec2f {
-
-    let u = (coord.x - staticUniform.terrainBox[0]) / (staticUniform.terrainBox[2] - staticUniform.terrainBox[0]);
-    let v = (coord.y - staticUniform.terrainBox[1]) / (staticUniform.terrainBox[3] - staticUniform.terrainBox[1]);
-    return vec2f(u, v);
-}
-
-fn uvCorrection(uv: vec2f, dim: vec2f) -> vec2f {
-
-    return clamp(uv, vec2f(0.0), dim - vec2f(1.0));
-}
-
-fn linearSampling(texture: texture_2d<f32>, uv: vec2f, dim: vec2f) -> vec4f {
-
-    let tl = textureLoad(texture, vec2i(uv), 0);
-    let tr = textureLoad(texture, vec2i(uvCorrection(uv + vec2f(1.0, 0.0), dim).xy), 0);
-    let bl = textureLoad(texture, vec2i(uvCorrection(uv + vec2f(0.0, 1.0), dim).xy), 0);
-    let br = textureLoad(texture, vec2i(uvCorrection(uv + vec2f(1.0, 1.0), dim).xy), 0);
-
-    let mix_x = fract(uv.x);
-    let mix_y = fract(uv.y);
-    let top = mix(tl, tr, mix_x);
-    let bottom = mix(bl, br, mix_x);
-    return mix(top, bottom, mix_y);
-}
-
-fn IDW(texture: texture_2d<f32>, uv: vec2f, dim: vec2f, step: i32, p: f32) -> vec4f {
-
-    let steps = vec2i(step, i32(ceil(f32(step) * dim.y / dim.x)));
-    var weightSum = 0.0;
-    var value = vec4f(0.0);
-    for (var i = -steps.x; i < steps.x; i++ ) {
-        for (var j = -steps.y; j < steps.y; j++) {
-
-            let offset = vec2f(f32(i), f32(j));
-            let distance = length(offset);
-            let w = 1.0 / pow(select(distance, 1.0, distance == 0.0), p);
-
-            let texcoords = uv + offset;
-            value += linearSampling(texture, texcoords, dim) * w;
-            weightSum += w;
-        }
-    }
-
-    return value / weightSum;
-}
+const TERRAIN_SECTOR_SIZE = 64u;
+const FINEST_HEIGHT_GEOMETRY_LEVEL = 12u;
+const MAX_HEIGHT_LEVEL = 3u;
+const EARTH_CIRCUMFERENCE = 40030228.88407185;
 
 fn nan() -> f32 {
 
-    let a = 0.0;
-    let b = 0.0;
-    return a / b;
+    let zero = 0.0;
+    return zero / zero;
 }
 
-fn translateRelativeToEye(high: vec3f, low: vec3f) -> vec3f {
+fn gridPosition(index: u32) -> vec2u {
 
-    let highDiff = high - dynamicUniform.centerHigh;
-    let lowDiff = low - dynamicUniform.centerLow;
-
-    return highDiff + lowDiff;
+    return vec2u(gridPositions[index * 2u], gridPositions[index * 2u + 1u]);
 }
 
-fn centroid(triangleID: u32) -> vec2f {
+fn triangleCentroid(triangleID: u32) -> vec2f {
 
-    let v1ID = triangleID * 3 + 0;
-    let v2ID = triangleID * 3 + 1;
-    let v3ID = triangleID * 3 + 2;
-
-    let v1Index = indices[v1ID];
-    let v2Index = indices[v2ID];
-    let v3Index = indices[v3ID];
-
-    let v1 = vec2f(positions[v1Index * 2 + 0], positions[v1Index * 2 + 1]);
-    let v2 = vec2f(positions[v2Index * 2 + 0], positions[v2Index * 2 + 1]);
-    let v3 = vec2f(positions[v3Index * 2 + 0], positions[v3Index * 2 + 1]);
-
-    return (v1 + v2 + v3) / 3.0;
+    let first = vec2f(gridPosition(indices[triangleID * 3u])) / f32(TERRAIN_SECTOR_SIZE);
+    let second = vec2f(gridPosition(indices[triangleID * 3u + 1u])) / f32(TERRAIN_SECTOR_SIZE);
+    let third = vec2f(gridPosition(indices[triangleID * 3u + 2u])) / f32(TERRAIN_SECTOR_SIZE);
+    return (first + second + third) / 3.0;
 }
 
-fn altitude2Mercator(lat: f32, alt: f32) -> f32 {
-    const earthRadius = 6371008.8;
-    const earthCircumference = 2.0 * PI * earthRadius;
-    return alt / earthCircumference * cos(lat * PI / 180.0);
+fn geometryHeightLevel(geometryLevel: u32) -> u32 {
+
+    if (geometryLevel >= FINEST_HEIGHT_GEOMETRY_LEVEL) { return 0u; }
+    return min(MAX_HEIGHT_LEVEL, FINEST_HEIGHT_GEOMETRY_LEVEL - geometryLevel);
 }
 
-fn positionCS(coord: vec2f, z: f32) -> vec4f {
+fn interpolateCell(minimum: i32, maximum: i32, index: u32) -> i32 {
 
-    var position_CS = dynamicUniform.uMatrix * vec4f(translateRelativeToEye(vec3f(calcWebMercatorCoord(coord), z), vec3f(0.0)), 1.0);
-    // let logZ = log(position_CS.w + 1.0) * log2(dynamicUniform.far + 1.0);
-    // position_CS.z = (logZ - dynamicUniform.near) / (dynamicUniform.far - dynamicUniform.near);
-    // position_CS.z = logZ;
+    let delta = maximum - minimum;
+    let quotient = delta / i32(TERRAIN_SECTOR_SIZE);
+    let remainder = delta % i32(TERRAIN_SECTOR_SIZE);
+    return minimum + quotient * i32(index) +
+        remainder * i32(index) / i32(TERRAIN_SECTOR_SIZE);
+}
 
-    return position_CS;
+fn canonicalCoordinate(node: CanonicalNode, grid: vec2u) -> DemCoordinatePosition {
+
+    var coordinate = node.minimum;
+    coordinate.axes[0].cell = interpolateCell(
+        node.minimum.axes[0].cell,
+        node.maximum.axes[0].cell,
+        grid.x,
+    );
+    coordinate.axes[1].cell = interpolateCell(
+        node.minimum.axes[1].cell,
+        node.maximum.axes[1].cell,
+        grid.y,
+    );
+    coordinate.axes[0].local = 0.0;
+    coordinate.axes[1].local = 0.0;
+    return coordinate;
+}
+
+fn logicalTexel(coordinate: DemCoordinatePosition) -> vec2f {
+
+    let x = f32(coordinate.axes[0].cell - DemRasterMinimum.axes[0].cell) /
+        f32(DemRasterMaximum.axes[0].cell - DemRasterMinimum.axes[0].cell);
+    let y = f32(coordinate.axes[1].cell - DemRasterMinimum.axes[1].cell) /
+        f32(DemRasterMaximum.axes[1].cell - DemRasterMinimum.axes[1].cell);
+    return vec2f(x, y) * DemRasterDimensions;
+}
+
+fn stableAtanh(value: f32) -> f32 {
+
+    let squared = value * value;
+    return value * (1.0 + squared / 3.0 + squared * squared / 5.0 +
+        squared * squared * squared / 7.0);
+}
+
+fn mercatorLatitudeDifference(cameraLatitude: f32, latitudeDifference: f32) -> f32 {
+
+    let cameraRadians = cameraLatitude * PI / 180.0;
+    let differenceRadians = latitudeDifference * PI / 180.0;
+    let targetRadians = cameraRadians + differenceRadians;
+    let numerator = 2.0 * cos(cameraRadians + differenceRadians * 0.5) *
+        sin(differenceRadians * 0.5);
+    let denominator = 1.0 - sin(targetRadians) * sin(cameraRadians);
+    return -stableAtanh(numerator / denominator) / (2.0 * PI);
+}
+
+fn altitudeToMercator(latitude: f32, altitude: f32) -> f32 {
+
+    return altitude / EARTH_CIRCUMFERENCE * cos(latitude * PI / 180.0);
+}
+
+fn positionCS(coordinate: DemCoordinatePosition, elevation: f32) -> vec4f {
+
+    let geographicDifference = DemCoordinate_difference(coordinate, cameraCoordinate[0]);
+    let relativeX = geographicDifference[0] / 360.0;
+    let relativeY = mercatorLatitudeDifference(
+        dynamicUniform.cameraLatitude,
+        geographicDifference[1],
+    );
+    var height = tileUniform.exaggeration * altitudeToMercator(
+        dynamicUniform.cameraLatitude + geographicDifference[1],
+        elevation,
+    );
+    height = select(height, 0.0, height >= 0.0);
+    let relativeZ = height - dynamicUniform.centerHigh.z - dynamicUniform.centerLow.z;
+    return dynamicUniform.uMatrix * vec4f(relativeX, relativeY, relativeZ, 1.0);
 }
 
 @vertex
-fn vMain(vsInput: VertexInput) -> VertexOutput {
+fn vMain(input: VertexInput) -> VertexOutput {
 
-    let triangleID = vsInput.vertexIndex / 3;
-    let index = indices[vsInput.vertexIndex];
-    let x = positions[index * 2 + 0];
-    let y = positions[index * 2 + 1];
-    let center = centroid(triangleID);
+    let triangleID = input.vertexIndex / 3u;
+    let index = indices[input.vertexIndex];
+    var grid = gridPosition(index);
+    let center = triangleCentroid(triangleID);
+    let boxOffset = input.instanceIndex * 4u;
     let nodeBox = vec4f(
-        box[vsInput.instanceIndex * 4 + 0],
-        box[vsInput.instanceIndex * 4 + 1],
-        box[vsInput.instanceIndex * 4 + 2],
-        box[vsInput.instanceIndex * 4 + 3],
+        geographicBoxes[boxOffset],
+        geographicBoxes[boxOffset + 1u],
+        geographicBoxes[boxOffset + 2u],
+        geographicBoxes[boxOffset + 3u],
     );
-
-    var coord = vec2f(
-        mix(nodeBox[0], nodeBox[2], x),
-        clamp(mix(nodeBox[1], nodeBox[3], y), -85.0, 85.0),
+    let centroidCoordinate = vec2f(
+        mix(nodeBox.x, nodeBox.z, center.x),
+        mix(nodeBox.y, nodeBox.w, center.y),
     );
-    let centeroidCoord = vec2f(
-        mix(nodeBox[0], nodeBox[2], center.x),
-        clamp(mix(nodeBox[1], nodeBox[3], center.y), -85.0, 85.0),
+    let lodDimensions = vec2f(textureDimensions(lodMap, 0)) - vec2f(1.0);
+    let lodCoordinate = vec2f(
+        floor((centroidCoordinate.x - tileUniform.tileBox.x) / tileUniform.sectorRange.x),
+        255.0 - floor((centroidCoordinate.y - tileUniform.tileBox.y) /
+            tileUniform.sectorRange.y),
     );
+    let middleLod = clamp(lodCoordinate, vec2f(0.0), lodDimensions);
+    let leftLod = clamp(lodCoordinate + vec2f(-1.0, 0.0), vec2f(0.0), lodDimensions);
+    let rightLod = clamp(lodCoordinate + vec2f(1.0, 0.0), vec2f(0.0), lodDimensions);
+    let topLod = clamp(lodCoordinate + vec2f(0.0, -1.0), vec2f(0.0), lodDimensions);
+    let bottomLod = clamp(lodCoordinate + vec2f(0.0, 1.0), vec2f(0.0), lodDimensions);
+    let ownLevel = geometryLevels[input.instanceIndex];
+    let middleLevel = u32(round(textureLoad(lodMap, vec2i(middleLod), 0).r * 255.0));
+    let leftLevel = u32(round(textureLoad(lodMap, vec2i(leftLod), 0).r * 255.0));
+    let rightLevel = u32(round(textureLoad(lodMap, vec2i(rightLod), 0).r * 255.0));
+    let topLevel = u32(round(textureLoad(lodMap, vec2i(topLod), 0).r * 255.0));
+    let bottomLevel = u32(round(textureLoad(lodMap, vec2i(bottomLod), 0).r * 255.0));
+    var heightLevel = geometryHeightLevel(ownLevel);
 
-    //////////////////
-
-    var z: f32; var uvs: vec2f; var depth: f32;
-    if ((coord.x >= staticUniform.terrainBox[0] && coord.x <= staticUniform.terrainBox[2]) && (coord.y >= staticUniform.terrainBox[1] && coord.y <= staticUniform.terrainBox[3])) {
-
-        var lodUV: vec2f;
-        let lodDim = vec2f(textureDimensions(lodMap, 0).xy) - vec2f(1.0);
-        lodUV.x = floor((centeroidCoord.x - tileUniform.tileBox[0]) / tileUniform.sectorRange.x);
-        lodUV.y = 255.0 - floor((centeroidCoord.y - tileUniform.tileBox[1]) / tileUniform.sectorRange.y);
-
-        let mLodUV = clamp(lodUV.xy, vec2f(0.0, 0.0), lodDim);
-        let lLodUV = clamp(lodUV + vec2f(-1.0, 0.0), vec2f(0.0, 0.0), lodDim);
-        let rLodUV = clamp(lodUV + vec2f(1.0, 0.0), vec2f(0.0, 0.0), lodDim);
-        let tLodUV = clamp(lodUV + vec2f(0.0, -1.0), vec2f(0.0, 0.0), lodDim);
-        let bLodUV = clamp(lodUV + vec2f(0.0, 1.0), vec2f(0.0, 0.0), lodDim);
-
-        let mLevel = textureLoad(lodMap, vec2i(mLodUV.xy), 0).r;
-        let lLevel = textureLoad(lodMap, vec2i(lLodUV.xy), 0).r;
-        let rLevel = textureLoad(lodMap, vec2i(rLodUV.xy), 0).r;
-        let tLevel = textureLoad(lodMap, vec2i(tLodUV.xy), 0).r;
-        let bLevel = textureLoad(lodMap, vec2i(bLodUV.xy), 0).r;
-
-        let deltaX = (nodeBox[2] - nodeBox[0]) / tileUniform.sectorSize;
-        let deltaY = (nodeBox[3] - nodeBox[1]) / tileUniform.sectorSize;
-
-        var offset = vec2f(0.0);
-        if ((coord.x == nodeBox[0] && lLevel < mLevel) || (coord.x == nodeBox[2] && rLevel < mLevel)) {
-
-            offset.y = select(0.0, deltaY, floor((coord.y - nodeBox[1]) / deltaY) % 2.0 == 1.0);
-        }
-        if ((coord.y == nodeBox[1] && bLevel < mLevel) || (coord.y == nodeBox[3] && tLevel < mLevel)) {
-
-            offset.x = select(0.0, deltaX, floor((coord.x - nodeBox[0]) / deltaX) % 2.0 == 1.0);
-        }
-        coord += offset;
-        let uv = calcUVFromCoord(coord);
-        let dim = vec2f(textureDimensions(demTexture, 0).xy);
-
-        let elevation = mix(staticUniform.e.x, staticUniform.e.y, linearSampling(demTexture, uv * dim, dim).r);
-        z = tileUniform.exaggeration * altitude2Mercator(coord.y, elevation);
-        z = select(z, 0.0, z >= 0.0);
-        depth = (elevation - staticUniform.e.x) / (staticUniform.e.y - staticUniform.e.x);
-        uvs = uv;
-    } else {
-
-        z = nan();
-        uvs = vec2f(nan());
-        depth = nan();
+    if (grid.x == 0u) {
+        heightLevel = max(heightLevel, geometryHeightLevel(leftLevel));
+        if (leftLevel < middleLevel && grid.y % 2u == 1u) { grid.y += 1u; }
+    }
+    if (grid.x == TERRAIN_SECTOR_SIZE) {
+        heightLevel = max(heightLevel, geometryHeightLevel(rightLevel));
+        if (rightLevel < middleLevel && grid.y % 2u == 1u) { grid.y += 1u; }
+    }
+    if (grid.y == 0u) {
+        heightLevel = max(heightLevel, geometryHeightLevel(bottomLevel));
+        if (bottomLevel < middleLevel && grid.x % 2u == 1u) { grid.x += 1u; }
+    }
+    if (grid.y == TERRAIN_SECTOR_SIZE) {
+        heightLevel = max(heightLevel, geometryHeightLevel(topLevel));
+        if (topLevel < middleLevel && grid.x % 2u == 1u) { grid.x += 1u; }
     }
 
+    let coordinate = canonicalCoordinate(canonicalNodes[input.instanceIndex], grid);
+    let finestTexel = logicalTexel(coordinate);
+    let inside = all(finestTexel >= vec2f(0.0)) && all(finestTexel <= DemRasterDimensions);
     var output: VertexOutput;
-    // output.position = dynamicUniform.uMatrix * vec4f(translateRelativeToEye(vec3f(calcWebMercatorCoord(coord), z), vec3f(0.0)), 1.0);
-    output.position = positionCS(coord, z);
-    output.level = f32(level[vsInput.instanceIndex]);
-    output.index = f32(vsInput.instanceIndex);
-    output.depth = depth;
-    output.uv = uvs;
+    if (inside) {
+        let requestedTexel = finestTexel / f32(1u << heightLevel);
+        let sample = DemHeight_sample_vertex(requestedTexel, heightLevel);
+        let available = sample.status != 0u && sample.status != 3u;
+        let elevation = select(DemElevationRange.x, sample.value.x, available);
+        output.position = positionCS(coordinate, elevation);
+        output.depth = (elevation - DemElevationRange.x) /
+            (DemElevationRange.y - DemElevationRange.x);
+        output.uv = finestTexel / DemRasterDimensions;
+        output.sampleStatus = f32(sample.status);
+        output.resolvedHeightLevel = f32(sample.resolved_level);
+    } else {
+        output.position = vec4f(nan());
+        output.depth = 0.0;
+        output.uv = vec2f(0.0);
+        output.sampleStatus = 0.0;
+        output.resolvedHeightLevel = f32(heightLevel);
+    }
+    output.level = f32(ownLevel);
     return output;
 }
 
 @fragment
-fn fMain(fsInput: VertexOutput) -> @location(0) vec4f {
-    
-    return vec4f(1.0 - fsInput.depth) * 0.5;
+fn fMain(input: VertexOutput) -> @location(0) vec4f {
+
+    return vec4f(1.0 - input.depth) * 0.5;
 }

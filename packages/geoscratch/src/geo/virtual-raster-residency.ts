@@ -37,7 +37,7 @@ export type VirtualRasterResidencyDescriptor = Readonly<{
 
 export type VirtualRasterHistoryEntry = Readonly<{
     sequence: number
-    kind: 'request' | 'staged' | 'resident' | 'fallback' | 'eviction' | 'failed' | 'stale' | 'dispose'
+    kind: 'request' | 'staged' | 'resident' | 'fallback' | 'eviction' | 'failed' | 'stale' | 'pin' | 'unpin' | 'dispose'
     pageKey: string
     detail?: string
 }>
@@ -48,6 +48,7 @@ export type VirtualRasterResidencyFacts = Readonly<{
     pendingCount: number
     stagedCount: number
     residentCount: number
+    pinnedCount: number
     cpuBytes: number
     maxCpuBytes: number
     maxPhysicalPages: number
@@ -96,6 +97,7 @@ export class VirtualRasterResidency {
     #activeRequests = new Set<Promise<VirtualRasterRequestOutcome>>()
     #staged = new Map<string, StagedPage>()
     #resident = new Map<string, ResidentPage>()
+    #pinned = new Set<string>()
     #failed = new Set<string>()
     #slotGenerations: number[]
     #pageEpochs = new Map<string, number>()
@@ -193,6 +195,23 @@ export class VirtualRasterResidency {
         if (resident !== undefined) resident.lastUsed = ++this.#sequence
     }
 
+    pin(page: VirtualRasterPageIdentity): void {
+
+        this.#assertActive()
+        this.addressSpace.assertPage(page)
+        if (this.#pinned.has(page.key)) return
+        this.#pinned.add(page.key)
+        this.#record('pin', page)
+    }
+
+    unpin(page: VirtualRasterPageIdentity): void {
+
+        this.#assertActive()
+        this.addressSpace.assertPage(page)
+        if (!this.#pinned.delete(page.key)) return
+        this.#record('unpin', page)
+    }
+
     publishSnapshot(): VirtualRasterSnapshot {
 
         this.#assertActive()
@@ -214,6 +233,7 @@ export class VirtualRasterResidency {
             pendingCount: this.#pending.size,
             stagedCount: this.#staged.size,
             residentCount: this.#resident.size,
+            pinnedCount: this.#pinned.size,
             cpuBytes: this.#cpuBytes(),
             maxCpuBytes: this.maxCpuBytes,
             maxPhysicalPages: this.maxPhysicalPages,
@@ -242,6 +262,7 @@ export class VirtualRasterResidency {
         for (const request of pending) request.controller.abort()
         this.#staged.clear()
         this.#resident.clear()
+        this.#pinned.clear()
         this.#failed.clear()
         this.#record('dispose', this.addressSpace.page({ level: this.addressSpace.levelCount - 1, x: 0, y: 0 }))
         this.#snapshotEpoch++
@@ -375,11 +396,13 @@ export class VirtualRasterResidency {
 
     #evictOne(): boolean {
 
-        const victim = [ ...this.#resident.values() ].sort((a, b) =>
+        const victim = [ ...this.#resident.values() ]
+            .filter(candidate => !this.#pinned.has(candidate.page.key))
+            .sort((a, b) =>
             a.lastUsed - b.lastUsed ||
             a.physicalSlot - b.physicalSlot ||
             a.page.key.localeCompare(b.page.key),
-        )[0]
+            )[0]
         if (victim === undefined) return false
         this.#resident.delete(victim.page.key)
         this.#evictionCount++

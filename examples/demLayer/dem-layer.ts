@@ -22,6 +22,17 @@ import {
     TERRAIN_BOUNDARY,
     selectTerrainNodes,
 } from './terrain-selection.ts'
+import {
+    DEM_CANONICAL_NODE_BYTES,
+    DEM_COORDINATE_CODEC,
+    demVirtualRasterWgslModule,
+    encodeDemCoordinate,
+    writeDemCanonicalNodes,
+} from './dem-virtual-raster.ts'
+import type {
+    DemVirtualRasterPublication,
+    createDemVirtualRasterRuntime,
+} from './dem-virtual-raster.ts'
 
 type DemShaders = {
     lodMap: string
@@ -45,6 +56,7 @@ type DemCameraState = {
 }
 
 type TerrainSelection = ReturnType<typeof selectTerrainNodes>
+type DemVirtualRaster = Awaited<ReturnType<typeof createDemVirtualRasterRuntime>>
 type Codecs = ReturnType<typeof createCodecs>
 type Uniforms = Awaited<ReturnType<typeof createUniformResources>>
 type TerrainGeometry = ReturnType<typeof createTerrainGeometry>
@@ -57,12 +69,13 @@ type Pipelines = Awaited<ReturnType<typeof createPipelines>>
 type Passes = ReturnType<typeof createPasses>
 type Commands = ReturnType<typeof createCommands>
 type LayoutValues = Parameters<LayoutCodec['pack']>[0]
-type BufferData = Float32Array<ArrayBuffer> | Uint32Array<ArrayBuffer>
+type BufferData = Float32Array<ArrayBuffer> | Uint32Array<ArrayBuffer> | Uint8Array<ArrayBuffer>
 type ContentResource = BufferResource | TextureResource
 
 type DemGraph = {
     runtime: ScratchRuntime
     surface: Surface
+    virtualRaster: DemVirtualRaster
     codecs: Codecs
     geometry: TerrainGeometry
     uniforms: Uniforms
@@ -88,7 +101,8 @@ type ProvenanceFact = Readonly<{
 
 type ProvenanceVerifier = (
     submitted: SubmittedWork,
-    graph: DemGraph
+    graph: DemGraph,
+    publication: DemVirtualRasterPublication
 ) => readonly ProvenanceFact[]
 
 type ResizeFacts = Readonly<{
@@ -106,6 +120,9 @@ type DemState = {
     staleBindSetPreparationCount: number
     lastResizeFacts?: ResizeFacts
     selection?: TerrainSelection
+    virtualPlan?: ReturnType<DemVirtualRaster['prepare']>['plan']
+    virtualSnapshotEpoch: number
+    virtualRequestedPageCount: number
     stageActivity: { 'lod-map': number; terrain: number }
 }
 
@@ -120,7 +137,7 @@ type PersistentFacts = Readonly<{
 type DemLayerOptions = {
     runtime: ScratchRuntime
     surface: Surface
-    demImage: ImageBitmap
+    virtualRaster: DemVirtualRaster
     size: SurfaceSize
     shaders: DemShaders
     failureProof?: DemFailureProof
@@ -141,7 +158,6 @@ const bufferUsage = globalThis.GPUBufferUsage ?? Object.freeze({
     INDIRECT: 0x100,
 })
 const textureUsage = globalThis.GPUTextureUsage ?? Object.freeze({
-    COPY_DST: 0x02,
     TEXTURE_BINDING: 0x04,
     RENDER_ATTACHMENT: 0x10,
 })
@@ -149,7 +165,7 @@ const textureUsage = globalThis.GPUTextureUsage ?? Object.freeze({
 export async function createDemLayer({
     runtime,
     surface,
-    demImage,
+    virtualRaster,
     size,
     shaders,
     failureProof = defaultFailureProof,
@@ -158,7 +174,7 @@ export async function createDemLayer({
 
     if (!(runtime instanceof ScratchRuntime)) throw new TypeError('DEM Layer requires ScratchRuntime')
     assertSize(size)
-    assertDemImage(demImage)
+    assertVirtualRaster(virtualRaster)
     assertShaders(shaders)
     if (typeof provenanceVerifier !== 'function') {
         throw new TypeError('DEM provenance verifier must be a function')
@@ -168,10 +184,17 @@ export async function createDemLayer({
     const geometry = createTerrainGeometry()
     const uniforms = await createUniformResources(runtime, codecs)
     const buffers = await createBufferResources(runtime, geometry)
-    const textures = await createTextures(runtime, demImage, size)
+    const textures = await createTextures(runtime, size)
     const layouts = await createBindLayouts(runtime, codecs)
-    const bindSets = await createBindSets(runtime, layouts, uniforms, buffers, textures)
-    const programs = await createPrograms(runtime, codecs, shaders, failureProof)
+    const bindSets = await createBindSets(
+        runtime,
+        layouts,
+        uniforms,
+        buffers,
+        textures,
+        virtualRaster
+    )
+    const programs = await createPrograms(runtime, codecs, shaders, failureProof, virtualRaster)
     const pipelines = await createPipelines(
         runtime,
         surface,
@@ -186,6 +209,7 @@ export async function createDemLayer({
         uniforms,
         buffers,
         textures,
+        virtualRaster,
         bindSets,
         pipelines
     )
@@ -203,37 +227,46 @@ export async function createDemLayer({
         pipelines,
         passes,
         commands,
+        virtualRaster,
     }
     const state = createState(size)
     const stableIdentities = Object.freeze(stableIdentitySnapshot(graph))
     const stableIdentityFacts = identityFactSnapshot(graph)
     const stableIdentityHash = stableIdentityFacts.hash
     const persistentBaseline = persistentFactSnapshot(runtime)
-    let initialization: Readonly<{
+    let initialization: Promise<Readonly<{
         submitted: SubmittedWork
         observation: Promise<Readonly<{ submissionId: string; nativeStatus: 'observed-succeeded' }>>
-    }> | undefined
+    }>> | undefined
 
     function initialize() {
 
         if (initialization !== undefined) return initialization
+        initialization = initializeOnce()
+        return initialization
+    }
+
+    async function initializeOnce() {
+
+        const publication = await virtualRaster.initialize()
         const builder = runtime.createSubmission({ validation: 'throw' })
         for (const upload of [
             uniforms.map.upload,
             uniforms.static.upload,
             buffers.positions.upload,
             buffers.indices.upload,
-            textures.demUpload,
+            ...publication.update.commands,
         ]) {
             builder.upload(upload)
         }
         const submitted = builder.submit()
+        virtualRaster.acknowledge(publication)
         const observation = observeSubmittedWork(submitted).then(result => {
             state.initialized = true
+            state.virtualSnapshotEpoch = publication.snapshotEpoch
             return result
         })
-        initialization = Object.freeze({ submitted, observation })
-        return initialization
+        return Object.freeze({ submitted, observation })
     }
 
     function renderFrame(camera: DemCameraState) {
@@ -249,22 +282,29 @@ export async function createDemLayer({
             maxNodes: MAX_TERRAIN_NODES,
         })
         updateFrameData(graph, selection, camera)
+        const streaming = virtualRaster.prepare(selection)
+        const publication = virtualRaster.publish()
 
-        const submitted = runtime.createSubmission({ validation: 'throw' })
+        const builder = runtime.createSubmission({ validation: 'throw' })
             .upload(uniforms.dynamic.upload)
             .upload(uniforms.tile.upload)
             .upload(buffers.nodeLevels.upload)
             .upload(buffers.nodeBoxes.upload)
+            .upload(buffers.canonicalNodes.upload)
+            .upload(buffers.cameraCoordinate.upload)
             .upload(buffers.lodArguments.upload)
             .upload(buffers.terrainArguments.upload)
+        for (const upload of publication.update.commands) builder.upload(upload)
+        const submitted = builder
             .render(passes.lodMap, [ commands.drawLodMap ])
             .render(passes.terrain, [ commands.drawTerrain ])
             .submit()
+        virtualRaster.acknowledge(publication)
         const nativeObservation = observeSubmittedWork(submitted)
         let provenance: readonly ProvenanceFact[] = Object.freeze([])
         let provenanceFailure: unknown
         try {
-            provenance = provenanceVerifier(submitted, graph)
+            provenance = provenanceVerifier(submitted, graph, publication)
         } catch (error) {
             provenanceFailure = error
         }
@@ -274,6 +314,9 @@ export async function createDemLayer({
 
         state.frame++
         state.selection = selection
+        state.virtualPlan = streaming.plan
+        state.virtualSnapshotEpoch = publication.snapshotEpoch
+        state.virtualRequestedPageCount += streaming.requestedCount
         state.stageActivity['lod-map']++
         state.stageActivity.terrain++
 
@@ -282,6 +325,10 @@ export async function createDemLayer({
             observation,
             provenance,
             selection,
+            virtualPlan: streaming.plan,
+            virtualPublication: publication,
+            residencySettlement: streaming.settlement,
+            requestedPageCount: streaming.requestedCount,
         })
     }
 
@@ -319,12 +366,14 @@ export async function createDemLayer({
         initialize,
         renderFrame,
         resize,
+        stopStreaming: virtualRaster.stopStreaming,
         stableIdentities,
         stableIdentityHash,
         stableIdentityFacts,
         currentIdentityFacts: () => identityFactSnapshot(graph),
         persistentFacts: () => persistentFactSnapshot(runtime),
         contractFacts: () => graphContractSnapshot(graph),
+        virtualRasterFacts: virtualRaster.inspect,
         state: () => stateSnapshot(state),
     })
 }
@@ -356,6 +405,8 @@ function createCodecs() {
         dynamic: uniform('DemDynamicUniform', [
             { name: 'far', type: 'f32' },
             { name: 'near', type: 'f32' },
+            { name: 'cameraLatitude', type: 'f32' },
+            { name: 'reserved', type: 'f32' },
             { name: 'uMatrix', type: 'mat4x4f' },
             { name: 'centerLow', type: 'vec3f' },
             { name: 'centerHigh', type: 'vec3f' },
@@ -384,6 +435,8 @@ async function createUniformResources(runtime: ScratchRuntime, codecs: Codecs) {
         dynamic: await createUniform(runtime, 'DEM camera state', codecs.dynamic, {
             far: 1,
             near: 0,
+            cameraLatitude: 0,
+            reserved: 0,
             uMatrix: identity,
             centerLow: [ 0, 0, 0 ],
             centerHigh: [ 0, 0, 0 ],
@@ -419,7 +472,9 @@ function createTerrainGeometry() {
 
     const generated = plane(Math.log2(TERRAIN_SECTOR_SIZE))
     return Object.freeze({
-        positions: new Float32Array(generated.positions),
+        positions: Uint32Array.from(generated.positions, value =>
+            Math.round(value * TERRAIN_SECTOR_SIZE)
+        ),
         indices: new Uint32Array(generated.indices),
         vertexCount: generated.indices.length,
     })
@@ -429,6 +484,8 @@ async function createBufferResources(runtime: ScratchRuntime, geometry: TerrainG
 
     const nodeLevels = new Uint32Array(MAX_TERRAIN_NODES)
     const nodeBoxes = new Float32Array(MAX_TERRAIN_NODES * 4)
+    const canonicalNodes = new Uint8Array(MAX_TERRAIN_NODES * DEM_CANONICAL_NODE_BYTES)
+    const cameraCoordinate = new Uint8Array(DEM_COORDINATE_CODEC.facts.bytesPerPosition)
     const lodArguments = new Uint32Array([ 4, 0, 0, 0 ])
     const terrainArguments = new Uint32Array([ geometry.vertexCount, 0, 0, 0 ])
 
@@ -455,6 +512,18 @@ async function createBufferResources(runtime: ScratchRuntime, geometry: TerrainG
             runtime,
             'DEM selected node boxes',
             nodeBoxes,
+            bufferUsage.COPY_DST | bufferUsage.STORAGE
+        ),
+        canonicalNodes: await createBufferWithUpload(
+            runtime,
+            'DEM canonical node coordinates',
+            canonicalNodes,
+            bufferUsage.COPY_DST | bufferUsage.STORAGE
+        ),
+        cameraCoordinate: await createBufferWithUpload(
+            runtime,
+            'DEM canonical camera coordinate',
+            cameraCoordinate,
             bufferUsage.COPY_DST | bufferUsage.STORAGE
         ),
         lodArguments: await createBufferWithUpload(
@@ -489,16 +558,8 @@ async function createBufferWithUpload<T extends BufferData>(
     })
 }
 
-async function createTextures(runtime: ScratchRuntime, demImage: ImageBitmap, size: SurfaceSize) {
+async function createTextures(runtime: ScratchRuntime, size: SurfaceSize) {
 
-    const dem = await runtime.createTexture({
-        label: 'DEM elevation texture',
-        size: { width: demImage.width, height: demImage.height },
-        format: 'rgba8unorm',
-        usage: textureUsage.COPY_DST |
-            textureUsage.TEXTURE_BINDING |
-            textureUsage.RENDER_ATTACHMENT,
-    })
     const lodMap = await runtime.createTexture({
         label: 'DEM LoD map',
         size: LOD_MAP_SIZE,
@@ -511,23 +572,10 @@ async function createTextures(runtime: ScratchRuntime, demImage: ImageBitmap, si
         format: 'depth32float',
         usage: textureUsage.RENDER_ATTACHMENT,
     })
-    const demUpload = runtime.createExternalImageUploadCommand({
-        label: 'Upload DEM elevation image',
-        source: demImage,
-        flipY: true,
-        target: dem,
-        colorSpace: 'srgb',
-        premultipliedAlpha: false,
-        size: { width: demImage.width, height: demImage.height },
-    })
-
     return {
-        dem,
         lodMap,
         depth,
-        demUpload,
         views: {
-            dem: dem.view(),
             lodMap: lodMap.view(),
             depth: depth.view(),
         },
@@ -575,8 +623,7 @@ async function createBindLayouts(runtime: ScratchRuntime, codecs: Codecs) {
             group: 0,
             entries: [
                 uniform(0, 'tileUniform', codecs.tile, [ 'vertex' ]),
-                uniform(1, 'staticUniform', codecs.static, [ 'vertex' ]),
-                uniform(2, 'dynamicUniform', codecs.dynamic, [ 'vertex' ]),
+                uniform(1, 'dynamicUniform', codecs.dynamic, [ 'vertex' ]),
             ],
         }),
         terrainStorage: await runtime.createBindLayout({
@@ -584,18 +631,21 @@ async function createBindLayouts(runtime: ScratchRuntime, codecs: Codecs) {
             group: 1,
             entries: [
                 readStorage(0, 'indices'),
-                readStorage(1, 'positions'),
-                readStorage(2, 'level'),
-                readStorage(3, 'box'),
+                readStorage(1, 'gridPositions'),
+                readStorage(2, 'geometryLevels'),
+                readStorage(3, 'geographicBoxes'),
+                readStorage(4, 'canonicalNodes'),
+                readStorage(5, 'cameraCoordinate'),
             ],
         }),
         terrainTextures: await runtime.createBindLayout({
             label: 'DEM terrain texture layout',
             group: 2,
             entries: [
+                readStorage(0, 'demPageTable'),
                 {
                     binding: 1,
-                    name: 'demTexture',
+                    name: 'demAtlas',
                     type: 'texture',
                     sampleType: 'float',
                     viewDimension: '2d',
@@ -619,7 +669,8 @@ async function createBindSets(
     layouts: Layouts,
     uniforms: Uniforms,
     buffers: Buffers,
-    textures: Textures
+    textures: Textures,
+    virtualRaster: DemVirtualRaster
 ) {
 
     return {
@@ -634,17 +685,19 @@ async function createBindSets(
         }, { label: 'DEM LoD selected nodes' }),
         terrainUniforms: await runtime.createBindSet(layouts.terrainUniforms, {
             tileUniform: uniforms.tile.region,
-            staticUniform: uniforms.static.region,
             dynamicUniform: uniforms.dynamic.region,
         }, { label: 'DEM terrain uniforms' }),
         terrainStorage: await runtime.createBindSet(layouts.terrainStorage, {
             indices: buffers.indices.region,
-            positions: buffers.positions.region,
-            level: buffers.nodeLevels.region,
-            box: buffers.nodeBoxes.region,
+            gridPositions: buffers.positions.region,
+            geometryLevels: buffers.nodeLevels.region,
+            geographicBoxes: buffers.nodeBoxes.region,
+            canonicalNodes: buffers.canonicalNodes.region,
+            cameraCoordinate: buffers.cameraCoordinate.region,
         }, { label: 'DEM terrain data' }),
         terrainTextures: await runtime.createBindSet(layouts.terrainTextures, {
-            demTexture: textures.views.dem,
+            demPageTable: virtualRaster.gpu.pageTable.region(),
+            demAtlas: virtualRaster.gpu.atlasView,
             lodMap: textures.views.lodMap,
         }, { label: 'DEM terrain textures' }),
     }
@@ -654,7 +707,8 @@ async function createPrograms(
     runtime: ScratchRuntime,
     codecs: Codecs,
     shaders: DemShaders,
-    failureProof: DemFailureProof
+    failureProof: DemFailureProof,
+    virtualRaster: DemVirtualRaster
 ) {
 
     const requirement = (
@@ -671,7 +725,10 @@ async function createPrograms(
     failureProof.beforeTerrainShaderModule(runtime)
     const terrainShader = await runtime.createShaderModule({
         label: 'DEM terrain shader',
-        sourceParts: [ { code: failureProof.terrainShader(shaders.terrain) } ],
+        sourceParts: [
+            { code: demVirtualRasterWgslModule(virtualRaster) },
+            { code: failureProof.terrainShader(shaders.terrain) },
+        ],
     })
     const lodMapShader = await runtime.createShaderModule({
         label: 'DEM LoD-map shader',
@@ -694,8 +751,7 @@ async function createPrograms(
             fragment: { module: terrainShader, entryPoint: 'fMain' },
             layoutRequirements: [
                 requirement(0, 0, codecs.tile),
-                requirement(0, 1, codecs.static),
-                requirement(0, 2, codecs.dynamic),
+                requirement(0, 1, codecs.dynamic),
             ],
         }),
     }
@@ -778,6 +834,7 @@ function createCommands(
     uniforms: Uniforms,
     buffers: Buffers,
     textures: Textures,
+    virtualRaster: DemVirtualRaster,
     bindSets: BindSets,
     pipelines: Pipelines
 ) {
@@ -813,13 +870,15 @@ function createCommands(
             resources: {
                 read: currentReads([
                     uniforms.tile.buffer,
-                    uniforms.static.buffer,
                     uniforms.dynamic.buffer,
                     buffers.indices.buffer,
                     buffers.positions.buffer,
                     buffers.nodeLevels.buffer,
                     buffers.nodeBoxes.buffer,
-                    textures.dem,
+                    buffers.canonicalNodes.buffer,
+                    buffers.cameraCoordinate.buffer,
+                    virtualRaster.gpu.pageTable,
+                    virtualRaster.gpu.atlas,
                     textures.lodMap,
                     buffers.terrainArguments.buffer,
                 ]),
@@ -844,6 +903,8 @@ function updateFrameData(
     graph.uniforms.dynamic.write({
         far: camera.far,
         near: camera.near,
+        cameraLatitude: camera.cameraPos[1],
+        reserved: 0,
         uMatrix: camera.matrix,
         centerLow: camera.centerLow,
         centerHigh: camera.centerHigh,
@@ -859,11 +920,23 @@ function updateFrameData(
     graph.buffers.nodeLevels.data.set(selection.nodeLevels)
     graph.buffers.nodeBoxes.data.fill(0)
     graph.buffers.nodeBoxes.data.set(selection.nodeBoxes)
+    writeDemCanonicalNodes(
+        graph.buffers.canonicalNodes.data,
+        selection,
+        graph.virtualRaster.manifest
+    )
+    graph.buffers.cameraCoordinate.data.set(
+        DEM_COORDINATE_CODEC.pack([ encodeDemCoordinate(camera.cameraPos) ])
+    )
     graph.buffers.lodArguments.data[1] = selection.visibleNodeCount
     graph.buffers.terrainArguments.data[1] = selection.visibleNodeCount
 }
 
-function verifyFrameProvenance(submitted: SubmittedWork, graph: DemGraph) {
+function verifyFrameProvenance(
+    submitted: SubmittedWork,
+    graph: DemGraph,
+    publication: DemVirtualRasterPublication
+) {
 
     const pairs = [
         {
@@ -896,6 +969,12 @@ function verifyFrameProvenance(submitted: SubmittedWork, graph: DemGraph) {
             producerPassId: graph.passes.lodMap.id,
             consumerCommandId: graph.commands.drawTerrain.id,
         },
+        ...(publication.update.pageTableUpload === undefined ? [] : [ {
+            name: 'virtual-page-table-upload-to-terrain-draw',
+            resource: graph.virtualRaster.gpu.pageTable,
+            producerCommandId: publication.update.pageTableUpload.id,
+            consumerCommandId: graph.commands.drawTerrain.id,
+        } ]),
     ]
 
     return Object.freeze(pairs.map(pair => {
@@ -960,14 +1039,14 @@ function identityObjectsByKind(graph: DemGraph) {
         resources: [
             ...Object.values(graph.uniforms).map(value => value.buffer),
             ...Object.values(graph.buffers).map(value => value.buffer),
-            graph.textures.dem,
+            graph.virtualRaster.gpu.atlas,
+            graph.virtualRaster.gpu.pageTable,
             graph.textures.lodMap,
             graph.textures.depth,
         ],
         uploads: [
             ...Object.values(graph.uniforms).map(value => value.upload),
             ...Object.values(graph.buffers).map(value => value.upload),
-            graph.textures.demUpload,
         ],
         bindLayouts: Object.values(graph.layouts),
         bindSets: Object.values(graph.bindSets),
@@ -998,6 +1077,15 @@ function graphContractSnapshot(graph: DemGraph) {
         maxNodes: MAX_TERRAIN_NODES,
         terrainVertexCount: graph.geometry.vertexCount,
         lodMapSize: LOD_MAP_SIZE,
+        virtualRaster: Object.freeze({
+            contentVersion: graph.virtualRaster.manifest.contentVersion,
+            pageSize: graph.virtualRaster.addressSpace.pageSize,
+            levelCount: graph.virtualRaster.addressSpace.levelCount,
+            maxPhysicalPages: graph.virtualRaster.residency.maxPhysicalPages,
+            completeImageUpload: false,
+            crossPageFiltering: 'logical-bilinear',
+            coordinateEncoding: DEM_COORDINATE_CODEC.facts.encoding,
+        }),
         persistentIdentityCount: stableIdentitySnapshot(graph).length,
         passIds: Object.freeze({
             lodMap: graph.passes.lodMap.id,
@@ -1020,6 +1108,9 @@ function createState(size: SurfaceSize): DemState {
         staleBindSetPreparationCount: 0,
         lastResizeFacts: undefined,
         selection: undefined,
+        virtualPlan: undefined,
+        virtualSnapshotEpoch: 0,
+        virtualRequestedPageCount: 0,
         stageActivity: Object.fromEntries(DEM_STAGE_ORDER.map(name => [ name, 0 ])) as {
             'lod-map': number
             terrain: number
@@ -1038,6 +1129,9 @@ function stateSnapshot(state: DemState) {
         lastResizeFacts: state.lastResizeFacts,
         visibleNodeCount: state.selection?.visibleNodeCount ?? 0,
         selection: state.selection,
+        virtualPlan: state.virtualPlan,
+        virtualSnapshotEpoch: state.virtualSnapshotEpoch,
+        virtualRequestedPageCount: state.virtualRequestedPageCount,
         stageActivity: Object.freeze({ ...state.stageActivity }),
     })
 }
@@ -1096,16 +1190,16 @@ function assertSize(value: SurfaceSize) {
     }
 }
 
-function assertDemImage(value: ImageBitmap) {
+function assertVirtualRaster(value: DemVirtualRaster) {
 
     if (
         value === undefined ||
-        !Number.isInteger(value.width) ||
-        !Number.isInteger(value.height) ||
-        value.width <= 0 ||
-        value.height <= 0
+        value.manifest?.contentVersion === undefined ||
+        value.addressSpace?.dimensions !== 2 ||
+        value.gpu?.atlas === undefined ||
+        value.gpu.pageTable === undefined
     ) {
-        throw new TypeError('DEM image must expose positive integer width and height')
+        throw new TypeError('DEM Layer requires a prepared 2D virtual raster runtime')
     }
 }
 

@@ -167,6 +167,30 @@ describe('Geo virtual raster', () => {
         expect(facts.history.length).to.be.at.most(3)
     })
 
+    it('pins a coarse fallback page while deterministically evicting unpinned detail', async() => {
+
+        const { addressSpace, residency } = fixture({ maxPhysicalPages: 2 })
+        const parent = addressSpace.page({ level: 1, x: 0, y: 0 })
+        const firstDetail = addressSpace.page({ level: 0, x: 0, y: 0 })
+        const secondDetail = addressSpace.page({ level: 0, x: 1, y: 0 })
+        residency.pin(parent)
+        await Promise.all([ residency.request(parent), residency.request(firstDetail) ])
+        residency.publishSnapshot()
+
+        await residency.request(secondDetail)
+        const snapshot = residency.publishSnapshot()
+
+        expect(snapshot.resolve(parent).status).to.equal('resident')
+        expect(snapshot.resolve(firstDetail).status).to.equal('fallback')
+        expect(snapshot.resolve(firstDetail).resolvedPage.key).to.equal(parent.key)
+        expect(snapshot.resolve(secondDetail).status).to.equal('resident')
+        expect(residency.inspect()).to.deep.include({
+            pinnedCount: 1,
+            residentCount: 2,
+            evictionCount: 1,
+        })
+    })
+
     it('rejects a stale async response after cancellation', async() => {
 
         let resolveLoad

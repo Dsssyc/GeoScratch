@@ -13,6 +13,11 @@ import {
 import { createDemLifecycle } from './dem-lifecycle.ts'
 import { createDemMap, readDemCameraState, waitForDemMap } from './dem-map.ts'
 import type { DemMap } from './dem-map.ts'
+import {
+    createDemHttpVirtualRasterSource,
+    createDemVirtualRasterRuntime,
+    fetchDemVirtualRasterManifest,
+} from './dem-virtual-raster.ts'
 import lodMapShader from './shaders/lod-map.wgsl?raw'
 import terrainShader from './shaders/terrain-mesh.wgsl?raw'
 
@@ -58,7 +63,6 @@ declare global {
 }
 
 const canvas = document.getElementById('GPUFrame') as HTMLCanvasElement
-const demImageUrl = new URL('./assets/dem.png', import.meta.url).href
 const FAILURE_RUNTIME_EVIDENCE_MAX_BYTES = 512 * 1024
 const FAILURE_CAPTURE_BOUNDS = Object.freeze({
     maxOperations: 1,
@@ -73,6 +77,13 @@ const FAILURE_SCENARIOS = Object.freeze([
 ])
 const parameters = new URLSearchParams(window.location.search)
 const proofMode = parameters.get('proof') === '1'
+const tileServerUrl = parameters.get('tileServer') ?? 'http://127.0.0.1:8787'
+const maxPhysicalPages = boundedIntegerParameter(
+    parameters.get('atlasPages'),
+    18,
+    2,
+    18
+)
 const requestedFailureScenario = parameters.get('fault')
 const failureConfiguration = Object.freeze({
     scenario: proofMode && requestedFailureScenario !== null
@@ -122,12 +133,16 @@ async function main(lifetime: DemLifecycle, proof: FailureProofController) {
             maxPendingNativeObservations: 8,
         },
     }))
-    const [ runtime ] = await Promise.all([ runtimeReady, mapReady ])
+    const manifestReady = lifetime.track(
+        fetchDemVirtualRasterManifest(tileServerUrl, lifetime.signal),
+        'dem-virtual-raster-manifest'
+    )
+    const [ runtime, , manifest ] = await Promise.all([
+        runtimeReady,
+        mapReady,
+        manifestReady,
+    ])
     proof.observeRuntime(runtime)
-    lifetime.assertActive('continue DEM initialization')
-
-    const image = await lifetime.acquireBitmap('DEM', loadDemImage(demImageUrl, lifetime.signal))
-    proof.imageAcquired()
     lifetime.assertActive('continue DEM initialization')
 
     const initialSize = canvasPixelSize(canvas)
@@ -138,19 +153,29 @@ async function main(lifetime: DemLifecycle, proof: FailureProofController) {
         size: initialSize,
     })
     proof.observeSurface(surface)
+    const virtualRaster = await createDemVirtualRasterRuntime({
+        runtime,
+        manifest,
+        source: createDemHttpVirtualRasterSource(manifest, tileServerUrl),
+        maxPhysicalPages,
+    })
+    proof.rasterAcquired()
+    lifetime.deferStop({
+        label: 'dem-virtual-raster-streaming',
+        run: virtualRaster.stopStreaming,
+    })
     const graph = await createDemLayer({
         runtime,
         surface,
-        demImage: image.source,
+        virtualRaster,
         size: initialSize,
         shaders: { lodMap: lodMapShader, terrain: terrainShader },
         failureProof: proof,
     })
     lifetime.assertActive('continue DEM initialization')
 
-    const initialized = graph.initialize()
+    const initialized = await graph.initialize()
     await lifetime.track(initialized.observation, 'dem-initial-submission')
-    await image.ownership.release()
     lifetime.assertActive('continue DEM initialization')
 
     let active = true
@@ -273,6 +298,19 @@ async function main(lifetime: DemLifecycle, proof: FailureProofController) {
             const frame = graph.renderFrame(camera)
             submittedFrames++
             latestProvenance = frame.provenance
+            if (frame.requestedPageCount > 0) {
+                const settlement = frame.residencySettlement.then(() => {
+                    if (active) requestRender()
+                })
+                void lifetime.track(
+                    settlement,
+                    `dem-page-requests-${submittedFrames}`
+                ).catch(error => {
+                    if (lifetime.isStopError(error)) return
+                    active = false
+                    void failPage(error)
+                })
+            }
             publish()
 
             const frameNumber = submittedFrames
@@ -290,13 +328,6 @@ async function main(lifetime: DemLifecycle, proof: FailureProofController) {
     requestRender()
 }
 
-async function loadDemImage(url: string, signal: AbortSignal) {
-
-    const response = await fetch(url, { signal })
-    if (!response.ok) throw new Error(`DEM image request failed: HTTP ${response.status}`)
-    return createImageBitmap(await response.blob())
-}
-
 function publishGraphFacts(runtime: ScratchRuntime, graph: DemLayer) {
 
     canvas.dataset.proofMode = String(proofMode)
@@ -307,6 +338,8 @@ function publishGraphFacts(runtime: ScratchRuntime, graph: DemLayer) {
     canvas.dataset.graphContract = JSON.stringify(graph.contractFacts())
     canvas.dataset.adapterAcquired = String(runtime.adapter !== undefined)
     canvas.dataset.adapter = JSON.stringify(adapterFacts(runtime))
+    canvas.dataset.tileServer = tileServerUrl
+    canvas.dataset.maxPhysicalPages = String(maxPhysicalPages)
 }
 
 function publishFrameFacts({
@@ -339,6 +372,10 @@ function publishFrameFacts({
     canvas.dataset.resizeGeneration = String(state.resizeGeneration)
     canvas.dataset.visibleNodeCount = String(state.visibleNodeCount)
     canvas.dataset.selection = JSON.stringify(state.selection ?? null)
+    canvas.dataset.virtualPlan = JSON.stringify(state.virtualPlan ?? null)
+    canvas.dataset.virtualSnapshotEpoch = String(state.virtualSnapshotEpoch)
+    canvas.dataset.virtualRequestedPageCount = String(state.virtualRequestedPageCount)
+    canvas.dataset.virtualRaster = JSON.stringify(graph.virtualRasterFacts())
     canvas.dataset.stageActivity = JSON.stringify(state.stageActivity)
     canvas.dataset.provenance = JSON.stringify(latestProvenance)
     canvas.dataset.persistentFacts = JSON.stringify(graph.persistentFacts())
@@ -390,7 +427,7 @@ function createFailureProofController(configuration: FailureConfiguration) {
     let evidenceFailure: unknown
     let reachedCount = 0
     let mapAcquiredCount = 0
-    let imageAcquiredCount = 0
+    let rasterAcquiredCount = 0
 
     function assertConfiguration() {
 
@@ -455,7 +492,7 @@ function createFailureProofController(configuration: FailureConfiguration) {
             scenario: configuration.scenario,
             reachedCount,
             mapAcquiredCount,
-            imageAcquiredCount,
+            rasterAcquiredCount,
             primaryFailure: serializeFailure(primaryFailure),
             ...(diagnostic === undefined ? {} : { diagnostic }),
             ...(incident === undefined ? {} : { incident }),
@@ -492,7 +529,7 @@ function createFailureProofController(configuration: FailureConfiguration) {
         observeRuntime: (value: ScratchRuntime) => { runtime = value },
         observeSurface: (value: Surface) => { surface = value },
         mapAcquired: () => { mapAcquiredCount++ },
-        imageAcquired: () => { imageAcquiredCount++ },
+        rasterAcquired: () => { rasterAcquiredCount++ },
     })
 }
 
@@ -581,6 +618,23 @@ function canvasPixelSize(target: HTMLElement): SurfaceSize {
 function sameSize(left: SurfaceSize, right: SurfaceSize) {
 
     return left.width === right.width && left.height === right.height
+}
+
+function boundedIntegerParameter(
+    value: string | null,
+    fallback: number,
+    minimum: number,
+    maximum: number
+) {
+
+    if (value === null) return fallback
+    const parsed = Number(value)
+    if (!Number.isSafeInteger(parsed) || parsed < minimum || parsed > maximum) {
+        throw new RangeError(
+            `DEM integer parameter must be between ${minimum} and ${maximum}`
+        )
+    }
+    return parsed
 }
 
 function readPublishedFacts() {

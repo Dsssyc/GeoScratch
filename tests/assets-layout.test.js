@@ -74,13 +74,18 @@ describe('asset layout', () => {
         expect(lines).to.not.include('public/json/examples/*')
     })
 
-    it('keeps the reachable DEM asset beside its owning example', () => {
+    it('keeps the DEM source beside its backend without exposing a full-image browser path', () => {
 
         expect(exists('examples', 'demLayer', 'assets', 'dem.png')).to.equal(true)
         expect(exists('packages', 'geoscratch', 'src', 'applications', 'terrain')).to.equal(false)
 
         const main = read('examples', 'demLayer', 'main.ts')
-        expect(main).to.include("new URL('./assets/dem.png', import.meta.url)")
+        const backend = read(
+            'examples', 'demLayer', 'tile-server', 'src', 'geoscratch_dem_tiles', 'build.py'
+        )
+        expect(backend).to.include('"assets" / "dem.png"')
+        expect(main).not.to.include('./assets/dem.png')
+        expect(main).to.include('fetchDemVirtualRasterManifest')
         expect(main).to.not.match(/border|palette/i)
     })
 

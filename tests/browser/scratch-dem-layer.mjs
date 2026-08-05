@@ -10,6 +10,9 @@ import { chromium } from 'playwright'
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const examplesRoot = resolve(repositoryRoot, 'examples')
 const viteEntry = resolve(repositoryRoot, 'node_modules/vite/bin/vite.js')
+const tileServerRoot = resolve(examplesRoot, 'demLayer/tile-server')
+const tileBuildEntry = resolve(tileServerRoot, '.venv/bin/dem-tile-build')
+const tileServeEntry = resolve(tileServerRoot, '.venv/bin/dem-tile-serve')
 const timeout = positiveInteger(process.env.DEM_LAYER_BROWSER_TIMEOUT_MS, 120_000)
 const outputDirectory = resolve(
     process.env.DEM_LAYER_BROWSER_OUTPUT ?? '/tmp/geoscratch-dem-layer-browser'
@@ -18,6 +21,10 @@ const port = process.env.DEM_LAYER_BROWSER_PORT === undefined
     ? await findAvailablePort()
     : positiveInteger(process.env.DEM_LAYER_BROWSER_PORT)
 const baseUrl = `http://127.0.0.1:${port}`
+const tilePort = process.env.DEM_LAYER_TILE_PORT === undefined
+    ? await findAvailablePort()
+    : positiveInteger(process.env.DEM_LAYER_TILE_PORT)
+const tileBaseUrl = `http://127.0.0.1:${tilePort}`
 const expectedStageOrder = Object.freeze([ 'lod-map', 'terrain' ])
 const requiredProvenanceNames = Object.freeze([
     'node-level-upload-to-lod-draw',
@@ -32,7 +39,9 @@ const failureScenarios = Object.freeze([
 ])
 
 await mkdir(outputDirectory, { recursive: true })
-const vite = startVite(port)
+let cogBuild
+let tileServer
+let vite
 let browser
 let browserVersion
 let browserClosed = false
@@ -42,8 +51,13 @@ let failureProofs
 let fatalError
 let cleanupError
 let serverClosed = false
+let tileServerClosed = false
 
 try {
+    cogBuild = await runCommand(tileBuildEntry, [], tileServerRoot)
+    tileServer = startTileServer(tilePort)
+    await waitForHttpProcess(tileServer, `${tileBaseUrl}/health`, 'DEM tile server')
+    vite = startVite(port)
     await waitForVite(vite, `${baseUrl}/demLayer/index.html`)
     browser = await chromium.launch({
         channel: 'chrome',
@@ -69,12 +83,22 @@ try {
         cleanupFailures.push(serializeError(error))
     }
     try {
-        await stopVite(vite)
+        if (vite !== undefined) await stopProcess(vite, 'Vite')
+    } catch (error) {
+        cleanupFailures.push(serializeError(error))
+    }
+    try {
+        if (tileServer !== undefined) await stopProcess(tileServer, 'DEM tile server')
     } catch (error) {
         cleanupFailures.push(serializeError(error))
     }
     try {
         serverClosed = await waitForPortClosed(port)
+    } catch (error) {
+        cleanupFailures.push(serializeError(error))
+    }
+    try {
+        tileServerClosed = await waitForPortClosed(tilePort)
     } catch (error) {
         cleanupFailures.push(serializeError(error))
     }
@@ -89,20 +113,31 @@ const failures = validateResult({
     cleanupError,
     browserClosed,
     serverClosed,
+    tileServerClosed,
 })
 const result = {
     schemaVersion: 1,
     browserVersion,
     headed: true,
     baseUrl,
+    tileBaseUrl,
     outputDirectory,
+    cogBuild,
     vite: {
-        pid: vite.child.pid,
-        exitCode: vite.child.exitCode,
-        signalCode: vite.child.signalCode,
+        pid: vite?.child.pid,
+        exitCode: vite?.child.exitCode,
+        signalCode: vite?.child.signalCode,
         serverClosed,
-        stdout: failures.length === 0 ? undefined : vite.stdout,
-        stderr: failures.length === 0 ? undefined : vite.stderr,
+        stdout: failures.length === 0 ? undefined : vite?.stdout,
+        stderr: failures.length === 0 ? undefined : vite?.stderr,
+    },
+    tileServer: {
+        pid: tileServer?.child.pid,
+        exitCode: tileServer?.child.exitCode,
+        signalCode: tileServer?.child.signalCode,
+        serverClosed: tileServerClosed,
+        stdout: failures.length === 0 ? undefined : tileServer?.stdout,
+        stderr: failures.length === 0 ? undefined : tileServer?.stderr,
     },
     browserClosed,
     adapter,
@@ -126,10 +161,13 @@ async function verifyNormalDem(activeBrowser) {
     const events = observePage(page)
 
     try {
-        await page.goto(`${baseUrl}/demLayer/index.html?proof=1`, {
+        await page.goto(
+            `${baseUrl}/demLayer/index.html?proof=1&tileServer=${encodeURIComponent(tileBaseUrl)}`,
+            {
             waitUntil: 'domcontentloaded',
             timeout,
-        })
+            }
+        )
         await waitForDemFacts(page, facts => (
             facts.status === 'ready' &&
             Number(facts.observedFrames) >= 1 &&
@@ -229,7 +267,8 @@ async function verifyFailureScenario(activeBrowser, scenario) {
     const events = observePage(page)
 
     try {
-        const url = `${baseUrl}/demLayer/index.html?proof=1&fault=${scenario}`
+        const url = `${baseUrl}/demLayer/index.html?proof=1&fault=${scenario}` +
+            `&tileServer=${encodeURIComponent(tileBaseUrl)}`
         await page.goto(url, { waitUntil: 'domcontentloaded', timeout })
         await page.waitForFunction(() => {
             return document.querySelector('#GPUFrame')?.dataset.initFailureProof !== undefined
@@ -253,6 +292,9 @@ function observePage(page) {
     const pageErrors = []
     const requestFailures = []
     const httpFailures = []
+    const requests = []
+    const tileRequests = []
+    const completeImageRequests = []
     page.on('console', (message) => {
         if (message.type() === 'error') pushBounded(consoleFailures, message.text())
         if (message.type() === 'warning') pushBounded(consoleWarnings, message.text())
@@ -262,12 +304,32 @@ function observePage(page) {
         requestFailures,
         `${request.method()} ${request.url()}: ${request.failure()?.errorText ?? 'unknown failure'}`
     ))
+    page.on('request', (request) => {
+        const url = request.url()
+        pushBounded(requests, url)
+        const parsed = new URL(url)
+        if (parsed.origin === tileBaseUrl && parsed.pathname.startsWith('/tiles/')) {
+            pushBounded(tileRequests, url)
+        }
+        if (parsed.pathname.endsWith('/assets/dem.png')) {
+            pushBounded(completeImageRequests, url)
+        }
+    })
     page.on('response', (response) => {
         if (response.status() >= 400) {
             pushBounded(httpFailures, `${response.status()} ${response.request().method()} ${response.url()}`)
         }
     })
-    return { consoleFailures, consoleWarnings, pageErrors, requestFailures, httpFailures }
+    return {
+        consoleFailures,
+        consoleWarnings,
+        pageErrors,
+        requestFailures,
+        httpFailures,
+        requests,
+        tileRequests,
+        completeImageRequests,
+    }
 }
 
 async function readRuntimeAdapterFacts(page, facts) {
@@ -454,6 +516,9 @@ function validateResult(result) {
     if (result.cleanupError !== undefined) failures.push(`cleanup failed: ${result.cleanupError}`)
     if (!result.browserClosed) failures.push('managed Chrome did not close')
     if (!result.serverClosed) failures.push(`managed Vite port ${port} remained open after cleanup`)
+    if (!result.tileServerClosed) {
+        failures.push(`managed DEM tile port ${tilePort} remained open after cleanup`)
+    }
     if (result.adapter?.available !== true) failures.push('navigator.gpu was unavailable')
     if (result.adapter?.runtimeAdapterAcquired !== true) {
         failures.push('ScratchRuntime did not acquire a WebGPU adapter')
@@ -538,17 +603,17 @@ function validateNormalProof(proof, failures) {
         failures.push('double disposal did not return two equivalent cleanup reports')
     } else {
         validateCleanup(proof.cleanupPair.reports[0], [
-            'external-image:DEM',
             'dem-frame-scheduler',
             'window-resize-listener',
             'map-render-listener',
+            'dem-virtual-raster-streaming',
             'pagehide-listener',
             'maplibre-map',
             'scratch-runtime',
         ], failures)
         const lifecycle = proof.cleanupPair.reports[0]?.lifecycle
         if (lifecycle?.state !== 'disposed' || lifecycle?.ownsMap || lifecycle?.ownsRuntime ||
-            lifecycle?.ownedBitmapCount !== 0 || lifecycle?.pendingObservationCount !== 0) {
+            lifecycle?.pendingObservationCount !== 0) {
             failures.push('normal cleanup retained a lifecycle owner')
         }
     }
@@ -570,6 +635,12 @@ function validateNormalProof(proof, failures) {
         proof.pixels.movement.changedPixels < 100 ||
         proof.pixels.movement.meanRgbDelta < 0.01) {
         failures.push('controlled camera change did not change enough terrain pixels')
+    }
+    if (proof.completeImageRequests.length > 0) {
+        failures.push('normal DEM page requested the complete dem.png asset')
+    }
+    if (proof.tileRequests.length === 0) {
+        failures.push('normal DEM page did not request COG-backed HTTP tiles')
     }
     validateCleanEvents('normal DEM page', proof, failures, 0)
 }
@@ -593,9 +664,9 @@ function validateDemFacts(label, facts, failures, expectedStatus = 'ready') {
 
     const identity = parseJson(facts.currentIdentityFacts, `${label} identity facts`, failures)
     const expectedIdentityCounts = {
-        count: 42,
-        resources: 13,
-        uploads: 11,
+        count: 46,
+        resources: 16,
+        uploads: 12,
         bindLayouts: 5,
         bindSets: 5,
         programs: 2,
@@ -644,6 +715,43 @@ function validateDemFacts(label, facts, failures, expectedStatus = 'ready') {
         JSON.stringify(contract?.stageOrder) !== JSON.stringify(expectedStageOrder)) {
         failures.push(`${label} persistent graph contract drifted`)
     }
+    if (contract?.virtualRaster?.completeImageUpload !== false ||
+        contract?.virtualRaster?.crossPageFiltering !== 'logical-bilinear' ||
+        contract?.virtualRaster?.coordinateEncoding !== 'cell-local-f32') {
+        failures.push(`${label} virtual raster graph contract drifted`)
+    }
+    validateVirtualRasterFacts(label, facts, failures)
+}
+
+function validateVirtualRasterFacts(label, facts, failures) {
+
+    const virtualRaster = parseJson(facts.virtualRaster, `${label} virtual raster facts`, failures)
+    const residency = virtualRaster?.residency
+    const gpu = virtualRaster?.gpu
+    const maximumPages = Number(facts.maxPhysicalPages)
+    if (!Number.isSafeInteger(maximumPages) || maximumPages < 2 || maximumPages > 18) {
+        failures.push(`${label} physical page budget was invalid`)
+    }
+    if (virtualRaster?.coordinateEncoding !== 'cell-local-f32' ||
+        !Number.isFinite(virtualRaster?.coordinateQuantum) ||
+        !Array.isArray(virtualRaster?.failedPageKeys) ||
+        virtualRaster.failedPageKeys.length !== 0) {
+        failures.push(`${label} virtual raster precision or failure facts were invalid`)
+    }
+    if (residency?.residentCount < 1 || residency?.residentCount > maximumPages ||
+        residency?.pinnedCount !== 1 || residency?.cpuBytes > residency?.maxCpuBytes ||
+        residency?.maxPhysicalPages !== maximumPages || residency?.failedCount !== 0 ||
+        residency?.staleResponseCount !== 0 || residency?.history?.length > 64) {
+        failures.push(`${label} virtual raster residency exceeded its finite contract`)
+    }
+    if (gpu?.maxPhysicalPages !== maximumPages || gpu?.snapshotEpoch !== residency?.snapshotEpoch ||
+        gpu?.pageTableEntryCount < 1 || gpu?.pageTableBytes < 1) {
+        failures.push(`${label} GPU virtual raster snapshot facts were inconsistent`)
+    }
+    if (Number(facts.virtualSnapshotEpoch) !== residency?.snapshotEpoch ||
+        Number(facts.virtualRequestedPageCount) < 0) {
+        failures.push(`${label} published virtual raster frame facts were inconsistent`)
+    }
 }
 
 function validatePersistentCounts(before, after, failures) {
@@ -651,7 +759,7 @@ function validatePersistentCounts(before, after, failures) {
     const first = parseJson(before.persistentFacts, 'initial persistent facts', failures)
     const second = parseJson(after.persistentFacts, 'resized persistent facts', failures)
     for (const [ name, expected ] of [
-        [ 'resources', 13 ],
+        [ 'resources', 16 ],
         [ 'bindLayouts', 5 ],
         [ 'bindSets', 5 ],
         [ 'pipelines', 2 ],
@@ -681,7 +789,7 @@ function validateFailureProof(result, failures) {
     validateCleanEvents(prefix, result, failures, 1)
 
     if (result.scenario === 'after-map-acquisition') {
-        if (proof?.imageAcquiredCount !== 0 ||
+        if (proof?.rasterAcquiredCount !== 0 ||
             proof?.primaryFailure?.code !== 'DEM_LAYER_INJECTED_FAILURE') {
             failures.push(`${prefix} lost the pre-runtime acquisition boundary or primary failure`)
         }
@@ -692,8 +800,8 @@ function validateFailureProof(result, failures) {
         return
     }
 
-    if (proof?.imageAcquiredCount !== 1) {
-        failures.push(`${prefix} did not acquire exactly one external image`)
+    if (proof?.rasterAcquiredCount !== 1) {
+        failures.push(`${prefix} did not acquire exactly one virtual raster`)
     }
     if (proof?.diagnostic?.code !== 'SCRATCH_SHADER_MODULE_COMPILATION_FAILED') {
         failures.push(`${prefix} did not retain the ShaderModule compilation failure`)
@@ -705,10 +813,10 @@ function validateFailureProof(result, failures) {
     const compilation = proof?.incident?.shaderModuleCompilationReport
     if (compilation?.shaderModuleId !== target?.shaderModuleId ||
         compilation?.sourceHash !== target?.sourceHash ||
-        compilation?.sourcePartCount !== 1 ||
-        compilation?.retainedSourcePartCount !== 1 ||
+        compilation?.sourcePartCount !== 2 ||
+        compilation?.retainedSourcePartCount !== 2 ||
         compilation?.errorCount < 1) {
-        failures.push(`${prefix} did not retain one localized source-part compilation report`)
+        failures.push(`${prefix} did not retain the two localized source-part compilation report`)
     }
     if (proof?.captureBounds?.maxOperations !== 1 ||
         proof?.captureBounds?.maxDurationMs !== 2_000 ||
@@ -731,8 +839,8 @@ function validateFailureProof(result, failures) {
         failures.push(`${prefix} exported raw WGSL source evidence`)
     }
     validateCleanup(proof, [
+        'dem-virtual-raster-streaming',
         'pagehide-listener',
-        'external-image:DEM',
         'maplibre-map',
         'scratch-runtime',
     ], failures)
@@ -799,6 +907,9 @@ function summarizeNormalProof(proof) {
         pageErrors: proof.pageErrors,
         requestFailures: proof.requestFailures,
         httpFailures: proof.httpFailures,
+        requestCount: proof.requests.length,
+        tileRequestCount: proof.tileRequests.length,
+        completeImageRequestCount: proof.completeImageRequests.length,
     }
 }
 
@@ -838,7 +949,7 @@ function summarizeFailureProof(result) {
             scenario: proof?.scenario,
             reachedCount: proof?.reachedCount,
             mapAcquiredCount: proof?.mapAcquiredCount,
-            imageAcquiredCount: proof?.imageAcquiredCount,
+            rasterAcquiredCount: proof?.rasterAcquiredCount,
             primaryFailure: proof?.primaryFailure,
             diagnosticCode: proof?.diagnostic?.code,
             incident: proof?.incident === undefined ? undefined : {
@@ -967,13 +1078,64 @@ function startVite(selectedPort) {
     return state
 }
 
+function startTileServer(selectedPort) {
+
+    return startProcess(tileServeEntry, [
+        '--host',
+        '127.0.0.1',
+        '--port',
+        String(selectedPort),
+    ], tileServerRoot)
+}
+
+function startProcess(command, arguments_, cwd) {
+
+    const child = spawn(command, arguments_, {
+        cwd,
+        env: { ...process.env, FORCE_COLOR: '0' },
+        stdio: [ 'ignore', 'pipe', 'pipe' ],
+    })
+    const state = { child, stdout: '', stderr: '', spawnError: undefined }
+    child.stdout.setEncoding('utf8')
+    child.stderr.setEncoding('utf8')
+    child.stdout.on('data', chunk => { state.stdout = appendBounded(state.stdout, chunk) })
+    child.stderr.on('data', chunk => { state.stderr = appendBounded(state.stderr, chunk) })
+    child.on('error', error => { state.spawnError = error })
+    return state
+}
+
+async function runCommand(command, arguments_, cwd) {
+
+    const state = startProcess(command, arguments_, cwd)
+    await waitForExit(state.child, timeout)
+    if (state.spawnError !== undefined) throw state.spawnError
+    if (state.child.exitCode !== 0) {
+        throw new Error([
+            `${command} exited with code ${state.child.exitCode}.`,
+            state.stderr,
+            state.stdout,
+        ].filter(Boolean).join('\n'))
+    }
+    return {
+        command,
+        exitCode: state.child.exitCode,
+        stdout: state.stdout,
+        stderr: state.stderr,
+    }
+}
+
 async function waitForVite(viteState, url) {
+
+    await waitForHttpProcess(viteState, url, 'Vite')
+}
+
+async function waitForHttpProcess(state, url, label) {
 
     const deadline = Date.now() + timeout
     while (Date.now() < deadline) {
-        if (viteState.spawnError !== undefined) throw viteState.spawnError
-        if (viteState.child.exitCode !== null) {
-            throw new Error(`Vite exited before readiness with code ${viteState.child.exitCode}.`)
+        if (state.spawnError !== undefined) throw state.spawnError
+        if (state.child.exitCode !== null) {
+            throw new Error(`${label} exited before readiness with code ${state.child.exitCode}.`)
         }
         try {
             const response = await fetch(url, { signal: AbortSignal.timeout(1_000) })
@@ -985,18 +1147,22 @@ async function waitForVite(viteState, url) {
         }
         await delay(100)
     }
-    throw new Error(`Timed out waiting for managed Vite at ${url}.`)
+    throw new Error(`Timed out waiting for managed ${label} at ${url}.`)
 }
 
-async function stopVite(viteState) {
+async function stopProcess(state, label) {
 
-    if (viteState.child.exitCode !== null || viteState.child.signalCode !== null) return
-    viteState.child.kill('SIGTERM')
+    if (state.child.exitCode !== null || state.child.signalCode !== null) return
+    state.child.kill('SIGTERM')
     try {
-        await waitForExit(viteState.child, 5_000)
+        await waitForExit(state.child, 5_000)
     } catch {
-        viteState.child.kill('SIGKILL')
-        await waitForExit(viteState.child, 5_000)
+        state.child.kill('SIGKILL')
+        try {
+            await waitForExit(state.child, 5_000)
+        } catch {
+            throw new Error(`${label} process ${state.child.pid} did not stop`)
+        }
     }
 }
 

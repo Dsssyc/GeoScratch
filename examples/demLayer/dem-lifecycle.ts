@@ -22,17 +22,6 @@ type ObservationEntry = {
     settlement: Promise<ObservationSettlement>
 }
 
-type CloseableImage = {
-    close(): void
-}
-
-type BitmapEntry = {
-    id: number
-    label: string
-    value: CloseableImage
-    released: boolean
-}
-
 type CleanupAction = Readonly<{
     phase: LifecyclePhase
     label: string
@@ -64,14 +53,12 @@ export function createDemLifecycle() {
     const abortController = new AbortController()
     const stopActions: StopAction[] = []
     const pendingObservations = new Map<number, ObservationEntry>()
-    const bitmaps = new Map<number, BitmapEntry>()
     const cleanupActions: CleanupAction[] = []
     const cleanupFailures: CleanupFailure[] = []
     let map: DemMap | undefined
     let runtime: ScratchRuntime | undefined
     let nextActionId = 1
     let nextObservationId = 1
-    let nextBitmapId = 1
     let state: LifecycleState = 'active'
     let disposal: Promise<CleanupReport> | undefined
     let primaryFailure: unknown
@@ -113,33 +100,6 @@ export function createDemLifecycle() {
         if (runtime !== undefined) throw new Error('DEM runtime ownership is already established')
         runtime = value
         return value
-    }
-
-    function ownBitmap(label: string, value: CloseableImage) {
-
-        assertActive('own decoded image')
-        if (typeof label !== 'string' || label.length === 0) {
-            throw new TypeError('DEM image label must be a non-empty string')
-        }
-        if (value === undefined || value === null || typeof value.close !== 'function') {
-            throw new TypeError('DEM image must expose close()')
-        }
-        const id = nextBitmapId++
-        const entry = { id, label, value, released: false }
-        bitmaps.set(id, entry)
-
-        return Object.freeze({
-            async release() {
-                if (entry.released) return false
-                entry.released = true
-                bitmaps.delete(id)
-                await recordAction('release', `external-image:${label}`, () => value.close())
-                return true
-            },
-            get isReleased() {
-                return entry.released
-            },
-        })
     }
 
     function deferStop({ label, run }: { label: string; run: LifecycleActionRun }) {
@@ -201,22 +161,6 @@ export function createDemLifecycle() {
         return track(guarded, 'scratch-runtime-acquisition')
     }
 
-    function acquireBitmap<T extends CloseableImage>(
-        label: string,
-        acquisition: T | PromiseLike<T>
-    ) {
-
-        assertActive('acquire decoded image')
-        const guarded = Promise.resolve(acquisition).then(async value => {
-            if (state !== 'active') {
-                await recordAction('release', `late-external-image:${label}`, () => value.close())
-                throw lifecycleStopError()
-            }
-            return Object.freeze({ source: value, ownership: ownBitmap(label, value) })
-        })
-        return track(guarded, `external-image-acquisition:${label}`)
-    }
-
     async function recordAction(
         phase: LifecyclePhase,
         label: string,
@@ -275,13 +219,6 @@ export function createDemLifecycle() {
         await runStopActions()
         await settle(pendingAtDisposal)
 
-        for (const entry of [ ...bitmaps.values() ]) {
-            if (entry.released) continue
-            entry.released = true
-            await recordAction('release', `external-image:${entry.label}`, () => entry.value.close())
-        }
-        bitmaps.clear()
-
         if (map !== undefined) await recordAction('release', 'maplibre-map', () => map!.remove())
         if (runtime !== undefined) await recordAction('release', 'scratch-runtime', () => runtime!.dispose())
 
@@ -319,7 +256,6 @@ export function createDemLifecycle() {
             state,
             activeActionCount: stopActions.filter(action => action.active).length,
             pendingObservationCount: pendingObservations.size,
-            ownedBitmapCount: bitmaps.size,
             ownsMap: map !== undefined,
             ownsRuntime: runtime !== undefined,
         })
@@ -328,9 +264,7 @@ export function createDemLifecycle() {
     return Object.freeze({
         ownMap,
         ownRuntime,
-        ownBitmap,
         acquireRuntime,
-        acquireBitmap,
         deferStop,
         track,
         drain,
