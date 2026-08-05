@@ -35,6 +35,11 @@ source/payload representation, decoder, sample type, schema version, and one of 
 accepted immutable, revisioned, or editable-base coherence revisions. Dirty editing
 state is never a cache revision.
 
+Validation covers both each Geo component and the composed Scratch key. Malformed
+Unicode, an oversized composed ID, or an oversized coherence revision is reported as
+`GEO_VIRTUAL_RASTER_CACHE_ADDRESS_INVALID`; the adapter does not leak URI encoding
+exceptions or cache-domain descriptor diagnostics across the Geo API boundary.
+
 Geo does not open IndexedDB or OPFS, choose byte budgets, retain payloads, expose a
 memory tier, or own cache disposal. `VirtualRasterCache`,
 `createVirtualRasterCache()`, `virtualRasterCacheKey()`, and the old cache policy and

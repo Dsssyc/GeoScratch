@@ -36,6 +36,7 @@ const PAYLOAD_DIRECTORY = 'payloads'
 const DEFAULT_MAX_HISTORY = 64
 const DEFAULT_RECOVERY_GRACE_MS = 5 * 60 * 1000
 const MAX_NAMESPACE_LENGTH = 120
+const MAX_NAMESPACE_UTF8_BYTES = 120
 const MAX_KEY_ID_LENGTH = 1024
 const MAX_REVISION_LENGTH = 512
 
@@ -328,8 +329,9 @@ export class PersistentCache<Metadata extends object = Readonly<Record<string, u
                 this.namespace,
                 'cache-recovery',
                 'delete-invalid-metadata',
-                () => deleteStorageKeys(
+                () => deleteStorageKeysIfInvalid(
                     this.#database,
+                    this.namespace,
                     invalid.map(entry => entry.storageKey)
                 )
             )
@@ -368,8 +370,7 @@ export class PersistentCache<Metadata extends object = Readonly<Record<string, u
         if (!validStoredEntry(entry, this.namespace) || entry.key.storageKey !== key.storageKey) {
             return this.#invalidEntryMiss(
                 key,
-                namespacedStorageKey(this.namespace, key.storageKey),
-                entry
+                namespacedStorageKey(this.namespace, key.storageKey)
             )
         }
         if (entry.payloadId === undefined) {
@@ -698,21 +699,27 @@ export class PersistentCache<Metadata extends object = Readonly<Record<string, u
 
     async #invalidEntryMiss(
         key: PersistentCacheKey,
-        storageKey: string,
-        entry: StoredCacheEntry
+        storageKey: string
     ): Promise<CacheReadOutcome<Metadata>> {
 
-        await databaseOperation(
+        const commit = await databaseOperation(
             this.namespace,
             'cache-recovery',
             'delete-invalid-entry',
-            () => deleteStorageKeys(this.#database, [ storageKey ])
+            () => deleteStorageKeyIfInvalid(
+                this.#database,
+                this.namespace,
+                storageKey,
+                key.storageKey
+            )
         )
+        if (commit.status === 'current-valid') return this.#get(key)
         this.#entries.delete(storageKey)
+        if (commit.status === 'missing') return this.#miss(key, 'absent')
         this.#deletionCount++
-        if (nonEmptyText(entry.payloadId)) {
+        if (nonEmptyText(commit.entry.payloadId)) {
             try {
-                await removePayload(this.#payloadDirectory, entry.payloadId)
+                await removePayload(this.#payloadDirectory, commit.entry.payloadId)
             } catch (error) {
                 this.#recordCleanupFailure('delete-invalid-entry', error)
             }
@@ -983,6 +990,8 @@ export function persistentCacheKey(
 function validateDescriptor(descriptor: PersistentCacheDescriptor): void {
 
     if (!nonEmptyText(descriptor.namespace) || descriptor.namespace.length > MAX_NAMESPACE_LENGTH ||
+        !wellFormedText(descriptor.namespace) ||
+        new TextEncoder().encode(descriptor.namespace).byteLength > MAX_NAMESPACE_UTF8_BYTES ||
         !nonNegativeSafeInteger(descriptor.maxPayloadBytes) ||
         !positiveSafeInteger(descriptor.maxEntries) ||
         (descriptor.maxHistory !== undefined && !nonNegativeSafeInteger(descriptor.maxHistory)) ||
@@ -1341,6 +1350,62 @@ async function deleteEntryIfCurrent(
     return matches
 }
 
+type InvalidEntryCommit =
+    | Readonly<{ status: 'deleted', entry: StoredCacheEntry }>
+    | Readonly<{ status: 'missing' }>
+    | Readonly<{ status: 'current-valid' }>
+
+async function deleteStorageKeyIfInvalid(
+    database: IDBDatabase,
+    namespace: string,
+    storageKey: IDBValidKey,
+    expectedKeyStorageKey: string
+): Promise<InvalidEntryCommit> {
+
+    const transaction = relaxedTransaction(database, ENTRIES_STORE)
+    const done = transactionDone(transaction)
+    const store = transaction.objectStore(ENTRIES_STORE)
+    const current = await requestValue<StoredCacheEntry | undefined>(store.get(storageKey))
+    if (current === undefined) {
+        transaction.commit()
+        await done
+        return Object.freeze({ status: 'missing' })
+    }
+    if (validStoredEntry(current, namespace) &&
+        current.key.storageKey === expectedKeyStorageKey) {
+        transaction.commit()
+        await done
+        return Object.freeze({ status: 'current-valid' })
+    }
+    store.delete(storageKey)
+    transaction.commit()
+    await done
+    return Object.freeze({ status: 'deleted', entry: current })
+}
+
+async function deleteStorageKeysIfInvalid(
+    database: IDBDatabase,
+    namespace: string,
+    storageKeys: readonly IDBValidKey[]
+): Promise<void> {
+
+    if (storageKeys.length === 0) return
+    const transaction = relaxedTransaction(database, ENTRIES_STORE)
+    const done = transactionDone(transaction)
+    const store = transaction.objectStore(ENTRIES_STORE)
+    const current = await Promise.all(storageKeys.map(storageKey =>
+        requestValue<StoredCacheEntry | undefined>(store.get(storageKey))
+    ))
+    for (let index = 0; index < storageKeys.length; index++) {
+        const entry = current[index]
+        if (entry !== undefined && !validStoredEntry(entry, namespace)) {
+            store.delete(storageKeys[index]!)
+        }
+    }
+    transaction.commit()
+    await done
+}
+
 async function payloadIsReferenced(
     database: IDBDatabase,
     namespace: string,
@@ -1359,20 +1424,6 @@ async function payloadIsReferenced(
     const [ entries, pending ] = await Promise.all([ entriesRequest, pendingRequest ])
     await done
     return pending !== undefined || entries.some(entry => entry.payloadId === payloadId)
-}
-
-async function deleteStorageKeys(
-    database: IDBDatabase,
-    storageKeys: readonly string[]
-): Promise<void> {
-
-    if (storageKeys.length === 0) return
-    const transaction = relaxedTransaction(database, ENTRIES_STORE)
-    const done = transactionDone(transaction)
-    const store = transaction.objectStore(ENTRIES_STORE)
-    for (const storageKey of storageKeys) store.delete(storageKey)
-    transaction.commit()
-    await done
 }
 
 async function touchEntry(
@@ -1548,6 +1599,7 @@ function validStoredEntry(entry: unknown, namespace: string): entry is StoredCac
     return value.namespace === namespace && nonEmptyText(value.storageKey) &&
         value.key?.kind === 'persistent-cache-key' && nonEmptyText(value.key.id) &&
         nonEmptyText(value.key.revision) && nonEmptyText(value.key.storageKey) &&
+        value.key.storageKey === JSON.stringify([ value.key.id, value.key.revision ]) &&
         value.storageKey === namespacedStorageKey(namespace, value.key.storageKey) &&
         value.metadata !== null && typeof value.metadata === 'object' &&
         (value.payloadId === undefined || nonEmptyText(value.payloadId)) &&
@@ -1688,6 +1740,22 @@ function cacheSubject(value: unknown): Readonly<{
 function nonEmptyText(value: unknown): value is string {
 
     return typeof value === 'string' && value.length > 0
+}
+
+function wellFormedText(value: string): boolean {
+
+    for (let index = 0; index < value.length; index++) {
+        const unit = value.charCodeAt(index)
+        if (unit >= 0xd800 && unit <= 0xdbff) {
+            if (index + 1 >= value.length) return false
+            const next = value.charCodeAt(index + 1)
+            if (next < 0xdc00 || next > 0xdfff) return false
+            index++
+        } else if (unit >= 0xdc00 && unit <= 0xdfff) {
+            return false
+        }
+    }
+    return true
 }
 
 function nonNegativeSafeInteger(value: unknown): value is number {

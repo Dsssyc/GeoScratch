@@ -68,6 +68,8 @@ const key = persistentCacheKey({
 
 `id` 标识逻辑对象，`revision` 标识不可变内容。相同 `(id, revision)` 的首次成功 `put()` 是提交者；后续 `put()` 返回 `already-present`，不静默覆盖。可编辑资源只有在提交出新的 immutable revision 后才能进入 cache，dirty working state 不属于 cache。
 
+namespace 必须是非空、Unicode 完整且 UTF-8 编码不超过 120 bytes 的字符串。OPFS 目录名使用这些 bytes 的小写十六进制可逆编码，因此不会因 `TextEncoder` 替换孤立 surrogate 而发生命名空间碰撞，生成的路径分量也保持在浏览器文件系统边界内。
+
 ### 元数据与 raw payload
 
 ```ts
@@ -133,6 +135,7 @@ type CachePutStatus =
 - open 时删除超过 recovery grace period 的 pending payload；
 - garbage collection 只删除既未被 committed entry 引用、也未被 live pending row 引用的文件；
 - garbage collection 在删除每个候选文件前用一个 IndexedDB snapshot 重查 committed entry 与 pending row；writer 只有在 commit transaction 中仍持有自己的 pending row 才能发布 metadata；
+- open/read 发现 invalid metadata 后，必须在执行删除的同一 IndexedDB readwrite transaction 中重读；若另一 context 已提交合法修复，则保留新记录并重试读取，不能按过期 snapshot 删除；
 - read 与 delete 竞态导致旧 payload 消失时，读取者重读一次 metadata；若 revision 已换则读取新 payload，若 metadata 已删除则返回正常 miss；
 - 所有未知清理失败进入 bounded history，不把已经成功提交的 entry 伪装成失败。
 
@@ -179,6 +182,7 @@ const address = virtualRasterCacheAddress({
 - 可用于 application invalidation 的稳定 ID prefixes。
 
 Geo 不打开 IndexedDB/OPFS，不持有 cache lifecycle，不实现 LRU，也不提供 memory tier。
+每个 Geo 字段和最终组合出的 Scratch key 都必须通过有界校验；非法 Unicode、组合 ID 溢出或 revision 溢出统一抛出 `GEO_VIRTUAL_RASTER_CACHE_ADDRESS_INVALID`，不得泄漏 `URIError` 或 Scratch cache diagnostic。
 
 ## DEM example 集成
 

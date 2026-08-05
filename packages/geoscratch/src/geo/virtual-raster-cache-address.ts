@@ -71,6 +71,20 @@ export function virtualRasterCacheAddress(
         `payload-representation/${component(descriptor.payloadRepresentation)}/` +
         `decoder/${component(descriptor.decoderVersion)}/` +
         `sample/${component(descriptor.sampleType)}`
+    const revision = coherenceRevision(coherence)
+    let key: PersistentCacheKey
+    try {
+        key = persistentCacheKey({ id, revision })
+    } catch {
+        return throwGeoDiagnostic({
+            code: 'GEO_VIRTUAL_RASTER_CACHE_ADDRESS_INVALID',
+            phase: 'cache',
+            subject: { kind: 'virtual-raster-cache-address' },
+            message: 'Virtual raster cache identity exceeds the bounded Scratch cache key contract.',
+            expected: { boundedCacheIdentity: true },
+            actual: { idLength: id.length, revisionLength: revision.length },
+        })
+    }
     const metadata: VirtualRasterCacheMetadata = Object.freeze({
         domain: 'geo.virtual-raster',
         sourceId: descriptor.sourceId,
@@ -89,7 +103,7 @@ export function virtualRasterCacheAddress(
     })
     return Object.freeze({
         kind: 'virtual-raster-cache-address',
-        key: persistentCacheKey({ id, revision: coherenceRevision(coherence) }),
+        key,
         metadata,
         invalidationPrefixes: Object.freeze({ source, plane, tileMatrixSet, matrix }),
     })
@@ -154,7 +168,24 @@ function component(value: string): string {
 
 function boundedText(value: unknown): value is string {
 
-    return typeof value === 'string' && value.length > 0 && value.length <= 256
+    return typeof value === 'string' && value.length > 0 && value.length <= 256 &&
+        wellFormedText(value)
+}
+
+function wellFormedText(value: string): boolean {
+
+    for (let index = 0; index < value.length; index++) {
+        const unit = value.charCodeAt(index)
+        if (unit >= 0xd800 && unit <= 0xdbff) {
+            if (index + 1 >= value.length) return false
+            const next = value.charCodeAt(index + 1)
+            if (next < 0xdc00 || next > 0xdfff) return false
+            index++
+        } else if (unit >= 0xdc00 && unit <= 0xdfff) {
+            return false
+        }
+    }
+    return true
 }
 
 function nonNegativeSafeInteger(value: unknown): value is number {

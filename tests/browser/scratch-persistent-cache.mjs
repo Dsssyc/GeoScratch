@@ -163,6 +163,13 @@ function validate(value) {
         second.reclaimedJournal.read?.reason !== 'absent') {
         failures.push('a writer published metadata after its pending journal was reclaimed')
     }
+    if (second.repairedMetadata?.intercepted !== true ||
+        second.repairedMetadata.read?.status !== 'hit' ||
+        second.repairedMetadata.facts?.observationScope !== 'instance' ||
+        JSON.stringify(second.repairedMetadata.read.payload) !==
+            JSON.stringify([ 31, 32, 33, 34 ])) {
+        failures.push('invalid metadata recovery deleted a concurrently repaired entry')
+    }
     if (events.consoleFailures.length !== 0 || events.consoleWarnings.length !== 0 ||
         events.pageErrors.length !== 0 || events.requestFailures.length !== 0 ||
         events.httpFailures.length !== 0) {

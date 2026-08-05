@@ -107,6 +107,7 @@ export async function finishScratchPersistentCacheProof(namespace: string) {
 
     const crossContext = await proveCrossContextGarbageCollection(namespace)
     const reclaimedJournal = await proveReclaimedJournalCannotCommit(namespace)
+    const repairedMetadata = await proveConcurrentInvalidMetadataRepair(namespace)
 
     let disposedCode: string | undefined
     try {
@@ -127,6 +128,7 @@ export async function finishScratchPersistentCacheProof(namespace: string) {
         disposedCode,
         crossContext,
         reclaimedJournal,
+        repairedMetadata,
     })
 }
 
@@ -228,6 +230,61 @@ async function proveReclaimedJournalCannotCommit(namespace: string) {
     return Object.freeze({ blocked, garbage, writeResult, read })
 }
 
+async function proveConcurrentInvalidMetadataRepair(namespace: string) {
+
+    const raceNamespace = `${namespace}.invalid-metadata`
+    const writer = await openProofCache(raceNamespace, false)
+    await writer.clear()
+    const liveKey = key('race/repaired-metadata')
+    await seedInvalidMetadata(raceNamespace, liveKey)
+    const indexPrototype = IDBIndex.prototype
+    const originalGetAll = indexPrototype.getAll
+    let intercepted = false
+    let repairFailure: unknown
+    indexPrototype.getAll = function(this: IDBIndex, query?: IDBValidKey | IDBKeyRange | null) {
+
+        const request = originalGetAll.call(this, query)
+        if (intercepted || this.name !== 'namespace' || this.objectStore.name !== 'entries') {
+            return request
+        }
+        intercepted = true
+        let successHandler: ((this: IDBRequest, event: Event) => unknown) | null = null
+        Object.defineProperty(request, 'onsuccess', {
+            configurable: true,
+            get: () => successHandler,
+            set: handler => { successHandler = handler },
+        })
+        request.addEventListener('success', event => {
+            void (async() => {
+                try {
+                    await writer.delete(liveKey)
+                    await writer.put(liveKey, raw(31))
+                } catch (error) {
+                    repairFailure = error
+                }
+                successHandler?.call(request, event)
+            })()
+        }, { once: true })
+        return request
+    }
+
+    let reader: Awaited<ReturnType<typeof openProofCache>> | undefined
+    try {
+        reader = await withProofTimeout(
+            openProofCache(raceNamespace, false),
+            'reader did not complete invalid-metadata recovery'
+        )
+    } finally {
+        indexPrototype.getAll = originalGetAll
+    }
+    if (repairFailure !== undefined) throw repairFailure
+    const read = serializeRead(await reader.get(liveKey))
+    const facts = reader.inspect()
+    await reader.clear()
+    await Promise.all([ reader.dispose(), writer.dispose() ])
+    return Object.freeze({ intercepted, read, facts })
+}
+
 async function openProofCache(namespace: string, requestPersistence: boolean) {
 
     return await PersistentCache.open<ProofMetadata>({
@@ -291,6 +348,54 @@ async function getPayloadDirectory(namespace: string): Promise<FileSystemDirecto
         { create: true }
     )
     return await namespaceDirectory.getDirectoryHandle('payloads', { create: true })
+}
+
+async function seedInvalidMetadata(
+    namespace: string,
+    cacheKey: PersistentCacheKey
+): Promise<void> {
+
+    const database = await openRawCacheDatabase()
+    try {
+        const transaction = database.transaction('entries', 'readwrite')
+        const done = transactionCompletion(transaction)
+        transaction.objectStore('entries').put({
+            storageKey: `${namespace}\u0000${cacheKey.storageKey}`,
+            namespace,
+            key: cacheKey,
+            metadata: null,
+            byteLength: 0,
+            storedAt: 0,
+            lastAccessedAt: 0,
+            accessSequence: 0,
+        })
+        transaction.commit()
+        await done
+    } finally {
+        database.close()
+    }
+}
+
+async function openRawCacheDatabase(): Promise<IDBDatabase> {
+
+    return await new Promise((resolve, reject) => {
+        const request = indexedDB.open('geoscratch-persistent-cache-v1', 1)
+        request.onsuccess = () => resolve(request.result)
+        request.onerror = () => reject(request.error ?? new Error('raw cache database open failed'))
+    })
+}
+
+async function transactionCompletion(transaction: IDBTransaction): Promise<void> {
+
+    return await new Promise((resolve, reject) => {
+        transaction.oncomplete = () => resolve()
+        transaction.onerror = () => reject(
+            transaction.error ?? new Error('raw cache transaction failed')
+        )
+        transaction.onabort = () => reject(
+            transaction.error ?? new Error('raw cache transaction aborted')
+        )
+    })
 }
 
 type DirectoryPrototype = {

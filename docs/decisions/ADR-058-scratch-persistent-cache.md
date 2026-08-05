@@ -61,6 +61,11 @@ identifies a logical object and `revision` identifies immutable content. The fir
 successful writer for a pair wins; later writes return `already-present` and never
 overwrite committed content.
 
+The namespace is a non-empty, well-formed Unicode string whose UTF-8 encoding is at
+most 120 bytes. Its OPFS directory is the injective lowercase hexadecimal encoding
+of those bytes, keeping the generated path component within the browser filesystem
+limit without allowing `TextEncoder` replacement-character collisions.
+
 Metadata is structured-cloned into IndexedDB. A payload is an optional, non-empty,
 whole `ArrayBuffer` snapshotted at `put()` and stored as an immutable OPFS `.bin`
 file. A metadata-only entry is valid. `get()` returns a fresh caller-owned buffer,
@@ -83,6 +88,12 @@ Open-time recovery removes stale pending rows and unreferenced payload files.
 Missing or size-mismatched committed payloads become structured repair misses and
 their metadata is removed. Cleanup failures are retained in bounded diagnostics for
 later garbage collection; they do not reverse a committed metadata transaction.
+
+Every invalid-metadata deletion is conditional. The repairing context rereads the
+candidate inside the same IndexedDB readwrite transaction that may delete it. If
+another context has already installed a valid record for the requested immutable
+key, recovery preserves that record and retries the read; it never deletes from a
+stale open-time or read-time snapshot.
 
 Garbage collection rechecks every deletion candidate against committed entries and
 pending rows in one IndexedDB snapshot immediately before removing the immutable

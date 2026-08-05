@@ -64,6 +64,29 @@ describe('Scratch persistent cache contract', () => {
         expect(failure.context).to.deep.include({ domain: 'cache' })
     })
 
+    it('rejects namespaces that cannot map injectively to a bounded OPFS directory', async() => {
+
+        for (const namespace of [ '\ud800', '界'.repeat(41) ]) {
+            let failure
+            try {
+                await PersistentCache.open({
+                    namespace,
+                    maxPayloadBytes: 1024,
+                    maxEntries: 4,
+                })
+            } catch (error) {
+                failure = error
+            }
+
+            expect(isScratchDiagnosticError(failure)).to.equal(true)
+            expect(failure.diagnostic).to.deep.include({
+                domain: 'cache',
+                code: 'CACHE_DESCRIPTOR_INVALID',
+                phase: 'cache-open',
+            })
+        }
+    })
+
     it('maps Geo virtual raster facts into a Scratch key and cloneable metadata', () => {
 
         const address = virtualRasterCacheAddress({
