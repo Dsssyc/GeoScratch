@@ -9,6 +9,7 @@
     "allowJs": true,
     "checkJs": false,
     "declaration": true,
+    "stripInternal": true,
     "emitDeclarationOnly": false,
     "rootDir": "src",
     "outDir": "dist",

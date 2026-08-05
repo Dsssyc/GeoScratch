@@ -1,5 +1,6 @@
 import * as scr from 'geoscratch'
 import * as scratchCompat from 'geoscratch/scratch'
+import * as workers from 'geoscratch/worker'
 import {
     CellLocalF32Codec,
     GeoDiagnosticError,
@@ -255,6 +256,80 @@ void typedRasterSample
 void typedRasterGpuState
 const planeGeometry = plane(2)
 const sphereGeometry = sphere(1, 8, 4)
+
+const typedWorkerModule = workers.defineWorkerModule({
+    id: 'typed-worker-module',
+    version: '1',
+    operations: {
+        double(input: { value: number }, context: workers.WorkerOperationContext) {
+
+            return context.signal.aborted ? 0 : input.value * 2
+        },
+        transfer(input: ArrayBuffer) {
+
+            return workers.transferWorkerResult(input, [ input ])
+        },
+    },
+    context: {
+        create(init: { value: number }) {
+
+            return { value: init.value }
+        },
+        operations: {
+            increment(state: { value: number }, input: { by: number }) {
+
+                state.value += input.by
+                return state.value
+            },
+        },
+        snapshot(state: { value: number }) {
+
+            return { value: state.value }
+        },
+    },
+})
+const typedWorkerSystem = new workers.WorkerSystem({ maxWorkers: 2 })
+const typedWorkerGroup: workers.WorkerGroup = typedWorkerSystem.createGroup({
+    id: 'typed-worker-group',
+    modules: [ {
+        id: typedWorkerModule.id,
+        version: typedWorkerModule.version,
+        url: new URL('./typed-worker-module.js', import.meta.url),
+    } ],
+    isolation: 'group',
+    size: { min: 0, max: 2 },
+    maxQueuedTasks: 8,
+    maxActiveTasks: 2,
+    idleTimeoutMs: 1_000,
+})
+const typedWorkerTask: workers.WorkerTaskHandle<number> = typedWorkerGroup.run<
+    { value: number },
+    number
+>({
+    module: 'typed-worker-module',
+    operation: 'double',
+    input: { value: 3 },
+    priority: { class: 'critical', score: 1 },
+    cancellation: 'cooperative',
+    staleKey: 'typed-generation',
+    generation: 1,
+})
+const typedWorkerFacts: workers.WorkerTaskFacts = typedWorkerTask.inspect()
+const typedWorkerContext = typedWorkerGroup.openContext<{ value: number }, { value: number }>({
+    module: 'typed-worker-module',
+    key: 'typed-context',
+    init: { value: 1 },
+})
+// @ts-expect-error Hard cancellation requires the documented cancellation mode values
+typedWorkerGroup.run({ module: 'typed-worker-module', operation: 'double', input: {}, cancellation: 'kill' })
+// @ts-expect-error Worker groups are created through their owning WorkerSystem
+new workers.WorkerGroup()
+// @ts-expect-error Scheduler pumping is package-internal
+typedWorkerSystem.schedule()
+// @ts-expect-error Worker host control is package-internal
+typedWorkerGroup.contextControl
+void typedWorkerFacts
+void typedWorkerContext
 
 async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
 

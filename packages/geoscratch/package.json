@@ -21,6 +21,10 @@
       "types": "./dist/geometry/index.d.ts",
       "import": "./dist/geometry/index.js"
     },
+    "./worker": {
+      "types": "./dist/worker.d.ts",
+      "import": "./dist/worker.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
