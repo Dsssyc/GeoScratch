@@ -11,6 +11,7 @@
   },
   "include": [
     "tests/types/**/*.ts",
+    "tests/fixtures/geo-virtual-raster-dynamic-flow.ts",
     "packages/geoscratch/src/core/utils/uuid.js"
   ]
 }

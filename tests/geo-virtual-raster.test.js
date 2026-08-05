@@ -314,6 +314,8 @@ describe('Geo virtual raster', () => {
         await work.done
         gpuState.acknowledge(snapshot)
 
+        expect(update.atlasUploads.every(upload => upload.isDisposed)).to.equal(true)
+        expect(update.pageTableUpload.isDisposed).to.equal(false)
         expect(gpuState.atlas).to.equal(stableAtlas)
         expect(gpuState.pageTable).to.equal(stablePageTable)
         expect(gpuState.stage(snapshot).commands).to.deep.equal([])

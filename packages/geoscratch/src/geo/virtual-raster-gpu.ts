@@ -61,6 +61,7 @@ export class VirtualRasterGpuState {
     #stagedSnapshotEpoch: number | undefined
     #stagedSlotGenerations = new Map<number, number>()
     #uploadedSlotGenerations = new Map<number, number>()
+    #stagedAtlasUploads: TextureUploadCommand[] = []
 
     private constructor(
         runtime: ScratchRuntime,
@@ -167,6 +168,7 @@ export class VirtualRasterGpuState {
                 atlasUploads: Object.freeze([]),
             })
         }
+        this.#releaseStagedAtlasUploads()
         const physicalPages = physicalPagesForSnapshot(snapshot)
         const atlasUploads: TextureUploadCommand[] = []
         const stagedGenerations = new Map<number, number>()
@@ -206,6 +208,7 @@ export class VirtualRasterGpuState {
         this.#encodePageTable(snapshot)
         this.#stagedSnapshotEpoch = snapshot.epoch
         this.#stagedSlotGenerations = stagedGenerations
+        this.#stagedAtlasUploads = [ ...atlasUploads ]
         return Object.freeze({
             snapshotEpoch: snapshot.epoch,
             commands: Object.freeze([ ...atlasUploads, this.#pageTableUpload ]),
@@ -232,6 +235,7 @@ export class VirtualRasterGpuState {
         this.#uploadedSlotGenerations = new Map(this.#stagedSlotGenerations)
         this.#stagedSnapshotEpoch = undefined
         this.#stagedSlotGenerations.clear()
+        this.#releaseStagedAtlasUploads()
     }
 
     facts(): VirtualRasterGpuFacts {
@@ -271,6 +275,7 @@ export class VirtualRasterGpuState {
         this.atlas.dispose()
         this.#stagedSlotGenerations.clear()
         this.#uploadedSlotGenerations.clear()
+        this.#releaseStagedAtlasUploads()
     }
 
     #encodePageTable(snapshot: VirtualRasterSnapshot): void {
@@ -303,6 +308,12 @@ export class VirtualRasterGpuState {
                 message: 'Virtual raster GPU state is disposed.',
             })
         }
+    }
+
+    #releaseStagedAtlasUploads(): void {
+
+        for (const upload of this.#stagedAtlasUploads) upload.dispose()
+        this.#stagedAtlasUploads.length = 0
     }
 }
 
