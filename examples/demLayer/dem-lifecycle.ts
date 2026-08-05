@@ -52,6 +52,7 @@ export function createDemLifecycle() {
 
     const abortController = new AbortController()
     const stopActions: StopAction[] = []
+    const releaseActions: StopAction[] = []
     const pendingObservations = new Map<number, ObservationEntry>()
     const cleanupActions: CleanupAction[] = []
     const cleanupFailures: CleanupFailure[] = []
@@ -102,16 +103,20 @@ export function createDemLifecycle() {
         return value
     }
 
-    function deferStop({ label, run }: { label: string; run: LifecycleActionRun }) {
+    function registerAction(
+        actions: StopAction[],
+        actionName: string,
+        { label, run }: { label: string; run: LifecycleActionRun }
+    ) {
 
-        assertActive('register stop action')
+        assertActive(`register ${actionName} action`)
         if (typeof label !== 'string' || label.length === 0) {
             throw new TypeError('DEM stop action label must be a non-empty string')
         }
         if (typeof run !== 'function') throw new TypeError('DEM stop action must be a function')
 
         const action: StopAction = { id: nextActionId++, label, run, active: true }
-        stopActions.push(action)
+        actions.push(action)
         return Object.freeze({
             cancel() {
                 if (!action.active) return false
@@ -123,6 +128,16 @@ export function createDemLifecycle() {
                 return action.active
             },
         })
+    }
+
+    function deferStop(action: { label: string; run: LifecycleActionRun }) {
+
+        return registerAction(stopActions, 'stop', action)
+    }
+
+    function deferRelease(action: { label: string; run: LifecycleActionRun }) {
+
+        return registerAction(releaseActions, 'release', action)
     }
 
     function track<T>(observation: T | PromiseLike<T>, label = 'submitted-work'): Promise<T> {
@@ -176,15 +191,15 @@ export function createDemLifecycle() {
         }
     }
 
-    async function runStopActions() {
+    async function runActions(actions: StopAction[], phase: 'stop' | 'release') {
 
-        for (let index = stopActions.length - 1; index >= 0; index--) {
-            const action = stopActions[index]
+        for (let index = actions.length - 1; index >= 0; index--) {
+            const action = actions[index]
             if (!action.active) continue
             action.active = false
             const run = action.run
             action.run = undefined
-            await recordAction('stop', action.label, run as LifecycleActionRun)
+            await recordAction(phase, action.label, run as LifecycleActionRun)
         }
     }
 
@@ -216,8 +231,9 @@ export function createDemLifecycle() {
 
     async function disposeOnce(pendingAtDisposal: readonly ObservationEntry[]) {
 
-        await runStopActions()
+        await runActions(stopActions, 'stop')
         await settle(pendingAtDisposal)
+        await runActions(releaseActions, 'release')
 
         if (map !== undefined) await recordAction('release', 'maplibre-map', () => map!.remove())
         if (runtime !== undefined) await recordAction('release', 'scratch-runtime', () => runtime!.dispose())
@@ -225,6 +241,7 @@ export function createDemLifecycle() {
         map = undefined
         runtime = undefined
         stopActions.length = 0
+        releaseActions.length = 0
         pendingObservations.clear()
         state = 'disposed'
 
@@ -254,7 +271,8 @@ export function createDemLifecycle() {
 
         return Object.freeze({
             state,
-            activeActionCount: stopActions.filter(action => action.active).length,
+            activeActionCount: [ ...stopActions, ...releaseActions ]
+                .filter(action => action.active).length,
             pendingObservationCount: pendingObservations.size,
             ownsMap: map !== undefined,
             ownsRuntime: runtime !== undefined,
@@ -266,6 +284,7 @@ export function createDemLifecycle() {
         ownRuntime,
         acquireRuntime,
         deferStop,
+        deferRelease,
         track,
         drain,
         dispose,

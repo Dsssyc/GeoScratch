@@ -1,10 +1,29 @@
-import { defineConfig } from 'vite'
+import { defineConfig, type Plugin } from 'vite'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const examplesRoot = path.dirname(fileURLToPath(import.meta.url))
 const projectRoot = path.resolve(examplesRoot, '..')
 const examplesPublic = path.resolve(examplesRoot, 'public')
+const demWorkerUrlModule = path.resolve(examplesRoot, 'demLayer/dem-tile-worker-url.ts')
+const demWorkerModule = path.resolve(examplesRoot, 'demLayer/dem-tile-worker.ts')
+
+function workerModuleUrlPlugin(): Plugin {
+  return {
+    name: 'geoscratch-worker-module-url',
+    apply: 'build' as const,
+    load(id: string) {
+      if (path.resolve(id) !== demWorkerUrlModule) return undefined
+      const reference = this.emitFile({
+        type: 'chunk',
+        id: demWorkerModule,
+        name: 'dem-tile-worker-module',
+        preserveSignature: 'strict',
+      })
+      return `export default import.meta.ROLLUP_FILE_URL_${reference};`
+    },
+  }
+}
 
 const examplePages = {
   index: path.resolve(examplesRoot, 'index.html'),
@@ -32,6 +51,7 @@ export default defineConfig({
   root: examplesRoot,
   publicDir: examplesPublic,
   plugins: [
+    workerModuleUrlPlugin(),
   ],
   build: {
     outDir: path.resolve(projectRoot, 'dist/examples'),

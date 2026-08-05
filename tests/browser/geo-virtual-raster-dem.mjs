@@ -14,6 +14,9 @@ const viteEntry = resolve(repositoryRoot, 'node_modules/vite/bin/vite.js')
 const tileBuildEntry = resolve(tileServerRoot, '.venv/bin/dem-tile-build')
 const tileServeEntry = resolve(tileServerRoot, '.venv/bin/dem-tile-serve')
 const timeout = positiveInteger(process.env.GEO_VIRTUAL_RASTER_DEM_TIMEOUT_MS, 120_000)
+const viteMode = process.env.GEO_VIRTUAL_RASTER_DEM_VITE_MODE === 'preview'
+    ? 'preview'
+    : 'dev'
 const outputDirectory = resolve(
     process.env.GEO_VIRTUAL_RASTER_DEM_OUTPUT ?? '/tmp/geoscratch-virtual-raster-dem'
 )
@@ -22,17 +25,16 @@ const tilePort = await findAvailablePort()
 const baseUrl = `http://127.0.0.1:${vitePort}`
 const tileBaseUrl = `http://127.0.0.1:${tilePort}`
 const defaultCamera = Object.freeze({ center: [ 120.980697, 31.684162 ], zoom: 10 })
-const sourceFeatureRow = 256
-const logicalFeatureY = 558 - 1 - sourceFeatureRow
 const pageBoundaryCamera = Object.freeze({
-    center: [
-        120.04373606134682 + (121.96623240116922 - 120.04373606134682) * 0.5,
-        31.173901952209487 +
-            (32.08401085804678 - 31.173901952209487) * logicalFeatureY / 558,
-    ],
+    center: [ 120.9375, 31.684162 ],
     zoom: 11,
 })
-const eastCamera = Object.freeze({ center: [ 121.72, 31.78 ], zoom: 11 })
+const westCamera = Object.freeze({ center: [ 120.80, 31.68 ], zoom: 11 })
+const eastCamera = Object.freeze({ center: [ 121.72, 31.65 ], zoom: 11 })
+const northCamera = Object.freeze({ center: [ 120.98, 31.98 ], zoom: 11 })
+const southCamera = Object.freeze({ center: [ 120.98, 31.64 ], zoom: 11 })
+const churnWestCamera = Object.freeze({ center: [ 120.55, 31.65 ], zoom: 11 })
+const churnSouthCamera = Object.freeze({ center: [ 120.98, 31.34 ], zoom: 11 })
 const zoomedOutCamera = Object.freeze({ center: defaultCamera.center, zoom: 9 })
 
 await mkdir(outputDirectory, { recursive: true })
@@ -51,6 +53,7 @@ try {
     await waitForHttpProcess(tileServer, `${tileBaseUrl}/health`, 'DEM tile server')
     vite = startProcess(process.execPath, [
         viteEntry,
+        ...(viteMode === 'preview' ? [ 'preview' ] : []),
         '--host',
         '127.0.0.1',
         '--port',
@@ -96,6 +99,7 @@ const result = {
     tileBaseUrl,
     atlasPages: 2,
     outputDirectory,
+    viteMode,
     sourceHash: parseBuildHash(build?.stdout),
     proof: summarizeProof(proof),
     processFacts,
@@ -116,11 +120,21 @@ async function runProof(activeBrowser) {
         viewport: { width: 960, height: 720 },
         deviceScaleFactor: 1,
     })
+    let tileDelayMs = 0
+    await context.route(`${tileBaseUrl}/tiles/**`, async route => {
+        const capturedDelay = tileDelayMs
+        if (capturedDelay > 0) await delay(capturedDelay)
+        try {
+            await route.continue()
+        } catch {
+            // An obsolete Worker fetch can be aborted while the proof delays it.
+        }
+    })
     const page = await context.newPage()
     const events = observePage(page)
     try {
         const url = `${baseUrl}/demLayer/index.html?proof=1&atlasPages=2` +
-            `&tileServer=${encodeURIComponent(tileBaseUrl)}`
+            `&cache=memory&tileServer=${encodeURIComponent(tileBaseUrl)}`
         await page.goto(url, { waitUntil: 'domcontentloaded', timeout })
         const initial = await waitForStableFacts(page)
         const initialCapture = await capture(page, 'initial')
@@ -131,10 +145,29 @@ async function runProof(activeBrowser) {
         const boundary = await moveAndWait(page, detailed, pageBoundaryCamera)
         const boundaryCapture = await capture(page, 'page-boundary')
 
-        const east = await moveAndWait(page, boundary, eastCamera)
-        const eastCapture = await capture(page, 'east-pan')
+        tileDelayMs = 150
+        await page.evaluate(async(cameras) => {
+            for (const camera of cameras) {
+                window.__DEM_LAYER_PROOF__.moveCamera(camera)
+                await new Promise(resolvePromise => setTimeout(resolvePromise, 25))
+            }
+        }, [ eastCamera, churnWestCamera, northCamera, churnSouthCamera, eastCamera ])
+        tileDelayMs = 0
+        const churn = await waitForStableFacts(page, facts => (
+            selectionMatchesCamera(facts, eastCamera)
+        ))
+        const churnCapture = await capture(page, 'rapid-churn-east')
 
-        const zoomedOut = await moveAndWait(page, east, zoomedOutCamera)
+        const west = await moveAndWait(page, churn, westCamera)
+        const westCapture = await capture(page, 'west-pan')
+
+        const north = await moveAndWait(page, west, northCamera)
+        const northCapture = await capture(page, 'north-pan')
+
+        const south = await moveAndWait(page, north, southCamera)
+        const southCapture = await capture(page, 'south-pan')
+
+        const zoomedOut = await moveAndWait(page, south, zoomedOutCamera)
         const zoomedOutCapture = await capture(page, 'zoom-out')
 
         const returned = await moveAndWait(page, zoomedOut, pageBoundaryCamera)
@@ -169,7 +202,10 @@ async function runProof(activeBrowser) {
                 initial,
                 detailed,
                 boundary,
-                east,
+                churn,
+                west,
+                north,
+                south,
                 zoomedOut,
                 returned,
                 repeated,
@@ -180,7 +216,10 @@ async function runProof(activeBrowser) {
                 initial: initialCapture,
                 detailed: detailedCapture,
                 boundary: boundaryCapture,
-                east: eastCapture,
+                churn: churnCapture,
+                west: westCapture,
+                north: northCapture,
+                south: southCapture,
                 zoomedOut: zoomedOutCapture,
                 returned: returnedCapture,
                 repeated: repeatedCapture,
@@ -225,6 +264,16 @@ async function waitForStableFacts(page, additional = () => true) {
         if (facts.status === 'ready' && Number(facts.frames) === Number(facts.observedFrames) &&
             virtualRaster?.residency?.pendingCount === 0 &&
             virtualRaster?.residency?.stagedCount === 0 &&
+            virtualRaster?.residency?.stagingBytes === 0 &&
+            virtualRaster?.scheduler?.activeRequestCount === 0 &&
+            virtualRaster?.scheduler?.queuedRequestCount === 0 &&
+            virtualRaster?.worker?.pendingCandidateCount === 0 &&
+            virtualRaster?.worker?.senderDecodedByteLength === 0 &&
+            virtualRaster?.worker?.system?.activeTaskCount === 0 &&
+            virtualRaster?.worker?.system?.queuedTaskCount === 0 &&
+            virtualRaster?.worker?.group?.activeTaskCount === 0 &&
+            virtualRaster?.worker?.group?.queuedTaskCount === 0 &&
+            virtualRaster?.gpu?.stagedSnapshotEpoch === undefined &&
             Number(facts.currentPendingNativeObservations) === 0 && additional(facts)) {
             return facts
         }
@@ -237,6 +286,9 @@ async function waitForStableFacts(page, additional = () => true) {
         observedFrames: lastFacts?.observedFrames,
         virtualRequestedPageCount: lastFacts?.virtualRequestedPageCount,
         residency: virtualRaster?.residency,
+        scheduler: virtualRaster?.scheduler,
+        worker: virtualRaster?.worker,
+        gpu: virtualRaster?.gpu,
     })}`)
 }
 
@@ -284,12 +336,41 @@ async function inspectPixels(page, png) {
             }
             if (pixels[index + 3] === 0) nonFiniteEquivalent++
         }
+        const contrast = (first, second) => (
+            Math.abs(pixels[first] - pixels[second]) +
+            Math.abs(pixels[first + 1] - pixels[second + 1]) +
+            Math.abs(pixels[first + 2] - pixels[second + 2]) >= 36
+        )
+        const minimumX = Math.floor(canvas.width * 0.05)
+        const maximumX = Math.ceil(canvas.width * 0.95)
+        const minimumY = Math.floor(canvas.height * 0.05)
+        const maximumY = Math.ceil(canvas.height * 0.85)
+        let maxVerticalContrastRun = 0
+        for (let x = minimumX + 1; x < maximumX; x++) {
+            let run = 0
+            for (let y = minimumY; y < maximumY; y++) {
+                const current = (y * canvas.width + x) * 4
+                run = contrast(current, current - 4) ? run + 1 : 0
+                maxVerticalContrastRun = Math.max(maxVerticalContrastRun, run)
+            }
+        }
+        let maxHorizontalContrastRun = 0
+        for (let y = minimumY + 1; y < maximumY; y++) {
+            let run = 0
+            for (let x = minimumX; x < maximumX; x++) {
+                const current = (y * canvas.width + x) * 4
+                run = contrast(current, current - canvas.width * 4) ? run + 1 : 0
+                maxHorizontalContrastRun = Math.max(maxHorizontalContrastRun, run)
+            }
+        }
         return {
             width: canvas.width,
             height: canvas.height,
             nonBackground,
             transparentPixels: nonFiniteEquivalent,
             channelRange: maximum - minimum,
+            maxVerticalContrastRun,
+            maxHorizontalContrastRun,
         }
     }, png.toString('base64'))
 }
@@ -309,53 +390,121 @@ function validateProof(value, processState) {
         identityHashes.add(facts.currentStableIdentityHash)
         const virtualRaster = parseJson(facts.virtualRaster)
         const residency = virtualRaster?.residency
-        if (virtualRaster?.coordinateEncoding !== 'cell-local-f32' ||
-            virtualRaster?.failedPageKeys?.length !== 0 || residency?.pinnedCount !== 1 ||
+        const scheduler = virtualRaster?.scheduler
+        const worker = virtualRaster?.worker
+        const gpu = virtualRaster?.gpu
+        if (virtualRaster?.coordinateEncoding !== 'wide-fixed' ||
+            virtualRaster?.coordinateBits !== 40 ||
+            virtualRaster?.tileMatrixSetId !== 'WebMercatorQuad' ||
+            virtualRaster?.sourceOrientation !== 'north-up-row-major' ||
+            virtualRaster?.tileOrientation !== 'north-up-row-major' ||
+            virtualRaster?.cachePolicy !== 'memory' ||
+            virtualRaster?.demandStopped !== false || virtualRaster?.stopped !== false ||
+            residency?.pinnedCount !== 1 ||
             residency?.residentCount < 1 || residency?.residentCount > 2 ||
-            residency?.maxPhysicalPages !== 2 || residency?.cpuBytes > residency?.maxCpuBytes ||
+            residency?.maxPhysicalPages !== 2 || residency?.stagedCount !== 0 ||
+            residency?.stagingBytes !== 0 ||
             residency?.failedCount !== 0 || residency?.staleResponseCount !== 0 ||
             residency?.history?.length > 64) {
             failures.push(`${name} frame violated bounded virtual-raster residency`)
+        }
+        if (scheduler?.activeRequestCount !== 0 || scheduler?.queuedRequestCount !== 0 ||
+            scheduler?.activeNetworkCount !== 0 || scheduler?.activeDecodeCount !== 0 ||
+            scheduler?.failedRequestCount !== 0 || scheduler?.history?.length > 64 ||
+            worker?.pendingCandidateCount !== 0 || worker?.senderDecodedByteLength !== 0 ||
+            worker?.cache?.tier !== 'memory' || worker?.cache?.persistentBytes !== 0 ||
+            worker?.cache?.memoryBytes > 16 * 1024 * 1024 ||
+            worker?.group?.queuedTaskCount !== 0 || worker?.group?.activeTaskCount !== 0 ||
+            worker?.group?.failedTaskCount !== 0 ||
+            worker?.group?.history?.length > 64 || worker?.system?.queuedTaskCount !== 0 ||
+            worker?.system?.activeTaskCount !== 0 || worker?.system?.history?.length > 64 ||
+            worker?.group?.workerCount < 1 ||
+            worker?.group?.workerCount > worker?.system?.maxWorkers ||
+            worker?.group?.maxActiveTasks > worker?.system?.maxWorkers ||
+            gpu?.maxPhysicalPages !== 2 || gpu?.pageTableEntryCount !== 49 ||
+            gpu?.stagedSnapshotEpoch !== undefined) {
+            failures.push(`${name} frame violated bounded Worker/cache/GPU state`)
         }
     }
     if (identityHashes.size !== 1) failures.push('persistent DEM graph identity changed')
 
     const detailedVirtual = parseJson(value.facts.detailed.virtualRaster)
     const boundaryVirtual = parseJson(value.facts.boundary.virtualRaster)
-    const eastVirtual = parseJson(value.facts.east.virtualRaster)
+    const churnVirtual = parseJson(value.facts.churn.virtualRaster)
+    const zoomedOutVirtual = parseJson(value.facts.zoomedOut.virtualRaster)
+    const returnedVirtual = parseJson(value.facts.returned.virtualRaster)
     if (detailedVirtual?.residency?.fallbackCount < 1 ||
         boundaryVirtual?.residency?.fallbackCount < detailedVirtual.residency.fallbackCount) {
         failures.push('parent fallback was not observable under the two-page atlas')
     }
-    if (eastVirtual?.residency?.evictionCount < 1) {
+    if (churnVirtual?.residency?.evictionCount <= boundaryVirtual?.residency?.evictionCount) {
         failures.push('cross-page pan did not force deterministic atlas eviction')
+    }
+    if (churnVirtual?.scheduler?.cancellationCount <=
+            boundaryVirtual?.scheduler?.cancellationCount &&
+        churnVirtual?.scheduler?.staleResultCount <=
+            boundaryVirtual?.scheduler?.staleResultCount &&
+        churnVirtual?.worker?.group?.cancelledTaskCount <=
+            boundaryVirtual?.worker?.group?.cancelledTaskCount) {
+        failures.push('rapid camera churn did not cancel or reject obsolete Worker demand')
+    }
+    if (churnVirtual?.residency?.staleResponseCount !== 0 ||
+        !selectionMatchesCamera(value.facts.churn, eastCamera)) {
+        failures.push('obsolete camera demand overwrote the final churn selection')
+    }
+    for (const [ name, camera ] of [
+        [ 'west', westCamera ],
+        [ 'north', northCamera ],
+        [ 'south', southCamera ],
+    ]) {
+        if (!selectionMatchesCamera(value.facts[name], camera)) {
+            failures.push(`${name} camera did not produce its canonical selection`)
+        }
     }
     const boundarySelection = parseJson(value.facts.boundary.selection)
     const returnedSelection = parseJson(value.facts.returned.selection)
     if (JSON.stringify(boundarySelection) !== JSON.stringify(returnedSelection)) {
         failures.push('camera roundtrip did not restore canonical terrain selection')
     }
+    if (value.facts.boundary.virtualPlan !== value.facts.returned.virtualPlan) {
+        failures.push('camera roundtrip changed the logical virtual-raster plan')
+    }
     if (value.captures.boundary.hash !== value.captures.returned.hash ||
         value.captures.returned.hash !== value.captures.repeated.hash) {
         failures.push('camera roundtrip or repeated static frame changed terrain pixels')
     }
+    if (returnedVirtual?.worker?.cache?.memoryHitCount <=
+            zoomedOutVirtual?.worker?.cache?.memoryHitCount ||
+        returnedVirtual?.worker?.networkRequestCount !==
+            zoomedOutVirtual?.worker?.networkRequestCount) {
+        failures.push('camera return did not reuse the accepted memory-cache payload')
+    }
     for (const [ name, captureFacts ] of Object.entries(value.captures)) {
         if (captureFacts.pixels.nonBackground < 5_000 ||
             captureFacts.pixels.channelRange < 8 ||
-            captureFacts.pixels.transparentPixels !== 0) {
-            failures.push(`${name} capture was blank, uniform, or propagated invalid positions`)
+            captureFacts.pixels.transparentPixels !== 0 ||
+            captureFacts.pixels.maxVerticalContrastRun > 96 ||
+            captureFacts.pixels.maxHorizontalContrastRun > 96) {
+            failures.push(`${name} capture was blank, uniform, seamed, or propagated invalid positions`)
         }
     }
     if (value.captures.detailed.hash === value.captures.boundary.hash ||
-        value.captures.boundary.hash === value.captures.east.hash ||
-        value.captures.east.hash === value.captures.zoomedOut.hash) {
+        value.captures.boundary.hash === value.captures.churn.hash ||
+        value.captures.churn.hash === value.captures.west.hash ||
+        value.captures.north.hash === value.captures.south.hash ||
+        value.captures.south.hash === value.captures.zoomedOut.hash) {
         failures.push('pan/zoom/page-boundary captures did not change')
     }
     if (value.tileStats?.tileRequests < 3 || value.tileStats?.cogWindowReads < 3 ||
         value.tileStats?.tileFailures !== 0 || value.tileStats?.tileNotFound !== 0) {
         failures.push('COG tile service did not provide multiple clean window reads')
     }
-    if (value.events.tileRequests.length < 3 || value.events.completeImageRequests.length !== 0) {
+    const standardTiles = new Set(value.events.tileRequests.filter(url => (
+        /^\/tiles\/WebMercatorQuad\/\d+\/\d+\/\d+\.png$/.test(new URL(url).pathname)
+    )))
+    if (standardTiles.size < 3 || value.events.completeImageRequests.length !== 0 ||
+        value.events.legacyTileRequests.length !== 0 ||
+        standardTiles.size !== new Set(value.events.tileRequests).size) {
         failures.push('browser tile traffic did not prove the clean-cut HTTP path')
     }
     if (value.events.consoleFailures.length !== 0 || value.events.consoleWarnings.length !== 0 ||
@@ -378,6 +527,46 @@ function validateProof(value, processState) {
         cleanup?.lifecycle?.state !== 'disposed') {
         failures.push('DEM lifecycle retained work or cleanup failures')
     }
+    const terminalVirtual = cleanup?.virtualRaster
+    if (terminalVirtual?.demandStopped !== true || terminalVirtual?.stopped !== true ||
+        terminalVirtual?.residency?.disposed !== true ||
+        terminalVirtual?.scheduler?.disposed !== true ||
+        terminalVirtual?.worker?.disposed !== true ||
+        terminalVirtual?.worker?.pendingCandidateCount !== 0 ||
+        terminalVirtual?.worker?.senderDecodedByteLength !== 0 ||
+        terminalVirtual?.worker?.cache?.memoryBytes !== 0 ||
+        terminalVirtual?.worker?.cache?.persistentBytes !== 0 ||
+        terminalVirtual?.worker?.workers?.some(worker => (
+            worker.cache.disposed !== true || worker.cache.memoryEntryCount !== 0 ||
+            worker.cache.memoryBytes !== 0 || worker.cache.persistentEntryCount !== 0 ||
+            worker.cache.persistentBytes !== 0 || worker.pendingCandidateCount !== 0 ||
+            worker.senderDecodedByteLength !== 0
+        )) !== false ||
+        terminalVirtual?.worker?.system?.disposed !== true ||
+        terminalVirtual?.worker?.system?.workerCount !== 0 ||
+        terminalVirtual?.worker?.system?.queuedTaskCount !== 0 ||
+        terminalVirtual?.worker?.system?.activeTaskCount !== 0 ||
+        terminalVirtual?.worker?.system?.contextCount !== 0 ||
+        terminalVirtual?.worker?.group?.state !== 'disposed' ||
+        terminalVirtual?.worker?.group?.workerCount !== 0 ||
+        terminalVirtual?.worker?.group?.queuedTaskCount !== 0 ||
+        terminalVirtual?.worker?.group?.activeTaskCount !== 0 ||
+        terminalVirtual?.worker?.group?.contextCount !== 0) {
+        failures.push('DEM cleanup retained Worker, request, staging, or residency ownership')
+    }
+    const cleanupActions = cleanup?.report?.cleanupActions ?? []
+    const demandStop = cleanupActions.findIndex(action => (
+        action.phase === 'stop' && action.label === 'dem-virtual-raster-demand'
+    ))
+    const streamingRelease = cleanupActions.findIndex(action => (
+        action.phase === 'release' && action.label === 'dem-virtual-raster-streaming'
+    ))
+    const runtimeRelease = cleanupActions.findIndex(action => (
+        action.phase === 'release' && action.label === 'scratch-runtime'
+    ))
+    if (demandStop < 0 || streamingRelease <= demandStop || runtimeRelease <= streamingRelease) {
+        failures.push('DEM cleanup did not stop demand before releasing Workers and Scratch')
+    }
     if (!processState.browserClosed || !processState.viteClosed || !processState.tileServerClosed) {
         failures.push('managed browser or service process remained reachable')
     }
@@ -387,6 +576,7 @@ function validateProof(value, processState) {
 function summarizeProof(value) {
 
     if (value === undefined) return undefined
+    const terminal = value.cleanupPair.reports?.[0]?.virtualRaster
     const summarizeFacts = facts => {
         const virtualRaster = parseJson(facts.virtualRaster)
         const selection = parseJson(facts.selection)
@@ -394,13 +584,21 @@ function summarizeProof(value) {
             status: facts.status,
             frames: Number(facts.frames),
             visibleNodeCount: Number(facts.visibleNodeCount),
+            cameraPos: selection?.cameraPos,
+            tileBox: selection?.tileBox,
             geometryLodRange: selection?.levelRange,
             requestedLodRange: parseJson(facts.virtualPlan)?.requestedLodRange,
             snapshotEpoch: virtualRaster?.residency?.snapshotEpoch,
             residentCount: virtualRaster?.residency?.residentCount,
             fallbackCount: virtualRaster?.residency?.fallbackCount,
             evictionCount: virtualRaster?.residency?.evictionCount,
-            pageRequestCount: virtualRaster?.residency?.pageRequestCount,
+            stagingBytes: virtualRaster?.residency?.stagingBytes,
+            cancellationCount: virtualRaster?.scheduler?.cancellationCount,
+            staleResultCount: virtualRaster?.scheduler?.staleResultCount,
+            memoryHitCount: virtualRaster?.worker?.cache?.memoryHitCount,
+            networkRequestCount: virtualRaster?.worker?.networkRequestCount,
+            pendingCandidateCount: virtualRaster?.worker?.pendingCandidateCount,
+            senderDecodedByteLength: virtualRaster?.worker?.senderDecodedByteLength,
         }
     }
     return {
@@ -416,6 +614,41 @@ function summarizeProof(value) {
         captures: value.captures,
         tileStats: value.tileStats,
         cleanupEquivalent: value.cleanupPair.equivalent,
+        cleanupTerminalVirtualRaster: terminal === undefined ? undefined : {
+            demandStopped: terminal.demandStopped,
+            stopped: terminal.stopped,
+            residency: {
+                disposed: terminal.residency.disposed,
+                residentCount: terminal.residency.residentCount,
+                stagedCount: terminal.residency.stagedCount,
+                stagingBytes: terminal.residency.stagingBytes,
+            },
+            scheduler: {
+                disposed: terminal.scheduler.disposed,
+                activeRequestCount: terminal.scheduler.activeRequestCount,
+                queuedRequestCount: terminal.scheduler.queuedRequestCount,
+            },
+            worker: {
+                disposed: terminal.worker.disposed,
+                pendingCandidateCount: terminal.worker.pendingCandidateCount,
+                senderDecodedByteLength: terminal.worker.senderDecodedByteLength,
+                cacheBytes: terminal.worker.cache.memoryBytes +
+                    terminal.worker.cache.persistentBytes,
+                disposedCacheCount: terminal.worker.workers.filter(worker => (
+                    worker.cache.disposed
+                )).length,
+                system: {
+                    disposed: terminal.worker.system.disposed,
+                    workerCount: terminal.worker.system.workerCount,
+                    contextCount: terminal.worker.system.contextCount,
+                },
+                group: {
+                    state: terminal.worker.group.state,
+                    workerCount: terminal.worker.group.workerCount,
+                    contextCount: terminal.worker.group.contextCount,
+                },
+            },
+        },
         terminalStatus: value.terminalStatus,
         eventCounts: Object.fromEntries(Object.entries(value.events).map(([ name, events ]) => [
             name,
@@ -431,8 +664,10 @@ function observePage(page) {
         consoleWarnings: [],
         pageErrors: [],
         requestFailures: [],
+        cancelledTileRequests: [],
         httpFailures: [],
         tileRequests: [],
+        legacyTileRequests: [],
         completeImageRequests: [],
     }
     page.on('console', (message) => {
@@ -440,10 +675,18 @@ function observePage(page) {
         if (message.type() === 'warning') pushBounded(events.consoleWarnings, message.text())
     })
     page.on('pageerror', error => pushBounded(events.pageErrors, serializeError(error)))
-    page.on('requestfailed', request => pushBounded(
-        events.requestFailures,
-        `${request.method()} ${request.url()}: ${request.failure()?.errorText ?? 'unknown'}`
-    ))
+    page.on('requestfailed', request => {
+        const failure = `${request.method()} ${request.url()}: ` +
+            `${request.failure()?.errorText ?? 'unknown'}`
+        const url = new URL(request.url())
+        if (url.origin === tileBaseUrl &&
+            /^\/tiles\/WebMercatorQuad\/\d+\/\d+\/\d+\.png$/.test(url.pathname) &&
+            /abort|cancel/i.test(request.failure()?.errorText ?? '')) {
+            pushBounded(events.cancelledTileRequests, failure)
+            return
+        }
+        pushBounded(events.requestFailures, failure)
+    })
     page.on('response', (response) => {
         if (response.status() >= 400) {
             pushBounded(events.httpFailures, `${response.status()} ${response.url()}`)
@@ -453,6 +696,9 @@ function observePage(page) {
         const url = new URL(request.url())
         if (url.origin === tileBaseUrl && url.pathname.startsWith('/tiles/')) {
             pushBounded(events.tileRequests, url.href)
+            if (!/^\/tiles\/WebMercatorQuad\/\d+\/\d+\/\d+\.png$/.test(url.pathname)) {
+                pushBounded(events.legacyTileRequests, url.href)
+            }
         }
         if (url.pathname.endsWith('/assets/dem.png')) {
             pushBounded(events.completeImageRequests, url.href)

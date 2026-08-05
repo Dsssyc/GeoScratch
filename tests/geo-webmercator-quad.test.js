@@ -3,6 +3,7 @@ import {
     GeoDiagnosticError,
     WebMercatorQuad,
     tileMatrixCoverage,
+    virtualRasterTileAddressSpace,
     webMercatorQuadAddressCodec,
 } from 'geoscratch/geo'
 
@@ -138,6 +139,53 @@ describe('OGC WebMercatorQuad public contract', () => {
         })
         expect(() => webMercatorQuadAddressCodec({ coverage: impostorCoverage }))
             .to.throw(GeoDiagnosticError)
+    })
+
+    it('uses global standard tiles as compact virtual page identities', () => {
+
+        const coverage = fixtureCoverage()
+        const addressSpace = virtualRasterTileAddressSpace({
+            id: 'web-mercator-height',
+            coverage,
+        })
+        const detail = addressSpace.pageFromTile({
+            matrixId: '9',
+            tileRow: 202,
+            tileCol: 424,
+        })
+
+        expect(addressSpace.pageTableEntryCount).to.equal(coverage.entryCount)
+        expect(addressSpace.levelCount).to.equal(2)
+        expect(addressSpace.matrixId(0)).to.equal('9')
+        expect(addressSpace.matrixId(1)).to.equal('8')
+        expect(detail).to.deep.include({
+            level: 0,
+            coordinates: [ 424, 202 ],
+            key: '9/202/424',
+        })
+        expect(detail.tile).to.deep.include({
+            tileMatrixSetId: 'WebMercatorQuad',
+            matrixId: '9',
+            tileRow: 202,
+            tileCol: 424,
+        })
+        expect(addressSpace.tableIndex(detail)).to.equal(coverage.index(detail.tile))
+        expect(addressSpace.parent(detail)).to.deep.include({
+            level: 1,
+            key: '8/101/212',
+        })
+        expect(addressSpace.pages()).to.have.length(coverage.entryCount)
+        expect(addressSpace.pages().map(page => page.key)).to.deep.equal(
+            coverage.limits.slice().reverse().flatMap(limit => {
+                const keys = []
+                for (let row = limit.minTileRow; row <= limit.maxTileRow; row++) {
+                    for (let col = limit.minTileCol; col <= limit.maxTileCol; col++) {
+                        keys.push(`${limit.matrixId}/${row}/${col}`)
+                    }
+                }
+                return keys
+            })
+        )
     })
 
     it('matches WGSL limb addressing at tile, texel, antimeridian, and carry boundaries', () => {

@@ -33,6 +33,8 @@ export type VirtualRasterStageOptions = Readonly<{
     generation: number
 }>
 
+export type VirtualRasterPageAvailability = 'staged' | 'resident' | 'missing'
+
 export type VirtualRasterResidencyDescriptor = Readonly<{
     addressSpace: VirtualRasterAddressSpace
     plane: VirtualRasterPlane
@@ -319,12 +321,23 @@ export class VirtualRasterResidency {
         this.#demandGeneration = generation
         this.#requiredGenerations = required
         for (const [ key, staged ] of this.#staged) {
-            if (required.get(key) === staged.demandGeneration) continue
+            if (required.has(key)) {
+                staged.demandGeneration = generation
+                continue
+            }
             this.#staged.delete(key)
             releaseOwnedVirtualRasterPagePayload(staged.payload, this)
             this.#staleResponseCount++
             this.#record('stale', staged.page, `generation:${staged.demandGeneration}`)
         }
+    }
+
+    availability(page: VirtualRasterPageIdentity): VirtualRasterPageAvailability {
+
+        this.addressSpace.assertPage(page)
+        if (this.#staged.has(page.key)) return 'staged'
+        if (this.#resident.has(page.key)) return 'resident'
+        return 'missing'
     }
 
     stage(
@@ -725,11 +738,7 @@ export class VirtualRasterResidency {
 
     #historyAnchor(): VirtualRasterPageIdentity {
 
-        return this.addressSpace.page({
-            level: this.addressSpace.levelCount - 1,
-            x: 0,
-            y: 0,
-        })
+        return this.addressSpace.rootPage()
     }
 
     #assertActive(): void {

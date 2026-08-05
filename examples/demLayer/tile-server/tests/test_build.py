@@ -12,29 +12,45 @@ from geoscratch_dem_tiles.build import (
     DEM_ELEVATION_MAX,
     DEM_ELEVATION_MIN,
     DEM_SOURCE_SHA256,
+    WEB_MERCATOR_QUAD_LIMITS,
     build_dem_cog,
 )
 
 
-def test_manifest_freezes_source_and_local_raster_pyramid(built_dem):
+def test_manifest_separates_source_from_standard_web_mercator_tiles(built_dem):
     manifest = json.loads(built_dem.manifest_path.read_text(encoding="utf-8"))
 
-    assert manifest["schemaVersion"] == 1
+    assert manifest["schemaVersion"] == 2
     assert manifest["sourceHash"] == DEM_SOURCE_SHA256
-    assert manifest["contentVersion"] == f"dem-{DEM_SOURCE_SHA256[:16]}-cog-v2"
-    assert manifest["crs"] == "EPSG:4326"
-    assert manifest["bounds"] == list(DEM_BOUNDS)
-    assert manifest["rasterDimensions"] == {"width": 1024, "height": 558}
-    assert manifest["tileMatrixSet"] == {
-        "id": "GeoScratchLocalRasterQuad",
-        "origin": "southwest",
-        "axisOrder": ["east", "north"],
+    assert manifest["contentVersion"] == f"dem-{DEM_SOURCE_SHA256[:16]}-cog-wmq-v3"
+    assert manifest["source"] == {
+        "crs": "EPSG:4326",
+        "geographicBounds": list(DEM_BOUNDS),
+        "rasterDimensions": {"width": 1024, "height": 558},
+        "sampleType": "uint8",
+        "bitsPerSample": 8,
     }
-    assert manifest["tileSize"] == 256
-    assert manifest["minZoom"] == 0
-    assert manifest["maxZoom"] == 3
+    assert manifest["projectedBounds"]["crs"] == (
+        "http://www.opengis.net/def/crs/EPSG/0/3857"
+    )
+    assert len(manifest["projectedBounds"]["bounds"]) == 4
+    assert manifest["tileMatrixSet"] == {
+        "id": "WebMercatorQuad",
+        "uri": "http://www.opengis.net/def/tilematrixset/OGC/1.0/WebMercatorQuad",
+        "crs": "http://www.opengis.net/def/crs/EPSG/0/3857",
+        "cornerOfOrigin": "topLeft",
+        "tileRowDirection": "south",
+        "tileColDirection": "east",
+        "tileWidth": 256,
+        "tileHeight": 256,
+        "minTileMatrix": "4",
+        "maxTileMatrix": "10",
+        "tileMatrixIds": [str(zoom) for zoom in range(4, 11)],
+        "limits": list(WEB_MERCATOR_QUAD_LIMITS),
+    }
+    assert manifest["nativeResolution"]["closestTileMatrix"] == "10"
+    assert manifest["nativeResolution"]["resampling"] == "nearest"
     assert manifest["nodata"] is None
-    assert manifest["sampleType"] == "uint8"
     assert manifest["scale"] == pytest.approx(
         (DEM_ELEVATION_MAX - DEM_ELEVATION_MIN) / 255
     )
@@ -43,14 +59,17 @@ def test_manifest_freezes_source_and_local_raster_pyramid(built_dem):
     assert manifest["pixelOrientation"] == {
         "source": "north-up-row-major",
         "cog": "north-up-row-major",
-        "tile": "south-up-row-major",
+        "tile": "north-up-row-major",
     }
-    assert manifest["levels"] == [
-        {"zoom": 0, "decimation": 8, "width": 128, "height": 70, "pagesX": 1, "pagesY": 1},
-        {"zoom": 1, "decimation": 4, "width": 256, "height": 140, "pagesX": 1, "pagesY": 1},
-        {"zoom": 2, "decimation": 2, "width": 512, "height": 279, "pagesX": 2, "pagesY": 2},
-        {"zoom": 3, "decimation": 1, "width": 1024, "height": 558, "pagesX": 4, "pagesY": 3},
-    ]
+    assert manifest["cacheValidators"] == {
+        "coherence": "immutable",
+        "encodedRepresentation": "image/png",
+        "decoderVersion": "dem-png-unorm8-v1",
+        "etag": "content-version-and-standard-tile",
+    }
+    serialized = json.dumps(manifest, sort_keys=True)
+    assert "GeoScratchLocalRasterQuad" not in serialized
+    assert "southwest" not in serialized
 
 
 def test_cog_is_valid_north_up_and_preserves_every_source_sample(built_dem, dem_source):

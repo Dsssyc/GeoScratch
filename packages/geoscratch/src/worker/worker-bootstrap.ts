@@ -1,11 +1,9 @@
-import {
-    isWorkerTransferResult,
-} from './module.js'
 import type {
     WorkerContextDefinition,
     WorkerModuleDefinition,
     WorkerOperation,
     WorkerOperationContext,
+    WorkerTransferResult,
 } from './module.js'
 import type {
     WorkerContextDisposeMessage,
@@ -330,6 +328,13 @@ function isModuleDefinition(value: unknown): value is LoadedModule {
         typeof (value as { version?: unknown }).version === 'string' &&
         (value as { operations?: unknown }).operations !== null &&
         typeof (value as { operations?: unknown }).operations === 'object'
+}
+
+function isWorkerTransferResult(value: unknown): value is WorkerTransferResult<unknown> {
+
+    return value !== null && typeof value === 'object' &&
+        (value as { kind?: unknown }).kind === 'worker-transfer-result' &&
+        Array.isArray((value as { transfer?: unknown }).transfer)
 }
 
 function remoteError(error: unknown): WorkerRemoteError {

@@ -31,8 +31,8 @@ struct TileUniformBlock {
 };
 
 struct CanonicalNode {
-    minimum: DemCoordinatePosition,
-    maximum: DemCoordinatePosition,
+    minimum: DemAddressFixedPosition,
+    maximum: DemAddressFixedPosition,
 };
 
 @group(0) @binding(0) var<uniform> tileUniform: TileUniformBlock;
@@ -43,7 +43,7 @@ struct CanonicalNode {
 @group(1) @binding(2) var<storage, read> geometryLevels: array<u32>;
 @group(1) @binding(3) var<storage, read> geographicBoxes: array<f32>;
 @group(1) @binding(4) var<storage, read> canonicalNodes: array<CanonicalNode>;
-@group(1) @binding(5) var<storage, read> cameraCoordinate: array<DemCoordinatePosition>;
+@group(1) @binding(5) var<storage, read> cameraCoordinate: array<DemAddressFixedPosition>;
 
 @group(2) @binding(2) var lodMap: texture_2d<f32>;
 
@@ -78,40 +78,9 @@ fn geometryHeightLevel(geometryLevel: u32) -> u32 {
     return min(MAX_HEIGHT_LEVEL, FINEST_HEIGHT_GEOMETRY_LEVEL - geometryLevel);
 }
 
-fn interpolateCell(minimum: i32, maximum: i32, index: u32) -> i32 {
+fn canonicalCoordinate(node: CanonicalNode, grid: vec2u) -> DemAddressFixedPosition {
 
-    let delta = maximum - minimum;
-    let quotient = delta / i32(TERRAIN_SECTOR_SIZE);
-    let remainder = delta % i32(TERRAIN_SECTOR_SIZE);
-    return minimum + quotient * i32(index) +
-        remainder * i32(index) / i32(TERRAIN_SECTOR_SIZE);
-}
-
-fn canonicalCoordinate(node: CanonicalNode, grid: vec2u) -> DemCoordinatePosition {
-
-    var coordinate = node.minimum;
-    coordinate.axes[0].cell = interpolateCell(
-        node.minimum.axes[0].cell,
-        node.maximum.axes[0].cell,
-        grid.x,
-    );
-    coordinate.axes[1].cell = interpolateCell(
-        node.minimum.axes[1].cell,
-        node.maximum.axes[1].cell,
-        grid.y,
-    );
-    coordinate.axes[0].local = 0.0;
-    coordinate.axes[1].local = 0.0;
-    return coordinate;
-}
-
-fn logicalTexel(coordinate: DemCoordinatePosition) -> vec2f {
-
-    let x = f32(coordinate.axes[0].cell - DemRasterMinimum.axes[0].cell) /
-        f32(DemRasterMaximum.axes[0].cell - DemRasterMinimum.axes[0].cell);
-    let y = f32(coordinate.axes[1].cell - DemRasterMinimum.axes[1].cell) /
-        f32(DemRasterMaximum.axes[1].cell - DemRasterMinimum.axes[1].cell);
-    return vec2f(x, y) * DemRasterDimensions;
+    return DemCanonical_interpolate(node.minimum, node.maximum, grid);
 }
 
 fn stableAtanh(value: f32) -> f32 {
@@ -137,9 +106,9 @@ fn altitudeToMercator(latitude: f32, altitude: f32) -> f32 {
     return altitude / EARTH_CIRCUMFERENCE * cos(latitude * PI / 180.0);
 }
 
-fn positionCS(coordinate: DemCoordinatePosition, elevation: f32) -> vec4f {
+fn positionCS(coordinate: DemAddressFixedPosition, elevation: f32) -> vec4f {
 
-    let geographicDifference = DemCoordinate_difference(coordinate, cameraCoordinate[0]);
+    let geographicDifference = DemCanonical_difference_degrees(coordinate, cameraCoordinate[0]);
     let relativeX = geographicDifference[0] / 360.0;
     let relativeY = mercatorLatitudeDifference(
         dynamicUniform.cameraLatitude,
@@ -209,18 +178,17 @@ fn vMain(input: VertexInput) -> VertexOutput {
     }
 
     let coordinate = canonicalCoordinate(canonicalNodes[input.instanceIndex], grid);
-    let finestTexel = logicalTexel(coordinate);
-    let inside = all(finestTexel >= vec2f(0.0)) && all(finestTexel <= DemRasterDimensions);
+    let uv = DemCanonical_uv(coordinate);
+    let inside = DemCanonical_inside(coordinate);
     var output: VertexOutput;
     if (inside) {
-        let requestedTexel = finestTexel / f32(1u << heightLevel);
-        let sample = DemHeight_sample_vertex(requestedTexel, heightLevel);
+        let sample = DemHeight_sample_vertex(coordinate, heightLevel);
         let available = sample.status != 0u && sample.status != 3u;
         let elevation = select(DemElevationRange.x, sample.value.x, available);
         output.position = positionCS(coordinate, elevation);
         output.depth = (elevation - DemElevationRange.x) /
             (DemElevationRange.y - DemElevationRange.x);
-        output.uv = finestTexel / DemRasterDimensions;
+        output.uv = uv;
         output.sampleStatus = f32(sample.status);
         output.resolvedHeightLevel = f32(sample.resolved_level);
     } else {

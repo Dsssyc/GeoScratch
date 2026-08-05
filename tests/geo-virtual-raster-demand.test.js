@@ -92,6 +92,75 @@ describe('virtual raster demand reconciliation', () => {
         await fixture.scheduler.dispose()
     })
 
+    it('reuses staged and resident pages across newer demand generations', async() => {
+
+        const fixture = createFixture()
+        const page = fixture.pages[0]
+        const first = fixture.scheduler.reconcile(virtualRasterDemandSet({
+            generation: 1,
+            demands: [ demand(page, 1, 'critical', 1, 'root', 'required') ],
+        }))
+        fixture.executor.requests.get(page.key).resolve(transfer(page, 1))
+        await first.settled
+
+        const staged = fixture.scheduler.reconcile(virtualRasterDemandSet({
+            generation: 2,
+            demands: [ demand(page, 2, 'critical', 2, 'root', 'required') ],
+        }))
+        expect(staged).to.deep.include({ requestedCount: 0, retainedCount: 1 })
+        expect(fixture.residency.inspect()).to.deep.include({
+            stagedCount: 1,
+            staleResponseCount: 0,
+        })
+
+        const publication = fixture.scheduler.publish()
+        await publication.acknowledge()
+        const resident = fixture.scheduler.reconcile(virtualRasterDemandSet({
+            generation: 3,
+            demands: [ demand(page, 3, 'critical', 3, 'root', 'required') ],
+        }))
+        expect(resident).to.deep.include({ requestedCount: 0, retainedCount: 1 })
+        expect(fixture.executor.order).to.deep.equal([ page.key ])
+        await fixture.scheduler.dispose()
+    })
+
+    it('discards executor candidates when a request fails before transfer adoption', async() => {
+
+        const fixture = createFixture()
+        const page = fixture.pages[0]
+        const settlement = fixture.scheduler.reconcile(virtualRasterDemandSet({
+            generation: 1,
+            demands: [ demand(page, 1, 'user-visible', 1, 'detail', 'required') ],
+        }))
+        const request = fixture.executor.requests.get(page.key)
+        request.reject(new Error('decode failed'))
+        await settlement.settled
+
+        expect(request.discarded).to.equal(true)
+        expect(fixture.scheduler.inspect()).to.deep.include({ failedRequestCount: 1 })
+        await fixture.scheduler.dispose()
+    })
+
+    it('waits for cancelled request disposal before scheduler disposal resolves', async() => {
+
+        const fixture = createFixture({ rejectOnCancel: true })
+        const page = fixture.pages[0]
+        fixture.scheduler.reconcile(virtualRasterDemandSet({
+            generation: 1,
+            demands: [ demand(page, 1, 'user-visible', 1, 'detail', 'required') ],
+        }))
+        const request = fixture.executor.requests.get(page.key)
+
+        await fixture.scheduler.dispose()
+
+        expect(request.cancelled).to.equal(true)
+        expect(request.discarded).to.equal(true)
+        expect(fixture.scheduler.inspect()).to.deep.include({
+            disposed: true,
+            activeRequestCount: 0,
+        })
+    })
+
     it('rejects duplicate page demand and converges repeated disposal', async() => {
 
         const fixture = createFixture()
@@ -189,6 +258,9 @@ class FakeExecutor {
             reprioritized: undefined,
             cancel: () => {
                 request.cancelled = true
+                if (this.options.cooperativeCancel !== false || this.options.rejectOnCancel) {
+                    deferred.reject(new Error('cancelled'))
+                }
                 return this.options.cooperativeCancel === false ? 'none' : 'cooperative'
             },
             reprioritize: priority => {
@@ -198,6 +270,7 @@ class FakeExecutor {
             accept: async() => { request.accepted = true },
             discard: async() => { request.discarded = true },
             resolve: value => deferred.resolve(value),
+            reject: error => deferred.reject(error),
         }
         this.order.push(demand.page.key)
         this.requests.set(demand.page.key, request)

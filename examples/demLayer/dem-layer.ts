@@ -24,9 +24,8 @@ import {
 } from './terrain-selection.ts'
 import {
     DEM_CANONICAL_NODE_BYTES,
-    DEM_COORDINATE_CODEC,
     demVirtualRasterWgslModule,
-    encodeDemCoordinate,
+    encodeDemCameraCoordinate,
     writeDemCanonicalNodes,
 } from './dem-virtual-raster.ts'
 import type {
@@ -183,7 +182,7 @@ export async function createDemLayer({
     const codecs = createCodecs()
     const geometry = createTerrainGeometry()
     const uniforms = await createUniformResources(runtime, codecs)
-    const buffers = await createBufferResources(runtime, geometry)
+    const buffers = await createBufferResources(runtime, geometry, virtualRaster)
     const textures = await createTextures(runtime, size)
     const layouts = await createBindLayouts(runtime, codecs)
     const bindSets = await createBindSets(
@@ -260,8 +259,11 @@ export async function createDemLayer({
             builder.upload(upload)
         }
         const submitted = builder.submit()
-        virtualRaster.acknowledge(publication)
-        const observation = observeSubmittedWork(submitted).then(result => {
+        const acknowledgement = virtualRaster.acknowledge(publication, submitted)
+        const observation = Promise.all([
+            observeSubmittedWork(submitted),
+            acknowledgement,
+        ]).then(([ result ]) => {
             state.initialized = true
             state.virtualSnapshotEpoch = publication.snapshotEpoch
             return result
@@ -299,8 +301,10 @@ export async function createDemLayer({
             .render(passes.lodMap, [ commands.drawLodMap ])
             .render(passes.terrain, [ commands.drawTerrain ])
             .submit()
-        virtualRaster.acknowledge(publication)
-        const nativeObservation = observeSubmittedWork(submitted)
+        const nativeObservation = Promise.all([
+            observeSubmittedWork(submitted),
+            virtualRaster.acknowledge(publication, submitted),
+        ]).then(([ result ]) => result)
         let provenance: readonly ProvenanceFact[] = Object.freeze([])
         let provenanceFailure: unknown
         try {
@@ -480,12 +484,18 @@ function createTerrainGeometry() {
     })
 }
 
-async function createBufferResources(runtime: ScratchRuntime, geometry: TerrainGeometry) {
+async function createBufferResources(
+    runtime: ScratchRuntime,
+    geometry: TerrainGeometry,
+    virtualRaster: DemVirtualRaster
+) {
 
     const nodeLevels = new Uint32Array(MAX_TERRAIN_NODES)
     const nodeBoxes = new Float32Array(MAX_TERRAIN_NODES * 4)
     const canonicalNodes = new Uint8Array(MAX_TERRAIN_NODES * DEM_CANONICAL_NODE_BYTES)
-    const cameraCoordinate = new Uint8Array(DEM_COORDINATE_CODEC.facts.bytesPerPosition)
+    const cameraCoordinate = new Uint8Array(
+        virtualRaster.addressCodec.positionCodec.facts.bytesPerPosition
+    )
     const lodArguments = new Uint32Array([ 4, 0, 0, 0 ])
     const terrainArguments = new Uint32Array([ geometry.vertexCount, 0, 0, 0 ])
 
@@ -923,10 +933,10 @@ function updateFrameData(
     writeDemCanonicalNodes(
         graph.buffers.canonicalNodes.data,
         selection,
-        graph.virtualRaster.manifest
+        graph.virtualRaster.model
     )
     graph.buffers.cameraCoordinate.data.set(
-        DEM_COORDINATE_CODEC.pack([ encodeDemCoordinate(camera.cameraPos) ])
+        encodeDemCameraCoordinate(graph.virtualRaster.model, camera.cameraPos)
     )
     graph.buffers.lodArguments.data[1] = selection.visibleNodeCount
     graph.buffers.terrainArguments.data[1] = selection.visibleNodeCount
@@ -1084,7 +1094,7 @@ function graphContractSnapshot(graph: DemGraph) {
             maxPhysicalPages: graph.virtualRaster.residency.maxPhysicalPages,
             completeImageUpload: false,
             crossPageFiltering: 'logical-bilinear',
-            coordinateEncoding: DEM_COORDINATE_CODEC.facts.encoding,
+            coordinateEncoding: graph.virtualRaster.addressCodec.positionCodec.facts.encoding,
         }),
         persistentIdentityCount: stableIdentitySnapshot(graph).length,
         passIds: Object.freeze({

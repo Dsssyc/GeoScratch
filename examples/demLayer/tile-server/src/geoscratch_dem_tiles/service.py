@@ -10,14 +10,18 @@ from typing import Any
 
 import numpy as np
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from PIL import Image
-from rasterio.crs import CRS
 from rio_tiler.io import Reader
 
-from .build import DEFAULT_OUTPUT_DIRECTORY, TILE_SIZE
+from .build import (
+    DEFAULT_OUTPUT_DIRECTORY,
+    TILE_SIZE,
+    WEB_MERCATOR_QUAD_MAX_ZOOM,
+    WEB_MERCATOR_QUAD_MIN_ZOOM,
+)
 
 
 @dataclass
@@ -28,8 +32,11 @@ class AggregateStats:
     tile_failures: int = 0
     cog_window_reads: int = 0
     bytes_served: int = 0
-    overview_reads: dict[int, int] = field(
-        default_factory=lambda: {1: 0, 2: 0, 4: 0, 8: 0}
+    matrix_reads: dict[int, int] = field(
+        default_factory=lambda: {
+            zoom: 0
+            for zoom in range(WEB_MERCATOR_QUAD_MIN_ZOOM, WEB_MERCATOR_QUAD_MAX_ZOOM + 1)
+        }
     )
     lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
@@ -45,12 +52,12 @@ class AggregateStats:
         with self.lock:
             self.tile_failures += 1
 
-    def record_success(self, byte_count: int, decimation: int) -> None:
+    def record_success(self, byte_count: int, tile_matrix: int) -> None:
         with self.lock:
             self.tile_successes += 1
             self.cog_window_reads += 1
             self.bytes_served += byte_count
-            self.overview_reads[decimation] += 1
+            self.matrix_reads[tile_matrix] += 1
 
     def snapshot(self) -> dict[str, Any]:
         with self.lock:
@@ -61,9 +68,12 @@ class AggregateStats:
                 "tileFailures": self.tile_failures,
                 "cogWindowReads": self.cog_window_reads,
                 "bytesServed": self.bytes_served,
-                "overviewReads": {
-                    str(factor): self.overview_reads[factor]
-                    for factor in (1, 2, 4, 8)
+                "matrixReads": {
+                    str(matrix): self.matrix_reads[matrix]
+                    for matrix in range(
+                        WEB_MERCATOR_QUAD_MIN_ZOOM,
+                        WEB_MERCATOR_QUAD_MAX_ZOOM + 1,
+                    )
                 },
             }
 
@@ -71,9 +81,9 @@ class AggregateStats:
 @dataclass(frozen=True)
 class TileRead:
     content: bytes
-    valid_width: int
-    valid_height: int
-    decimation: int
+    tile_matrix: int
+    tile_row: int
+    tile_col: int
 
 
 class DemCogStore:
@@ -84,61 +94,50 @@ class DemCogStore:
         if not self.manifest_path.is_file():
             raise FileNotFoundError(f"DEM manifest does not exist: {self.manifest_path}")
         self.manifest = json.loads(self.manifest_path.read_text(encoding="utf-8"))
-        self.levels = {
-            int(level["zoom"]): level
-            for level in self.manifest["levels"]
+        self.limits = {
+            limit["matrixId"]: limit
+            for limit in self.manifest["tileMatrixSet"]["limits"]
         }
 
-    def tile_facts(self, zoom: int, page_x: int, page_y: int) -> dict[str, int] | None:
-        level = self.levels.get(zoom)
-        if level is None or page_x < 0 or page_y < 0:
+    def tile_facts(
+        self,
+        tile_matrix: str,
+        tile_row: int,
+        tile_col: int,
+    ) -> dict[str, int] | None:
+        try:
+            zoom = int(tile_matrix)
+        except ValueError:
             return None
-        if page_x >= level["pagesX"] or page_y >= level["pagesY"]:
+        if str(zoom) != tile_matrix or tile_row < 0 or tile_col < 0:
             return None
-        valid_width = min(TILE_SIZE, level["width"] - page_x * TILE_SIZE)
-        valid_height = min(TILE_SIZE, level["height"] - page_y * TILE_SIZE)
-        return {
-            "validWidth": valid_width,
-            "validHeight": valid_height,
-            "decimation": level["decimation"],
-        }
+        limit = self.limits.get(tile_matrix)
+        if limit is None:
+            return None
+        if not (
+            limit["minTileRow"] <= tile_row <= limit["maxTileRow"]
+            and limit["minTileCol"] <= tile_col <= limit["maxTileCol"]
+        ):
+            return None
+        return {"zoom": zoom, "tileRow": tile_row, "tileCol": tile_col}
 
-    def read_tile(self, zoom: int, page_x: int, page_y: int) -> TileRead:
-        facts = self.tile_facts(zoom, page_x, page_y)
+    def read_tile(self, tile_matrix: str, tile_row: int, tile_col: int) -> TileRead:
+        facts = self.tile_facts(tile_matrix, tile_row, tile_col)
         if facts is None:
-            raise KeyError((zoom, page_x, page_y))
+            raise KeyError((tile_matrix, tile_row, tile_col))
         if not self.cog_path.is_file():
             raise FileNotFoundError(self.cog_path)
 
-        width = self.manifest["rasterDimensions"]["width"]
-        height = self.manifest["rasterDimensions"]["height"]
-        west, south, east, north = self.manifest["bounds"]
-        decimation = facts["decimation"]
-        source_x0 = page_x * TILE_SIZE * decimation
-        source_y0 = page_y * TILE_SIZE * decimation
-        source_x1 = min(width, source_x0 + facts["validWidth"] * decimation)
-        source_y1 = min(height, source_y0 + facts["validHeight"] * decimation)
-        bounds = (
-            west + (east - west) * source_x0 / width,
-            south + (north - south) * source_y0 / height,
-            west + (east - west) * source_x1 / width,
-            south + (north - south) * source_y1 / height,
-        )
-
         with Reader(str(self.cog_path)) as reader:
-            image = reader.part(
-                bounds,
-                bounds_crs=CRS.from_epsg(4326),
-                dst_crs=CRS.from_epsg(4326),
+            image = reader.tile(
+                tile_col,
+                tile_row,
+                facts["zoom"],
+                tilesize=TILE_SIZE,
                 indexes=1,
-                width=facts["validWidth"],
-                height=facts["validHeight"],
                 resampling_method="nearest",
             )
-        north_up = np.ma.filled(image.array, 0)[0].astype(np.uint8, copy=False)
-        south_up = np.flipud(north_up)
-        tile = np.zeros((TILE_SIZE, TILE_SIZE), dtype=np.uint8)
-        tile[: facts["validHeight"], : facts["validWidth"]] = south_up
+        tile = np.ma.filled(image.array, 0)[0].astype(np.uint8, copy=False)
         encoded = io.BytesIO()
         Image.fromarray(tile, mode="L").save(
             encoded,
@@ -148,9 +147,15 @@ class DemCogStore:
         )
         return TileRead(
             content=encoded.getvalue(),
-            valid_width=facts["validWidth"],
-            valid_height=facts["validHeight"],
-            decimation=decimation,
+            tile_matrix=facts["zoom"],
+            tile_row=tile_row,
+            tile_col=tile_col,
+        )
+
+    def etag(self, tile_matrix: str, tile_row: int, tile_col: int) -> str:
+        return (
+            f'"{self.manifest["contentVersion"]}-WebMercatorQuad-'
+            f'{tile_matrix}-{tile_row}-{tile_col}"'
         )
 
 
@@ -182,20 +187,27 @@ def create_app(output_directory: str | Path = DEFAULT_OUTPUT_DIRECTORY) -> FastA
         response.headers["ETag"] = f'"{store.manifest["sourceHash"]}"'
         return response
 
-    @app.get("/tiles/{zoom}/{page_x}/{page_y}.png")
-    def tile(zoom: int, page_x: int, page_y: int) -> Response:
+    @app.get("/tiles/WebMercatorQuad/{tile_matrix}/{tile_row}/{tile_col}.png")
+    def tile(tile_matrix: str, tile_row: int, tile_col: int, request: Request) -> Response:
         stats.record_request()
-        if store.tile_facts(zoom, page_x, page_y) is None:
+        if store.tile_facts(tile_matrix, tile_row, tile_col) is None:
             stats.record_not_found()
             raise HTTPException(
                 status_code=404,
                 detail={
                     "code": "DEM_TILE_OUT_OF_RANGE",
-                    "tile": {"zoom": zoom, "x": page_x, "y": page_y},
+                    "tile": {
+                        "tileMatrix": tile_matrix,
+                        "tileRow": tile_row,
+                        "tileCol": tile_col,
+                    },
                 },
             )
+        etag = store.etag(tile_matrix, tile_row, tile_col)
+        if request.headers.get("if-none-match") == etag:
+            return Response(status_code=304, headers={"ETag": etag})
         try:
-            tile_read = store.read_tile(zoom, page_x, page_y)
+            tile_read = store.read_tile(tile_matrix, tile_row, tile_col)
         except FileNotFoundError as error:
             stats.record_failure()
             raise HTTPException(
@@ -208,18 +220,16 @@ def create_app(output_directory: str | Path = DEFAULT_OUTPUT_DIRECTORY) -> FastA
                 status_code=500,
                 detail={"code": "DEM_TILE_READ_FAILED", "message": str(error)},
             ) from error
-        stats.record_success(len(tile_read.content), tile_read.decimation)
+        stats.record_success(len(tile_read.content), tile_read.tile_matrix)
         return Response(
             tile_read.content,
             media_type="image/png",
             headers={
                 "Cache-Control": "public, max-age=31536000, immutable",
-                "ETag": (
-                    f'"{store.manifest["contentVersion"]}-{zoom}-{page_x}-{page_y}"'
-                ),
-                "X-DEM-Valid-Width": str(tile_read.valid_width),
-                "X-DEM-Valid-Height": str(tile_read.valid_height),
-                "X-DEM-Overview-Decimation": str(tile_read.decimation),
+                "ETag": etag,
+                "X-DEM-Tile-Matrix": str(tile_read.tile_matrix),
+                "X-DEM-Tile-Row": str(tile_read.tile_row),
+                "X-DEM-Tile-Col": str(tile_read.tile_col),
             },
         )
 

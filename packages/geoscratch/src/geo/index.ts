@@ -132,6 +132,7 @@ export {
     VirtualRasterSnapshot,
     virtualRasterAccessor,
     virtualRasterAddressSpace,
+    virtualRasterTileAddressSpace,
     virtualRasterPlane,
     virtualRasterSamplingProfile,
     virtualRasterSource,
@@ -140,6 +141,7 @@ export type {
     VirtualRasterAccessorDescriptor,
     VirtualRasterAccessorWgslOptions,
     VirtualRasterAddressSpaceDescriptor,
+    VirtualRasterTileAddressSpaceDescriptor,
     VirtualRasterCpuPage,
     VirtualRasterCpuPageProvider,
     VirtualRasterFieldKind,
@@ -169,6 +171,7 @@ export {
 } from './virtual-raster-residency.js'
 export type {
     VirtualRasterHistoryEntry,
+    VirtualRasterPageAvailability,
     VirtualRasterPublicationFacts,
     VirtualRasterPublicationState,
     VirtualRasterResidencyDescriptor,

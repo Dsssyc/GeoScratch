@@ -14,10 +14,10 @@ import { createDemLifecycle } from './dem-lifecycle.ts'
 import { createDemMap, readDemCameraState, waitForDemMap } from './dem-map.ts'
 import type { DemMap } from './dem-map.ts'
 import {
-    createDemHttpVirtualRasterSource,
     createDemVirtualRasterRuntime,
     fetchDemVirtualRasterManifest,
 } from './dem-virtual-raster.ts'
+import type { VirtualRasterCachePolicy } from 'geoscratch/geo'
 import lodMapShader from './shaders/lod-map.wgsl?raw'
 import terrainShader from './shaders/terrain-mesh.wgsl?raw'
 
@@ -32,6 +32,7 @@ type CleanupProof = Readonly<{
     report: ReturnType<typeof serializeCleanupReport>
     lifecycle: ReturnType<DemLifecycle['snapshot']>
     graphState?: ReturnType<DemLayer['state']>
+    virtualRaster?: ReturnType<DemLayer['virtualRasterFacts']>
 }>
 type PageSettlement = Promise<FailureProof | CleanupProof | void | undefined>
 type PageContext = { graph: DemLayer; runtime: ScratchRuntime }
@@ -78,6 +79,7 @@ const FAILURE_SCENARIOS = Object.freeze([
 const parameters = new URLSearchParams(window.location.search)
 const proofMode = parameters.get('proof') === '1'
 const tileServerUrl = parameters.get('tileServer') ?? 'http://127.0.0.1:8787'
+const cachePolicy = readCachePolicy(parameters.get('cache'))
 const maxPhysicalPages = boundedIntegerParameter(
     parameters.get('atlasPages'),
     18,
@@ -156,11 +158,17 @@ async function main(lifetime: DemLifecycle, proof: FailureProofController) {
     const virtualRaster = await createDemVirtualRasterRuntime({
         runtime,
         manifest,
-        source: createDemHttpVirtualRasterSource(manifest, tileServerUrl),
+        tileServerUrl,
+        cachePolicy,
+        requestPersistence: cachePolicy.tier === 'persistent',
         maxPhysicalPages,
     })
     proof.rasterAcquired()
     lifetime.deferStop({
+        label: 'dem-virtual-raster-demand',
+        run: virtualRaster.stopDemand,
+    })
+    lifetime.deferRelease({
         label: 'dem-virtual-raster-streaming',
         run: virtualRaster.stopStreaming,
     })
@@ -339,7 +347,28 @@ function publishGraphFacts(runtime: ScratchRuntime, graph: DemLayer) {
     canvas.dataset.adapterAcquired = String(runtime.adapter !== undefined)
     canvas.dataset.adapter = JSON.stringify(adapterFacts(runtime))
     canvas.dataset.tileServer = tileServerUrl
+    canvas.dataset.cacheMode = cachePolicy.tier
     canvas.dataset.maxPhysicalPages = String(maxPhysicalPages)
+}
+
+function readCachePolicy(value: string | null): VirtualRasterCachePolicy {
+
+    switch (value ?? 'memory') {
+        case 'none':
+            return Object.freeze({ tier: 'none' })
+        case 'memory':
+            return Object.freeze({ tier: 'memory', maxBytes: 16 * 1024 * 1024 })
+        case 'persistent':
+            return Object.freeze({
+                tier: 'persistent',
+                memoryMaxBytes: 16 * 1024 * 1024,
+                persistentMaxBytes: 128 * 1024 * 1024,
+                backend: 'indexeddb',
+                namespace: 'geoscratch-dem-webmercator-v1',
+            })
+        default:
+            throw new TypeError(`Unsupported DEM cache mode: ${value}`)
+    }
 }
 
 function publishFrameFacts({
@@ -560,6 +589,7 @@ async function disposePage() {
             report: serializeCleanupReport(report),
             lifecycle: pageLifetime.snapshot(),
             graphState: pageContext?.graph.state(),
+            virtualRaster: pageContext?.graph.virtualRasterFacts(),
         })
         window.__DEM_LAYER_CLEANUP_PROOF__ = cleanupProof
         canvas.dataset.cleanupProof = JSON.stringify(cleanupProof)

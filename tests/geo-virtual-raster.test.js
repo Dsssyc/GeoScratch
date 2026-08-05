@@ -345,6 +345,15 @@ describe('Geo virtual raster', () => {
         expect(gpuState.stage(unchanged).commands).to.deep.equal([])
         const emptyWork = runtime.createSubmission({ validation: 'throw' }).submit()
         await gpuState.acknowledge(unchanged, emptyWork)
+        stage(residency, scalarPage(
+            pages.get('0/0/0').page,
+            [ 1, 2, 3, 4 ],
+            'v2'
+        ), 2)
+        const changedAfterEmpty = residency.publish()
+        const changedUpdate = gpuState.stage(changedAfterEmpty)
+        expect(changedUpdate.atlasUploads).to.have.length(1)
+        await gpuState.abandon(changedAfterEmpty)
         expect(fake.calls.queueTextureWrites).to.have.length(2)
         expect(fake.calls.queueWrites).to.have.length(1)
         expect(gpuState.facts()).to.deep.include({

@@ -189,6 +189,7 @@ export class VirtualRasterGpuState {
                 })
             }
             this.#stagedSnapshotEpoch = snapshot.epoch
+            this.#stagedSlotGenerations = new Map(this.#uploadedSlotGenerations)
             this.#stagedPublication = publication
             return Object.freeze({
                 snapshotEpoch: snapshot.epoch,

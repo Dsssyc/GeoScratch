@@ -1,6 +1,13 @@
 import type { CoordinateDimension } from './coordinate-domain.js'
 import { throwGeoDiagnostic } from './diagnostics.js'
 import type {
+    TileCoordinate,
+    TileCoordinateDescriptor,
+    TileMatrixCoverage,
+    TileMatrixId,
+    TileMatrixLimits,
+} from './tile-matrix.js'
+import type {
     OwnedVirtualRasterPagePayload,
     VirtualRasterPageData,
 } from './virtual-raster-transfer.js'
@@ -25,6 +32,11 @@ export type VirtualRasterAddressSpaceDescriptor = Readonly<{
     levelCount: number
 }>
 
+export type VirtualRasterTileAddressSpaceDescriptor = Readonly<{
+    id: string
+    coverage: TileMatrixCoverage
+}>
+
 export type VirtualRasterPageDescriptor = Readonly<{
     level: number
     x: number
@@ -39,6 +51,7 @@ export type VirtualRasterPageIdentity = Readonly<{
     level: number
     coordinates: readonly number[]
     key: string
+    tile?: TileCoordinate
 }>
 
 export type VirtualRasterPlaneDescriptor = Readonly<{
@@ -186,10 +199,55 @@ export class VirtualRasterAddressSpace {
     readonly pageSize: readonly number[]
     readonly levelCount: number
     readonly pageTableEntryCount: number
+    readonly tileCoverage?: TileMatrixCoverage
     readonly #levelOffsets: readonly number[]
+    readonly #tileLimitsByLevel: readonly TileMatrixLimits[]
+    readonly #tileLevelsByMatrix: ReadonlyMap<TileMatrixId, number>
 
-    constructor(descriptor: VirtualRasterAddressSpaceDescriptor) {
+    constructor(
+        descriptor: VirtualRasterAddressSpaceDescriptor | VirtualRasterTileAddressSpaceDescriptor
+    ) {
 
+        if ('coverage' in descriptor) {
+            if (typeof descriptor.id !== 'string' || descriptor.id.length === 0 ||
+                descriptor.coverage?.kind !== 'tile-matrix-coverage') {
+                throwAddressSpaceInvalid(descriptor)
+            }
+            const limits = Object.freeze([ ...descriptor.coverage.limits ].reverse())
+            const matrices = limits.map(limit => descriptor.coverage.tileMatrixSet.matrix(limit.matrixId))
+            const tileWidth = matrices[0]!.tileWidth
+            const tileHeight = matrices[0]!.tileHeight
+            if (matrices.some(matrix =>
+                matrix.tileWidth !== tileWidth || matrix.tileHeight !== tileHeight
+            )) {
+                throwAddressSpaceInvalid(descriptor)
+            }
+            const finest = limits[0]!
+            this.id = descriptor.id
+            this.dimensions = 2
+            this.extent = Object.freeze([
+                (finest.maxTileCol - finest.minTileCol + 1) * tileWidth,
+                (finest.maxTileRow - finest.minTileRow + 1) * tileHeight,
+            ])
+            this.pageSize = Object.freeze([ tileWidth, tileHeight ])
+            this.levelCount = limits.length
+            this.pageTableEntryCount = descriptor.coverage.entryCount
+            this.tileCoverage = descriptor.coverage
+            this.#tileLimitsByLevel = limits
+            this.#tileLevelsByMatrix = new Map(limits.map((limit, level) => [
+                limit.matrixId,
+                level,
+            ]))
+            this.#levelOffsets = Object.freeze(limits.map(limit =>
+                descriptor.coverage.index({
+                    matrixId: limit.matrixId,
+                    tileRow: limit.minTileRow,
+                    tileCol: limit.minTileCol,
+                })
+            ))
+            Object.freeze(this)
+            return
+        }
         if (typeof descriptor.id !== 'string' || descriptor.id.length === 0 ||
             !isDimension(descriptor.dimensions) ||
             descriptor.extent.length !== descriptor.dimensions ||
@@ -197,20 +255,15 @@ export class VirtualRasterAddressSpace {
             descriptor.extent.some(value => !isPositiveInteger(value)) ||
             descriptor.pageSize.some(value => !isPositiveInteger(value)) ||
             !isPositiveInteger(descriptor.levelCount)) {
-            throwGeoDiagnostic({
-                code: 'GEO_VIRTUAL_RASTER_ADDRESS_SPACE_INVALID',
-                phase: 'virtual-raster',
-                subject: { kind: 'virtual-raster-address-space', id: descriptor.id },
-                message: 'Virtual raster dimensions, extents, page sizes, and levels must be finite positive integers.',
-                expected: { dimensions: '1, 2, or 3', axisValues: 'positive integers' },
-                actual: descriptor,
-            })
+            throwAddressSpaceInvalid(descriptor)
         }
         this.id = descriptor.id
         this.dimensions = descriptor.dimensions
         this.extent = Object.freeze([ ...descriptor.extent ])
         this.pageSize = Object.freeze([ ...descriptor.pageSize ])
         this.levelCount = descriptor.levelCount
+        this.#tileLimitsByLevel = Object.freeze([])
+        this.#tileLevelsByMatrix = new Map()
         const offsets: number[] = []
         let count = 0
         for (let level = 0; level < this.levelCount; level++) {
@@ -225,6 +278,13 @@ export class VirtualRasterAddressSpace {
     levelExtent(level: number): readonly number[] {
 
         this.#assertLevel(level)
+        const limit = this.#tileLimitsByLevel[level]
+        if (limit !== undefined) {
+            return Object.freeze([
+                (limit.maxTileCol - limit.minTileCol + 1) * this.pageSize[0]!,
+                (limit.maxTileRow - limit.minTileRow + 1) * this.pageSize[1]!,
+            ])
+        }
         const scale = 2 ** level
         return Object.freeze(this.extent.map(value => Math.max(1, Math.ceil(value / scale))))
     }
@@ -246,6 +306,33 @@ export class VirtualRasterAddressSpace {
     page(descriptor: VirtualRasterPageDescriptor): VirtualRasterPageIdentity {
 
         this.#assertLevel(descriptor.level)
+        const limit = this.#tileLimitsByLevel[descriptor.level]
+        if (limit !== undefined) {
+            const tile = this.tileCoverage!.tileMatrixSet.tile({
+                matrixId: limit.matrixId,
+                tileRow: descriptor.y ?? -1,
+                tileCol: descriptor.x,
+            })
+            if (!this.tileCoverage!.contains(tile)) {
+                return throwGeoDiagnostic({
+                    code: 'GEO_VIRTUAL_RASTER_PAGE_INVALID',
+                    phase: 'virtual-raster',
+                    subject: { kind: 'virtual-raster-address-space', id: this.id },
+                    message: 'A tile virtual page must be inside finite TileMatrixLimits.',
+                    expected: { limit },
+                    actual: tile,
+                })
+            }
+            return Object.freeze({
+                kind: 'virtual-raster-page',
+                addressSpaceId: this.id,
+                dimensions: 2,
+                level: descriptor.level,
+                coordinates: Object.freeze([ tile.tileCol, tile.tileRow ]),
+                key: tile.key,
+                tile,
+            })
+        }
         const coordinates = [ descriptor.x ]
         if (this.dimensions >= 2) coordinates.push(descriptor.y ?? 0)
         if (this.dimensions >= 3) coordinates.push(descriptor.z ?? 0)
@@ -276,6 +363,10 @@ export class VirtualRasterAddressSpace {
     parent(page: VirtualRasterPageIdentity): VirtualRasterPageIdentity | undefined {
 
         this.assertPage(page)
+        if (this.tileCoverage !== undefined) {
+            const parent = this.tileCoverage.parent(page.tile!)
+            return parent === undefined ? undefined : this.pageFromTile(parent)
+        }
         if (page.level + 1 >= this.levelCount) return undefined
         const coordinates = page.coordinates.map(value => Math.floor(value / 2))
         return this.page({
@@ -286,9 +377,28 @@ export class VirtualRasterAddressSpace {
         })
     }
 
+    rootPage(): VirtualRasterPageIdentity {
+
+        if (this.tileCoverage !== undefined) {
+            const limit = this.tileCoverage.limits[0]!
+            return this.pageFromTile({
+                matrixId: limit.matrixId,
+                tileRow: limit.minTileRow,
+                tileCol: limit.minTileCol,
+            })
+        }
+        return this.page({
+            level: this.levelCount - 1,
+            x: 0,
+            ...(this.dimensions >= 2 ? { y: 0 } : {}),
+            ...(this.dimensions >= 3 ? { z: 0 } : {}),
+        })
+    }
+
     tableIndex(page: VirtualRasterPageIdentity): number {
 
         this.assertPage(page)
+        if (this.tileCoverage !== undefined) return this.tileCoverage.index(page.tile!)
         const grid = this.pageGrid(page.level)
         let localIndex = page.coordinates[0]!
         if (this.dimensions >= 2) localIndex += page.coordinates[1]! * grid[0]!
@@ -301,6 +411,17 @@ export class VirtualRasterAddressSpace {
     pages(): readonly VirtualRasterPageIdentity[] {
 
         const pages: VirtualRasterPageIdentity[] = []
+        if (this.tileCoverage !== undefined) {
+            for (let level = 0; level < this.levelCount; level++) {
+                const limit = this.#tileLimitsByLevel[level]!
+                for (let row = limit.minTileRow; row <= limit.maxTileRow; row++) {
+                    for (let col = limit.minTileCol; col <= limit.maxTileCol; col++) {
+                        pages.push(this.page({ level, x: col, y: row }))
+                    }
+                }
+            }
+            return Object.freeze(pages)
+        }
         for (let level = 0; level < this.levelCount; level++) {
             const grid = this.pageGrid(level)
             const depth = this.dimensions >= 3 ? grid[2]! : 1
@@ -339,7 +460,8 @@ export class VirtualRasterAddressSpace {
             ...(this.dimensions >= 2 ? { y: page.coordinates[1]! } : {}),
             ...(this.dimensions >= 3 ? { z: page.coordinates[2]! } : {}),
         })
-        if (expected.key !== page.key) {
+        if (expected.key !== page.key ||
+            (this.tileCoverage !== undefined && expected.tile?.key !== page.tile?.key)) {
             return throwGeoDiagnostic({
                 code: 'GEO_VIRTUAL_RASTER_PAGE_INVALID',
                 phase: 'virtual-raster',
@@ -349,6 +471,67 @@ export class VirtualRasterAddressSpace {
                 actual: page,
             })
         }
+    }
+
+    pageFromTile(descriptor: TileCoordinateDescriptor): VirtualRasterPageIdentity {
+
+        if (this.tileCoverage === undefined) {
+            return throwGeoDiagnostic({
+                code: 'GEO_VIRTUAL_RASTER_ADDRESS_SPACE_INVALID',
+                phase: 'virtual-raster',
+                subject: { kind: 'virtual-raster-address-space', id: this.id },
+                message: 'Only a tile-coverage address space can create a page from a tile.',
+                actual: descriptor,
+            })
+        }
+        const level = this.#tileLevelsByMatrix.get(descriptor.matrixId)
+        if (level === undefined || !this.tileCoverage.contains(descriptor)) {
+            return throwGeoDiagnostic({
+                code: 'GEO_TILE_MATRIX_COVERAGE_MISS',
+                phase: 'virtual-raster',
+                subject: { kind: 'virtual-raster-address-space', id: this.id },
+                message: 'A standard tile must be inside this virtual raster coverage.',
+                expected: { limits: this.tileCoverage.limits },
+                actual: descriptor,
+            })
+        }
+        return this.page({
+            level,
+            x: descriptor.tileCol,
+            y: descriptor.tileRow,
+        })
+    }
+
+    matrixId(level: number): TileMatrixId {
+
+        this.#assertLevel(level)
+        const matrixId = this.#tileLimitsByLevel[level]?.matrixId
+        if (matrixId === undefined) {
+            return throwGeoDiagnostic({
+                code: 'GEO_VIRTUAL_RASTER_ADDRESS_SPACE_INVALID',
+                phase: 'virtual-raster',
+                subject: { kind: 'virtual-raster-address-space', id: this.id },
+                message: 'A dense address space has no TileMatrix identifier.',
+                actual: { level },
+            })
+        }
+        return matrixId
+    }
+
+    levelForMatrix(matrixId: TileMatrixId): number {
+
+        const level = this.#tileLevelsByMatrix.get(matrixId)
+        if (level === undefined) {
+            return throwGeoDiagnostic({
+                code: 'GEO_TILE_MATRIX_COVERAGE_MISS',
+                phase: 'virtual-raster',
+                subject: { kind: 'virtual-raster-address-space', id: this.id },
+                message: 'TileMatrix identifier is outside this virtual raster coverage.',
+                expected: { matrixIds: [ ...this.#tileLevelsByMatrix.keys() ] },
+                actual: { matrixId },
+            })
+        }
+        return level
     }
 
     #assertLevel(level: number): void {
@@ -662,6 +845,13 @@ export function virtualRasterAddressSpace(
     return new VirtualRasterAddressSpace(descriptor)
 }
 
+export function virtualRasterTileAddressSpace(
+    descriptor: VirtualRasterTileAddressSpaceDescriptor
+): VirtualRasterAddressSpace {
+
+    return new VirtualRasterAddressSpace(descriptor)
+}
+
 export function virtualRasterPlane(descriptor: VirtualRasterPlaneDescriptor): VirtualRasterPlane {
 
     if (descriptor.addressSpace.dimensions !== 2 ||
@@ -848,6 +1038,23 @@ function normalizeNamespace(value: string | undefined, fallback: string): string
 function isDimension(value: unknown): value is CoordinateDimension {
 
     return value === 1 || value === 2 || value === 3
+}
+
+function throwAddressSpaceInvalid(
+    descriptor: VirtualRasterAddressSpaceDescriptor | VirtualRasterTileAddressSpaceDescriptor
+): never {
+
+    return throwGeoDiagnostic({
+        code: 'GEO_VIRTUAL_RASTER_ADDRESS_SPACE_INVALID',
+        phase: 'virtual-raster',
+        subject: { kind: 'virtual-raster-address-space', id: descriptor.id },
+        message: 'A virtual raster requires either finite dense axes or one finite 2D tile coverage.',
+        expected: {
+            dense: { dimensions: '1, 2, or 3', axisValues: 'positive integers' },
+            tiled: { coverage: 'TileMatrixCoverage with a stable tile shape' },
+        },
+        actual: descriptor,
+    })
 }
 
 function isPositiveInteger(value: unknown): value is number {

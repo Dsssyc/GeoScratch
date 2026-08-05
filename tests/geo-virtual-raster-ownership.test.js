@@ -115,6 +115,29 @@ describe('virtual raster payload ownership contract', () => {
         expect(residency.publish().snapshot.resolve(page).status).to.equal('missing')
     })
 
+    it('rebases a staged page when the same page remains required by a newer generation', () => {
+
+        const { page, residency } = fixture()
+        residency.reconcileGeneration(1, [ page ])
+        expect(residency.stage(ownedVirtualRasterPagePayload({
+            page,
+            width: 2,
+            height: 2,
+            channels: 1,
+            data: new Uint8Array([ 1, 2, 3, 4 ]),
+            contentVersion: 'v1',
+        }), { generation: 1 }).status).to.equal('staged')
+
+        residency.reconcileGeneration(2, [ page ])
+
+        expect(residency.inspect()).to.deep.include({
+            demandGeneration: 2,
+            stagedCount: 1,
+            stagingBytes: 4,
+            staleResponseCount: 0,
+        })
+    })
+
     it('adopts an owned payload without a second typed-array copy', () => {
 
         const residency = read(

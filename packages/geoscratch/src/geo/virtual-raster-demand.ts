@@ -207,6 +207,13 @@ export class VirtualRasterRequestScheduler {
                 currentCompletions.push(existing.completion)
                 continue
             }
+            const availability = this.residency.availability(demand.page)
+            if (availability !== 'missing') {
+                this.residency.markUsed(demand.page)
+                retainedCount++
+                this.#record('retained', demand, availability)
+                continue
+            }
             let execution: VirtualRasterRequestExecution
             try {
                 execution = this.executor.request(demand)
@@ -310,6 +317,7 @@ export class VirtualRasterRequestScheduler {
 
         let transfer: VirtualRasterPageTransfer | undefined
         let adopted = false
+        let executionSettled = false
         try {
             transfer = await record.execution.result
             const current = !this.#disposed && record.current &&
@@ -317,6 +325,7 @@ export class VirtualRasterRequestScheduler {
                 this.#demands.get(record.demand.page.key) === record.demand
             if (!current) {
                 await record.execution.discard()
+                executionSettled = true
                 discardVirtualRasterPageTransfer(transfer)
                 this.#staleResultCount++
                 this.#record('stale', record.demand, 'obsolete-result')
@@ -339,10 +348,12 @@ export class VirtualRasterRequestScheduler {
             }
             if (outcome.status === 'staged' || outcome.status === 'resident') {
                 await record.execution.accept()
+                executionSettled = true
                 this.#completedRequestCount++
                 this.#record(outcome.status, record.demand)
             } else {
                 await record.execution.discard()
+                executionSettled = true
                 if (outcome.status === 'stale') this.#staleResultCount++
                 else this.#failedRequestCount++
                 this.#record(outcome.status === 'stale' ? 'stale' : 'failed', record.demand,
@@ -350,6 +361,13 @@ export class VirtualRasterRequestScheduler {
             }
             return outcome
         } catch (error) {
+            if (!executionSettled) {
+                try {
+                    await record.execution.discard()
+                } catch {
+                    // Preserve the request failure as the primary scheduler outcome.
+                }
+            }
             if (!adopted && transfer !== undefined && transfer.buffer.byteLength > 0) {
                 discardVirtualRasterPageTransfer(transfer)
             }
@@ -383,11 +401,8 @@ export class VirtualRasterRequestScheduler {
         }
         this.#active.clear()
         this.#demands.clear()
-        const page = this.residency.addressSpace.page({
-            level: this.residency.addressSpace.levelCount - 1,
-            x: 0,
-            y: 0,
-        })
+        await Promise.allSettled([ ...this.#records ].map(record => record.completion))
+        const page = this.residency.addressSpace.rootPage()
         this.#record('disposed', Object.freeze({
             page,
             generation: this.#generation,
