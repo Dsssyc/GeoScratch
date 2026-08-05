@@ -47,6 +47,44 @@ export type {
     WideFixedPosition,
 } from './position-codec.js'
 export {
+    TileMatrixCoverage,
+    tileMatrixCoverage,
+    tileMatrixSet,
+} from './tile-matrix.js'
+export type {
+    TileCoordinate,
+    TileCoordinateDescriptor,
+    TileMatrix,
+    TileMatrixCornerOfOrigin,
+    TileMatrixCoverageDescriptor,
+    TileMatrixCoverageWgslOptions,
+    TileMatrixDescriptor,
+    TileMatrixId,
+    TileMatrixLimits,
+    TileMatrixSet,
+    TileMatrixSetBoundingBox,
+    TileMatrixSetDescriptor,
+} from './tile-matrix.js'
+export {
+    WEB_MERCATOR_QUAD_HALF_WORLD,
+    WEB_MERCATOR_QUAD_MAX_LATITUDE,
+    WEB_MERCATOR_QUAD_MAX_ZOOM,
+    WEB_MERCATOR_QUAD_WORLD_WIDTH,
+    WebMercatorQuad,
+    WebMercatorQuadAddressCodec,
+    webMercatorQuadAddressCodec,
+} from './web-mercator-quad.js'
+export type {
+    GeographicPosition2D,
+    ProjectedPosition2D,
+    WebMercatorQuadAddressCodecDescriptor,
+    WebMercatorQuadAddressWgslOptions,
+    WebMercatorQuadModel,
+    WebMercatorQuadPosition,
+    WebMercatorQuadTileBounds,
+    WebMercatorTileSampleAddress,
+} from './web-mercator-quad.js'
+export {
     VirtualRasterAccessor,
     VirtualRasterAddressSpace,
     VirtualRasterSnapshot,

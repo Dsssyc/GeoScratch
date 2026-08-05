@@ -15,6 +15,7 @@
   },
   "include": [
     "tests/types/**/*.ts",
+    "tests/fixtures/geo-webmercator-addressing.ts",
     "packages/geoscratch/src/core/utils/uuid.js"
   ]
 }

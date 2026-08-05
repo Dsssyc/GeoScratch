@@ -7,6 +7,9 @@ import {
     GeoQuadNode2D,
     MercatorCoordinate,
     Node2D,
+    TileMatrixCoverage,
+    WebMercatorQuad,
+    WebMercatorQuadAddressCodec,
     WideFixedCodec,
     VirtualRasterGpuState,
     VirtualRasterResidency,
@@ -14,17 +17,20 @@ import {
     coordinateDomain,
     localVector,
     surfaceDomain,
+    tileMatrixCoverage,
     wideFixedCodec,
     virtualRasterAccessor,
     virtualRasterAddressSpace,
     virtualRasterPlane,
     virtualRasterSamplingProfile,
     virtualRasterSource,
+    webMercatorQuadAddressCodec,
     type CellLocalPosition,
     type CoordinateDomain,
     type MapOptions,
     type PositionPrecisionFacts,
     type WideFixedPosition,
+    type WebMercatorQuadPosition,
     type VirtualRasterPageIdentity,
     type VirtualRasterSample,
 } from 'geoscratch/geo'
@@ -228,6 +234,23 @@ const typedRasterSample: VirtualRasterSample = typedRasterAccessor.sample(
     { texel: [ 0, 0 ], profile: typedRasterProfile },
 )
 const typedRasterGpuState: VirtualRasterGpuState | undefined = undefined
+const typedTileCoverage: TileMatrixCoverage = tileMatrixCoverage({
+    tileMatrixSet: WebMercatorQuad,
+    limits: [ {
+        matrixId: '0',
+        minTileRow: 0,
+        maxTileRow: 0,
+        minTileCol: 0,
+        maxTileCol: 0,
+    } ],
+})
+const typedWebMercatorCodec: WebMercatorQuadAddressCodec = webMercatorQuadAddressCodec({
+    coverage: typedTileCoverage,
+    coordinateBits: 40,
+})
+const typedWebMercatorPosition: WebMercatorQuadPosition =
+    typedWebMercatorCodec.fromLonLat([ 121.5, 31.2 ])
+const typedWebMercatorAddress = typedWebMercatorCodec.address(typedWebMercatorPosition, '0')
 // @ts-expect-error Coordinate dimensions are limited to one, two, or three
 coordinateDomain({ id: 'typed-invalid', intrinsicDimensions: 4, embeddingDimensions: 3, axes: [] })
 // @ts-expect-error Mercator coordinate inputs require two components
@@ -254,6 +277,7 @@ void typedGeoError
 void typedRasterPage
 void typedRasterSample
 void typedRasterGpuState
+void typedWebMercatorAddress
 const planeGeometry = plane(2)
 const sphereGeometry = sphere(1, 8, 4)
 
