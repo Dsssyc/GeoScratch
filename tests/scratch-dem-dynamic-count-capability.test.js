@@ -1,6 +1,6 @@
 import { createTestProgram } from './scratch-test-utils.js'
 import { expect } from 'chai'
-import { GPURuntime } from 'geoscratch'
+import { GPURuntime } from 'geoscratch/scratch'
 import {
     createFakeGpu,
     defaultRenderStateActions,

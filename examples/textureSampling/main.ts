@@ -1,7 +1,7 @@
 import {
     GPURuntime,
-} from 'geoscratch'
-import type { SubmittedWork, Surface } from 'geoscratch'
+} from 'geoscratch/scratch'
+import type { SubmittedWork, Surface } from 'geoscratch/scratch'
 
 const canvas = document.getElementById('GPUFrame') as HTMLCanvasElement
 

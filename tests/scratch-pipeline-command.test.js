@@ -5,7 +5,7 @@ import {
     ScratchDiagnosticError,
     GPURuntime,
     RenderPipeline,
-} from 'geoscratch'
+} from 'geoscratch/scratch'
 import { createFakeGpu, triangleWgsl } from './scratch-test-utils.js'
 
 const GPU_BUFFER_USAGE_VERTEX = 0x20

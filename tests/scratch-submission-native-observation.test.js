@@ -1,5 +1,5 @@
 import { expect } from 'chai'
-import * as scr from 'geoscratch'
+import * as scr from 'geoscratch/scratch'
 import { beginSubmissionNativeObservation } from '../packages/geoscratch/dist/scratch/gpu/submission-native-observation.js'
 import { createFakeGpu } from './scratch-test-utils.js'
 

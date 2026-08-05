@@ -1,6 +1,6 @@
 import { createTestProgram } from './scratch-test-utils.js'
 import { expect } from 'chai'
-import { ScratchDiagnosticError, GPURuntime } from 'geoscratch'
+import { ScratchDiagnosticError, GPURuntime } from 'geoscratch/scratch'
 import { setResourceContentState } from '../packages/geoscratch/dist/scratch/gpu/resource.js'
 import { createFakeCanvas, createFakeGpu } from './scratch-test-utils.js'
 

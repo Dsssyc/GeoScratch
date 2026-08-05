@@ -1,5 +1,5 @@
-import { GPURuntime } from 'geoscratch'
-import type { GPUOperationRecord, SubmittedWork, SurfaceSize, TextureResource } from 'geoscratch'
+import { GPURuntime } from 'geoscratch/scratch'
+import type { GPUOperationRecord, SubmittedWork, SurfaceSize, TextureResource } from 'geoscratch/scratch'
 
 const canvas = document.getElementById('GPUFrame') as HTMLCanvasElement
 const statusElement = document.getElementById('proof-status') as HTMLElement

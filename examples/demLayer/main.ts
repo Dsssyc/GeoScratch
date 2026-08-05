@@ -1,11 +1,11 @@
-import { GPURuntime } from 'geoscratch'
+import { GPURuntime } from 'geoscratch/scratch'
 import type {
     GPUDiagnosticCapture,
     GPUDiagnosticCaptureReport,
     GPURuntimeDiagnosticsEvidence,
     Surface,
     SurfaceSize,
-} from 'geoscratch'
+} from 'geoscratch/scratch'
 import {
     DEM_STAGE_ORDER,
     createDemLayer,

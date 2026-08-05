@@ -9,8 +9,8 @@ import type {
 import {
     defineWorkerModule,
     transferWorkerResult,
-} from 'geoscratch/worker'
-import type { WorkerOperationContext } from 'geoscratch/worker'
+} from 'geoscratch/scratch'
+import type { WorkerOperationContext } from 'geoscratch/scratch'
 import type {
     DemTileCandidateDescriptor,
     DemTileDecodeResult,

@@ -13,6 +13,7 @@ describe('type contracts', () => {
 
         expect(readJson('package.json').scripts.typecheck).to.equal('npm --workspace geoscratch run build && node node_modules/typescript/bin/tsc -p tsconfig.types.json && npm --workspace examples run typecheck && npm run typecheck:webgpu')
         expect(exists('tests', 'types', 'public-api.ts')).to.equal(true)
+        expect(exists('tests', 'types', 'scratch-foundation-public-api.ts')).to.equal(true)
         expect(exists('tsconfig.webgpu-types.json')).to.equal(true)
     })
 
@@ -31,7 +32,8 @@ describe('type contracts', () => {
         expect(buildConfig.compilerOptions.rootDir).to.equal('src')
         expect(buildConfig.compilerOptions.outDir).to.equal('dist')
         expect(buildConfig.compilerOptions.declaration).to.equal(true)
-        expect(buildConfig.compilerOptions.allowJs).to.equal(true)
+        expect(buildConfig.compilerOptions.allowJs).to.equal(false)
+        expect(tsconfig.compilerOptions.allowJs).to.equal(false)
         expect(buildConfig.include).to.deep.equal([ 'src/**/*' ])
         expect(exists('packages', 'geoscratch', 'tsconfig.build.json')).to.equal(true)
         expect(exists('packages', 'geoscratch', 'scripts', 'clean-dist.mjs')).to.equal(true)

@@ -4,8 +4,8 @@
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "strict": true,
-    "allowJs": true,
-    "checkJs": true,
+    "allowJs": false,
+    "checkJs": false,
     "noEmit": true,
     "skipLibCheck": false
   },
@@ -14,7 +14,6 @@
     "tests/fixtures/geo-webmercator-addressing.ts",
     "tests/fixtures/geo-virtual-raster-dynamic-flow.ts",
     "tests/fixtures/worker-system-module.ts",
-    "tests/fixtures/worker-system.ts",
-    "packages/geoscratch/src/core/utils/uuid.js"
+    "tests/fixtures/worker-system.ts"
   ]
 }

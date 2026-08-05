@@ -204,8 +204,3 @@ export type {
     VirtualRasterGpuStateDescriptor,
     VirtualRasterGpuUpdate,
 } from './virtual-raster-gpu.js'
-export {
-    GeoQuadNode2D,
-    Node2D,
-    type MapOptions,
-} from './tiling/geoQuadNode2D.js'

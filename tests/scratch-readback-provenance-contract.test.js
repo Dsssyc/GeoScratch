@@ -1,5 +1,5 @@
 import { expect } from 'chai'
-import * as scr from 'geoscratch'
+import * as scr from 'geoscratch/scratch'
 import { createGpuOperationRecord } from '../packages/geoscratch/dist/scratch/gpu/gpu-operation.js'
 import { createFakeGpu } from './scratch-test-utils.js'
 

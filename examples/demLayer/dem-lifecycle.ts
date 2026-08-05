@@ -1,4 +1,4 @@
-import type { GPURuntime } from 'geoscratch'
+import type { GPURuntime } from 'geoscratch/scratch'
 import type { DemMap } from './dem-map.ts'
 
 type LifecycleState = 'active' | 'disposing' | 'disposed'

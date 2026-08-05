@@ -1,4 +1,4 @@
-import type { GPURuntime } from 'geoscratch'
+import type { GPURuntime } from 'geoscratch/scratch'
 import type { FlowMap } from './flow-map.ts'
 
 type FlowLifecycleState = 'active' | 'disposing' | 'disposed'

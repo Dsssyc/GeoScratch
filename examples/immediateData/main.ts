@@ -1,11 +1,11 @@
 import {
     GPURuntime,
     layoutCodec,
-} from 'geoscratch'
+} from 'geoscratch/scratch'
 import type {
     SubmittedWork,
     Surface,
-} from 'geoscratch'
+} from 'geoscratch/scratch'
 
 const languageFeature = 'immediate_address_space'
 const canvas = document.getElementById('GPUFrame') as HTMLCanvasElement

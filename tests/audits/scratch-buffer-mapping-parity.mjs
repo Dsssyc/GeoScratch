@@ -118,7 +118,7 @@ const checks = Object.freeze({
         'MappedBufferLeaseState',
     ])),
     publicOnlyExample: hasAll(example, [
-        "from 'geoscratch'",
+        "from 'geoscratch/scratch'",
         'runtime.createMappedBuffer(',
         'runtime.createCopyCommand(',
         'runtime.mapBuffer(',

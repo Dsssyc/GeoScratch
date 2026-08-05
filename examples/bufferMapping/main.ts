@@ -1,5 +1,5 @@
-import { GPURuntime } from 'geoscratch'
-import type { SubmittedWork } from 'geoscratch'
+import { GPURuntime } from 'geoscratch/scratch'
+import type { SubmittedWork } from 'geoscratch/scratch'
 
 const expected = [ 3, 5, 8, 13 ]
 const canvas = document.getElementById('GPUFrame') as HTMLCanvasElement

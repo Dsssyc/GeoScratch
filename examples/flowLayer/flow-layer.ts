@@ -1,8 +1,8 @@
 import {
-    MercatorCoordinate,
     GPURuntime,
     layoutCodec,
-} from 'geoscratch'
+} from 'geoscratch/scratch'
+import { MercatorCoordinate } from 'geoscratch/geo'
 import { mat4 } from 'wgpu-matrix'
 import type {
     BindLayout,
@@ -31,7 +31,7 @@ import type {
     TextureViewSpec,
     UniformBindLayoutEntry,
     UploadCommand,
-} from 'geoscratch'
+} from 'geoscratch/scratch'
 import { Delaunay } from 'd3-delaunay'
 import type { FlowLifecycle } from './flow-lifecycle.ts'
 import type { FlowCameraState, FlowMap } from './flow-map.ts'

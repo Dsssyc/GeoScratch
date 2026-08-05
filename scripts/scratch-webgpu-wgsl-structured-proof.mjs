@@ -23,7 +23,7 @@ export const structuredProofKinds = Object.freeze([
 ])
 
 const structuredProofKindSet = new Set(structuredProofKinds)
-const packageEntrypointPath = 'packages/geoscratch/src/index.ts'
+const packageEntrypointPath = 'packages/geoscratch/src/scratch/index.ts'
 const managedScratchSourcePrefix = 'packages/geoscratch/src/scratch/'
 const webGpuTypesPath = 'node_modules/@webgpu/types/dist/index.d.ts'
 const wgslBrowserMatrixPath =

@@ -793,7 +793,7 @@ const baselineMissingTypes = difference(
 )
 const expectedBaselineMissingTypes = Object.keys(baselineTypeReplacements).sort()
 
-const currentPackageTypes = exportedTypeNames(current.packageIndex)
+const currentPackageTypes = exportedTypeNames(current.scratchIndex)
 const historicalPackageTypes = publicExportNames(historical.packageTypes)
 const classifiedHistoricalTypes = historicalTypeInventory.map(entry => Object.freeze({
     ...entry,
@@ -3077,7 +3077,9 @@ function auditExamples() {
 
     for (const name of ordinaryExamples) {
         const source = fs.readFileSync(`examples/${name}/main.ts`, 'utf8')
-        if (!/from\s+['"]geoscratch['"]/.test(source)) failures.push(`${name} does not import geoscratch`)
+        if (!/from\s+['"]geoscratch\/scratch['"]/.test(source)) {
+            failures.push(`${name} does not import geoscratch/scratch`)
+        }
         if (source.includes('packages/geoscratch/src') || source.includes('../packages/')) {
             failures.push(`${name} reaches into library source`)
         }

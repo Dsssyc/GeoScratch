@@ -3,7 +3,7 @@ import {
     LayoutCodec,
     ScratchDiagnosticError,
     layoutCodec,
-} from 'geoscratch'
+} from 'geoscratch/scratch'
 import * as scratchCompat from 'geoscratch/scratch'
 
 function bytesOf(view) {

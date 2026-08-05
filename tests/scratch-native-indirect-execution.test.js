@@ -5,7 +5,7 @@ import {
     DrawCommand,
     ScratchDiagnosticError,
     GPURuntime,
-} from 'geoscratch'
+} from 'geoscratch/scratch'
 import {
     createFakeGpu,
     defaultRenderStateActions,

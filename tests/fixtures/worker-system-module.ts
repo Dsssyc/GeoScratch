@@ -2,7 +2,7 @@ import {
     defineWorkerModule,
     transferWorkerResult,
     type WorkerOperationContext,
-} from 'geoscratch/worker'
+} from 'geoscratch/scratch'
 
 let transferredView: Uint8Array | undefined
 

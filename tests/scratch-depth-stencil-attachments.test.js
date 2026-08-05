@@ -5,7 +5,7 @@ import {
     ScratchDiagnosticError,
     GPURuntime,
     TextureResource,
-} from 'geoscratch'
+} from 'geoscratch/scratch'
 import {
     advanceResourceContentEpochForTest,
     createFakeGpu,

@@ -3,7 +3,7 @@ import { expect } from 'chai'
 import {
     GPURuntime,
     inspectShader,
-} from 'geoscratch'
+} from 'geoscratch/scratch'
 import { createFakeGpu } from './scratch-test-utils.js'
 
 async function createRuntimeFixture() {

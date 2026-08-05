@@ -5,7 +5,7 @@ import {
     SamplerResource,
     ScratchDiagnosticError,
     GPURuntime,
-} from 'geoscratch'
+} from 'geoscratch/scratch'
 import { createFakeGpu } from './scratch-test-utils.js'
 
 describe('Scratch acknowledged supporting objects', () => {

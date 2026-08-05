@@ -1,6 +1,6 @@
 import {
     GPURuntime,
-} from 'geoscratch'
+} from 'geoscratch/scratch'
 import type {
     DrawCommand,
     RenderPassSpec,
@@ -8,7 +8,7 @@ import type {
     SubmissionPassExecutionOutcome,
     SubmittedWork,
     Surface,
-} from 'geoscratch'
+} from 'geoscratch/scratch'
 
 const canvas = document.getElementById('GPUFrame') as HTMLCanvasElement
 

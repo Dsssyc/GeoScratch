@@ -6,7 +6,7 @@
     "strict": true,
     "noImplicitAny": true,
     "exactOptionalPropertyTypes": true,
-    "allowJs": true,
+    "allowJs": false,
     "checkJs": false,
     "declaration": true,
     "stripInternal": true,

@@ -3,7 +3,7 @@ import { expect } from 'chai'
 import {
     ScratchDiagnosticError,
     GPURuntime,
-} from 'geoscratch'
+} from 'geoscratch/scratch'
 import {
     diagnosticsControllerFor,
 } from '../packages/geoscratch/dist/scratch/gpu/runtime-diagnostics.js'

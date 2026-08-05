@@ -4,7 +4,7 @@ import {
     DispatchCommand,
     ScratchDiagnosticError,
     GPURuntime,
-} from 'geoscratch'
+} from 'geoscratch/scratch'
 import { createFakeGpu } from './scratch-test-utils.js'
 
 const GPU_BUFFER_USAGE_STORAGE = 0x80

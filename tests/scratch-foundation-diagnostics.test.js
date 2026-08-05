@@ -4,8 +4,8 @@ import {
     createScratchDiagnostic,
     createScratchDiagnosticReport,
     isScratchDiagnosticError,
-} from 'geoscratch'
-import { WorkerSystem } from 'geoscratch/worker'
+} from 'geoscratch/scratch'
+import { WorkerSystem } from 'geoscratch/scratch'
 
 describe('Scratch foundation diagnostics', () => {
 

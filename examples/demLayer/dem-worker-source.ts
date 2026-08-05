@@ -11,7 +11,7 @@ import type {
 } from 'geoscratch/geo'
 import {
     WorkerSystem,
-} from 'geoscratch/worker'
+} from 'geoscratch/scratch'
 import type {
     WorkerContextHandle,
     WorkerGroup,
@@ -20,7 +20,7 @@ import type {
     WorkerTaskHandle,
     WorkerTaskPriority,
     WorkerTaskState,
-} from 'geoscratch/worker'
+} from 'geoscratch/scratch'
 import type {
     DemTileCandidateDescriptor,
     DemTileDecodeResult,

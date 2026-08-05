@@ -34,8 +34,22 @@ const removedWorkerNames = new Set([
     'WorkerDiagnosticSeverity',
     'createWorkerDiagnostic',
 ])
-const removedGeoNames = new Set([ 'GeoQuadNode2D', 'Node2D' ])
+const removedGeoNames = new Set([ 'GeoQuadNode2D', 'MapOptions', 'Node2D' ])
 const scratchGeometryNames = new Set([ 'PlaneGeometry', 'SphereGeometry', 'plane', 'sphere' ])
+const targetAdditions = Object.freeze([
+    { targetSurface: 'scratch', name: 'GPUDiagnostic', kinds: [ 'type' ] },
+    { targetSurface: 'scratch', name: 'GPUDiagnosticPhase', kinds: [ 'type' ] },
+    { targetSurface: 'scratch', name: 'PlaneGeometry', kinds: [ 'type' ] },
+    { targetSurface: 'scratch', name: 'ScratchDiagnosticBase', kinds: [ 'type' ] },
+    { targetSurface: 'scratch', name: 'ScratchDiagnosticDomain', kinds: [ 'type' ] },
+    { targetSurface: 'scratch', name: 'ScratchDiagnosticErrorContext', kinds: [ 'type' ] },
+    { targetSurface: 'scratch', name: 'ScratchDiagnosticErrorOptions', kinds: [ 'type' ] },
+    { targetSurface: 'scratch', name: 'ScratchDiagnosticEvidence', kinds: [ 'type' ] },
+    { targetSurface: 'scratch', name: 'ScratchDiagnosticSeverity', kinds: [ 'type' ] },
+    { targetSurface: 'scratch', name: 'ScratchDiagnosticSuggestion', kinds: [ 'type' ] },
+    { targetSurface: 'scratch', name: 'SphereGeometry', kinds: [ 'type' ] },
+    { targetSurface: 'scratch', name: 'isScratchDiagnosticError', kinds: [ 'value' ] },
+])
 
 function createPackageProgram() {
 
@@ -184,6 +198,7 @@ function buildBaselineManifest() {
         entryCount: entries.length,
         facetCount: facets,
         inventoryHash,
+        targetAdditions,
         entries: groupedEntries,
     })
 }
@@ -212,6 +227,11 @@ function groupEntries(entries) {
 function verifyManifest(manifest) {
 
     assertEqual(manifest.baselineCommit, baselineCommit, 'baseline commit')
+    assertEqual(
+        stableJson(manifest.targetAdditions),
+        stableJson(targetAdditions),
+        'target additions'
+    )
     assertEqual(
         manifest.entries.reduce((count, entry) => count + entry.surfaces.length, 0),
         manifest.entryCount,
@@ -290,6 +310,13 @@ function verifyTarget(manifest) {
         for (const kind of entry.kinds) kinds.add(kind)
         target.set(entry.targetName, kinds)
     }
+    for (const addition of manifest.targetAdditions) {
+        const target = expected[addition.targetSurface]
+        if (target === undefined) throw new Error(`Unknown target surface: ${addition.targetSurface}`)
+        const kinds = target.get(addition.name) ?? new Set()
+        for (const kind of addition.kinds) kinds.add(kind)
+        target.set(addition.name, kinds)
+    }
 
     const targetEntrypoints = {
         scratch: 'packages/geoscratch/src/scratch.ts',
@@ -321,6 +348,7 @@ function summary(manifest) {
         entryCount: manifest.entryCount,
         facetCount: manifest.facetCount,
         inventoryHash: manifest.inventoryHash,
+        targetAdditionCount: manifest.targetAdditions.length,
         dispositions,
     })
 }

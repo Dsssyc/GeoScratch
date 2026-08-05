@@ -4,7 +4,7 @@ import {
     ScratchDiagnosticError,
     GPURuntime,
     layoutCodec,
-} from 'geoscratch'
+} from 'geoscratch/scratch'
 import {
     createFakeGpu,
     createFakePipelineError,

@@ -6,7 +6,7 @@ import {
     GPURuntime,
     TextureViewSpec,
     layoutCodec,
-} from 'geoscratch'
+} from 'geoscratch/scratch'
 import { createFakeGpu } from './scratch-test-utils.js'
 
 const GPU_TEXTURE_USAGE_TEXTURE_BINDING = 0x4

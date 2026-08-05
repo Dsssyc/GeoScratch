@@ -8,7 +8,7 @@ import {
     ResolveQuerySetCommand,
     ScratchDiagnosticError,
     GPURuntime,
-} from 'geoscratch'
+} from 'geoscratch/scratch'
 import {
     advanceQuerySlotContentEpochForTest,
     createFakeGpu,

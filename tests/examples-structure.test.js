@@ -290,7 +290,7 @@ describe('examples structure', () => {
     it('demonstrates readiness policy execution without GPU readback', () => {
         const source = read('examples', 'readinessPolicies', 'main.ts')
 
-        expect(source).to.include("from 'geoscratch'")
+        expect(source).to.include("from 'geoscratch/scratch'")
         expect(source).to.include("whenMissing: 'use-fallback'")
         expect(source).to.include("whenMissing: 'skip-command'")
         expect(source).to.include("whenMissing: 'skip-pass'")
@@ -305,7 +305,7 @@ describe('examples structure', () => {
 
         expect(html).to.include('<title>Submission Order | GeoScratch Examples</title>')
         expect(html).to.include('id="GPUFrame"')
-        expect(source).to.include("from 'geoscratch'")
+        expect(source).to.include("from 'geoscratch/scratch'")
         expect(source).to.include('.upload(uploadZero)')
         expect(source).to.include('.compute(pass, [ incrementZero ])')
         expect(source).to.include('.upload(uploadTen)')
@@ -324,7 +324,7 @@ describe('examples structure', () => {
         expect(html).to.include('<title>External Image Upload | GeoScratch Examples</title>')
         expect(html).to.include('<h1>External Image Upload</h1>')
         expect(html).to.include('data-status="pending"')
-        expect(source).to.include("from 'geoscratch'")
+        expect(source).to.include("from 'geoscratch/scratch'")
         expect(source).to.include("document.createElement('canvas')")
         expect(source).to.include('createExternalImageUploadCommand')
         expect(source).to.include('sourceOrigin: { x: 1, y: 1 }')
@@ -356,7 +356,7 @@ describe('examples structure', () => {
         expect(html).to.include('<title>Texture Resize | GeoScratch Examples</title>')
         expect(html).to.include('<h1>Texture Resize</h1>')
         expect(html).to.include('data-status="pending"')
-        expect(source).to.include("from 'geoscratch'")
+        expect(source).to.include("from 'geoscratch/scratch'")
         expect(source).to.include('surface.resize(resizedSurfaceSize)')
         expect(source).to.include('texture.resize(surface.size)')
         expect(source).to.include('createCopyCommand')
@@ -398,7 +398,7 @@ describe('examples structure', () => {
 
         expect(html).to.include('<title>Render Pass Features | GeoScratch Examples</title>')
         expect(html).to.include('id="GPUFrame"')
-        expect(source).to.include("from 'geoscratch'")
+        expect(source).to.include("from 'geoscratch/scratch'")
         expect(source).to.include('sampleCount')
         expect(source).to.include('targets: [')
         expect(source).to.include('color: [')
@@ -426,7 +426,7 @@ describe('examples structure', () => {
 
         expect(html).to.include('<title>Immediate Data | GeoScratch Examples</title>')
         expect(html).to.include('id="GPUFrame"')
-        expect(source).to.include("from 'geoscratch'")
+        expect(source).to.include("from 'geoscratch/scratch'")
         expect(source).to.include('requires immediate_address_space;')
         expect(source).to.include('var<immediate>')
         expect(source).to.include("usage: [ 'immediate' ]")

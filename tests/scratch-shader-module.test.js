@@ -1,7 +1,7 @@
 import { expect } from 'chai'
 import {
     GPURuntime,
-} from 'geoscratch'
+} from 'geoscratch/scratch'
 import { createFakeGpu } from './scratch-test-utils.js'
 
 describe('scratch ShaderModule', () => {

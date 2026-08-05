@@ -6,7 +6,7 @@ import {
     ScratchDiagnosticError,
     GPURuntime,
     TextureResource,
-} from 'geoscratch'
+} from 'geoscratch/scratch'
 import {
     createFakeGpu,
     replaceResourceAllocationForTest,

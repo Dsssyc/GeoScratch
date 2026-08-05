@@ -8,7 +8,7 @@ import {
     SubmissionBuilder,
     SubmittedWork,
     TextureResource,
-} from 'geoscratch'
+} from 'geoscratch/scratch'
 import {
     advanceResourceContentEpochForTest,
     createFakeCanvas,

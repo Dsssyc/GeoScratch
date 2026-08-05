@@ -4,7 +4,7 @@ import {
     BindSet,
     ScratchDiagnosticError,
     GPURuntime,
-} from 'geoscratch'
+} from 'geoscratch/scratch'
 import {
     advanceResourceContentEpochForTest,
     createFakeGpu,

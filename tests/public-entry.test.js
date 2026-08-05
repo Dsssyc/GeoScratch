@@ -1,80 +1,26 @@
 import { expect } from 'chai'
-import * as scr from 'geoscratch'
-import * as scratchCompat from 'geoscratch/scratch'
-import * as scratchInternal from '../packages/geoscratch/dist/scratch/index.js'
+import * as root from 'geoscratch'
+import * as geo from 'geoscratch/geo'
+import * as scratch from 'geoscratch/scratch'
 
 describe('public entrypoints', () => {
 
-    it('exports the standard library entrypoint', () => {
+    it('exports Scratch and Geo as the only root concepts', () => {
 
-        expect(scr).to.have.property('StartDash').that.is.a('function')
-        expect(scr).to.have.property('renderPass').that.is.a('function')
-        expect(scr).to.have.property('binding').that.is.a('function')
-        expect(scr).to.have.property('Program').that.is.a('function')
-        expect(scr).to.have.property('BindLayout').that.is.a('function')
-        expect(scr).to.have.property('BindSet').that.is.a('function')
-        expect(scr).to.have.property('RenderPipeline').that.is.a('function')
-        expect(scr).to.have.property('ComputePipeline').that.is.a('function')
-        expect(scr).to.have.property('BeginOcclusionQueryCommand').that.is.a('function')
-        expect(scr).to.have.property('EndOcclusionQueryCommand').that.is.a('function')
-        expect(scr).to.have.property('DrawCommand').that.is.a('function')
-        expect(scr).to.have.property('DispatchCommand').that.is.a('function')
-        expect(scr).to.have.property('UploadCommand').that.is.a('function')
-        expect(scr).to.have.property('CopyCommand').that.is.a('function')
-        expect(scr).to.have.property('ReadbackCommand').that.is.a('function')
-        expect(scr).to.have.property('QuerySetResource').that.is.a('function')
-        expect(scr).to.have.property('ResolveQuerySetCommand').that.is.a('function')
-        expect(scr).to.have.property('RenderPassSpec').that.is.a('function')
-        expect(scr).to.have.property('ComputePassSpec').that.is.a('function')
-        expect(scr).to.have.property('SubmissionBuilder').that.is.a('function')
-        expect(scr).to.have.property('SubmittedWork').that.is.a('function')
-        expect(scr).to.have.property('ReadbackOperation').that.is.a('function')
-        expect(scr).to.have.property('TextureResource').that.is.a('function')
-        expect(scr).to.have.property('SamplerResource').that.is.a('function')
-        expect(scr).to.have.property('TextureUploadCommand').that.is.a('function')
-        expect(scr).to.have.property('LayoutCodec').that.is.a('function')
-        expect(scr).to.have.property('layoutCodec').that.is.a('function')
+        expect(Object.keys(root).sort()).to.deep.equal([ 'geo', 'scratch' ])
+        expect(root.scratch.GPURuntime).to.equal(scratch.GPURuntime)
+        expect(root.scratch.WorkerSystem).to.equal(scratch.WorkerSystem)
+        expect(root.scratch.plane).to.equal(scratch.plane)
+        expect(root.geo.WebMercatorQuad).to.equal(geo.WebMercatorQuad)
     })
 
-    it('keeps the scratch compatibility entrypoint', () => {
+    it('keeps the formal Scratch and Geo subpaths independent', () => {
 
-        expect(scratchCompat).to.have.property('StartDash').that.equals(scr.StartDash)
-        expect(scratchCompat).to.have.property('renderPass').that.equals(scr.renderPass)
-        expect(scratchCompat).to.have.property('Program').that.equals(scr.Program)
-        expect(scratchCompat).to.have.property('BindLayout').that.equals(scr.BindLayout)
-        expect(scratchCompat).to.have.property('BindSet').that.equals(scr.BindSet)
-        expect(scratchCompat).to.have.property('ComputePipeline').that.equals(scr.ComputePipeline)
-        expect(scratchCompat).to.have.property('BeginOcclusionQueryCommand').that.equals(scr.BeginOcclusionQueryCommand)
-        expect(scratchCompat).to.have.property('EndOcclusionQueryCommand').that.equals(scr.EndOcclusionQueryCommand)
-        expect(scratchCompat).to.have.property('DrawCommand').that.equals(scr.DrawCommand)
-        expect(scratchCompat).to.have.property('DispatchCommand').that.equals(scr.DispatchCommand)
-        expect(scratchCompat).to.have.property('UploadCommand').that.equals(scr.UploadCommand)
-        expect(scratchCompat).to.have.property('CopyCommand').that.equals(scr.CopyCommand)
-        expect(scratchCompat).to.have.property('ReadbackCommand').that.equals(scr.ReadbackCommand)
-        expect(scratchCompat).to.have.property('QuerySetResource').that.equals(scr.QuerySetResource)
-        expect(scratchCompat).to.have.property('ResolveQuerySetCommand').that.equals(scr.ResolveQuerySetCommand)
-        expect(scratchCompat).to.have.property('RenderPassSpec').that.equals(scr.RenderPassSpec)
-        expect(scratchCompat).to.have.property('ComputePassSpec').that.equals(scr.ComputePassSpec)
-        expect(scratchCompat).to.have.property('SubmissionBuilder').that.equals(scr.SubmissionBuilder)
-        expect(scratchCompat).to.have.property('ReadbackOperation').that.equals(scr.ReadbackOperation)
-        expect(scratchCompat).to.have.property('TextureResource').that.equals(scr.TextureResource)
-        expect(scratchCompat).to.have.property('SamplerResource').that.equals(scr.SamplerResource)
-        expect(scratchCompat).to.have.property('TextureUploadCommand').that.equals(scr.TextureUploadCommand)
-        expect(scratchCompat).to.have.property('LayoutCodec').that.equals(scr.LayoutCodec)
-        expect(scratchCompat).to.have.property('layoutCodec').that.equals(scr.layoutCodec)
-    })
-
-    it('exposes package-level entrypoints', () => {
-
-        expect(scr).to.have.property('GPURuntime').that.is.a('function')
-        expect(scr).to.have.property('RenderPipeline').that.is.a('function')
-        expect(scr).to.have.property('ComputePipeline').that.is.a('function')
-        expect(scr.RenderPipeline).to.equal(scratchInternal.RenderPipeline)
-        expect(scr.ComputePipeline).to.equal(scratchInternal.ComputePipeline)
-        expect(scratchCompat).to.have.property('GPURuntime').that.equals(scr.GPURuntime)
-        expect(scratchCompat).to.have.property('RenderPassSpec').that.equals(scr.RenderPassSpec)
-        expect(scratchCompat).to.have.property('ComputePassSpec').that.equals(scr.ComputePassSpec)
-        expect(scratchCompat).to.have.property('SubmittedWork').that.equals(scr.SubmittedWork)
-        expect(scratchCompat).to.have.property('TextureResource').that.equals(scr.TextureResource)
+        expect(scratch).to.have.property('GPURuntime').that.is.a('function')
+        expect(scratch).to.have.property('WorkerSystem').that.is.a('function')
+        expect(scratch).to.have.property('plane').that.is.a('function')
+        expect(geo).to.have.property('WebMercatorQuad')
+        expect(scratch).not.to.have.property('WebMercatorQuad')
+        expect(geo).not.to.have.property('GPURuntime')
     })
 })

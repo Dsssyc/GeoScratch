@@ -7,6 +7,7 @@ const scratchRoot = path.join(root, 'packages', 'geoscratch', 'src', 'scratch')
 const gpuRoot = path.join(scratchRoot, 'gpu')
 const workerRoot = path.join(scratchRoot, 'worker')
 const legacyWorkerRoot = path.join(root, 'packages', 'geoscratch', 'src', 'worker')
+const sourceRoot = path.join(root, 'packages', 'geoscratch', 'src')
 
 const gpuBasenames = [
     'binding-ownership.ts',
@@ -103,5 +104,28 @@ describe('Scratch foundation source topology', () => {
                 /\b(?:GPUDevice|GPUCanvasContext|HTMLCanvasElement|OffscreenCanvas|GPURuntime)\b/
             )
         }
+    })
+
+    it('contains only TypeScript source under the two approved domains', () => {
+
+        const unexpectedExtensions = []
+        const visit = directory => {
+            for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+                const target = path.join(directory, entry.name)
+                if (entry.isDirectory()) visit(target)
+                else if (!entry.name.endsWith('.ts')) unexpectedExtensions.push(
+                    path.relative(sourceRoot, target)
+                )
+            }
+        }
+        visit(sourceRoot)
+
+        expect(unexpectedExtensions).to.deep.equal([])
+        expect(fs.existsSync(path.join(sourceRoot, 'core'))).to.equal(false)
+        expect(fs.existsSync(path.join(sourceRoot, 'gpu'))).to.equal(false)
+        expect(fs.existsSync(path.join(sourceRoot, 'geometry'))).to.equal(false)
+        expect(fs.existsSync(path.join(sourceRoot, 'effects'))).to.equal(false)
+        expect(fs.existsSync(path.join(sourceRoot, 'loaders'))).to.equal(false)
+        expect(fs.existsSync(path.join(sourceRoot, 'worker.ts'))).to.equal(false)
     })
 })

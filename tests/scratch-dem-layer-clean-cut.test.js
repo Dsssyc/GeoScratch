@@ -2,7 +2,7 @@ import { expect } from 'chai'
 import fs from 'node:fs'
 import crypto from 'node:crypto'
 import path from 'node:path'
-import { GPURuntime } from 'geoscratch'
+import { GPURuntime } from 'geoscratch/scratch'
 import {
     VirtualRasterResidency,
     createVirtualRasterGpuState,

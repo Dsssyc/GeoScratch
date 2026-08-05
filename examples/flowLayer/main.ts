@@ -1,4 +1,4 @@
-import { GPURuntime } from 'geoscratch'
+import { GPURuntime } from 'geoscratch/scratch'
 import type {
     ScratchDiagnostic,
     GPUDiagnosticCapture,
@@ -7,7 +7,7 @@ import type {
     GPURuntimeDiagnosticsEvidence,
     Surface,
     SurfaceSize,
-} from 'geoscratch'
+} from 'geoscratch/scratch'
 import {
     FIELD_COUNT,
     PARTICLE_BLOCK_SIZE,

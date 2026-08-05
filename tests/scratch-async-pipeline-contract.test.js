@@ -5,7 +5,7 @@ import {
     ScratchDiagnosticError,
     RenderPipeline,
     GPURuntime,
-} from 'geoscratch'
+} from 'geoscratch/scratch'
 import {
     createGpuIncidentReport,
     createGpuOperationRecord,

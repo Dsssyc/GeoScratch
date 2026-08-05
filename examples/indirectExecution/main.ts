@@ -1,5 +1,5 @@
-import { GPURuntime } from 'geoscratch'
-import type { SubmittedWork, Surface } from 'geoscratch'
+import { GPURuntime } from 'geoscratch/scratch'
+import type { SubmittedWork, Surface } from 'geoscratch/scratch'
 
 const GPU_BUFFER_USAGE_COPY_DST = 0x08
 const GPU_BUFFER_USAGE_INDEX = 0x10

@@ -1,7 +1,7 @@
 import {
     GPURuntime,
-} from 'geoscratch'
-import type { SubmittedWork } from 'geoscratch'
+} from 'geoscratch/scratch'
+import type { SubmittedWork } from 'geoscratch/scratch'
 
 const canvas = document.getElementById('GPUFrame') as HTMLCanvasElement
 const result = document.getElementById('readback-result') as HTMLElement

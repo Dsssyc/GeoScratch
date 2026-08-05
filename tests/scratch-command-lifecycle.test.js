@@ -14,7 +14,7 @@ import {
     GPURuntime,
     TextureUploadCommand,
     UploadCommand,
-} from 'geoscratch'
+} from 'geoscratch/scratch'
 import { createFakeGpu, triangleWgsl } from './scratch-test-utils.js'
 
 const GPU_BUFFER_USAGE_COPY_SRC = 0x4

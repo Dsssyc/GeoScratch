@@ -1,12 +1,10 @@
-import * as scr from 'geoscratch'
+import * as scr from 'geoscratch/scratch'
 import * as scratchCompat from 'geoscratch/scratch'
-import * as workers from 'geoscratch/worker'
+import * as workers from 'geoscratch/scratch'
 import {
     CellLocalF32Codec,
     GeoDiagnosticError,
-    GeoQuadNode2D,
     MercatorCoordinate,
-    Node2D,
     TileMatrixCoverage,
     WebMercatorQuad,
     WebMercatorQuadAddressCodec,
@@ -27,14 +25,13 @@ import {
     webMercatorQuadAddressCodec,
     type CellLocalPosition,
     type CoordinateDomain,
-    type MapOptions,
     type PositionPrecisionFacts,
     type WideFixedPosition,
     type WebMercatorQuadPosition,
     type VirtualRasterPageIdentity,
     type VirtualRasterSample,
 } from 'geoscratch/geo'
-import { plane, sphere } from 'geoscratch/geometry'
+import { plane, sphere } from 'geoscratch/scratch'
 
 declare const typedImageBitmap: ImageBitmap
 declare const typedImageData: ImageData
@@ -114,52 +111,10 @@ scr.assertProgramPipelineAuthority
 // @ts-expect-error Compatibility entrypoints do not expose Program lifecycle authority stamps
 scratchCompat.assertProgramPipelineAuthority
 
-const startResult: Promise<GPUDevice | undefined> = scr.StartDash()
-const device: GPUDevice = scr.getDevice()
-
-const screen = scr.screen({
-    canvas: document.createElement('canvas'),
-})
-const createdScreen: scr.Screen = scr.Screen.create({
-    canvas: document.createElement('canvas'),
-})
-
-const pass = scr.renderPass({
-    name: 'typed render pass',
-    colorAttachments: [ { colorResource: screen } ],
-})
-
-const shader = scr.shader({
-    name: 'typed shader',
-    codeFunc: () => '@vertex fn vMain() -> @builtin(position) vec4f { return vec4f(); } @fragment fn fMain() -> @location(0) vec4f { return vec4f(); }',
-})
-
-const pipeline = scr.renderPipeline({
-    name: 'typed pipeline',
-    shader: { module: shader },
-})
-
-const binding = scr.binding({
-    name: 'typed binding',
-    range: () => [ 3 ],
-})
-
-pass.add(pipeline, binding)
-
 const readonlyLonLat = [ 0, 0 ] as const
 const mercator: [number, number] = MercatorCoordinate.fromLonLat(readonlyLonLat)
 const mercatorNdc: [number, number] = MercatorCoordinate.toNDC(mercator)
 const restoredLonLat: [number, number] = MercatorCoordinate.fromNDC(mercatorNdc)
-const geoNode = new GeoQuadNode2D()
-const aliasGeoNode: GeoQuadNode2D = new Node2D()
-const geoNodeLevel: number | null = geoNode.level
-const geoNodeParent: GeoQuadNode2D | null | undefined = geoNode.parent
-const geoNodeChildren: GeoQuadNode2D[] | null = geoNode.children
-const mapOptions: MapOptions = {
-    cameraBounds: scr.BoundingBox2D.create(0, 0, 1, 1),
-    cameraPos: [ 0, 0 ],
-    zoomLevel: 0,
-}
 const typedSurfaceDomain: CoordinateDomain = surfaceDomain({
     id: 'typed-surface',
     axes: [
@@ -282,21 +237,7 @@ const typedWebMercatorAddress = typedWebMercatorCodec.address(typedWebMercatorPo
 coordinateDomain({ id: 'typed-invalid', intrinsicDimensions: 4, embeddingDimensions: 3, axes: [] })
 // @ts-expect-error Mercator coordinate inputs require two components
 MercatorCoordinate.fromLonLat([ 0 ])
-const invalidMapOptions: MapOptions = {
-    cameraBounds: scr.BoundingBox2D.create(0, 0, 1, 1),
-    // @ts-expect-error Camera positions require two components
-    cameraPos: [ 0 ],
-    zoomLevel: 0,
-}
-// @ts-expect-error Geo node levels are numeric
-new GeoQuadNode2D('0')
 void restoredLonLat
-void aliasGeoNode
-void geoNodeLevel
-void geoNodeParent
-void geoNodeChildren
-void mapOptions
-void invalidMapOptions
 void typedAdvancedPosition
 void typedFixedPosition
 void typedPrecisionFacts
@@ -2591,10 +2532,6 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     void compatShaderReport
 }
 
-void startResult
-void device
-void screen
-void createdScreen
 void mercator
 void planeGeometry
 void sphereGeometry

@@ -9,7 +9,7 @@ import {
     RenderPipeline,
     GPURuntime,
     layoutCodec,
-} from 'geoscratch'
+} from 'geoscratch/scratch'
 import { createFakeGpu } from './scratch-test-utils.js'
 
 const GPU_BUFFER_USAGE_COPY_DST = 0x8

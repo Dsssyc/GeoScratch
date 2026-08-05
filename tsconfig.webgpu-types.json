@@ -5,8 +5,8 @@
     "moduleResolution": "Bundler",
     "strict": true,
     "exactOptionalPropertyTypes": true,
-    "allowJs": true,
-    "checkJs": true,
+    "allowJs": false,
+    "checkJs": false,
     "noEmit": true,
     "skipLibCheck": false,
     "types": [
@@ -15,7 +15,6 @@
   },
   "include": [
     "tests/types/**/*.ts",
-    "tests/fixtures/geo-webmercator-addressing.ts",
-    "packages/geoscratch/src/core/utils/uuid.js"
+    "tests/fixtures/geo-webmercator-addressing.ts"
   ]
 }

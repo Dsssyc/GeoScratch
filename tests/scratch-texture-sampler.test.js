@@ -8,7 +8,7 @@ import {
     GPURuntime,
     TextureResource,
     TextureUploadCommand,
-} from 'geoscratch'
+} from 'geoscratch/scratch'
 import { createFakeCanvas, createFakeGpu } from './scratch-test-utils.js'
 
 const GPU_TEXTURE_USAGE_COPY_DST = 0x2

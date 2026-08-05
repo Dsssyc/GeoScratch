@@ -1,7 +1,7 @@
 import type {
     WorkerTaskPriority,
     WorkerTaskPriorityClass,
-} from 'geoscratch/worker'
+} from 'geoscratch/scratch'
 
 export type DemWorkerPhase = 'network' | 'decode'
 

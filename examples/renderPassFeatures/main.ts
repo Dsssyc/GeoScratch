@@ -1,11 +1,11 @@
-import { GPURuntime } from 'geoscratch'
+import { GPURuntime } from 'geoscratch/scratch'
 import type {
     RenderPipeline,
     ShaderModule,
     SubmittedWork,
     Surface,
     SurfaceSize,
-} from 'geoscratch'
+} from 'geoscratch/scratch'
 
 const canvas = document.getElementById('GPUFrame') as HTMLCanvasElement
 const initialSize = Object.freeze({ width: 64, height: 64 })

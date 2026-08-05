@@ -17,7 +17,7 @@ const fixturePath =
 const runtimePath =
     'packages/geoscratch/src/scratch/gpu/runtime.ts'
 const entrypointPath =
-    'packages/geoscratch/src/index.ts'
+    'packages/geoscratch/src/scratch/index.ts'
 
 describe('Scratch structured WebGPU and WGSL normative proofs', () => {
 

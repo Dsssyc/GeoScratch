@@ -6,7 +6,7 @@ import {
     GPURuntime,
     SurfaceTextureLease,
     SurfaceTextureView,
-} from 'geoscratch'
+} from 'geoscratch/scratch'
 import {
     createFakeCanvas,
     createFakeExternalImageSource,

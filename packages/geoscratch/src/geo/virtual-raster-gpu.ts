@@ -1,8 +1,12 @@
-import type { BufferResource } from '../scratch/gpu/buffer.js'
-import type { TextureUploadCommand, UploadCommand } from '../scratch/gpu/command.js'
-import type { GPURuntime } from '../scratch/gpu/runtime.js'
-import type { SubmittedWork } from '../scratch/gpu/submission.js'
-import type { TextureResource, TextureViewSpec } from '../scratch/gpu/texture.js'
+import type {
+    BufferResource,
+    GPURuntime,
+    SubmittedWork,
+    TextureResource,
+    TextureUploadCommand,
+    TextureViewSpec,
+    UploadCommand,
+} from '../scratch/index.js'
 import { throwGeoDiagnostic } from './diagnostics.js'
 import { uploadPagesForPublication } from './virtual-raster-residency.js'
 import type { VirtualRasterPublication } from './virtual-raster-residency.js'

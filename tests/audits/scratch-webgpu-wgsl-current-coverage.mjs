@@ -141,10 +141,10 @@ const [ packageEntrypoint, scratchEntrypoint ] = await Promise.all([
     import('geoscratch'),
     import('geoscratch/scratch'),
 ])
-const packageRuntimeExportNames = Object.keys(packageEntrypoint).sort()
+const packageRuntimeExportNames = Object.keys(packageEntrypoint.scratch).sort()
 const scratchRuntimeExportNames = Object.keys(scratchEntrypoint).sort()
 const packageSourceExportNames = collectNamedExports(
-    'packages/geoscratch/src/index.ts'
+    'packages/geoscratch/src/scratch/index.ts'
 )
 const pointerProofCases = tryExtractSemanticCases(
     'tests/browser/scratch-wgsl-capability-matrix.mjs',
@@ -341,7 +341,7 @@ const checks = {
             pointerProofCases.cases.get('pointer-composite')
         ),
     requiredPublicExportsPresent:
-        [ packageEntrypoint, scratchEntrypoint ].every(entrypoint =>
+        [ packageEntrypoint.scratch, scratchEntrypoint ].every(entrypoint =>
             requiredRuntimeExports.every(name => name in entrypoint)
         ),
     exactRuntimeEntrypointParity:
@@ -403,7 +403,7 @@ const result = {
     ),
     publicEntrypoints: {
         requiredPackage: requiredRuntimeExports.filter(
-            name => name in packageEntrypoint
+            name => name in packageEntrypoint.scratch
         ),
         requiredScratch: requiredRuntimeExports.filter(
             name => name in scratchEntrypoint
@@ -417,7 +417,7 @@ const result = {
             name => !scratchRuntimeExportNames.includes(name)
         ),
         sourceDeclarationExportCount: packageSourceExportNames.size,
-        compatibilityShim: 'export-all',
+        scratchFacade: 'formal-export-all',
     },
     pointerProofSources: {
         extractionError: pointerProofCases.error,
@@ -593,9 +593,9 @@ function evidenceAttributionRegressionsPass() {
             profile: 'render-bundle-create',
             evidenceIds: [ 'webgpu-render-bundle-debug' ],
             publicSymbols: [
+                'GPURuntime',
                 'RenderBundle',
                 'RenderBundleDescriptor',
-                'GPURuntime',
             ],
             operations: [ 'createRenderBundleEncoder' ],
             sourcePaths: [
@@ -1692,8 +1692,8 @@ function declarationEntrypointParityIsExact() {
     const sourceShim = readText('packages/geoscratch/src/scratch.ts').trim()
     const emittedShim = readText('packages/geoscratch/dist/scratch.d.ts').trim()
     return (
-        sourceShim === "export * from './index.js'" &&
-        emittedShim === "export * from './index.js';"
+        sourceShim === "export * from './scratch/index.js'" &&
+        emittedShim === "export * from './scratch/index.js';"
     )
 }
 

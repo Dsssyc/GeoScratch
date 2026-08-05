@@ -23,8 +23,15 @@ describe('architecture boundaries', () => {
         const pkg = readJson('packages', 'geoscratch', 'package.json')
         const adr = read('docs', 'decisions', 'ADR-006-scratch-typescript-source-dist-boundary.md')
 
-        expect(pkg.exports).to.include.keys([ '.', './scratch', './geo', './geometry', './package.json' ])
+        expect(Object.keys(pkg.exports)).to.deep.equal([
+            '.',
+            './scratch',
+            './geo',
+            './package.json',
+        ])
         expect(pkg.exports).to.not.have.property('./src/*')
+        expect(pkg.exports).to.not.have.property('./worker')
+        expect(pkg.exports).to.not.have.property('./geometry')
         expect(adr).to.include('dist outputs')
     })
 

@@ -6,7 +6,7 @@ import {
     ScratchDiagnosticError,
     GPURuntime,
     UploadCommand,
-} from 'geoscratch'
+} from 'geoscratch/scratch'
 import {
     advanceResourceContentEpochForTest,
     createFakeCanvas,

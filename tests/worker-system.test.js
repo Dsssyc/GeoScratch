@@ -1,6 +1,6 @@
 import { expect } from 'chai'
-import { ScratchDiagnosticError } from 'geoscratch'
-import { WorkerSystem } from 'geoscratch/worker'
+import { ScratchDiagnosticError } from 'geoscratch/scratch'
+import { WorkerSystem } from 'geoscratch/scratch'
 import {
     ScriptedWorker,
     scriptedWorkerFactory,

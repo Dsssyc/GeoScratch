@@ -5,7 +5,7 @@ import {
     ScratchDiagnosticError,
     GPURuntime,
     layoutCodec,
-} from 'geoscratch'
+} from 'geoscratch/scratch'
 import { createFakeGpu } from './scratch-test-utils.js'
 
 const GPU_BUFFER_USAGE_MAP_READ = 0x1

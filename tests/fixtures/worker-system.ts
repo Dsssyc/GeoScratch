@@ -1,5 +1,5 @@
 import { ScratchDiagnosticError } from 'geoscratch/scratch'
-import { WorkerSystem, type WorkerTaskHandle } from 'geoscratch/worker'
+import { WorkerSystem, type WorkerTaskHandle } from 'geoscratch/scratch'
 
 export async function runWorkerSystemProof() {
 

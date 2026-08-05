@@ -1,5 +1,5 @@
 import { expect } from 'chai'
-import * as scr from 'geoscratch'
+import * as scr from 'geoscratch/scratch'
 import {
     createFakeCanvas,
     createFakeExternalImageSource,

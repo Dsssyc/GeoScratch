@@ -308,9 +308,9 @@ sphere(1, 8, 4, .2, 3, .1, 1.7)  09a77f5de3465b78e39e2e2c27006fe5e0fa9579bf9f18f
 - Modify: `tests/geo-typescript-migration.test.js`
 - Modify: `tests/architecture-boundary.test.js`
 
-- [ ] Add RED runtime export tests asserting root keys are exactly `['geo', 'scratch']`; `geoscratch/scratch` equals the approved Scratch manifest; `geoscratch/geo` equals the approved Geo manifest; and package export keys are exactly `.`, `./scratch`, `./geo`, `./package.json`.
-- [ ] Add RED negative import tests for `geoscratch/worker` and `geoscratch/geometry`, and negative type assertions for every removed root flat export and old GPU name.
-- [ ] Rewrite root entry as namespace-only exports:
+- [x] Add RED runtime export tests asserting root keys are exactly `['geo', 'scratch']`; `geoscratch/scratch` equals the approved Scratch manifest; `geoscratch/geo` equals the approved Geo manifest; and package export keys are exactly `.`, `./scratch`, `./geo`, `./package.json`.
+- [x] Add RED negative import tests for `geoscratch/worker` and `geoscratch/geometry`, and negative type assertions for every removed root flat export and old GPU name.
+- [x] Rewrite root entry as namespace-only exports:
 
 ```ts
 import * as geo from './geo/index.js'
@@ -319,15 +319,15 @@ import * as scratch from './scratch/index.js'
 export { geo, scratch }
 ```
 
-- [ ] Keep `scratch.ts` as the formal `./scratch` facade, not a compatibility shim. Delete `worker.ts` and both package subpath exports.
-- [ ] Change every example/fixture consumer to import GPU, Worker and geometry from `geoscratch/scratch`, and Geo contracts from `geoscratch/geo`. Do not use source-relative imports to bypass package boundaries.
-- [ ] Remove `GeoQuadNode2D` and `Node2D` from `geo/index.ts`; delete old quadtree and `BoundingBox2D`. Keep `MercatorCoordinate` only in `geo/mercatorCoordinate.ts`; delete the duplicate core version.
-- [ ] Delete the old global-device GPU stack, effects, loaders, ArrayRef, BlockRef, numeric wrappers, ScratchObject, random helper, old geometry copies, all same-source `.js`, and all handwritten `.d.ts` files.
-- [ ] Set `allowJs: false` in `packages/geoscratch/tsconfig.build.json`, `tsconfig.types.json`, and `tsconfig.webgpu-types.json`; remove the deleted `packages/geoscratch/src/core/utils/uuid.js` includes. Assert that no `.js`, `.d.js`, or handwritten `.d.ts` remains under `packages/geoscratch/src/`.
-- [ ] Keep every current Geo coordinate/high-precision/tile-matrix/WebMercator/virtual-raster export, except the explicitly removed old quadtree types. Do not rewrite `virtual-raster-cache.ts`.
-- [ ] Run `npm test -- --grep "foundation public topology|public entry|type contracts|module layout|workspace layout|examples structure|Geo TypeScript"`, `npm run typecheck`, and `npm run build`.
-- [ ] Run the topology audit and require every baseline export to have exactly one final disposition with no unclassified deletion.
-- [ ] Commit as `Cut Scratch and Geo public entrypoints`.
+- [x] Keep `scratch.ts` as the formal `./scratch` facade, not a compatibility shim. Delete `worker.ts` and both package subpath exports.
+- [x] Change every example/fixture consumer to import GPU, Worker and geometry from `geoscratch/scratch`, and Geo contracts from `geoscratch/geo`. Do not use source-relative imports to bypass package boundaries.
+- [x] Remove `GeoQuadNode2D` and `Node2D` from `geo/index.ts`; delete old quadtree and `BoundingBox2D`. Keep `MercatorCoordinate` only in `geo/mercatorCoordinate.ts`; delete the duplicate core version.
+- [x] Delete the old global-device GPU stack, effects, loaders, ArrayRef, BlockRef, numeric wrappers, ScratchObject, random helper, old geometry copies, all same-source `.js`, and all handwritten `.d.ts` files.
+- [x] Set `allowJs: false` in `packages/geoscratch/tsconfig.build.json`, `tsconfig.types.json`, and `tsconfig.webgpu-types.json`; remove the deleted `packages/geoscratch/src/core/utils/uuid.js` includes. Assert that no `.js`, `.d.js`, or handwritten `.d.ts` remains under `packages/geoscratch/src/`.
+- [x] Keep every current Geo coordinate/high-precision/tile-matrix/WebMercator/virtual-raster export, except the explicitly removed old quadtree types. Do not rewrite `virtual-raster-cache.ts`.
+- [x] Run `npm test -- --grep "foundation public topology|public entry|type contracts|module layout|workspace layout|examples structure|Geo TypeScript"`, `npm run typecheck`, and `npm run build`.
+- [x] Run the topology audit and require every baseline export to have exactly one final disposition with no unclassified deletion.
+- [x] Commit as `Cut Scratch and Geo public entrypoints`.
 
 ### Task 7: Publish The Accepted Architecture And Exact Historical Allowlist
 

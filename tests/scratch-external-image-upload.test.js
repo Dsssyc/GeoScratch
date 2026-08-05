@@ -3,7 +3,7 @@ import {
     ExternalImageUploadCommand,
     ScratchDiagnosticError,
     GPURuntime,
-} from 'geoscratch'
+} from 'geoscratch/scratch'
 import { ExternalImageUploadCommand as CompatExternalImageUploadCommand } from 'geoscratch/scratch'
 import { createFakeExternalImageSource, createFakeGpu } from './scratch-test-utils.js'
 

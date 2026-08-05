@@ -1,5 +1,5 @@
-import { GPURuntime } from 'geoscratch'
-import type { BufferResource, SubmittedWork, UploadCommand } from 'geoscratch'
+import { GPURuntime } from 'geoscratch/scratch'
+import type { BufferResource, SubmittedWork, UploadCommand } from 'geoscratch/scratch'
 import {
     VirtualRasterResidency,
     cellLocalF32Codec,

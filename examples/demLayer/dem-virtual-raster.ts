@@ -1,7 +1,7 @@
 import type {
     GPURuntime,
     SubmittedWork,
-} from 'geoscratch'
+} from 'geoscratch/scratch'
 import {
     TileMatrixCoverage,
     VirtualRasterRequestScheduler,

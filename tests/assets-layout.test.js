@@ -89,24 +89,12 @@ describe('asset layout', () => {
         expect(main).to.not.match(/border|palette/i)
     })
 
-    it('keeps library-owned postprocess shaders next to postprocess source', async () => {
+    it('keeps example-owned postprocess shaders with Hello GAW after legacy removal', () => {
 
-        expect(exists('packages', 'geoscratch', 'src', 'effects', 'postprocess', 'shaders', 'bloom', 'index.js')).to.equal(true)
-        expect(exists('packages', 'geoscratch', 'src', 'effects', 'postprocess', 'shaders', 'fxaa', 'index.js')).to.equal(true)
+        expect(exists('packages', 'geoscratch', 'src', 'effects')).to.equal(false)
         expect(exists('examples', 'public', 'shaders', 'postprocess')).to.equal(false)
-
-        const bloomPass = read('packages', 'geoscratch', 'src', 'effects', 'postprocess', 'bloomPass.js')
-        const fxaaPass = read('packages', 'geoscratch', 'src', 'effects', 'postprocess', 'fxaaPass.js')
-
-        expect(bloomPass).to.not.include('/shaders/postprocess/')
-        expect(fxaaPass).to.not.include('/shaders/postprocess/')
-
-        const bloomShaders = await import('../packages/geoscratch/src/effects/postprocess/shaders/bloom/index.js')
-        const fxaaShaders = await import('../packages/geoscratch/src/effects/postprocess/shaders/fxaa/index.js')
-
-        expect(bloomShaders.highlightComputeShader).to.include('@compute')
-        expect(bloomShaders.bloomOutputComputeShader).to.include('@compute')
-        expect(fxaaShaders.fxaaComputeShader).to.include('@compute')
+        expect(read('examples', 'helloGAW', 'shaders', 'bloom.wgsl')).to.include('@compute')
+        expect(read('examples', 'helloGAW', 'shaders', 'fxaa.wgsl')).to.include('@compute')
     })
 
     it('keeps only reachable terrain shaders beside the DEM example', () => {

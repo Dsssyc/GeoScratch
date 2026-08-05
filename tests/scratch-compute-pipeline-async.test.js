@@ -3,7 +3,7 @@ import {
     ComputePipeline,
     ScratchDiagnosticError,
     GPURuntime,
-} from 'geoscratch'
+} from 'geoscratch/scratch'
 import {
     createFakeGpu,
     createFakePipelineError,

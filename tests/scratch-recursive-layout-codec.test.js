@@ -3,7 +3,7 @@ import {
     ScratchDiagnosticError,
     GPURuntime,
     layoutCodec,
-} from 'geoscratch'
+} from 'geoscratch/scratch'
 import { createFakeGpu } from './scratch-test-utils.js'
 
 function uint16At(bytes, offset) {
