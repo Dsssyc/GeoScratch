@@ -42,7 +42,7 @@
 - `examples/demLayer/shaders/lod-map.wgsl`: 从 GPU visible instance tile address 绘制固定 source-domain LoD map。
 - `examples/demLayer/shaders/terrain-mesh.wgsl`: 从 tile address + local grid 重建高精度 WebMercator 坐标，采样 Virtual Raster，并按 GPU 邻接 level stitching。
 - `tests/fixtures/geo-gpu-tile-frontier.ts`: 真实 WebGPU synthetic frontier proof。
-- `tests/browser/geo-gpu-tile-frontier.mjs`: CPU oracle 与真实 GPU 输出的一对一 proof harness。
+- `tests/browser/geo-gpu-tile-frontier-core.mjs`: CPU oracle、公开 feedback ring 与真实 GPU 输出的一对一 proof harness。
 - `tests/browser/scratch-dem-layer.mjs`: DEM 高俯仰、bearing、teleport、tight budget、failure、resize 和 cleanup proof。
 - `tests/browser/geo-virtual-raster-dem.mjs`: DEM demand/residency/cache/churn 的 GPU-frontier 版本 proof。
 - `docs/decisions/ADR-061-gpu-resident-tile-frontier-dem.md`: 接受最终所有权与 clean-cut 决策。
@@ -289,7 +289,7 @@ Expected: policy/reference/type tests PASS and no Scratch source changes exist.
 - Create: `tests/scratch-readback-current-content.test.js`
 - Create: `tests/geo-virtual-raster-gpu-feedback.test.js`
 - Create: `tests/fixtures/geo-gpu-tile-frontier.ts`
-- Create: `tests/browser/geo-gpu-tile-frontier.mjs`
+- Create: `tests/browser/geo-gpu-tile-frontier-core.mjs`
 - Modify: `packages/geoscratch/src/geo/index.ts`
 - Modify: `tests/geo-gpu-tile-frontier.test.js`
 - Modify: `tests/types/public-api.ts`
@@ -414,7 +414,7 @@ Requirements encoded in WGSL:
 
 `GpuTileFrontier.create()` allocates all buffers once. `stageSeed(snapshot)` resolves configured roots against the acknowledged snapshot and initializes frontier A plus dispatch A. `writeView()` is the sole per-frame CPU pack, advances the bounded view submission authority once, and captures the current frontier-sequence stamp. `frame(viewToken)` chooses one of two precreated compute/render resource templates from that issued-frontier sequence; caller `frameEpoch` remains decision metadata and never controls A/B state. `encode(builder, frame)` validates ownership/liveness, adds the captured residency/view requirements, appends the private immutable MapMeta upload and exact private compute template, then places `consume(sequenceStamp)` immediately after that work as an ordered issue boundary. Failure before this boundary consumes nothing; failure in later composed work cannot replay the already-issued A/B transition. The caller disposes the view token after submission. Task 3C owns readback-slot selection and backpressure.
 
-Each A/B draw-argument buffer contains one 16-byte region per `GpuTileFrontierDrawTemplate`. `finalizeArguments` writes static `vertexCount/firstVertex/firstInstance` plus GPU visible count into the region matched to the frame's visible buffer. Each `VirtualRasterGpuFeedbackRing` command copies one fixed packed demand/retire/diagnostic/counter region with `retain: 'consume-on-read'`; `feedback(frame, submitted)` obtains the operation through `command.result({ after: submitted })`, consumes it once, validates decision/residency epochs and releases the ring claim in `finally`. Frontier disposal disposes all three commands after in-flight operations settle or are cancelled.
+Each A/B draw-argument buffer contains one 16-byte region per `GpuTileFrontierDrawTemplate`. `finalizeArguments` writes static `vertexCount/firstVertex/firstInstance` plus GPU visible count into the region matched to the frame's visible buffer. `VirtualRasterGpuFeedbackRing` owns exactly three persistent `ReadbackCommand` slots with `retain: 'consume-on-read'` and one private issue authority. `encode(builder, frame)` may append one readback only after the exact frontier upload/compute graph is already present; busy-slot backpressure fails before builder mutation, so callers may still submit the frontier/render graph without feedback. `feedback(frame, submitted)` uses exact `SubmittedWork` provenance and actual successful frontier issue sequence, not caller `frameEpoch`, to enforce N-1-or-earlier consumption. It consumes the selected operation once, validates packed decision and current acknowledged residency epochs, canonicalizes demands, rejects capacity overflow, and accepts retirements only when physical slot, generation, content epoch, and snapshot epoch still match. Public batches expose immutable domain facts, never raw mapped bytes or history. Frontier disposal cascades to all three commands and the private authority.
 
 - [ ] **Step 8: Prove same-submission provenance with fake GPU**
 
@@ -438,7 +438,7 @@ Submit seed, MapMeta upload, compute commands, and a small indirect draw. Assert
 Before implementation, run the new browser harness and record missing export RED. After implementation run:
 
 ```bash
-node tests/browser/geo-gpu-tile-frontier.mjs
+node tests/browser/geo-gpu-tile-frontier-core.mjs
 ```
 
 Expected GREEN JSON: `status: "passed"`, CPU/GPU comparisons all true, validation/uncaptured/console/page errors empty, and managed Chrome/Vite ports closed.
@@ -449,9 +449,9 @@ Expected GREEN JSON: `status: "passed"`, CPU/GPU comparisons all true, validatio
 npm --workspace geoscratch run build
 npx mocha tests/geo-gpu-tile-frontier.test.js tests/geo-virtual-raster.test.js tests/geo-virtual-raster-gpu-feedback.test.js tests/scratch-native-indirect-execution.test.js
 npm run typecheck
-node tests/browser/geo-gpu-tile-frontier.mjs
+node tests/browser/geo-gpu-tile-frontier-core.mjs
 git diff --check
-git add packages/geoscratch/src/geo/gpu-tile-frontier-wgsl.ts packages/geoscratch/src/geo/gpu-tile-frontier.ts packages/geoscratch/src/geo/virtual-raster-gpu-feedback.ts packages/geoscratch/src/geo/index.ts tests/geo-gpu-tile-frontier.test.js tests/geo-virtual-raster-gpu-feedback.test.js tests/types/public-api.ts tests/fixtures/geo-gpu-tile-frontier.ts tests/browser/geo-gpu-tile-frontier.mjs
+git add packages/geoscratch/src/geo/gpu-tile-frontier-wgsl.ts packages/geoscratch/src/geo/gpu-tile-frontier.ts packages/geoscratch/src/geo/virtual-raster-gpu-feedback.ts packages/geoscratch/src/geo/index.ts tests/geo-gpu-tile-frontier.test.js tests/geo-virtual-raster-gpu-feedback.test.js tests/types/public-api.ts tests/fixtures/geo-gpu-tile-frontier.ts tests/browser/geo-gpu-tile-frontier-core.mjs
 git commit -m "Implement GPU tile frontier execution"
 ```
 
@@ -703,7 +703,7 @@ Update `geo-virtual-raster-dem.mjs` so persistent-cache reload, rapid camera chu
 - [ ] **Step 6: Run browser gates and inspect screenshots**
 
 ```bash
-node tests/browser/geo-gpu-tile-frontier.mjs
+node tests/browser/geo-gpu-tile-frontier-core.mjs
 node tests/browser/scratch-dem-layer.mjs
 node tests/browser/geo-virtual-raster-dem.mjs
 ```
@@ -804,7 +804,7 @@ Expected: all PASS.
 - [ ] **Step 2: Run required real-browser gates**
 
 ```bash
-node tests/browser/geo-gpu-tile-frontier.mjs
+node tests/browser/geo-gpu-tile-frontier-core.mjs
 node tests/browser/scratch-dem-layer.mjs
 node tests/browser/geo-virtual-raster-dem.mjs
 node tests/browser/scratch-hello-gaw.mjs
