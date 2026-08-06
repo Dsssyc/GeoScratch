@@ -163,6 +163,8 @@ describe('DEM Layer clean cut', () => {
     it('uses the neutral route and removes every legacy DEM owner', () => {
 
         expect(fs.existsSync(path.join(root, 'examples', 'demLayer', 'index.html'))).to.equal(true)
+        expect(fs.existsSync(path.join(root, 'examples', 'demLayer', 'terrain-selection.ts')))
+            .to.equal(false)
         expect(fs.existsSync(path.join(root, 'examples', 'm_demLayer'))).to.equal(false)
         expect(fs.existsSync(path.join(root, 'examples', 'shared', 'scratchMap.js'))).to.equal(false)
         expect(fs.existsSync(path.join(root, 'packages', 'geoscratch', 'src', 'applications', 'terrain'))).to.equal(false)
@@ -181,7 +183,6 @@ describe('DEM Layer clean cut', () => {
             mainSource,
             read('examples', 'demLayer', 'dem-map.ts'),
             read('examples', 'demLayer', 'dem-lifecycle.ts'),
-            read('examples', 'demLayer', 'terrain-selection.ts'),
         ].join('\n')
 
         for (const call of [

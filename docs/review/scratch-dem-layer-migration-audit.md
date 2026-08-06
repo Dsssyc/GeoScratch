@@ -1,5 +1,16 @@
 # Scratch DEM Layer Migration Audit
 
+## Current Architecture Supersession
+
+As of 2026-08-06, ADR-061 replaces the CPU selector and CPU-authored indirect-count
+path described in the historical source-parity matrix below. The current DEM owns no
+`selectTerrainNodes()` production path: Geo's persistent GPU frontier produces visible
+instances, demand, and indirect arguments from acknowledged Virtual Raster residency.
+The matrix remains a record of the earlier Scratch API migration and must not be read as
+the current DEM execution architecture. See
+[ADR-061](../decisions/ADR-061-gpu-resident-tile-frontier-dem.md) and the final GPU
+frontier audit.
+
 ## Audit Status
 
 Integrated on `dev-feature` through implementation/gate commit `bceb8a2`. The original

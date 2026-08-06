@@ -26,6 +26,23 @@ canonical high-precision position
     -> shader-stage logical sampling and parent fallback
 ```
 
+DEM 已通过 ADR-061 接受一条 GPU resident frontier 路径。在需要可见性与 LoD 的
+消费者中，前半段进一步具体化为:
+
+```text
+camera/map metadata upload
+    -> persistent GPU A/B active frontier
+    -> frustum + SSE + hysteresis + balance + bounded budget
+    -> GPU visible instances + indirect arguments
+    -> bounded demand/retirement feedback
+    -> CPU Worker/cache/request reconciliation
+    -> acknowledged immutable residency publication
+    -> next GPU frontier decision
+```
+
+这里不是把整个网络瓦片树移入 GPU。GPU 只遍历有限 active frontier 和已确认的
+residency metadata；CPU 不再逐帧生成 visible node 数组或 indirect count。
+
 ## 冻结的所有权边界
 
 - `geoscratch/scratch` 分别拥有通用 Dedicated Worker 与 Persistent Cache 能力。
@@ -38,6 +55,10 @@ canonical high-precision position
 - Scratch GPU 域只拥有 WebGPU resource、command、submission、epoch 与 GPU diagnostics。
 - example 或上层 source adapter 拥有数据 URL、业务展示范围、camera selection、
   source revision、是否创建 PersistentCache、缓存预算和最终 presentation。
+- `geoscratch/geo` 的 `GpuTileFrontier` 拥有 persistent frontier、视锥/SSE、滞回、
+  相邻层级平衡、预算仲裁、canonical compaction、visible instances、demand、retirement
+  和结构化 diagnostics。具体 DEM 仍拥有 level metrics、page-to-patch、shader 与
+  mesh-stitching。
 
 缓存不是数据真相，GPU residency 不是缓存，in-flight 去重不是 completed cache，
 editable working state 也不是缓存。
@@ -114,6 +135,12 @@ type VirtualRasterPageDemand = {
 - 对 queue、active request、network、decode 和 history 使用硬预算；
 - 独立配置 network 与 CPU decode 并发预算，并分别报告 active、queued 与峰值；
 - 将超预算事实报告为 degradation 或结构化 diagnostic。
+
+GPU 产生的一个已接受父级缺页事务，在相同父级仍需要 refine 且 residency snapshot
+尚未补齐时必须保持 sticky；普通公平优先级不能每帧轮换该事务并造成 cancel/retry
+振荡。相机或策略使父级不再需要 refine 时，generation reconciliation 仍正常取消
+旧任务。terminal child failure 在 page table 中保持独立 `failed` 状态，阻断该父级
+refine、保留 parent cover，并防止重复请求。
 
 ## 通用 WorkerSystem
 
@@ -231,6 +258,14 @@ owned publication pages
 内容变化推进 Scratch `contentEpoch`，物理替换推进 `allocationVersion`。Geo 不模拟
 bind-group invalidation，不把 Worker/tile/cache 概念注入 Scratch，也不绕过 Scratch
 直接写 raw queue。
+
+GPU frontier 证明现有 Scratch 能力已经足够：Geo 使用 storage/compute、indirect
+dispatch/draw、submission authority、三槽 bounded readback、current-at-step provenance
+和 diagnostics 组合固定图，没有向 Scratch 新增 tile API。具体所有权和 clean cut
+见 [ADR-061](../../../../decisions/ADR-061-gpu-resident-tile-frontier-dem.md)、
+[设计文档](../../../../superpowers/specs/2026-08-06-gpu-resident-tile-frontier-dem-design.md)
+和
+[实现计划](../../../../superpowers/plans/2026-08-06-gpu-resident-tile-frontier-dem.md)。
 
 ## 非目标
 

@@ -271,6 +271,24 @@ This preserves GeoScratch's design philosophy:
 - expose validation failures through stable diagnostics, not prose-only exceptions
 - expose bounded causal evidence without retaining an ever-growing runtime log
 
+## Accepted Geo Frontier Boundary
+
+ADR-061 validates this boundary with a production-sized consumer. Geo's persistent
+tile frontier uses existing Scratch storage resources, layout codecs, compute commands,
+indirect dispatch/draw, ordered submission authority, bounded readback, provenance, and
+diagnostics. No tile, terrain, frustum, SSE, LoD, or residency policy entered Scratch.
+
+The host writes one map/camera metadata update and submits a fixed graph. Geo compute
+owns the bounded active frontier and indirect counts, while CPU Worker/cache/network
+code acts only on bounded GPU demand feedback and acknowledges immutable residency
+publications. This is evidence that explicit Scratch primitives can support a dynamic
+GPU-owned domain system without a forced `prepare()` state machine or scene abstraction.
+
+See [ADR-061](../decisions/ADR-061-gpu-resident-tile-frontier-dem.md), the
+[accepted design](../superpowers/specs/2026-08-06-gpu-resident-tile-frontier-dem-design.md),
+and the
+[implementation plan](../superpowers/plans/2026-08-06-gpu-resident-tile-frontier-dem.md).
+
 ## Open Questions For Future ADRs And Living Reviews
 
 - How strict should buffer layout typing be across CPU views, vertex attributes, WGSL storage, and readback?

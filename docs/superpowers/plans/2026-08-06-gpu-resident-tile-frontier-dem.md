@@ -65,7 +65,7 @@
 - Produces: `VirtualRasterGpuState.slotTable: BufferResource`, `VirtualRasterGpuUpdate.slotTableUpload?: UploadCommand`, `VirtualRasterGpuFacts.slotTableBytes: number`, GPU-distinct `failed` page status, and native-outcome-gated publication acknowledgement。
 - Slot ABI: 每个物理槽固定 12 个 `u32`：`valid, samplingLevel, matrixLevel, tileRow, tileCol, compactIndex, physicalSlot, generation, contentEpoch, snapshotEpoch, publicationEpoch, flags`。非 tile address 的 `matrixLevel/tileRow/tileCol/compactIndex` 写 `0xffffffff`。DEM 的 minimum/maximum elevation 与 geometric error 由 Geo frontier 的 level-metric buffer 提供，不进入通用 Virtual Raster slot ABI；compute 读取两者后形成设计文档所称的完整 resident-slot evaluation facts。
 
-- [ ] **Step 1: Write the failing slot-table publication test**
+- [x] **Step 1: Write the failing slot-table publication test**
 
 在 `tests/geo-virtual-raster.test.js` 的 GPU-state describe 中扩展 publication test：
 
@@ -83,7 +83,7 @@ expect(update.commands.at(-1)).to.equal(update.slotTableUpload)
 
 同一 test block 还必须锁定：terminal `failed` page 即使没有 physical slot，page-table status 仍编码为 `4` 而不是全零 `missing`。包含本 publication upload command 的 changed publication 仅在 `submitted.nativeOutcome.status === 'observed-succeeded'` 时推进 acknowledged epoch；`observed-failed`、`observation-failed` 或 `unobserved` 必须保持 staged state 且不释放 staging bytes。无 upload、无 staging bytes、snapshot epoch 已经是当前 acknowledged epoch 的 unchanged publication 不归因于 submission 中的其他 native work，因此在同 runtime/command-membership 验证后直接 settle；既不要求整个 submission 是 `no-native-work`，也不让无关 draw failure阻塞这个 no-op settlement。
 
-- [ ] **Step 2: Run the focused test and record RED**
+- [x] **Step 2: Run the focused test and record RED**
 
 Run:
 
@@ -94,7 +94,7 @@ npx mocha tests/geo-virtual-raster.test.js --grep "stable Scratch atlas/page-tab
 
 Expected: FAIL because slot metadata does not exist, failed collapses to missing, and acknowledgement currently advances without checking native outcome.
 
-- [ ] **Step 3: Add the stable slot resource and encoder**
+- [x] **Step 3: Add the stable slot resource and encoder**
 
 在 `virtual-raster-gpu.ts` 增加固定布局和 encoder：
 
@@ -115,11 +115,11 @@ function encodeSlotTable(
 
 Changed publication 的 `acknowledge()` 在任何 residency mutation 前 `await submitted.nativeOutcome`，按前述规则 fail closed；失败诊断包含 submission id、snapshot epoch 和 native outcome。失败路径由调用方显式 `abandon(publication)` 或重试，不得暗中 acknowledge。Unchanged publication 不等待或继承不相关 native work 的成败。
 
-- [ ] **Step 4: Keep non-tile Virtual Raster generic**
+- [x] **Step 4: Keep non-tile Virtual Raster generic**
 
 为普通 2D address-space fixture 增加断言：slot 仍合法，但四个 tile-only words 为 `SLOT_INVALID`。编码函数不得访问 DEM、高程、SSE 或 WebMercator 常量。
 
-- [ ] **Step 5: Add public type usage and run GREEN**
+- [x] **Step 5: Add public type usage and run GREEN**
 
 在 `tests/types/public-api.ts` 加入：
 
@@ -142,7 +142,7 @@ git diff --check
 
 Update the intentional declaration-signature count in `tests/scratch-persistent-binding-final-parity.test.js` for the three new public declarations, then run the full suite. Expected: all commands PASS; fake queue writes show atlas uploads plus exactly two stable buffer uploads when a snapshot changes.
 
-- [ ] **Step 6: Commit Task 1**
+- [x] **Step 6: Commit Task 1**
 
 ```bash
 git add packages/geoscratch/src/geo/virtual-raster-gpu.ts packages/geoscratch/src/geo/virtual-raster.ts tests/geo-virtual-raster.test.js tests/scratch-persistent-binding-final-parity.test.js tests/types/public-api.ts
@@ -166,7 +166,7 @@ git commit -m "Expose virtual raster GPU slot metadata"
 - Produces public types `GpuTileFrontierPolicy`, `GpuTileFrontierView`, `GpuTileFrontierLevelMetric`, `GpuTileFrontierDrawTemplate`, `GpuTileFrontierDescriptor`, `GpuTileFrontierDemand`, `GpuTileFrontierFacts` and factory `gpuTileFrontierPolicy()`。
 - Produces package-internal `evaluateGpuTileFrontierReference(input)` with the same retain/refine/coarsen/balance/budget rules as WGSL。
 
-- [ ] **Step 1: Write RED tests for policy and deterministic reference behavior**
+- [x] **Step 1: Write RED tests for policy and deterministic reference behavior**
 
 `tests/geo-gpu-tile-frontier.test.js` must cover these exact cases:
 
@@ -197,7 +197,7 @@ Reference fixtures then assert: an off-frustum leaf is not visible; an under-thr
 
 Discovered-design correction for Task 3B: numeric `compactIndex` order is address identity, not canonical array order. Canonical frontier/demand/tie order is maximum-level-aligned hierarchical path-prefix order with row bit before column bit (`00, 01, 10, 11`). A valid frontier is prefix-free; stable parent-to-children replacement and complete sibling-to-parent coarsening therefore preserve this order in `O(active)` without global atomics, per-output rank rescans, or radix passes. Mixed-level and subcoverage fixtures must lock this invariant.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 ```bash
 npm --workspace geoscratch run build
@@ -206,7 +206,7 @@ npx mocha tests/geo-gpu-tile-frontier.test.js
 
 Expected: FAIL with missing module/exports.
 
-- [ ] **Step 3: Define exact public contracts and codecs**
+- [x] **Step 3: Define exact public contracts and codecs**
 
 `gpu-tile-frontier-layout.ts` defines these stable inputs:
 
@@ -240,11 +240,11 @@ export type GpuTileFrontierDrawTemplate = Readonly<{
 
 MapMeta、policy、level metric、frontier entry、visible instance、demand 和 diagnostics 都由 `layoutCodec()` 建立；导出 byte sizes/field offsets 给 TypeScript packer 和 WGSL generator 共用，禁止手写两份偏移。
 
-- [ ] **Step 4: Implement structured policy validation**
+- [x] **Step 4: Implement structured policy validation**
 
 给 `GeoDiagnosticPhase` 增加 `'selection'`。`gpuTileFrontierPolicy()` 验证 finite numbers、`coarsenErrorPixels < refineErrorPixels`、level order、positive capacities 和 `maximumDemands <= maximumActiveTiles * 4`；`GpuTileFrontier.create()` 再依据传入的 slot capacity 验证 transition reserve。失败 codes 使用已批准的 `GEO_GPU_TILE_*` envelope。
 
-- [ ] **Step 5: Implement the CPU oracle**
+- [x] **Step 5: Implement the CPU oracle**
 
 `evaluateGpuTileFrontierReference()` 仅操作传入的有限 current frontier/resident-page records：
 
@@ -259,11 +259,11 @@ type GpuTileFrontierReferenceOutput = Readonly<{
 
 实现顺序固定为 visibility/SSE candidate、256-bucket budget、refine acceptance、coarsen sibling transaction、neighbor balance validation、canonical prefix compaction。该模块不得创建 runtime、buffer、worker 或 network request。
 
-- [ ] **Step 6: Export contracts and typecheck them**
+- [x] **Step 6: Export contracts and typecheck them**
 
 在 `geo/index.ts` 导出 public contracts/factory，不导出 reference evaluator。在 `tests/types/public-api.ts` 构造完整 descriptor，并用 `@ts-expect-error` 锁定缺失 WebMercator projection、错误 tuple 长度和非法字段类型；重复 draw id 属于值级不变量，在 `geo-gpu-tile-frontier.test.js` 中断言结构化 runtime validation，而不伪装成 TypeScript 可判定错误。
 
-- [ ] **Step 7: Run GREEN and commit Task 2**
+- [x] **Step 7: Run GREEN and commit Task 2**
 
 ```bash
 npm --workspace geoscratch run build
@@ -301,7 +301,7 @@ Expected: policy/reference/type tests PASS and no Scratch source changes exist.
 
 Discovered API correction: a frame assembled before either residency acknowledgement or a newer `writeView()` must fail at submission, so raw `viewUpload`, compute pass, command arrays, working buffers, and feedback write regions are not Geo frame capabilities. Scratch command/resource descriptors remain an intentional expert escape hatch for direct GPU composition, not a same-realm security boundary。
 
-- [ ] **Step 1: Prove the generic ordered-readback gap with RED**
+- [x] **Step 1: Prove the generic ordered-readback gap with RED**
 
 Create `tests/scratch-readback-current-content.test.js`. A persistent readback command with:
 
@@ -320,11 +320,11 @@ npx mocha tests/scratch-readback-current-content.test.js
 
 Expected: RED with `SCRATCH_READBACK_SOURCE_INVALID` because `ReadbackCommandDescriptor` currently accepts only a numeric epoch.
 
-- [ ] **Step 2: Add `current-at-step` to ordered readback without weakening CopyCommand**
+- [x] **Step 2: Add `current-at-step` to ordered readback without weakening CopyCommand**
 
 Define a readback-only source descriptor whose `contentEpoch` is `CommandResourceReadEpoch`; keep ordinary `BufferCopyCommandSourceDescriptor` numeric. Normalize `'current-at-step'`, pass it through readiness simulation, and at the readback step snapshot the actual simulated/produced numeric epoch into the claim, operation and `SubmittedWork` provenance. Do not permit future lookahead, stale numeric reads or indeterminate reads.
 
-- [ ] **Step 3: Run Scratch readback gates and commit the generic prerequisite**
+- [x] **Step 3: Run Scratch readback gates and commit the generic prerequisite**
 
 ```bash
 npm --workspace geoscratch run build
@@ -337,7 +337,7 @@ git commit -m "Allow ordered readback of current GPU content"
 
 Expected: all PASS; the Scratch diff contains only the generic epoch contract and no tile/frontier term.
 
-- [ ] **Step 4: Extend frontier unit tests with RED resource-graph assertions**
+- [x] **Step 4: Extend frontier unit tests with RED resource-graph assertions**
 
 Create a fake-GPU fixture and assert:
 
@@ -369,7 +369,7 @@ evenView.dispose()
 
 Assert the first issued frontier frame reads A/writes B and the next issued frontier frame reads B/writes A regardless of caller `frameEpoch`; cancelled tokens, unsubmitted builders, and failures before the frontier issue boundary do not advance parity. A later composed queue action may make `submit()` throw after frontier issue, but must not roll parity back. Object ids remain stable, stale view/residency/sequence stamps fail at submission, and no `mapAsync` or direct native buffer read occurs.
 
-- [ ] **Step 5: Run frontier unit RED**
+- [x] **Step 5: Run frontier unit RED**
 
 ```bash
 npm --workspace geoscratch run build
@@ -378,7 +378,7 @@ npx mocha tests/geo-gpu-tile-frontier.test.js --grep "GPU resource graph"
 
 Expected: FAIL because `GpuTileFrontier` does not exist.
 
-- [ ] **Step 6: Generate the fixed WGSL command graph**
+- [x] **Step 6: Generate the fixed WGSL command graph**
 
 `gpu-tile-frontier-wgsl.ts` emits named entry points with one shared ABI module:
 
@@ -410,17 +410,17 @@ Requirements encoded in WGSL:
 - perform two-level stable prefix scan and canonical compaction;
 - clamp every count and set overflow bits before writing indirect arguments.
 
-- [ ] **Step 7: Implement persistent resources and A/B templates**
+- [x] **Step 7: Implement persistent resources and A/B templates**
 
 `GpuTileFrontier.create()` allocates all buffers once. `stageSeed(snapshot)` resolves configured roots against the acknowledged snapshot and initializes frontier A plus dispatch A. `writeView()` is the sole per-frame CPU pack, advances the bounded view submission authority once, and captures the current frontier-sequence stamp. `frame(viewToken)` chooses one of two precreated compute/render resource templates from that issued-frontier sequence; caller `frameEpoch` remains decision metadata and never controls A/B state. `encode(builder, frame)` validates ownership/liveness, adds the captured residency/view requirements, appends the private immutable MapMeta upload and exact private compute template, then places `consume(sequenceStamp)` immediately after that work as an ordered issue boundary. Failure before this boundary consumes nothing; failure in later composed work cannot replay the already-issued A/B transition. The caller disposes the view token after submission. Task 3C owns readback-slot selection and backpressure.
 
 Each A/B draw-argument buffer contains one 16-byte region per `GpuTileFrontierDrawTemplate`. `finalizeArguments` writes static `vertexCount/firstVertex/firstInstance` plus GPU visible count into the region matched to the frame's visible buffer. `VirtualRasterGpuFeedbackRing` owns exactly three persistent `ReadbackCommand` slots with `retain: 'consume-on-read'` and one private issue authority. Frontier upload/compute and ring readback use package-owned Scratch opaque steps: public `builder.steps` retains only frozen labeled markers, while real commands and the privately branded sequence witness remain inaccessible. `encode(builder, frame)` requires one intact exact-frame sequence from `GpuTileFrontier.encode()`; marker removal, duplication, reordering, or public command reuse fails before native issue. Busy submitted-slot backpressure fails before builder mutation, while speculative open builders remain authority-arbitrated contenders rather than hidden reservations. `feedback(frame, submitted)` uses exact `SubmittedWork` provenance and actual successful frontier issue sequence, not caller `frameEpoch`, to enforce N-1-or-earlier consumption. It consumes the selected operation once, validates packed decision and current acknowledged residency epochs, canonicalizes demands, rejects every counter above fixed capacity, requires exact resident demand parents, and accepts retirements only when exact resident page, physical slot, generation, content epoch, and snapshot epoch still match. Public batches expose immutable domain facts, never raw mapped bytes or history. Direct JS construction and public identity rebinding are rejected; frontier disposal cascades to all three commands and the private authority.
 
-- [ ] **Step 8: Prove same-submission provenance with fake GPU**
+- [x] **Step 8: Prove same-submission provenance with fake GPU**
 
 Submit seed, MapMeta upload, compute commands, and a small indirect draw. Assert `SubmittedWork.resourceAccesses` reports `current-at-step` reads for internally produced dispatch arguments and each draw argument; producer and consumer epochs match; `fake.calls.maps` remains empty; overflow/zero-work still records producer epochs without CPU fallback.
 
-- [ ] **Step 9: Add the real-browser synthetic fixture**
+- [x] **Step 9: Add the real-browser synthetic fixture**
 
 `tests/fixtures/geo-gpu-tile-frontier.ts` creates a finite WebMercatorQuad z0-z3 coverage, synthetic resident snapshots, and these proofs:
 
@@ -433,7 +433,7 @@ Submit seed, MapMeta upload, compute commands, and a small indirect draw. Assert
 
 `geo-virtual-raster-gpu-feedback.test.js` separately asserts N-1-or-earlier consumption, submitted-slot backpressure, speculative-builder authority arbitration, exact encode provenance, all bounded counter limits, stale decision/snapshot rejection, exact-resident versus fallback authority, canonical demand dedupe, generation-matched retire decoding, runtime construction closure, and immutable ownership identity. It must never return raw mapped bytes or an unbounded history.
 
-- [ ] **Step 10: Run real GPU RED then GREEN**
+- [x] **Step 10: Run real GPU RED then GREEN**
 
 Before implementation, run the new browser harness and record missing export RED. After implementation run:
 
@@ -443,7 +443,7 @@ node tests/browser/geo-gpu-tile-frontier-core.mjs
 
 Expected GREEN JSON: `status: "passed"`, CPU/GPU comparisons all true, validation/uncaptured/console/page errors empty, and managed Chrome/Vite ports closed.
 
-- [ ] **Step 11: Run Task 3 frontier gates and commit**
+- [x] **Step 11: Run Task 3 frontier gates and commit**
 
 ```bash
 npm --workspace geoscratch run build
@@ -473,7 +473,7 @@ git commit -m "Implement GPU tile frontier execution"
 - Produces `VirtualRasterResidencyLease`, and `reconcileFeedback(feedback)` returning `{ generation, requestedCount, retainedCount, retiredCount, settlement }`。
 - Removes production `prepare(selection)` and `planDemVirtualPages()` from the DEM runtime contract。
 
-- [ ] **Step 1: Rewrite tests to RED against GPU demand reconciliation**
+- [x] **Step 1: Rewrite tests to RED against GPU demand reconciliation**
 
 Tests construct feedback batches with demands carrying `page`, `priority`, `decisionEpoch`, `parentPage/parentGeneration` and `required` flags plus retire records carrying `page/generation`, then assert:
 
@@ -487,7 +487,7 @@ expect(virtualRaster.scheduler.inspect().activeRequestCount).to.equal(0)
 
 Also assert every minimum-matrix safety-cover page remains leased, duplicate demand keys collapse to highest priority, out-of-coverage pages produce `GEO_GPU_TILE_FRONTIER_INVALID`, and stale decision epochs cannot revive canceled work. A demanded transition leases its resident parent and each newly installed child; only a generation-matched GPU retire releases a lease. A stale retire, failed upload acknowledgement, pending child set or disposed feedback slot cannot make an active page evictable.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 ```bash
 npm --workspace geoscratch run build
@@ -496,13 +496,13 @@ npx mocha tests/geo-virtual-raster-dem.test.js tests/scratch-dem-layer-clean-cut
 
 Expected: FAIL because runtime exposes only `prepare(selection)` and residency has no owner-scoped generation-safe lease.
 
-- [ ] **Step 3: Implement owner-scoped residency leases**
+- [x] **Step 3: Implement owner-scoped residency leases**
 
 `VirtualRasterResidency.createLease({ id, maximumPages })` returns an explicit `VirtualRasterResidencyLease` with `retain(page, generation)`, `release(page, generation)`, `facts()` and idempotent `dispose()`. Residency eviction excludes a page only while a live lease contains that page's current physical-slot generation; stale generations cannot protect a reused slot or release its replacement. The lease has a hard page budget, bounded facts/history, structured overflow diagnostics, and is independent of request/cache/worker state. Existing manual `pin/unpin` remains source-owned safety policy, not transition authority.
 
 Add tests for two independent owners, stale release after slot reuse, lease overflow, publication abandon, and dispose. No GPU or DEM term enters the residency API.
 
-- [ ] **Step 4: Implement the event-path adapter**
+- [x] **Step 4: Implement the event-path adapter**
 
 Replace selection planning with:
 
@@ -536,11 +536,11 @@ function reconcileFeedback(
 
 `safetyCoverPages` is every covered tile in the coarsest configured matrix, not `VirtualRasterAddressSpace.rootPage()`'s single top-left convenience page. Priority mapping preserves GPU score and usage (`required`/`prefetch`) without recomputing camera distance. CPU scheduler remains authority for worker cancellation, cache, network/decode budgets and terminal failure publication. Publication install leases acknowledged children before they can enter a GPU frontier; GPU retire releases old parent/children only after the replacement cover is visible in a later acknowledged snapshot. Dispose releases the frontier lease after in-flight SubmittedWork settles.
 
-- [ ] **Step 5: Remove selection-shaped production exports**
+- [x] **Step 5: Remove selection-shaped production exports**
 
 Delete `TerrainSelection`, `DemVirtualRasterPagePlan`, `planDemVirtualPages`, `comparePagesForCamera`, selection-to-bounds loops and `MAX_TERRAIN_NODES` import from `dem-virtual-raster.ts`. Keep coordinate/sampling/stitch helpers used by shaders/tests.
 
-- [ ] **Step 6: Run GREEN and commit Task 4**
+- [x] **Step 6: Run GREEN and commit Task 4**
 
 ```bash
 npm --workspace geoscratch run build
@@ -572,7 +572,7 @@ Expected: scheduler/residency/cache tests PASS and no production code consumes `
 - Produces frame order `MapMeta upload -> residency uploads -> frontier compute -> LoD drawIndirect -> terrain drawIndirect -> demand readback`。
 - Removes `selectTerrainNodes`, node buffers, canonical-node buffers, camera-coordinate buffer and CPU indirect uploads from the production graph。
 
-- [ ] **Step 1: Make clean-cut source tests RED**
+- [x] **Step 1: Make clean-cut source tests RED**
 
 Replace old CPU-selection snapshots with source/contract assertions:
 
@@ -588,11 +588,11 @@ expect(contract.selectionPath).to.equal('gpu-resident-active-frontier')
 
 Run the focused tests and confirm they fail against the current CPU implementation.
 
-- [ ] **Step 2: Extend the MapLibre camera adapter**
+- [x] **Step 2: Extend the MapLibre camera adapter**
 
 `readDemCameraState()` returns exactly the Task 2 `GpuTileFrontierView` fields plus `far/near` required by terrain color/depth. Compute `verticalFovRadians` from `_fov/fov`, preserve the current `f64 -> high/low` split, and keep `clipFromRelativeWorld = absoluteClipMatrix * translate(cameraHigh)` so shaders consume camera-relative coordinates.
 
-- [ ] **Step 3: Create frontier policy and level metrics from manifest facts**
+- [x] **Step 3: Create frontier policy and level metrics from manifest facts**
 
 For every covered TileMatrixSet matrix, derive:
 
@@ -602,7 +602,7 @@ const geometricErrorMeters = matrix.cellSize * matrix.tileWidth / TERRAIN_SECTOR
 
 Use manifest elevation range and `TERRAIN_EXAGGERATION` for conservative vertical bounds. Configure root pages from the minimum matrix coverage, `maximumActiveTiles <= coverage.entryCount`, `maximumDemands <= maxPhysicalPages * 4`, and `transitionReservePages >= maximum covered child count + 1` when the physical-page budget permits. Tight budgets reject refine and report budget-limited instead of creating holes.
 
-- [ ] **Step 4: Replace DEM frame construction**
+- [x] **Step 4: Replace DEM frame construction**
 
 `renderFrame(camera)` performs no selection. It stages current residency publication, writes MapMeta once, gets the A/B frontier frame, and submits residency uploads before compute when and only when publication changed:
 
@@ -625,19 +625,19 @@ try {
 
 After submission, publication acknowledgement and feedback decode run asynchronously. Decoded demands/retirements call `virtualRaster.reconcileFeedback`; request settlement schedules another frame. While frontier facts are `seeding`, `refining`, `coarsening` or `waiting-residency`, `main.ts` schedules bounded follow-up frames even if MapLibre camera is static.
 
-- [ ] **Step 5: Rewrite LoD-map shader inputs**
+- [x] **Step 5: Rewrite LoD-map shader inputs**
 
 `lod-map.wgsl` reads `visibleInstances` entries containing `matrixLevel`, `tileRow`, `tileCol`, `samplingLevel`, physical slot/generation and four neighbor matrix levels. It reconstructs normalized WebMercator tile bounds, maps them into the fixed DEM source projected bounds, and writes matrix level. No CPU `tileBox`, `sectorRange`, `level[]` or `box[]` storage remains.
 
-- [ ] **Step 6: Rewrite terrain vertex coordinates and stitching**
+- [x] **Step 6: Rewrite terrain vertex coordinates and stitching**
 
 `terrain-mesh.wgsl` reads the same visible entry. It constructs exact wide-fixed WebMercator quanta from `(matrixLevel, tileRow, tileCol, local grid)` using integer shifts, samples `DemHeight_sample_vertex_mercator(position, samplingLevel)`, computes camera-relative XY from fixed-axis difference, and reads neighbor levels directly for 64-sector stitching. It does not reconstruct a seven-field address per vertex in memory and does not use global `f32` world coordinates as position truth.
 
-- [ ] **Step 7: Update DEM provenance and lifecycle facts**
+- [x] **Step 7: Update DEM provenance and lifecycle facts**
 
 Provenance pairs become compute-produced `visibleInstances/indirectArgs -> render reads`, LoD-map pass -> terrain read, and optional residency slot/page-table uploads -> compute/terrain reads. State facts expose bounded counters only: frontier/visible/demand/fallback/stale/budget-limited counts, level range, maximum SSE, convergence and readback in-flight count.
 
-- [ ] **Step 8: Run focused GREEN and commit Task 5**
+- [x] **Step 8: Run focused GREEN and commit Task 5**
 
 ```bash
 npm --workspace geoscratch run build
@@ -664,7 +664,7 @@ Expected: focused tests/typecheck/build PASS; production DEM source contains no 
 - Consumes: bounded frontier facts/capture, DEM proof controller, tile-server delay/failure routing。
 - Produces machine-readable browser evidence for pitch/bearing/teleport/convergence/parent fallback/tight budget/cache/lifecycle。
 
-- [ ] **Step 1: Replace legacy visible-node expectations with GPU facts**
+- [x] **Step 1: Replace legacy visible-node expectations with GPU facts**
 
 Remove hard-coded old counts `24/56/146` and `nodeLevels/nodeBoxes`. Require:
 
@@ -675,7 +675,7 @@ if (facts.cpuSelectionUploadCount !== 0) failures.push('CPU selection uploads re
 if (!facts.frontierConverged) failures.push('frontier did not converge')
 ```
 
-- [ ] **Step 2: Add deterministic camera scenarios**
+- [x] **Step 2: Add deterministic camera scenarios**
 
 For pitch `0, 45, 70, 85`, bearing `0, 90, 225`, and two zooms, move camera, wait until `convergence === "stable"` for three consecutive frames with identical `frontierHash/renderCoverHash` and `demandCount === 0`, capture canvas/frontier facts, and assert:
 
@@ -688,19 +688,19 @@ For pitch `0, 45, 70, 85`, bearing `0, 90, 225`, and two zooms, move camera, wai
 
 The proof controller also renders a proof-only coverage/status mask into an offscreen target. Erode the asserted safety domain by two pixels, then require `coverageGapPixels === 0`, `invalidStatusPixels === 0`, `staleStatusPixels === 0`, and valid terrain coverage in near/middle/far screen bands for pitch 70/85. This mask is test-only and never changes the visible example pipeline.
 
-- [ ] **Step 3: Add delayed residency and teleport proof**
+- [x] **Step 3: Add delayed residency and teleport proof**
 
 Delay tile responses by 150 ms, teleport west/east, and assert current parent remains drawn until covered children become acknowledged. Old demands must be canceled or lose priority, demand count remains within capacity, and convergence resumes after responses are released.
 
-- [ ] **Step 4: Add tight-budget and terminal-failure proof**
+- [x] **Step 4: Add tight-budget and terminal-failure proof**
 
 Run `atlasPages=2` and a routed child 404. Assert `budgetLimitedCount > 0` or terminal-failure code is present, root/parent coverage remains visible, no stale physical slot is drawn, and diagnostics stay bounded. The test must not expect target SSE when transition reserve cannot fit.
 
-- [ ] **Step 5: Retain cache/churn/resize/disposal proof**
+- [x] **Step 5: Retain cache/churn/resize/disposal proof**
 
 Update `geo-virtual-raster-dem.mjs` so persistent-cache reload, rapid camera churn, resize, duplicate dispose and managed process cleanup run against GPU demands. Cache reuse must not change frontier order or sampling output.
 
-- [ ] **Step 6: Run browser gates and inspect screenshots**
+- [x] **Step 6: Run browser gates and inspect screenshots**
 
 ```bash
 node tests/browser/geo-gpu-tile-frontier-core.mjs
@@ -710,7 +710,7 @@ node tests/browser/geo-virtual-raster-dem.mjs
 
 Expected: each emits `status: "passed"`; screenshot and proof-mask paths exist; no upper-half coarse/missing terrain region appears at high pitch; all spawned browser/Vite/tile-server processes close.
 
-- [ ] **Step 7: Commit Task 6**
+- [x] **Step 7: Commit Task 6**
 
 ```bash
 git add tests/browser/scratch-dem-layer.mjs tests/browser/geo-virtual-raster-dem.mjs examples/demLayer/main.ts
@@ -735,7 +735,7 @@ git commit -m "Verify GPU-driven DEM frontier"
 - Consumes: completed GPU implementation and browser evidence。
 - Produces: no production/test dependency on the legacy selector; accepted ADR with exact ownership and evidence。
 
-- [ ] **Step 1: Add the legacy-absence RED assertion**
+- [x] **Step 1: Add the legacy-absence RED assertion**
 
 ```js
 expect(fs.existsSync(path.join(root, 'examples/demLayer/terrain-selection.ts'))).to.equal(false)
@@ -744,11 +744,11 @@ expect(allProductionSources).to.not.match(/selectTerrainNodes|uploaded-indirect-
 
 Run the focused cleanup tests and confirm RED while the file still exists.
 
-- [ ] **Step 2: Delete the selector and obsolete snapshots**
+- [x] **Step 2: Delete the selector and obsolete snapshots**
 
 Delete `terrain-selection.ts`; remove imports and tests that preserve old camera-neighborhood counts, CPU node arrays, legacy `slice(0, maxNodes)` behavior or selection-shaped Virtual Raster plans. Keep only a test-only CPU oracle for the new frontier semantics in `gpu-tile-frontier-reference.ts`.
 
-- [ ] **Step 3: Write ADR-061**
+- [x] **Step 3: Write ADR-061**
 
 ADR must state:
 
@@ -761,11 +761,11 @@ ADR must state:
 - no-hole parent handoff and deterministic compaction are mandatory;
 - legacy CPU selector is removed during `0.x.x` with no compatibility path.
 
-- [ ] **Step 4: Update active vision without rewriting history**
+- [x] **Step 4: Update active vision without rewriting history**
 
 Document that Scratch's existing indirect/readback primitives were sufficient and no tile API entered core. Link the design spec, implementation plan, ADR and browser proof; do not edit superseded ADR facts except adding an explicit supersession note when required.
 
-- [ ] **Step 5: Run cleanup scans and commit Task 7**
+- [x] **Step 5: Run cleanup scans and commit Task 7**
 
 ```bash
 rg -n "selectTerrainNodes|nodeLevels|nodeBoxes|canonicalNodes|uploaded-indirect-arguments" examples/demLayer packages/geoscratch/src tests docs --glob '!docs/superpowers/specs/**' --glob '!docs/superpowers/plans/**'
