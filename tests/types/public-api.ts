@@ -1,6 +1,7 @@
 import * as scr from 'geoscratch/scratch'
 import * as scratchCompat from 'geoscratch/scratch'
 import * as workers from 'geoscratch/scratch'
+import * as geoApi from 'geoscratch/geo'
 import {
     CellLocalF32Codec,
     GeoDiagnosticError,
@@ -13,6 +14,7 @@ import {
     VirtualRasterResidency,
     cellLocalF32Codec,
     coordinateDomain,
+    gpuTileFrontierPolicy,
     localVector,
     ownedVirtualRasterPagePayload,
     surfaceDomain,
@@ -22,9 +24,15 @@ import {
     virtualRasterAddressSpace,
     virtualRasterPlane,
     virtualRasterSamplingProfile,
+    virtualRasterTileAddressSpace,
     webMercatorQuadAddressCodec,
     type CellLocalPosition,
     type CoordinateDomain,
+    type GpuTileFrontierDescriptor,
+    type GpuTileFrontierDrawTemplate,
+    type GpuTileFrontierLevelMetric,
+    type GpuTileFrontierPolicy,
+    type GpuTileFrontierView,
     type PositionPrecisionFacts,
     type WideFixedPosition,
     type WebMercatorQuadPosition,
@@ -237,6 +245,74 @@ const typedWebMercatorCodec: WebMercatorQuadAddressCodec = webMercatorQuadAddres
 const typedWebMercatorPosition: WebMercatorQuadPosition =
     typedWebMercatorCodec.fromLonLat([ 121.5, 31.2 ])
 const typedWebMercatorAddress = typedWebMercatorCodec.address(typedWebMercatorPosition, '0')
+const typedFrontierAddressSpace = virtualRasterTileAddressSpace({
+    id: 'typed-frontier-raster',
+    coverage: typedTileCoverage,
+})
+declare const typedFrontierGpuState: VirtualRasterGpuState
+const typedFrontierPolicy: GpuTileFrontierPolicy = gpuTileFrontierPolicy({
+    refineErrorPixels: 2,
+    coarsenErrorPixels: 1,
+    minimumMatrixLevel: 0,
+    maximumMatrixLevel: 0,
+    maximumActiveTiles: 16,
+    maximumDemands: 8,
+    transitionReservePages: 4,
+    invisibleGraceFrames: 2,
+})
+const typedFrontierLevelMetrics: readonly GpuTileFrontierLevelMetric[] = [ {
+    matrixLevel: 0,
+    minimumElevationMeters: -100,
+    maximumElevationMeters: 8_000,
+    geometricErrorMeters: 1_000,
+} ]
+const typedFrontierDrawTemplates: readonly GpuTileFrontierDrawTemplate[] = [ {
+    id: 'terrain',
+    vertexCount: 24_576,
+    firstVertex: 0,
+    firstInstance: 0,
+} ]
+const typedFrontierDescriptor: GpuTileFrontierDescriptor = {
+    gpuState: typedFrontierGpuState,
+    addressCodec: typedWebMercatorCodec,
+    policy: typedFrontierPolicy,
+    levelMetrics: typedFrontierLevelMetrics,
+    roots: [ typedFrontierAddressSpace.rootPage() ],
+    drawTemplates: typedFrontierDrawTemplates,
+}
+const typedFrontierView: GpuTileFrontierView = {
+    clipFromRelativeWorld: new Float32Array(16),
+    cameraHigh: [ 0, 0, 0 ],
+    cameraLow: [ 0, 0, 0 ],
+    viewport: [ 1920, 1080 ],
+    verticalFovRadians: 1,
+    cameraLatitudeRadians: 0,
+    zoomHint: 0,
+    frameEpoch: 1,
+    residencySnapshotEpoch: 1,
+}
+// @ts-expect-error Frontier descriptors require an explicit WebMercatorQuad address codec
+const typedFrontierWithoutProjection: GpuTileFrontierDescriptor = {
+    gpuState: typedFrontierGpuState,
+    policy: typedFrontierPolicy,
+    levelMetrics: typedFrontierLevelMetrics,
+    roots: [ typedFrontierAddressSpace.rootPage() ],
+    drawTemplates: typedFrontierDrawTemplates,
+}
+const typedFrontierInvalidTuple: GpuTileFrontierView = {
+    ...typedFrontierView,
+    // @ts-expect-error Camera high/low values are exact three-component tuples
+    cameraHigh: [ 0, 0 ],
+}
+const typedFrontierInvalidDraw: GpuTileFrontierDrawTemplate = {
+    id: 'invalid',
+    // @ts-expect-error Draw vertex counts are numeric values
+    vertexCount: '6',
+}
+// @ts-expect-error The CPU reference evaluator is package-internal
+geoApi.evaluateGpuTileFrontierReference
+// @ts-expect-error Descriptor value validation is package-internal
+geoApi.validateGpuTileFrontierDescriptor
 // @ts-expect-error Coordinate dimensions are limited to one, two, or three
 coordinateDomain({ id: 'typed-invalid', intrinsicDimensions: 4, embeddingDimensions: 3, axes: [] })
 // @ts-expect-error Mercator coordinate inputs require two components
@@ -250,6 +326,11 @@ void typedRasterPage
 void typedRasterSample
 void typedRasterGpuState
 void typedWebMercatorAddress
+void typedFrontierDescriptor
+void typedFrontierView
+void typedFrontierWithoutProjection
+void typedFrontierInvalidTuple
+void typedFrontierInvalidDraw
 const planeGeometry = plane(2)
 const sphereGeometry = sphere(1, 8, 4)
 

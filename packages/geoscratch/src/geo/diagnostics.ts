@@ -9,6 +9,7 @@ export type GeoDiagnosticPhase =
     | 'demand'
     | 'residency'
     | 'sampling'
+    | 'selection'
 
 export type GeoDiagnosticSubject = Readonly<{
     kind: string

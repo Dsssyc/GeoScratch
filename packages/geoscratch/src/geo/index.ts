@@ -11,6 +11,17 @@ export type {
     GeoDiagnosticSeverity,
     GeoDiagnosticSubject,
 } from './diagnostics.js'
+export { gpuTileFrontierPolicy } from './gpu-tile-frontier-layout.js'
+export type {
+    GpuTileFrontierConvergenceState,
+    GpuTileFrontierDemand,
+    GpuTileFrontierDescriptor,
+    GpuTileFrontierDrawTemplate,
+    GpuTileFrontierFacts,
+    GpuTileFrontierLevelMetric,
+    GpuTileFrontierPolicy,
+    GpuTileFrontierView,
+} from './gpu-tile-frontier-layout.js'
 export {
     coordinateDomain,
     localVector,
