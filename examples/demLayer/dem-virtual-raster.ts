@@ -3,10 +3,12 @@ import type {
     SubmittedWork,
 } from 'geoscratch/scratch'
 import {
+    GeoDiagnosticError,
     TileMatrixCoverage,
     VirtualRasterRequestScheduler,
     VirtualRasterResidency,
     WebMercatorQuad,
+    createGeoDiagnostic,
     createVirtualRasterGpuState,
     tileMatrixCoverage,
     virtualRasterDemandSet,
@@ -15,11 +17,16 @@ import {
     webMercatorQuadAddressCodec,
 } from 'geoscratch/geo'
 import type {
+    GpuTileFrontierDemand,
+    GpuTileFrontierRetirement,
     VirtualRasterGpuState,
+    VirtualRasterGpuFeedbackBatch,
     VirtualRasterGpuUpdate,
+    VirtualRasterDemandReconciliation,
     VirtualRasterPageDemand,
     VirtualRasterPageIdentity,
     VirtualRasterPublication,
+    VirtualRasterResidencyLease,
     WebMercatorQuadAddressCodec,
     WideFixedPosition,
 } from 'geoscratch/geo'
@@ -141,6 +148,37 @@ export type DemVirtualRasterPublication = Readonly<{
     publication: VirtualRasterPublication
 }>
 
+export type DemVirtualRasterDemandAdapterOptions = Readonly<{
+    model: DemVirtualRasterModel
+    residency: VirtualRasterResidency
+    scheduler: VirtualRasterRequestScheduler
+    maxPhysicalPages: number
+}>
+
+export type DemVirtualRasterFeedbackReconciliation = Readonly<{
+    generation: number
+    requestedCount: number
+    retainedCount: number
+    retiredCount: number
+    settlement: Promise<Readonly<{
+        generation: number
+        stagedCount: number
+        residentCount: number
+        staleCount: number
+        failedCount: number
+    }>>
+}>
+
+export type DemVirtualRasterDemandAdapterFacts = Readonly<{
+    disposed: boolean
+    generation: number
+    lastDecisionFrameEpoch: number
+    acknowledgedSnapshotEpoch: number
+    activeDemandCount: number
+    transitionCount: number
+    lease: ReturnType<VirtualRasterResidencyLease['facts']>
+}>
+
 export const DEM_WEB_MERCATOR_COORDINATE_BITS = 40
 export const DEM_CANONICAL_NODE_BYTES = 32
 export const DEM_DEFAULT_PHYSICAL_PAGES = 18
@@ -242,6 +280,17 @@ export function createDemVirtualRasterModel(manifest: DemVirtualRasterManifest) 
         offset: parsed.offset,
         auxiliaryAxes: [ { name: 'tile-matrix', value: 'explicit-WebMercatorQuad' } ],
     })
+    const safetyLimit = coverage.limit(parsed.tileMatrixSet.minTileMatrix)!
+    const safetyCoverPages: VirtualRasterPageIdentity[] = []
+    for (let row = safetyLimit.minTileRow; row <= safetyLimit.maxTileRow; row++) {
+        for (let col = safetyLimit.minTileCol; col <= safetyLimit.maxTileCol; col++) {
+            safetyCoverPages.push(addressSpace.pageFromTile({
+                matrixId: safetyLimit.matrixId,
+                tileRow: row,
+                tileCol: col,
+            }))
+        }
+    }
     return Object.freeze({
         manifest: parsed,
         coverage,
@@ -249,6 +298,258 @@ export function createDemVirtualRasterModel(manifest: DemVirtualRasterManifest) 
         addressCodec,
         plane,
         rootPage: addressSpace.rootPage(),
+        safetyCoverPages: Object.freeze(safetyCoverPages),
+    })
+}
+
+type DemTransitionLeaseRecord = {
+    page: VirtualRasterPageIdentity
+    generation: number
+    visibleAfterSnapshotEpoch: number
+    acknowledged: boolean
+}
+
+export function createDemVirtualRasterDemandAdapter({
+    model,
+    residency,
+    scheduler,
+    maxPhysicalPages,
+}: DemVirtualRasterDemandAdapterOptions) {
+
+    if (residency.addressSpace !== model.addressSpace || residency.plane !== model.plane ||
+        scheduler.residency !== residency || !positiveInteger(maxPhysicalPages) ||
+        maxPhysicalPages > residency.maxPhysicalPages ||
+        model.safetyCoverPages.length > maxPhysicalPages ||
+        model.safetyCoverPages.length > scheduler.maxRequests) {
+        throwDemGpuFeedbackInvalid(
+            model,
+            'DEM GPU demand requires one matching scheduler/residency owner and budgets that contain the complete safety cover.',
+            {
+                maxPhysicalPages,
+                residencyMaxPhysicalPages: residency.maxPhysicalPages,
+                schedulerMaxRequests: scheduler.maxRequests,
+                safetyCoverPageCount: model.safetyCoverPages.length,
+            }
+        )
+    }
+    const lease = residency.createLease({
+        id: `dem-frontier.${model.addressSpace.id}`,
+        maximumPages: maxPhysicalPages,
+        maxHistory: DEM_DEFAULT_HISTORY,
+    })
+    const safetyKeys = new Set(model.safetyCoverPages.map(page => page.key))
+    const transitions = new Map<string, DemTransitionLeaseRecord>()
+    let activeDemandKeys = new Set(safetyKeys)
+    let disposed = false
+    let generation = 0
+    let lastDecisionFrameEpoch = -1
+    let acknowledgedSnapshotEpoch = 0
+    let ringId: string | undefined
+    let frontierId: string | undefined
+    for (const page of model.safetyCoverPages) residency.pin(page)
+
+    function initialize(): VirtualRasterDemandReconciliation {
+
+        assertActive()
+        if (generation !== 0) {
+            return throwDemGpuFeedbackInvalid(
+                model,
+                'DEM safety-cover demand can be initialized exactly once.',
+                { generation }
+            )
+        }
+        const demandGeneration = ++generation
+        activeDemandKeys = new Set(safetyKeys)
+        return scheduler.reconcile(virtualRasterDemandSet({
+            generation: demandGeneration,
+            demands: model.safetyCoverPages.map(page => safetyDemand(page, demandGeneration)),
+        }))
+    }
+
+    function reconcileFeedback(
+        feedback: VirtualRasterGpuFeedbackBatch
+    ): DemVirtualRasterFeedbackReconciliation {
+
+        assertActive()
+        const canonical = canonicalDemGpuFeedback(
+            model,
+            feedback,
+            lastDecisionFrameEpoch,
+            acknowledgedSnapshotEpoch,
+            ringId,
+            frontierId
+        )
+        ringId ??= feedback.ringId
+        frontierId ??= feedback.frontierId
+        lastDecisionFrameEpoch = feedback.frameEpoch
+        let retainedCount = 0
+        for (const demand of canonical.demands) {
+            if (safetyKeys.has(demand.parent.key)) continue
+            const existing = transitions.get(demand.parent.key)
+            if (!lease.retain(demand.parent, demand.parentGeneration)) continue
+            if (existing?.generation !== demand.parentGeneration) {
+                transitions.set(demand.parent.key, {
+                    page: demand.parent,
+                    generation: demand.parentGeneration,
+                    visibleAfterSnapshotEpoch: feedback.residencySnapshotEpoch,
+                    acknowledged: true,
+                })
+                retainedCount++
+            }
+        }
+        let retiredCount = 0
+        for (const retirement of canonical.retirements) {
+            if (safetyKeys.has(retirement.page.key)) continue
+            const record = transitions.get(retirement.page.key)
+            if (record === undefined || record.generation !== retirement.generation ||
+                !record.acknowledged ||
+                feedback.residencySnapshotEpoch <= record.visibleAfterSnapshotEpoch) continue
+            const current = residency.currentSnapshot.resolve(retirement.page)
+            if (current.status !== 'resident' ||
+                current.physicalSlot !== retirement.physicalSlot ||
+                current.generation !== retirement.generation ||
+                current.contentEpoch !== retirement.contentEpoch) continue
+            if (lease.release(retirement.page, retirement.generation)) retiredCount++
+            transitions.delete(retirement.page.key)
+        }
+        const demandGeneration = ++generation
+        const requested = canonical.demands.map(demand => gpuPageDemand(
+            demand,
+            demandGeneration,
+            feedback.frameEpoch
+        ))
+        activeDemandKeys = new Set([
+            ...safetyKeys,
+            ...requested.map(demand => demand.page.key),
+        ])
+        const reconciliation = scheduler.reconcile(virtualRasterDemandSet({
+            generation: demandGeneration,
+            demands: [
+                ...model.safetyCoverPages.map(page => safetyDemand(page, demandGeneration)),
+                ...requested.filter(demand => !safetyKeys.has(demand.page.key)),
+            ],
+        }))
+        return Object.freeze({
+            generation: demandGeneration,
+            requestedCount: reconciliation.requestedCount,
+            retainedCount,
+            retiredCount,
+            settlement: reconciliation.settled,
+        })
+    }
+
+    function retainPublication(publication: VirtualRasterPublication): number {
+
+        assertActive()
+        if (publication.snapshot.addressSpace !== model.addressSpace ||
+            publication.inspect().state !== 'pending') {
+            return throwDemGpuFeedbackInvalid(
+                model,
+                'DEM transition leases can retain only the active pending residency publication.',
+                publication.inspect()
+            )
+        }
+        let retainedCount = 0
+        for (const page of model.safetyCoverPages) {
+            const resolved = publication.snapshot.resolve(page)
+            if (resolved.status === 'resident' && resolved.generation !== undefined) {
+                lease.retain(page, resolved.generation)
+            }
+        }
+        for (const upload of publication.uploads) {
+            if (!activeDemandKeys.has(upload.page.key)) continue
+            const existing = transitions.get(upload.page.key)
+            if (!lease.retain(upload.page, upload.generation)) continue
+            if (!safetyKeys.has(upload.page.key) && existing?.generation !== upload.generation) {
+                transitions.set(upload.page.key, {
+                    page: upload.page,
+                    generation: upload.generation,
+                    visibleAfterSnapshotEpoch: publication.snapshot.epoch,
+                    acknowledged: false,
+                })
+                retainedCount++
+            }
+        }
+        return retainedCount
+    }
+
+    function acknowledgePublication(publication: VirtualRasterPublication): void {
+
+        assertActive()
+        if (publication.snapshot.addressSpace !== model.addressSpace ||
+            publication.inspect().state !== 'acknowledged' ||
+            publication.snapshot.epoch < acknowledgedSnapshotEpoch) {
+            return throwDemGpuFeedbackInvalid(
+                model,
+                'DEM demand authority can acknowledge only a monotonic settled residency publication.',
+                publication.inspect()
+            )
+        }
+        acknowledgedSnapshotEpoch = publication.snapshot.epoch
+        for (const record of transitions.values()) {
+            if (record.visibleAfterSnapshotEpoch === publication.snapshot.epoch) {
+                record.acknowledged = true
+            }
+        }
+    }
+
+    function abandonPublication(publication: VirtualRasterPublication): void {
+
+        if (disposed) return
+        if (publication.snapshot.addressSpace !== model.addressSpace ||
+            publication.inspect().state !== 'abandoned') {
+            return throwDemGpuFeedbackInvalid(
+                model,
+                'DEM demand authority can abandon only its settled residency publication.',
+                publication.inspect()
+            )
+        }
+        for (const [ key, record ] of transitions) {
+            if (record.acknowledged ||
+                record.visibleAfterSnapshotEpoch !== publication.snapshot.epoch) continue
+            lease.release(record.page, record.generation)
+            transitions.delete(key)
+        }
+    }
+
+    function facts(): DemVirtualRasterDemandAdapterFacts {
+
+        return Object.freeze({
+            disposed,
+            generation,
+            lastDecisionFrameEpoch,
+            acknowledgedSnapshotEpoch,
+            activeDemandCount: activeDemandKeys.size,
+            transitionCount: transitions.size,
+            lease: lease.facts(),
+        })
+    }
+
+    function dispose(): void {
+
+        if (disposed) return
+        disposed = true
+        for (const page of model.safetyCoverPages) residency.unpin(page)
+        transitions.clear()
+        activeDemandKeys.clear()
+        lease.dispose()
+    }
+
+    function assertActive(): void {
+
+        if (!disposed) return
+        throwDemGpuFeedbackInvalid(model, 'DEM GPU demand adapter is disposed.', { disposed })
+    }
+
+    return Object.freeze({
+        lease,
+        initialize,
+        reconcileFeedback,
+        retainPublication,
+        acknowledgePublication,
+        abandonPublication,
+        facts,
+        dispose,
     })
 }
 
@@ -945,6 +1246,163 @@ function pageDemand(
         reason,
         usage,
     })
+}
+
+function safetyDemand(
+    page: VirtualRasterPageIdentity,
+    generation: number
+): VirtualRasterPageDemand {
+
+    return pageDemand(
+        page,
+        generation,
+        'critical',
+        1_000_000,
+        'minimum-matrix-safety-cover',
+        'required'
+    )
+}
+
+function gpuPageDemand(
+    demand: GpuTileFrontierDemand,
+    generation: number,
+    frameEpoch: number
+): VirtualRasterPageDemand {
+
+    return pageDemand(
+        demand.page,
+        generation,
+        'user-visible',
+        demand.priority,
+        `gpu-frontier:${frameEpoch}`,
+        'required'
+    )
+}
+
+function canonicalDemGpuFeedback(
+    model: DemVirtualRasterModel,
+    feedback: VirtualRasterGpuFeedbackBatch,
+    lastDecisionFrameEpoch: number,
+    acknowledgedSnapshotEpoch: number,
+    ringId: string | undefined,
+    frontierId: string | undefined
+): Readonly<{
+    demands: readonly GpuTileFrontierDemand[]
+    retirements: readonly GpuTileFrontierRetirement[]
+}> {
+
+    if (feedback.kind !== 'virtual-raster-gpu-feedback-batch' ||
+        typeof feedback.ringId !== 'string' || feedback.ringId.length === 0 ||
+        typeof feedback.frontierId !== 'string' || feedback.frontierId.length === 0 ||
+        !nonNegativeInteger(feedback.frameEpoch) || feedback.frameEpoch > 0xffff_ffff ||
+        feedback.frameEpoch <= lastDecisionFrameEpoch ||
+        !nonNegativeInteger(feedback.residencySnapshotEpoch) ||
+        feedback.residencySnapshotEpoch > 0xffff_ffff ||
+        feedback.residencySnapshotEpoch > acknowledgedSnapshotEpoch ||
+        (ringId !== undefined && feedback.ringId !== ringId) ||
+        (frontierId !== undefined && feedback.frontierId !== frontierId)) {
+        throwDemGpuFeedbackInvalid(
+            model,
+            'GPU feedback must come from one stable frontier and advance monotonically within acknowledged residency.',
+            {
+                ringId: feedback.ringId,
+                frontierId: feedback.frontierId,
+                frameEpoch: feedback.frameEpoch,
+                residencySnapshotEpoch: feedback.residencySnapshotEpoch,
+                lastDecisionFrameEpoch,
+                acknowledgedSnapshotEpoch,
+            }
+        )
+    }
+    const demands = new Map<string, GpuTileFrontierDemand>()
+    for (const demand of feedback.demands) {
+        try {
+            model.addressSpace.assertPage(demand.page)
+            model.addressSpace.assertPage(demand.parent)
+        } catch (error) {
+            throwDemGpuFeedbackInvalid(
+                model,
+                'GPU demand pages must belong to the configured DEM coverage.',
+                demand,
+                error
+            )
+        }
+        const expectedParent = model.addressSpace.parent(demand.page)
+        const tile = demand.page.tile!
+        const expectedChildMask = 1 << ((tile.tileRow % 2) * 2 + tile.tileCol % 2)
+        if (expectedParent?.key !== demand.parent.key ||
+            demand.parentCompactIndex !== model.addressSpace.tableIndex(demand.parent) ||
+            !nonNegativeInteger(demand.parentPhysicalSlot) ||
+            demand.parentPhysicalSlot > 0xffff_ffff ||
+            !positiveInteger(demand.parentGeneration) || demand.parentGeneration > 0xffff_ffff ||
+            !nonNegativeInteger(demand.priority) || demand.priority > 0xffff_ffff ||
+            demand.childMask !== expectedChildMask ||
+            demand.decisionFrameEpoch !== feedback.frameEpoch ||
+            demand.residencySnapshotEpoch !== feedback.residencySnapshotEpoch) {
+            throwDemGpuFeedbackInvalid(
+                model,
+                'GPU demand must name one covered child and its exact acknowledged parent assignment.',
+                { demand, expectedParent }
+            )
+        }
+        const existing = demands.get(demand.page.key)
+        if (existing === undefined || demand.priority > existing.priority) {
+            demands.set(demand.page.key, demand)
+        }
+    }
+    const retirements: GpuTileFrontierRetirement[] = []
+    for (const retirement of feedback.retirements) {
+        try {
+            model.addressSpace.assertPage(retirement.page)
+        } catch (error) {
+            throwDemGpuFeedbackInvalid(
+                model,
+                'GPU retirement pages must belong to the configured DEM coverage.',
+                retirement,
+                error
+            )
+        }
+        if (!nonNegativeInteger(retirement.physicalSlot) ||
+            retirement.physicalSlot > 0xffff_ffff ||
+            !positiveInteger(retirement.generation) || retirement.generation > 0xffff_ffff ||
+            !positiveInteger(retirement.contentEpoch) ||
+            retirement.contentEpoch > 0xffff_ffff ||
+            retirement.decisionFrameEpoch !== feedback.frameEpoch ||
+            retirement.residencySnapshotEpoch !== feedback.residencySnapshotEpoch) {
+            throwDemGpuFeedbackInvalid(
+                model,
+                'GPU retirement must identify one exact physical assignment from this feedback frame.',
+                retirement
+            )
+        }
+        retirements.push(retirement)
+    }
+    return Object.freeze({
+        demands: Object.freeze([ ...demands.values() ].sort((left, right) =>
+            left.page.key.localeCompare(right.page.key)
+        )),
+        retirements: Object.freeze(retirements),
+    })
+}
+
+function throwDemGpuFeedbackInvalid(
+    model: DemVirtualRasterModel,
+    message: string,
+    actual: unknown,
+    cause?: unknown
+): never {
+
+    throw new GeoDiagnosticError(createGeoDiagnostic({
+        code: 'GEO_GPU_TILE_FRONTIER_INVALID',
+        phase: 'selection',
+        subject: { kind: 'dem-virtual-raster', id: model.addressSpace.id },
+        message,
+        expected: {
+            addressSpaceId: model.addressSpace.id,
+            safetyCoverPageCount: model.safetyCoverPages.length,
+        },
+        actual,
+    }), cause === undefined ? undefined : { cause })
 }
 
 function globalTexel(

@@ -1,8 +1,16 @@
 import { expect } from 'chai'
 import {
+    GeoDiagnosticError,
+    VirtualRasterRequestScheduler,
+    VirtualRasterResidency,
+    ownedVirtualRasterPagePayload,
+    prepareVirtualRasterPageTransfer,
+} from 'geoscratch/geo'
+import {
     DEM_CANONICAL_NODE_BYTES,
     DEM_WEB_MERCATOR_COORDINATE_BITS,
     canonicalDemCoordinateQuanta,
+    createDemVirtualRasterDemandAdapter,
     createDemVirtualRasterModel,
     demHeightSamplingLevel,
     demTileUrl,
@@ -115,6 +123,7 @@ describe('DEM WebMercator virtual raster', () => {
         expect(model.addressSpace.matrixId(0)).to.equal('10')
         expect(model.addressSpace.matrixId(6)).to.equal('4')
         expect(model.rootPage).to.deep.include({ key: '4/6/13', level: 6 })
+        expect(model.safetyCoverPages.map(page => page.key)).to.deep.equal([ '4/6/13' ])
         expect(model.addressCodec.coordinateBits).to.equal(DEM_WEB_MERCATOR_COORDINATE_BITS)
         expect(model.addressCodec.quantumMeters).to.be.lessThan(0.001)
         expect(model.plane).to.deep.include({
@@ -123,6 +132,177 @@ describe('DEM WebMercator virtual raster', () => {
             sampleType: 'unorm8',
             gpuFormat: 'r8unorm',
         })
+    })
+
+    it('reconciles canonical GPU demand, cancellation, and stale epochs', async() => {
+
+        const fixture = await createGpuDemandFixture()
+        const child = fixture.model.addressSpace.pageFromTile({
+            matrixId: '5',
+            tileRow: 12,
+            tileCol: 26,
+        })
+        const parent = fixture.model.addressSpace.parent(child)
+        const firstFeedback = feedbackAt(
+            7,
+            fixture.acknowledgedSnapshotEpoch(),
+            [
+                gpuDemand(fixture, child, parent, 10),
+                gpuDemand(fixture, child, parent, 90),
+            ]
+        )
+
+        const first = fixture.adapter.reconcileFeedback(firstFeedback)
+        expect(first).to.deep.include({ requestedCount: 1, retainedCount: 0, retiredCount: 0 })
+        expect(fixture.executor.requests.get(child.key).demand.priority).to.deep.equal({
+            class: 'user-visible',
+            score: 90,
+        })
+        expect(fixture.adapter.lease.facts().retainedPages.map(page => page.pageKey))
+            .to.include.members(fixture.model.safetyCoverPages.map(page => page.key))
+
+        const second = fixture.adapter.reconcileFeedback(feedbackAt(
+            8,
+            fixture.acknowledgedSnapshotEpoch(),
+            []
+        ))
+        expect(second.generation).to.be.greaterThan(first.generation)
+        expect(fixture.scheduler.inspect().activeRequestCount).to.equal(0)
+        expect(fixture.executor.requests.get(child.key).cancelled).to.equal(true)
+        await second.settlement
+
+        let staleFailure
+        try {
+            fixture.adapter.reconcileFeedback(firstFeedback)
+        } catch (error) {
+            staleFailure = error
+        }
+        expect(staleFailure).to.be.instanceOf(GeoDiagnosticError)
+        expect(staleFailure.diagnostic).to.include({
+            code: 'GEO_GPU_TILE_FRONTIER_INVALID',
+            phase: 'selection',
+        })
+        expect(fixture.scheduler.inspect().activeRequestCount).to.equal(0)
+        await fixture.dispose()
+    })
+
+    it('rejects GPU demand outside the configured virtual-raster coverage', async() => {
+
+        const fixture = await createGpuDemandFixture()
+        const child = fixture.model.addressSpace.pageFromTile({
+            matrixId: '5',
+            tileRow: 12,
+            tileCol: 26,
+        })
+        const parent = fixture.model.addressSpace.parent(child)
+        const foreign = Object.freeze({ ...child, addressSpaceId: 'foreign.raster' })
+        let failure
+        try {
+            fixture.adapter.reconcileFeedback(feedbackAt(
+                3,
+                fixture.acknowledgedSnapshotEpoch(),
+                [ { ...gpuDemand(fixture, child, parent, 1), page: foreign } ]
+            ))
+        } catch (error) {
+            failure = error
+        }
+
+        expect(failure).to.be.instanceOf(GeoDiagnosticError)
+        expect(failure.diagnostic).to.include({
+            code: 'GEO_GPU_TILE_FRONTIER_INVALID',
+            phase: 'selection',
+        })
+        expect(fixture.scheduler.inspect().generation).to.equal(1)
+        await fixture.dispose()
+    })
+
+    it('holds transition parents and pending children until later acknowledged retirement', async() => {
+
+        const fixture = await createGpuDemandFixture({ maxPhysicalPages: 4 })
+        const parent = fixture.model.addressSpace.pageFromTile({
+            matrixId: '5',
+            tileRow: 12,
+            tileCol: 26,
+        })
+        await fixture.installOutsideDemand(parent, 2)
+        const child = fixture.model.addressSpace.pageFromTile({
+            matrixId: '6',
+            tileRow: 25,
+            tileCol: 53,
+        })
+        const parentEntry = fixture.residency.currentSnapshot.resolve(parent)
+        const demanded = fixture.adapter.reconcileFeedback(feedbackAt(
+            10,
+            fixture.acknowledgedSnapshotEpoch(),
+            [ gpuDemand(fixture, child, parent, 50) ]
+        ))
+        expect(demanded.retainedCount).to.equal(1)
+        expect(fixture.adapter.lease.facts().retainedPages).to.deep.include({
+            pageKey: parent.key,
+            generation: parentEntry.generation,
+        })
+
+        fixture.executor.requests.get(child.key).resolve(transfer(child, 31))
+        await demanded.settlement
+        const pendingPublication = fixture.scheduler.publish()
+        fixture.adapter.retainPublication(pendingPublication)
+        const pendingChild = pendingPublication.snapshot.resolve(child)
+        expect(fixture.adapter.lease.facts().retainedPages).to.deep.include({
+            pageKey: child.key,
+            generation: pendingChild.generation,
+        })
+
+        const beforeAcknowledgement = fixture.adapter.reconcileFeedback(feedbackAt(
+            11,
+            fixture.acknowledgedSnapshotEpoch(),
+            [],
+            [ gpuRetirement(parent, parentEntry, 11, fixture.acknowledgedSnapshotEpoch()) ]
+        ))
+        expect(beforeAcknowledgement.retiredCount).to.equal(0)
+        expect(fixture.adapter.lease.facts().retainedPages).to.deep.include({
+            pageKey: parent.key,
+            generation: parentEntry.generation,
+        })
+
+        await pendingPublication.abandon()
+        fixture.adapter.abandonPublication(pendingPublication)
+        expect(fixture.adapter.lease.facts().retainedPages).not.to.deep.include({
+            pageKey: child.key,
+            generation: pendingChild.generation,
+        })
+        expect(fixture.adapter.lease.facts().retainedPages).to.deep.include({
+            pageKey: parent.key,
+            generation: parentEntry.generation,
+        })
+
+        const retried = fixture.adapter.reconcileFeedback(feedbackAt(
+            12,
+            fixture.acknowledgedSnapshotEpoch(),
+            [ gpuDemand(fixture, child, parent, 60) ]
+        ))
+        fixture.executor.requests.get(child.key).resolve(transfer(child, 32))
+        await retried.settlement
+        const acknowledgedPublication = fixture.scheduler.publish()
+        fixture.adapter.retainPublication(acknowledgedPublication)
+        await acknowledgedPublication.acknowledge()
+        fixture.adapter.acknowledgePublication(acknowledgedPublication)
+
+        const retired = fixture.adapter.reconcileFeedback(feedbackAt(
+            13,
+            fixture.acknowledgedSnapshotEpoch(),
+            [],
+            [ gpuRetirement(parent, parentEntry, 13, fixture.acknowledgedSnapshotEpoch()) ]
+        ))
+        expect(retired.retiredCount).to.equal(1)
+        expect(fixture.adapter.lease.facts().retainedPages).not.to.deep.include({
+            pageKey: parent.key,
+            generation: parentEntry.generation,
+        })
+        expect(fixture.adapter.lease.facts().retainedPages).to.deep.include({
+            pageKey: child.key,
+            generation: acknowledgedPublication.snapshot.resolve(child).generation,
+        })
+        await fixture.dispose()
     })
 
     it('constructs only the standard row/column endpoint with immutable content identity', () => {
@@ -139,6 +319,27 @@ describe('DEM WebMercator virtual raster', () => {
             'http://127.0.0.1:8787/tiles/WebMercatorQuad/10/418/858.png' +
             '?v=dem-aa7a584830f19877-cog-wmq-v3'
         )
+    })
+
+    it('uses every covered minimum-matrix tile as the safety cover', () => {
+
+        const expanded = structuredClone(manifest)
+        expanded.tileMatrixSet.limits[0] = {
+            matrixId: '4',
+            minTileRow: 6,
+            maxTileRow: 7,
+            minTileCol: 12,
+            maxTileCol: 13,
+        }
+        const model = createDemVirtualRasterModel(parseDemVirtualRasterManifest(expanded))
+
+        expect(model.safetyCoverPages.map(page => page.key)).to.deep.equal([
+            '4/6/12',
+            '4/6/13',
+            '4/7/12',
+            '4/7/13',
+        ])
+        expect(model.rootPage.key).to.equal('4/6/12')
     })
 
     it('bypasses stale browser cache when fetching the mutable manifest endpoint', async() => {
@@ -280,4 +481,193 @@ async function expectRejectedName(promise, name) {
     }
     expect(failure).to.be.instanceOf(Error)
     expect(failure.name).to.equal(name)
+}
+
+async function createGpuDemandFixture({ maxPhysicalPages = 6 } = {}) {
+
+    const model = createDemVirtualRasterModel(parseDemVirtualRasterManifest(manifest))
+    const residency = new VirtualRasterResidency({
+        addressSpace: model.addressSpace,
+        plane: model.plane,
+        maxPhysicalPages,
+        maxStagingBytes: maxPhysicalPages * 256 * 256,
+        maxHistory: 16,
+    })
+    const executor = new FakeExecutor()
+    const scheduler = new VirtualRasterRequestScheduler({
+        residency,
+        executor,
+        maxRequests: 24,
+        maxHistory: 16,
+    })
+    const adapter = createDemVirtualRasterDemandAdapter({
+        model,
+        residency,
+        scheduler,
+        maxPhysicalPages,
+    })
+    const initialization = adapter.initialize()
+    for (const request of executor.requests.values()) {
+        request.resolve(transfer(request.demand.page, 17))
+    }
+    await initialization.settled
+    const publication = scheduler.publish()
+    adapter.retainPublication(publication)
+    await publication.acknowledge()
+    adapter.acknowledgePublication(publication)
+    return {
+        model,
+        residency,
+        scheduler,
+        executor,
+        adapter,
+        acknowledgedSnapshotEpoch: () => adapter.facts().acknowledgedSnapshotEpoch,
+        async installOutsideDemand(page, generation) {
+            residency.stage(ownedVirtualRasterPagePayload({
+                page,
+                width: 256,
+                height: 256,
+                channels: 1,
+                data: new Uint8Array(256 * 256).fill(23),
+                contentVersion: `outside-${generation}`,
+            }), { generation })
+            const outside = scheduler.publish()
+            adapter.retainPublication(outside)
+            await outside.acknowledge()
+            adapter.acknowledgePublication(outside)
+        },
+        async dispose() {
+            await scheduler.dispose()
+            adapter.dispose()
+            residency.dispose()
+        },
+    }
+}
+
+function feedbackAt(frameEpoch, residencySnapshotEpoch, demands, retirements = []) {
+
+    return Object.freeze({
+        kind: 'virtual-raster-gpu-feedback-batch',
+        ringId: 'test-feedback-ring',
+        frontierId: 'test-frontier',
+        submissionId: `test-submission-${frameEpoch}`,
+        frameEpoch,
+        residencySnapshotEpoch,
+        demands: Object.freeze(demands.map(demand => Object.freeze({
+            ...demand,
+            decisionFrameEpoch: frameEpoch,
+            residencySnapshotEpoch,
+        }))),
+        retirements: Object.freeze(retirements.map(retirement => Object.freeze({
+            ...retirement,
+            decisionFrameEpoch: frameEpoch,
+            residencySnapshotEpoch,
+        }))),
+        facts: Object.freeze({
+            frameEpoch,
+            residencySnapshotEpoch,
+            activeFrontierCount: 1,
+            visibleInstanceCount: 1,
+            refineCandidateCount: demands.length > 0 ? 1 : 0,
+            coarsenCandidateCount: retirements.length > 0 ? 1 : 0,
+            demandCount: demands.length,
+            fallbackCount: 0,
+            staleGenerationCount: 0,
+            budgetLimitedCount: 0,
+            maximumObservedSse: 1,
+            frontierOverflow: false,
+            demandOverflow: false,
+            visibleOverflow: false,
+            convergenceState: demands.length > 0 ? 'transitioning' : 'converged',
+        }),
+        counters: Object.freeze({
+            currentFrontierCount: 1,
+            nextFrontierCount: 1,
+            visibleInstanceCount: 1,
+            refineCandidateCount: demands.length > 0 ? 1 : 0,
+            coarsenCandidateCount: retirements.length > 0 ? 1 : 0,
+            demandCount: demands.length,
+            retirementCount: retirements.length,
+            staleGenerationCount: 0,
+            budgetLimitedCount: 0,
+            lookupDuplicateCount: 0,
+            balanceRejectedCount: 0,
+            fallbackCount: 0,
+            acceptedRefineCount: demands.length > 0 ? 1 : 0,
+            acceptedCoarsenCount: retirements.length > 0 ? 1 : 0,
+            discardedStaleRetirementCount: 0,
+        }),
+        diagnostics: Object.freeze([]),
+    })
+}
+
+function gpuDemand(fixture, page, parent, priority) {
+
+    const parentEntry = fixture.residency.currentSnapshot.resolve(parent)
+    const tile = page.tile
+    return {
+        page,
+        parent,
+        parentCompactIndex: fixture.model.addressSpace.tableIndex(parent),
+        parentPhysicalSlot: parentEntry.physicalSlot,
+        parentGeneration: parentEntry.generation,
+        priority,
+        decisionFrameEpoch: 0,
+        residencySnapshotEpoch: 0,
+        childMask: 1 << ((tile.tileRow % 2) * 2 + tile.tileCol % 2),
+    }
+}
+
+function gpuRetirement(page, entry, decisionFrameEpoch, residencySnapshotEpoch) {
+
+    return {
+        page,
+        physicalSlot: entry.physicalSlot,
+        generation: entry.generation,
+        contentEpoch: entry.contentEpoch,
+        decisionFrameEpoch,
+        residencySnapshotEpoch,
+    }
+}
+
+function transfer(page, value) {
+
+    const prepared = prepareVirtualRasterPageTransfer({
+        page,
+        width: 256,
+        height: 256,
+        channels: 1,
+        data: new Uint8Array(256 * 256).fill(value),
+        contentVersion: `feedback-${value}`,
+    })
+    return structuredClone(prepared.value, { transfer: [ ...prepared.transferables ] })
+}
+
+class FakeExecutor {
+
+    requests = new Map()
+
+    request(demand) {
+
+        const deferred = Promise.withResolvers()
+        const request = {
+            demand,
+            result: deferred.promise,
+            cancelled: false,
+            cancel: () => {
+                request.cancelled = true
+                deferred.reject(new Error('cancelled'))
+                return 'cooperative'
+            },
+            reprioritize: priority => {
+                request.demand = { ...request.demand, priority }
+                return true
+            },
+            accept: async() => {},
+            discard: async() => {},
+            resolve: value => deferred.resolve(value),
+        }
+        this.requests.set(demand.page.key, request)
+        return request
+    }
 }
