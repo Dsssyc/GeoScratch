@@ -299,6 +299,13 @@ export function validateGpuTileFrontierDescriptor(
             }
         )
     }
+    if (!positiveInteger(descriptor.gpuState.maxPhysicalPages)) {
+        return invalidFrontier(
+            'GPU tile frontier physical-page capacity must fit a positive u32.',
+            { maxPhysicalPages: 'positive u32' },
+            { maxPhysicalPages: descriptor.gpuState.maxPhysicalPages }
+        )
+    }
     gpuTileFrontierPolicy(descriptor.policy)
     validateLevelMetrics(descriptor)
     validateRoots(descriptor)
@@ -370,6 +377,13 @@ function validateRoots(descriptor: GpuTileFrontierDescriptor): void {
             { rootCount: Array.isArray(descriptor.roots)
                 ? descriptor.roots.length
                 : undefined }
+        )
+    }
+    if (expectedRootCount > descriptor.policy.maximumActiveTiles) {
+        return invalidFrontier(
+            'GPU tile frontier active capacity must hold the complete minimum-level root cover.',
+            { maximumActiveTiles: `>= ${expectedRootCount}` },
+            { maximumActiveTiles: descriptor.policy.maximumActiveTiles, expectedRootCount }
         )
     }
     for (let index = 0; index < descriptor.roots.length; index++) {

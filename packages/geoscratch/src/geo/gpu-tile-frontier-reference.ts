@@ -86,20 +86,21 @@ export function evaluateGpuTileFrontierReference(
 
     validateGpuTileFrontierDescriptor(input.descriptor)
     validateView(input.view)
+    const current = validateCurrentFrontier(input)
     const metrics = new Map(input.descriptor.levelMetrics.map(metric => [
         metric.matrixLevel,
         metric,
     ]))
     const residents = residentMap(input)
-    const current = canonicalEntries(input.currentFrontier)
     const active: GpuTileFrontierReferenceEntry[] = []
     let staleGenerationCount = 0
     for (const entry of current) {
-        validateEntry(input.descriptor, entry)
         const resident = residents.get(entry.page.key)
         if (resident === undefined ||
+            resident.compactIndex !== entry.compactIndex ||
             resident.generation !== entry.generation ||
             resident.physicalSlot !== entry.physicalSlot ||
+            resident.contentEpoch !== entry.contentEpoch ||
             resident.residencySnapshotEpoch !== input.view.residencySnapshotEpoch ||
             entry.residencySnapshotEpoch !== input.view.residencySnapshotEpoch) {
             staleGenerationCount++
@@ -290,20 +291,64 @@ function residentMap(
     input: GpuTileFrontierReferenceInput
 ): Map<string, GpuTileFrontierReferenceResidentPage> {
 
+    if (!Array.isArray(input.residentPages)) {
+        invalidReference('Resident frontier pages must be an array.', input.residentPages)
+    }
     const result = new Map<string, GpuTileFrontierReferenceResidentPage>()
+    const compactIndexes = new Set<number>()
+    const physicalSlots = new Set<number>()
     for (const resident of input.residentPages) {
-        input.descriptor.gpuState.addressSpace.assertPage(resident.page)
+        const expectedCompactIndex = compactIndexForPage(input.descriptor, resident.page)
         if (result.has(resident.page.key) ||
+            compactIndexes.has(resident.compactIndex) ||
+            physicalSlots.has(resident.physicalSlot) ||
             !u32(resident.compactIndex) ||
+            resident.compactIndex !== expectedCompactIndex ||
             !u32(resident.physicalSlot) ||
+            resident.physicalSlot >= input.descriptor.gpuState.maxPhysicalPages ||
             !u32(resident.generation) ||
             !u32(resident.contentEpoch) ||
             !u32(resident.residencySnapshotEpoch)) {
-            invalidReference('Resident frontier pages must be unique bounded GPU records.', resident)
+            invalidReference(
+                'Resident frontier pages, compact indexes, and physical slots must be canonical and one-to-one.',
+                resident
+            )
         }
         result.set(resident.page.key, resident)
+        compactIndexes.add(resident.compactIndex)
+        physicalSlots.add(resident.physicalSlot)
     }
     return result
+}
+
+function validateCurrentFrontier(
+    input: GpuTileFrontierReferenceInput
+): readonly GpuTileFrontierReferenceEntry[] {
+
+    if (!Array.isArray(input.currentFrontier) ||
+        input.currentFrontier.length > input.descriptor.policy.maximumActiveTiles) {
+        invalidReference(
+            'Current frontier must be an array within active-frontier capacity.',
+            {
+                currentFrontierLength: input.currentFrontier?.length,
+                maximumActiveTiles: input.descriptor.policy.maximumActiveTiles,
+            }
+        )
+    }
+    const pageKeys = new Set<string>()
+    const compactIndexes = new Set<number>()
+    for (const entry of input.currentFrontier) {
+        validateEntry(input.descriptor, entry)
+        if (pageKeys.has(entry.page.key) || compactIndexes.has(entry.compactIndex)) {
+            invalidReference(
+                'Current frontier page keys and compact indexes must be canonical and one-to-one.',
+                entry
+            )
+        }
+        pageKeys.add(entry.page.key)
+        compactIndexes.add(entry.compactIndex)
+    }
+    return canonicalEntries(input.currentFrontier)
 }
 
 function validateEntry(
@@ -311,9 +356,11 @@ function validateEntry(
     entry: GpuTileFrontierReferenceEntry
 ): void {
 
-    descriptor.gpuState.addressSpace.assertPage(entry.page)
+    const expectedCompactIndex = compactIndexForPage(descriptor, entry.page)
     if (!u32(entry.compactIndex) ||
+        entry.compactIndex !== expectedCompactIndex ||
         !u32(entry.physicalSlot) ||
+        entry.physicalSlot >= descriptor.gpuState.maxPhysicalPages ||
         !u32(entry.generation) ||
         !u32(entry.contentEpoch) ||
         !u32(entry.residencySnapshotEpoch) ||
@@ -323,6 +370,34 @@ function validateEntry(
         ![ 'retain', 'refine', 'coarsen' ].includes(entry.previousLodState)) {
         invalidReference('Frontier entries must contain bounded canonical GPU facts.', entry)
     }
+}
+
+function compactIndexForPage(
+    descriptor: GpuTileFrontierDescriptor,
+    page: VirtualRasterPageIdentity
+): number {
+
+    try {
+        descriptor.gpuState.addressSpace.assertPage(page)
+    } catch {
+        invalidReference('Frontier records require pages from the descriptor address space.', page)
+    }
+    if (page.tile === undefined) {
+        invalidReference('Frontier records require tile-backed page identities.', page)
+    }
+    let compactIndex: number
+    try {
+        compactIndex = descriptor.addressCodec.coverage.index(page.tile)
+    } catch {
+        invalidReference('Frontier record pages must lie within descriptor coverage.', page)
+    }
+    if (!u32(compactIndex)) {
+        invalidReference('Frontier record compact indexes must fit the packed u32 ABI.', {
+            page: page.key,
+            compactIndex,
+        })
+    }
+    return compactIndex
 }
 
 function validateView(view: GpuTileFrontierView): void {

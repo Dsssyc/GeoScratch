@@ -72,7 +72,7 @@ function createFixture(options = {}) {
         }
     }
     const descriptor = {
-        gpuState: { addressSpace, maxPhysicalPages: 64 },
+        gpuState: { addressSpace, maxPhysicalPages: 128 },
         addressCodec,
         policy,
         levelMetrics,
@@ -324,6 +324,18 @@ describe('Geo GPU tile frontier contracts and reference oracle', () => {
             residentPages: [],
         }))
         expectFrontierInvalid(() => evaluateGpuTileFrontierReference({
+            descriptor: {
+                ...fixture.descriptor,
+                gpuState: {
+                    ...fixture.descriptor.gpuState,
+                    maxPhysicalPages: U32_LIMIT,
+                },
+            },
+            view: fixture.view,
+            currentFrontier: [],
+            residentPages: [],
+        }))
+        expectFrontierInvalid(() => evaluateGpuTileFrontierReference({
             descriptor: fixture.descriptor,
             view: { ...fixture.view, frameEpoch: U32_LIMIT },
             currentFrontier: [],
@@ -338,6 +350,108 @@ describe('Geo GPU tile frontier contracts and reference oracle', () => {
             [ oversizedEntry ],
             [ oversizedResident ]
         ))
+    })
+
+    it('rejects a complete root cover larger than active-frontier capacity', () => {
+
+        const fixture = createFixture({
+            minimumMatrixLevel: 1,
+            maximumActiveTiles: 1,
+            maximumDemands: 4,
+        })
+
+        expect(fixture.descriptor.roots).to.have.length(4)
+        expectFrontierInvalid(() => fixture.evaluate([], []))
+    })
+
+    it('rejects duplicate or over-capacity current-frontier inputs before selection', () => {
+
+        const tight = createFixture({
+            maximumActiveTiles: 5,
+            errorByLevel: [ 100, 100_000, 100, 100 ],
+        })
+        const first = tight.entry(1, 0, 0)
+        const second = tight.entry(1, 0, 1)
+        const residents = [
+            tight.resident(1, 0, 0),
+            tight.resident(1, 0, 1),
+        ]
+        for (const currentFrontier of [
+            [ second, first, first ],
+            [ first, first, second ],
+        ]) {
+            expectFrontierInvalid(() => tight.evaluate(currentFrontier, residents))
+        }
+
+        const overCapacity = createFixture({
+            maximumActiveTiles: 1,
+            maximumDemands: 4,
+        })
+        expectFrontierInvalid(() => overCapacity.evaluate(
+            [ overCapacity.entry(1, 0, 0), overCapacity.entry(1, 0, 1) ],
+            [ overCapacity.resident(1, 0, 0), overCapacity.resident(1, 0, 1) ]
+        ))
+        expectFrontierInvalid(() => tight.evaluate([
+            tight.entry(1, 0, 0, {
+                physicalSlot: tight.descriptor.gpuState.maxPhysicalPages,
+            }),
+        ], []))
+    })
+
+    it('rejects forged current compact indexes independent of input order', () => {
+
+        const fixture = createFixture()
+        const first = fixture.entry(1, 0, 0)
+        const second = fixture.entry(1, 0, 1, {
+            compactIndex: first.compactIndex,
+        })
+        const residents = [
+            fixture.resident(1, 0, 0),
+            fixture.resident(1, 0, 1),
+        ]
+
+        expectFrontierInvalid(() => fixture.evaluate([ first, second ], residents))
+        expectFrontierInvalid(() => fixture.evaluate([ second, first ], residents))
+    })
+
+    it('rejects noncanonical resident indexes and physical-slot ownership', () => {
+
+        const fixture = createFixture()
+        const first = fixture.resident(1, 0, 0)
+        const second = fixture.resident(1, 0, 1)
+        const duplicateIndex = {
+            ...second,
+            compactIndex: first.compactIndex,
+        }
+        const duplicateSlot = {
+            ...second,
+            physicalSlot: first.physicalSlot,
+        }
+        const outOfRangeSlot = {
+            ...second,
+            physicalSlot: fixture.descriptor.gpuState.maxPhysicalPages,
+        }
+
+        expectFrontierInvalid(() => fixture.evaluate([], [ first, duplicateIndex ]))
+        expectFrontierInvalid(() => fixture.evaluate([], [ duplicateIndex, first ]))
+        expectFrontierInvalid(() => fixture.evaluate([], [ first, first ]))
+        expectFrontierInvalid(() => fixture.evaluate([], [ first, duplicateSlot ]))
+        expectFrontierInvalid(() => fixture.evaluate([], [ first, outOfRangeSlot ]))
+    })
+
+    it('does not draw an active entry with stale authoritative content', () => {
+
+        const fixture = createFixture({ errorByLevel: [ 0.1, 0.1, 0.1, 0.1 ] })
+        const entry = fixture.entry(3, 3, 3, { contentEpoch: 4 })
+        const resident = fixture.resident(3, 3, 3, { contentEpoch: 5 })
+        const result = fixture.evaluate([ entry ], [ resident ])
+
+        expect(result.nextFrontier).to.deep.equal([])
+        expect(result.visible).to.deep.equal([])
+        expect(result.facts).to.deep.include({
+            staleGenerationCount: 1,
+            visibleInstanceCount: 0,
+        })
     })
 
     it('does not draw an off-frustum leaf', () => {
