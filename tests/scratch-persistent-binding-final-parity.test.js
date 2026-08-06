@@ -317,7 +317,7 @@ describe('Scratch persistent binding final parity', () => {
             status: 'passed',
         })
         expect(result.publicSurface.publicMemberParity.missingGoalStart).to.have.length(23)
-        expect(result.publicSurface.publicMemberParity.changedGoalStart).to.have.length(23)
+        expect(result.publicSurface.publicMemberParity.changedGoalStart).to.have.length(24)
         expect(result.publicSurface.publicMemberParity.goalStartChangedReplacements)
             .to.have.property(
                 'GPURuntimeDiagnosticsController.constructor:constructor',
@@ -338,7 +338,7 @@ describe('Scratch persistent binding final parity', () => {
             status: 'passed',
             emittedJavaScriptCount: 81,
             emittedDeclarationCount: 81,
-            declarationSignatureCount: 5040,
+            declarationSignatureCount: 5046,
         })
         expect(result.publicSurface.productionEmitParity.files).to.have.length(162)
         expect(result.publicSurface.productionEmitParity.files.every(entry => entry.exactMatch)).to.equal(true)

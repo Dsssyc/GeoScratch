@@ -417,7 +417,7 @@ type TextureCopyEndpoint = TextureResource | SurfaceTextureLease
 
 export type ReadbackCommandDescriptor = {
     label?: string
-    source: BufferCopyCommandSourceDescriptor
+    source: ReadbackCommandSourceDescriptor
     retain?: ReadbackRetentionPolicy
     whenMissing: 'throw'
 }
@@ -3069,7 +3069,7 @@ export class CopyCommand {
 
 type NormalizedReadbackCommandDescriptor = Readonly<{
     label?: string
-    source: BufferCopyCommandSourceDescriptor
+    source: ReadbackCommandSourceDescriptor
     retain: ReadbackRetentionPolicy
     whenMissing: 'throw'
 }>
@@ -3078,7 +3078,7 @@ type ReadbackCommandPrivateState = {
     runtime: GPURuntime
     id: string
     label: string | undefined
-    source: BufferCopyCommandSourceDescriptor
+    source: ReadbackCommandSourceDescriptor
     retain: ReadbackRetentionPolicy
     whenMissing: 'throw'
     slot: ReadbackStagingSlot
@@ -3153,7 +3153,7 @@ export class ReadbackCommand {
     get id(): string { return readbackCommandStateFor(this).id }
     get label(): string | undefined { return readbackCommandStateFor(this).label }
     get commandKind(): 'readback' { return 'readback' }
-    get source(): BufferCopyCommandSourceDescriptor { return readbackCommandStateFor(this).source }
+    get source(): ReadbackCommandSourceDescriptor { return readbackCommandStateFor(this).source }
     get retain(): ReadbackRetentionPolicy { return readbackCommandStateFor(this).retain }
     get whenMissing(): 'throw' { return readbackCommandStateFor(this).whenMissing }
     get state(): GPUReadbackCommandState { return readbackCommandStateFor(this).state }
@@ -3304,7 +3304,7 @@ export async function createReadbackCommand(
 
 export function claimReadbackCommand(
     command: ReadbackCommand,
-    input: Readonly<{ submissionId: string, stepIndex: number }>
+    input: Readonly<ReadbackCommandClaimInput>
 ): ReadbackCommandClaim {
 
     command.assertUsable()
@@ -3327,8 +3327,8 @@ export function claimReadbackCommand(
         submissionId: input.submissionId,
         stepIndex: input.stepIndex,
         sourceResourceId: command.source.region.buffer.id,
-        allocationVersion: command.source.region.buffer.allocationVersion,
-        contentEpoch: command.source.contentEpoch,
+        allocationVersion: input.allocationVersion,
+        contentEpoch: input.contentEpoch,
         stagingAllocationOperationId: commandState.slot.allocationOperationId,
         done: undefined,
         status: 'claimed',
@@ -3584,7 +3584,7 @@ function readbackCommandFact(command: ReadbackCommand) {
         ...(command.label !== undefined ? { label: command.label } : {}),
         sourceResourceId: command.source.region.buffer.id,
         allocationVersion: command.source.region.buffer.allocationVersion,
-        contentEpoch: command.source.contentEpoch,
+        contentEpoch: command.source.contentEpoch as number,
         byteLength: command.source.region.size,
         state: state.state,
         stagingAllocationOperationId: state.slot.allocationOperationId,
@@ -3639,20 +3639,20 @@ function normalizeReadbackCommandSource(
     runtime: GPURuntime,
     subject: ScratchDiagnosticSubject,
     source: unknown
-): BufferCopyCommandSourceDescriptor {
+): ReadbackCommandSourceDescriptor {
 
     if (!isRecord(source)) throwReadbackCommandSourceDiagnostic(runtime, subject, source)
     const region = source.region
     const contentEpoch = 'contentEpoch' in source ? source.contentEpoch : undefined
     if (
         !isBufferRegion(region) ||
-        typeof contentEpoch !== 'number' ||
-        !Number.isInteger(contentEpoch) ||
-        contentEpoch < 0
+        contentEpoch !== 'current-at-step' &&
+        (typeof contentEpoch !== 'number' ||
+            !Number.isInteger(contentEpoch) || contentEpoch < 0)
     ) {
         throwReadbackCommandSourceDiagnostic(runtime, subject, source)
     }
-    const normalized = Object.freeze({ region, contentEpoch })
+    const normalized = Object.freeze({ region, contentEpoch: contentEpoch as CommandResourceReadEpoch })
     validateCurrentReadbackCommandSource(runtime, subject, normalized)
     return normalized
 }
@@ -3660,7 +3660,7 @@ function normalizeReadbackCommandSource(
 function validateCurrentReadbackCommandSource(
     runtime: GPURuntime,
     subject: ScratchDiagnosticSubject,
-    source: BufferCopyCommandSourceDescriptor
+    source: ReadbackCommandSourceDescriptor
 ): void {
 
     const region = source.region
@@ -3701,7 +3701,7 @@ function throwReadbackCommandSourceDiagnostic(
         expected: {
             source: {
                 region: 'non-empty BufferRegion with 4-byte aligned offset and size',
-                contentEpoch: 'non-negative integer',
+                contentEpoch: 'non-negative integer | "current-at-step"',
             },
         },
         actual: {
@@ -3719,7 +3719,7 @@ function throwReadbackCommandSourceDiagnostic(
 
 function normalizeReadbackCommandRetention(
     subject: ScratchDiagnosticSubject,
-    source: BufferCopyCommandSourceDescriptor,
+    source: ReadbackCommandSourceDescriptor,
     retain: unknown
 ): ReadbackRetentionPolicy {
 
@@ -3739,7 +3739,7 @@ function normalizeReadbackCommandRetention(
 
 function normalizeReadbackCommandReadinessPolicy(
     subject: ScratchDiagnosticSubject,
-    source: BufferCopyCommandSourceDescriptor,
+    source: ReadbackCommandSourceDescriptor,
     whenMissing: unknown
 ): 'throw' {
 
@@ -8460,3 +8460,15 @@ for (const commandPrototype of [
     ReadbackCommand.prototype,
     ReadbackCommandClaim.prototype,
 ]) Object.freeze(commandPrototype)
+
+type ReadbackCommandClaimInput = {
+    submissionId: string
+    stepIndex: number
+    contentEpoch: number
+    allocationVersion: number
+}
+
+export type ReadbackCommandSourceDescriptor = {
+    region: BufferRegion
+    contentEpoch: CommandResourceReadEpoch
+}

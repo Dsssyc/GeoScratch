@@ -378,6 +378,7 @@ export type {
     ExternalImageUploadSourceOrigin,
     QuerySetSlotReadDescriptor,
     ReadbackCommandDescriptor,
+    ReadbackCommandSourceDescriptor,
     ReadbackCommandResultOptions,
     ResolveQuerySetCommandDescriptor,
     ResolveQuerySetSourceDescriptor,

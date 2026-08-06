@@ -791,6 +791,11 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         region: storageOutputRegion,
         contentEpoch: storageOutput.contentEpoch,
     }
+    const invalidCurrentCopySource: scr.BufferCopyCommandSourceDescriptor = {
+        region: storageOutputRegion,
+        // @ts-expect-error CopyCommand buffer sources remain numeric-only
+        contentEpoch: currentReadEpoch,
+    }
     const genericCopySource: scr.CopyCommandSourceDescriptor = copySource
     const compatCopySource: scratchCompat.CopyCommandSourceDescriptor = copySource
     const queryDestination: scr.BufferResource = await runtime.createBuffer({
@@ -2354,9 +2359,15 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     const compatAccessKind: scratchCompat.SubmissionResourceAccessKind | undefined = compatResourceAccesses[0]?.access
     const compatStepKind: scratchCompat.SubmissionStepKind | undefined = compatProducerEpochs[0]?.producedBy.stepKind
     const compatBuilder: scratchCompat.SubmissionBuilder = runtime.createSubmission(compatSubmissionOptions)
+    const readbackCommandSource: scr.ReadbackCommandSourceDescriptor = {
+        region: storageOutputRegion,
+        contentEpoch: currentReadEpoch,
+    }
+    const compatReadbackCommandSource: scratchCompat.ReadbackCommandSourceDescriptor =
+        readbackCommandSource
     const readbackCommandDescriptor: scr.ReadbackCommandDescriptor = {
         label: 'typed ordered readback',
-        source: { region: storageOutputRegion, contentEpoch: storageOutput.contentEpoch },
+        source: readbackCommandSource,
         retain: 'until-dispose',
         whenMissing: 'throw',
     }
@@ -2365,6 +2376,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     const readbackCommandAliasPromise: Promise<scratchCompat.ReadbackCommand> = runtime.readbackCommand(compatReadbackCommandDescriptor)
     const readbackCommand: scr.ReadbackCommand = await readbackCommandPromise
     const readbackCommandAlias: scratchCompat.ReadbackCommand = await readbackCommandAliasPromise
+    const publicReadbackCommandSource: scr.ReadbackCommandSourceDescriptor = readbackCommand.source
     const orderedSubmitted: scr.SubmittedWork = runtime.submission()
         .readback(readbackCommand)
         .readback(readbackCommandAlias)
@@ -2456,6 +2468,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     void storageInputRead
     void compatStorageInputRead
     void copySource
+    void invalidCurrentCopySource
     void genericCopySource
     void compatCopySource
     void textureCopySource
@@ -2552,6 +2565,9 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     void compatAccessKind
     void compatStepKind
     void readbackCommandDescriptor
+    void readbackCommandSource
+    void compatReadbackCommandSource
+    void publicReadbackCommandSource
     void compatReadbackCommandDescriptor
     void orderedSubmitted
     void orderedReadback

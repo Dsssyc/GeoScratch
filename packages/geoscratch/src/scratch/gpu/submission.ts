@@ -357,7 +357,7 @@ type ResolvedSubmissionStep =
     | UploadStep
     | ClearStep
     | CopyStep
-    | ReadbackStep
+    | ResolvedReadbackStep
     | ResolveStep
     | DebugStep
 
@@ -729,7 +729,7 @@ export class SubmissionBuilder {
                 if (step.kind !== 'readback') continue
                 readbackClaims.set(stepIndex, claimReadbackCommand(step.command, {
                     submissionId: submittedId,
-                    stepIndex,
+                    stepIndex, contentEpoch: step.sourceContentEpoch, allocationVersion: step.sourceAllocationVersion,
                 }))
             }
         } catch (cause) {
@@ -935,8 +935,8 @@ export class SubmissionBuilder {
                     const claim = readbackClaims.get(stepIndex)
                     if (claim === undefined) throw new TypeError(`Readback step ${stepIndex} has no staging claim.`)
                     updateReadbackCommandClaimProvenance(claim, {
-                        contentEpoch: readAccess.contentEpochBefore,
-                        allocationVersion: step.command.source.region.buffer.allocationVersion,
+                        contentEpoch: step.sourceContentEpoch,
+                        allocationVersion: step.sourceAllocationVersion,
                     })
                     issueStandaloneCommandEncoding(
                         nativeObservation,
@@ -950,8 +950,8 @@ export class SubmissionBuilder {
                         command: step.command,
                         claim,
                         stepIndex,
-                        contentEpoch: readAccess.contentEpochBefore,
-                        allocationVersion: step.command.source.region.buffer.allocationVersion,
+                        contentEpoch: step.sourceContentEpoch,
+                        allocationVersion: step.sourceAllocationVersion,
                     }
                     pendingReadbacks.push(pendingReadback)
                     segmentReadbacks.push(pendingReadback)
@@ -1999,8 +1999,18 @@ function resolveSubmissionBeforeEncoding(builder: SubmissionBuilder): ResolvedSu
         if (step.kind === 'readback') {
             validateReadbackStep(builder, step)
             validateReadbackUniqueness(builder, step, stepIndex, readbackSteps)
-            validateReadbackReadiness(builder, step, stepIndex, readiness, diagnostics)
-            steps.push(step)
+            const sourceSnapshot = validateReadbackReadiness(
+                builder,
+                step,
+                stepIndex,
+                readiness,
+                diagnostics
+            )
+            steps.push({
+                ...step,
+                sourceContentEpoch: sourceSnapshot.contentEpoch,
+                sourceAllocationVersion: sourceSnapshot.allocationVersion,
+            })
             continue
         }
 
@@ -2322,12 +2332,17 @@ function validateReadbackReadiness(
     stepIndex: number,
     readiness: ReadinessSimulation,
     diagnostics: ScratchDiagnostic[]
-): void {
+): Readonly<{ contentEpoch: number, allocationVersion: number }> {
 
+    const resource = step.command.source.region.buffer
     validateThrowOnlyCommandReadiness(builder, stepIndex, step.command, [ {
-        resource: step.command.source.region.buffer,
+        resource,
         contentEpoch: step.command.source.contentEpoch,
     } ], readiness, diagnostics, 'source')
+    return {
+        contentEpoch: simulatedResourceState(readiness, resource).contentEpoch,
+        allocationVersion: resource.allocationVersion,
+    }
 }
 
 function validateReadbackUniqueness(
@@ -5697,4 +5712,9 @@ function releaseUnsubmittedReadbackClaims(claims: Iterable<ReadbackCommandClaim>
     for (const claim of claims) {
         releaseReadbackCommandClaim(claim, { unmap: false, gpuUseComplete: true })
     }
+}
+
+type ResolvedReadbackStep = ReadbackStep & {
+    sourceContentEpoch: number
+    sourceAllocationVersion: number
 }

@@ -867,6 +867,7 @@ const goalStartChangedPublicMemberReplacements = Object.freeze({
     'LayoutCodec.uploadView:method': 'canonical recursive root values plus explicit runtime-sized extent',
     'LayoutCodec.wgslAccessors:method': 'named recursive WGSL accessor options',
     'LayoutCodec.write:method': 'canonical recursive root values plus explicit runtime-sized extent',
+    'ReadbackCommand.source:get': 'ordered readback source supports current-at-step content resolution',
     'ReadbackOperation.source:get': 'whole BufferResource source -> explicit BufferRegion source',
     'ScratchDiagnosticError.constructor:constructor': 'generic domain-matched diagnostic, report, and context contract',
     'ScratchDiagnosticError.diagnostic:property': 'immutable domain-discriminated diagnostic union',
