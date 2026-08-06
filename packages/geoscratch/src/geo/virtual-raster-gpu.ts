@@ -284,12 +284,13 @@ export class VirtualRasterGpuState {
                 }
                 const slotX = slot % this.atlasColumns
                 const slotY = Math.floor(slot / this.atlasColumns)
+                const stagedData = upload.payload.data.slice()
                 atlasUploads.push(this.runtime.createTextureUploadCommand({
                     label: `${this.plane.id} page ${physical.page.key} slot ${slot}`,
                     target: this.atlas,
-                    data: upload.payload.data,
+                    data: stagedData,
                     layout: {
-                        bytesPerRow: upload.payload.data.byteLength / upload.payload.height,
+                        bytesPerRow: stagedData.byteLength / upload.payload.height,
                         rowsPerImage: upload.payload.height,
                     },
                     size: {
@@ -352,6 +353,8 @@ export class VirtualRasterGpuState {
         }
         this.#settlingPublication = publication
         let settlementAttempted = false
+        const uploadedSlotGenerations = new Map(this.#stagedSlotGenerations)
+        const submissionAuthority = residencySubmissionAuthorityFor(this)
         try {
             const submittedCommandIds = new Set(
                 submitted.resourceAccesses
@@ -390,6 +393,7 @@ export class VirtualRasterGpuState {
                 }
             }
             this.#assertStagedPublication(publication)
+            submissionAuthority.stamp()
             settlementAttempted = true
             await publication.acknowledge()
             this.#assertStagedPublication(publication)
@@ -403,12 +407,12 @@ export class VirtualRasterGpuState {
                     actual: publication.inspect(),
                 })
             }
+            submissionAuthority.advance()
+            this.#clearStagedPublication()
             this.#acknowledgedSnapshotEpoch = snapshot.epoch
             this.#acknowledgedSnapshot = snapshot
             this.#acknowledgementSerial++
-            this.#uploadedSlotGenerations = new Map(this.#stagedSlotGenerations)
-            residencySubmissionAuthorityFor(this).advance()
-            this.#clearStagedPublication()
+            this.#uploadedSlotGenerations = uploadedSlotGenerations
         } catch (error) {
             if (settlementAttempted && this.#stagedPublication === publication) {
                 this.#clearStagedPublication()
@@ -437,8 +441,16 @@ export class VirtualRasterGpuState {
                 actual: { snapshotEpoch: publication.snapshot.epoch },
             })
         }
-        this.#clearStagedPublication()
-        await publication.abandon()
+        this.#settlingPublication = publication
+        try {
+            await publication.abandon()
+            this.#assertStagedPublication(publication)
+            this.#clearStagedPublication()
+        } finally {
+            if (this.#settlingPublication === publication) {
+                this.#settlingPublication = undefined
+            }
+        }
     }
 
     facts(): VirtualRasterGpuFacts {
@@ -566,7 +578,7 @@ export class VirtualRasterGpuState {
             code: 'GEO_VIRTUAL_RASTER_GPU_PUBLICATION_PENDING',
             phase: 'residency',
             subject: { kind: 'virtual-raster-gpu-state', id: this.addressSpace.id },
-            message: 'GPU publication acknowledgement is already settling.',
+            message: 'GPU publication settlement is already in progress.',
             expected: { settlingSnapshotEpoch: this.#settlingPublication?.snapshot.epoch },
             actual: { snapshotEpoch: publication.snapshot.epoch },
         })
