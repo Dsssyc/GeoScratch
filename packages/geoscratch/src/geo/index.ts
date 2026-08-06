@@ -212,6 +212,9 @@ export type {
 } from './virtual-raster-gpu.js'
 export { VirtualRasterGpuFeedbackRing } from './virtual-raster-gpu-feedback.js'
 export type {
+    GpuTileFrontierRetirement,
+    VirtualRasterGpuFeedbackBatch,
+    VirtualRasterGpuFeedbackCounters,
     VirtualRasterGpuFeedbackRingFacts,
     VirtualRasterGpuFeedbackSlotFacts,
 } from './virtual-raster-gpu-feedback.js'

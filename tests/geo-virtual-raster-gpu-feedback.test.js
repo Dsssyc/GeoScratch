@@ -14,6 +14,14 @@ import {
     virtualRasterTileAddressSpace,
     webMercatorQuadAddressCodec,
 } from 'geoscratch/geo'
+import {
+    gpuTileFrontierDemandCodec,
+    gpuTileFrontierDiagnosticsCodec,
+    gpuTileFrontierEntryCodec,
+} from '../packages/geoscratch/dist/geo/gpu-tile-frontier-layout.js'
+import {
+    gpuTileFrontierTestFrameAccess,
+} from '../packages/geoscratch/dist/geo/gpu-tile-frontier.js'
 import { createFakeGpu } from './scratch-test-utils.js'
 
 const HALF_WORLD = 20_037_508.3427892
@@ -128,6 +136,113 @@ async function createFeedbackFixture() {
     }
 }
 
+function packedFeedback(frame, options = {}) {
+
+    const layout = frame.feedbackOutput.layout
+    const demands = options.demands ?? []
+    const retirements = options.retirements ?? []
+    const bytes = new Uint8Array(layout.byteLength)
+    if (demands.length > 0) {
+        gpuTileFrontierDemandCodec.write(bytes, demands, {
+            byteOffset: layout.demands.offset,
+        })
+    }
+    if (retirements.length > 0) {
+        gpuTileFrontierEntryCodec.write(bytes, retirements, {
+            byteOffset: layout.retirements.offset,
+        })
+    }
+    const counters = new Uint32Array(
+        bytes.buffer,
+        bytes.byteOffset + layout.counters.offset,
+        layout.counters.byteLength / 4
+    )
+    counters[0] = options.activeFrontierCount ?? 1
+    counters[1] = options.activeFrontierCount ?? 1
+    counters[2] = options.visibleInstanceCount ?? 1
+    counters[3] = options.refineCandidateCount ?? 0
+    counters[4] = options.coarsenCandidateCount ?? 0
+    counters[5] = options.demandCount ?? demands.length
+    counters[6] = options.retirementCount ?? retirements.length
+    counters[7] = options.staleGenerationCount ?? 0
+    counters[8] = options.budgetLimitedCount ?? 0
+    new DataView(counters.buffer, counters.byteOffset, counters.byteLength)
+        .setFloat32(9 * 4, options.maximumObservedSse ?? 1, true)
+    counters[10] = options.minimumSelectedMatrixLevel ?? 0
+    counters[11] = options.maximumSelectedMatrixLevel ?? 0
+    counters[12] = options.frontierOverflow ? 1 : 0
+    counters[13] = options.demandOverflow ? 1 : 0
+    counters[14] = options.visibleOverflow ? 1 : 0
+    counters[15] = options.lookupDuplicateCount ?? 0
+    counters[16] = options.balanceRejectedCount ?? 0
+    counters[17] = frame.frameEpoch
+    counters[18] = options.residencySnapshotEpoch ?? 0
+    counters[19] = options.fallbackCount ?? 0
+    counters[20] = options.acceptedRefineCount ?? 0
+    counters[21] = options.acceptedCoarsenCount ?? 0
+    gpuTileFrontierDiagnosticsCodec.write(bytes, {
+        frameEpoch: frame.frameEpoch,
+        residencySnapshotEpoch: options.residencySnapshotEpoch ?? 0,
+        activeFrontierCount: counters[0],
+        visibleInstanceCount: counters[2],
+        refineCandidateCount: counters[3],
+        coarsenCandidateCount: counters[4],
+        demandCount: counters[5],
+        fallbackCount: counters[19],
+        staleGenerationCount: counters[7],
+        budgetLimitedCount: counters[8],
+        maximumObservedSse: options.maximumObservedSse ?? 1,
+        minimumSelectedMatrixLevel: counters[10],
+        maximumSelectedMatrixLevel: counters[11],
+        frontierOverflow: counters[12],
+        demandOverflow: counters[13],
+        visibleOverflow: counters[14],
+        convergenceState: options.convergenceState ?? 0,
+        reserved0: counters[15],
+        reserved1: counters[16],
+        reserved2: counters[6],
+    }, { byteOffset: layout.diagnostics.offset })
+    return bytes
+}
+
+function issueFeedbackFrame(fixture, ring, frameEpoch, feedback = {}) {
+
+    const token = fixture.frontier.writeView(fixture.view(frameEpoch))
+    const frame = fixture.frontier.frame(token)
+    const builder = fixture.frontier.encode(
+        fixture.runtime.createSubmission({ validation: 'throw' }),
+        frame
+    )
+    const access = gpuTileFrontierTestFrameAccess(fixture.frontier, frame)
+    const upload = fixture.runtime.createUploadCommand({
+        label: `Inject GPU feedback ${frameEpoch}`,
+        target: access.feedbackOutput.region(),
+        data: packedFeedback(frame, {
+            residencySnapshotEpoch: fixture.gpuState.facts().snapshotEpoch,
+            ...feedback,
+        }),
+    })
+    builder.upload(upload)
+    ring.encode(builder, frame)
+    const submitted = builder.submit()
+    upload.dispose()
+    token.dispose()
+    return { frame, submitted }
+}
+
+async function expectFeedbackError(action, code) {
+
+    let failure
+    try {
+        await action()
+    } catch (error) {
+        failure = error
+    }
+    expect(failure).to.be.instanceOf(GeoDiagnosticError)
+    expect(failure.diagnostic).to.deep.include({ code, phase: 'selection' })
+    return failure.diagnostic
+}
+
 describe('Geo Virtual Raster GPU feedback ring', () => {
 
     it('owns exactly three fixed readback slots and follows frontier disposal', async() => {
@@ -218,6 +333,53 @@ describe('Geo Virtual Raster GPU feedback ring', () => {
         const submittedWithoutFeedback = builder.submit()
         token.dispose()
         expect(submittedWithoutFeedback.readbacks).to.deep.equal([])
+
+        fixture.frontier.dispose()
+        fixture.gpuState.dispose()
+        fixture.residency.dispose()
+        fixture.runtime.dispose()
+    })
+
+    it('consumes only N-1 feedback exactly once without exposing mapped bytes', async() => {
+
+        const fixture = await createFeedbackFixture()
+        const ring = await VirtualRasterGpuFeedbackRing.create(fixture.frontier)
+        const first = issueFeedbackFrame(fixture, ring, 0)
+
+        await expectFeedbackError(
+            () => ring.feedback(first.frame, first.submitted),
+            'GEO_GPU_TILE_FEEDBACK_TOO_RECENT'
+        )
+        expect(ring.facts().slots[0].state).to.equal('submitted')
+
+        issueFeedbackFrame(fixture, ring, 1)
+        const feedback = await ring.feedback(first.frame, first.submitted)
+        expect(feedback).to.deep.include({
+            kind: 'virtual-raster-gpu-feedback-batch',
+            ringId: ring.id,
+            frontierId: fixture.frontier.id,
+            submissionId: first.submitted.id,
+            frameEpoch: 0,
+            residencySnapshotEpoch: fixture.gpuState.facts().snapshotEpoch,
+        })
+        expect(feedback.demands).to.deep.equal([])
+        expect(feedback.retirements).to.deep.equal([])
+        expect(feedback.facts).to.deep.include({
+            frameEpoch: 0,
+            activeFrontierCount: 1,
+            visibleInstanceCount: 1,
+            convergenceState: 'converged',
+        })
+        expect(feedback).not.to.have.property('bytes')
+        expect(feedback).not.to.have.property('mapped')
+        expect(Object.isFrozen(feedback)).to.equal(true)
+        expect(Object.isFrozen(feedback.facts)).to.equal(true)
+        expect(ring.facts().slots[0].state).to.equal('idle')
+
+        await expectFeedbackError(
+            () => ring.feedback(first.frame, first.submitted),
+            'GEO_GPU_TILE_FEEDBACK_CONSUMED'
+        )
 
         fixture.frontier.dispose()
         fixture.gpuState.dispose()

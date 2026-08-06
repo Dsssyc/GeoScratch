@@ -201,6 +201,7 @@ type FrameRecord = Readonly<{
     template: ParityTemplate
     view: ViewTokenRecord
     pass: ComputePassSpec
+    residencySnapshotEpoch: number
 }>
 
 const frameRecords = new WeakMap<GpuTileFrontierFrame, FrameRecord>()
@@ -550,6 +551,7 @@ export class GpuTileFrontier {
             template,
             view: record,
             pass: this.#pass,
+            residencySnapshotEpoch: viewToken.residencySnapshotEpoch,
         }))
         return frame
     }
@@ -722,6 +724,7 @@ export type GpuTileFrontierFeedbackFrameAccess = Readonly<{
     commands: readonly DispatchCommand[]
     viewCommand: UploadCommand
     sequenceRevision: number
+    residencySnapshotEpoch: number
 }>
 
 /** @internal Package-owned frame provenance for bounded feedback scheduling. */
@@ -742,6 +745,7 @@ export function gpuTileFrontierFeedbackFrameAccess(
         commands: record.template.commands,
         viewCommand: record.view.command,
         sequenceRevision: record.view.sequenceStamp.revision,
+        residencySnapshotEpoch: record.residencySnapshotEpoch,
     })
 }
 
