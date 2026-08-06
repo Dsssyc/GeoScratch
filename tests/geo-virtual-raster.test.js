@@ -3,12 +3,15 @@ import { GPURuntime } from 'geoscratch/scratch'
 import {
     GeoDiagnosticError,
     VirtualRasterResidency,
+    WebMercatorQuad,
     createVirtualRasterGpuState,
     ownedVirtualRasterPagePayload,
+    tileMatrixCoverage,
     virtualRasterAccessor,
     virtualRasterAddressSpace,
     virtualRasterPlane,
     virtualRasterSamplingProfile,
+    virtualRasterTileAddressSpace,
 } from 'geoscratch/geo'
 import { createFakeGpu } from './scratch-test-utils.js'
 
@@ -95,6 +98,50 @@ function fixture({ maxPhysicalPages = 4, maxHistory = 8, pageValues } = {}) {
         },
     })
     return { addressSpace, plane, residency, pages, cpuPages }
+}
+
+function tileFixture() {
+
+    const coverage = tileMatrixCoverage({
+        tileMatrixSet: WebMercatorQuad,
+        limits: [
+            { matrixId: '8', minTileRow: 101, maxTileRow: 102, minTileCol: 212, maxTileCol: 214 },
+            { matrixId: '9', minTileRow: 202, maxTileRow: 205, minTileCol: 424, maxTileCol: 429 },
+        ],
+    })
+    const addressSpace = virtualRasterTileAddressSpace({
+        id: 'test.tile-raster',
+        coverage,
+    })
+    const plane = virtualRasterPlane({
+        id: 'tile-height',
+        addressSpace,
+        kind: 'scalar',
+        channels: 1,
+        sampleType: 'unorm8',
+        gpuFormat: 'r8unorm',
+    })
+    const [ width, height ] = addressSpace.pageSize
+    const data = new Uint8Array(width * height).fill(17)
+    const page = Object.freeze({
+        page: addressSpace.pageFromTile({
+            matrixId: '9',
+            tileRow: 204,
+            tileCol: 428,
+        }),
+        width,
+        height,
+        channels: 1,
+        data,
+        contentVersion: 'tile-v3',
+    })
+    const residency = new VirtualRasterResidency({
+        addressSpace,
+        plane,
+        maxPhysicalPages: 1,
+        maxStagingBytes: data.byteLength,
+    })
+    return { coverage, addressSpace, plane, page, residency }
 }
 
 function stage(residency, page, generation = 1) {
@@ -496,7 +543,67 @@ describe('Geo virtual raster', () => {
         }, cpuPages)
         expect(sample.status).to.equal('failed')
         const wgsl = accessor.wgslModule({ group: 0, pageTableBinding: 0, atlasBinding: 1 })
-        expect(wgsl).to.include('if (status == 4u)')
+        expect(wgsl).to.include(
+            'fn GeoVirtualRaster_failed(level: u32) -> GeoVirtualRasterSample { return GeoVirtualRasterSample(vec4f(0.0), 4u, level, level); }'
+        )
+        const failedBranch = wgsl.indexOf(
+            'if (status == 4u) { return GeoVirtualRaster_failed(level); }'
+        )
+        expect(failedBranch).to.be.greaterThan(-1)
+        for (const laterAccess of [
+            'let resolved_level = GeoVirtualRaster_page_table[base + 2u];',
+            'let slot = vec2u(GeoVirtualRaster_page_table[base], GeoVirtualRaster_page_table[base + 1u]);',
+            'let raw = textureLoad(GeoVirtualRaster_atlas,',
+        ]) {
+            expect(failedBranch).to.be.lessThan(wgsl.indexOf(laterAccess))
+        }
+
+        gpuState.dispose()
+        residency.dispose()
+        runtime.dispose()
+    })
+
+    it('encodes every tile slot field with distinct sampling and matrix levels', async() => {
+
+        const fake = createFakeGpu()
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
+        const { coverage, addressSpace, plane, page, residency } = tileFixture()
+        expect(stage(residency, page, 37)).to.deep.include({ status: 'staged' })
+        const publication = residency.publish()
+        const snapshot = publication.snapshot
+        const gpuState = await createVirtualRasterGpuState(runtime, {
+            addressSpace,
+            plane,
+            maxPhysicalPages: 1,
+        })
+        const update = gpuState.stage(publication)
+        const work = submitUpdate(runtime, update)
+        await gpuState.acknowledge(publication, work)
+
+        const entry = snapshot.resolve(page.page)
+        const tile = page.page.tile
+        const slotWords = wordsFromWrite(fake.calls.queueWrites.find(write =>
+            write.data.byteLength === SLOT_TABLE_WORDS * Uint32Array.BYTES_PER_ELEMENT
+        ))
+        expect(Array.from(slotWords)).to.deep.equal([
+            1,
+            page.page.level,
+            coverage.tileMatrixSet.tileMatrices.findIndex(matrix => matrix.id === tile.matrixId),
+            tile.tileRow,
+            tile.tileCol,
+            coverage.index(tile),
+            entry.physicalSlot,
+            entry.generation,
+            entry.contentEpoch,
+            snapshot.epoch,
+            snapshot.epoch,
+            0,
+        ])
+        expect(slotWords[1]).to.not.equal(slotWords[2])
+        expect(slotWords[2]).to.equal(9)
+        expect(slotWords[3]).to.equal(204)
+        expect(slotWords[4]).to.equal(428)
+        expect(slotWords[5]).to.equal(22)
 
         gpuState.dispose()
         residency.dispose()
