@@ -584,6 +584,17 @@ fn childTerminalFailureMask(entry: GpuTileFrontierEntry) -> u32 {
     return mask;
 }
 
+fn parentWouldImmediatelyRefine(entry: GpuTileFrontierEntry) -> bool {
+    if (entry.matrixLevel == 0u) { return false; }
+    let parentLevel = entry.matrixLevel - 1u;
+    let parentRow = entry.tileRow / 2u;
+    let parentColumn = entry.tileCol / 2u;
+    let bounds = boundsFor(parentLevel, parentRow, parentColumn);
+    return parentLevel < selectionPolicy.maximumMatrixLevel &&
+        webGpuClipVisible(bounds) &&
+        screenSpaceError(parentLevel, bounds) > selectionPolicy.refineErrorPixels;
+}
+
 fn addressesNeighbor(
     leftLevel: u32,
     leftRow: u32,
@@ -800,6 +811,7 @@ fn isCanonicalCoveredSibling(entry: GpuTileFrontierEntry) -> bool {
 
 fn siblingGroupReady(entry: GpuTileFrontierEntry) -> bool {
     if (!isCanonicalCoveredSibling(entry)) { return false; }
+    if (parentWouldImmediatelyRefine(entry)) { return false; }
     let parentLevel = entry.matrixLevel - 1u;
     let parentRow = entry.tileRow / 2u;
     let parentColumn = entry.tileCol / 2u;
@@ -823,6 +835,7 @@ fn siblingGroupReady(entry: GpuTileFrontierEntry) -> bool {
 
 fn siblingGroupGracePending(entry: GpuTileFrontierEntry) -> bool {
     if (!isCanonicalCoveredSibling(entry)) { return false; }
+    if (parentWouldImmediatelyRefine(entry)) { return false; }
     let parentLevel = entry.matrixLevel - 1u;
     let parentRow = entry.tileRow / 2u;
     let parentColumn = entry.tileCol / 2u;

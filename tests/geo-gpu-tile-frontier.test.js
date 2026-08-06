@@ -2233,6 +2233,35 @@ describe('Geo GPU tile frontier contracts and reference oracle', () => {
         expect(incomplete.facts.coarsenCandidateCount).to.equal(0)
     })
 
+    it('does not coarsen siblings whose visible parent would immediately refine', () => {
+
+        const fixture = createFixture({
+            errorByLevel: [ 0.1, 100_000, 0.1, 0.1 ],
+        })
+        const siblings = [
+            fixture.entry(2, 0, 0),
+            fixture.entry(2, 0, 1),
+            fixture.entry(2, 1, 0),
+            fixture.entry(2, 1, 1),
+        ]
+        const residents = [
+            fixture.resident(1, 0, 0),
+            ...siblings.map(entry => fixture.resident(
+                2,
+                entry.page.tile.tileRow,
+                entry.page.tile.tileCol
+            )),
+        ]
+
+        const result = fixture.evaluate(siblings, residents)
+
+        expect(keys(result.nextFrontier)).to.deep.equal(keys(siblings))
+        expect(result.facts).to.deep.include({
+            coarsenCandidateCount: 0,
+            convergenceState: 'converged',
+        })
+    })
+
     it('treats a balance-blocked coarsen fallback as a stable frontier', () => {
 
         const fixture = createFixture({ errorByLevel: [ 0.1, 0.1, 0.1, 0.1 ] })

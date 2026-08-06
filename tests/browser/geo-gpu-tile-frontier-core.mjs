@@ -1471,8 +1471,8 @@ async function runProof({ scratchUrl, geoUrl, referenceUrl, layoutUrl, testAcces
             assertEqual(frameResult.keys, [
                 outside.key,
                 ...nearChildren.map(child => child.key),
-                far.key,
-            ], 'off-axis view must refine near and coarsen far')
+                ...farChildren.map(child => child.key),
+            ], 'off-axis view must refine near and retain a far group whose parent would refine')
             const outsideCompactIndex = env.coverage.index(outside.tile)
             assert(
                 !frameResult.visible.some(entry => entry.compactIndex === outsideCompactIndex),
@@ -1480,8 +1480,8 @@ async function runProof({ scratchUrl, geoUrl, referenceUrl, layoutUrl, testAcces
             )
             assert(
                 frameResult.facts.refineCandidateCount >= 1 &&
-                frameResult.facts.coarsenCandidateCount >= 1,
-                'off-axis production facts must observe both near refine and far coarsen'
+                frameResult.facts.coarsenCandidateCount === 0,
+                'off-axis production facts must reject a non-fixed-point far coarsen'
             )
             const disposal = disposeScenario(frontier, capture, env)
             frontier = undefined
@@ -1491,7 +1491,7 @@ async function runProof({ scratchUrl, geoUrl, referenceUrl, layoutUrl, testAcces
                 camera,
                 direction,
                 refinedNearKeys: nearChildren.map(child => child.key),
-                coarsenedFarKey: far.key,
+                retainedFarKeys: farChildren.map(child => child.key),
                 outsideKey: outside.key,
                 outsideVisible: false,
                 visibleCompactIndexes: frameResult.visible.map(entry => entry.compactIndex),
@@ -2414,7 +2414,8 @@ function validate(value) {
         proof.scenarios.visibilityGrace?.parentLastVisibleFrame !== 1 ||
         proof.scenarios.offAxis?.outsideVisible !== false ||
         !(proof.scenarios.offAxis?.facts?.refineCandidateCount >= 1) ||
-        !(proof.scenarios.offAxis?.facts?.coarsenCandidateCount >= 1)) {
+        proof.scenarios.offAxis?.facts?.coarsenCandidateCount !== 0 ||
+        proof.scenarios.offAxis?.retainedFarKeys?.length !== 4) {
         failures.push('decoded GPU semantic evidence is incomplete')
     }
     if (!proof.disposal?.frontierDisposed || !proof.disposal?.feedbackRingDisposed ||

@@ -432,6 +432,8 @@ describe('DEM Layer clean cut', () => {
         expect(layer).not.to.include('DEM elevation texture')
         expect(main).not.to.include("./assets/dem.png")
         expect(browserProof).to.include('visibleNodeCount')
+        expect(browserProof).to.include("scenario('mobile-pitch70-bearing90-z10', 10, 70, 90, {")
+        expect(browserProof).to.include('width: 390, height: 844')
     })
 
     it('observes issued native work before surfacing a provenance failure', async() => {

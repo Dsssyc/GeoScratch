@@ -1416,7 +1416,7 @@ function kernelDefinitions(
         { entryPoint: 'clearLookup', label: 'Clear GPU tile frontier lookup', bindings: [ lookupWrite ], count: [ ceilDivide(bounds.lookupCapacity, GPU_TILE_FRONTIER_WORKGROUP_SIZE), 1, 1 ] },
         { entryPoint: 'buildLookup', label: 'Build GPU tile frontier lookup', bindings: [ map, current, lookupWrite, countersWrite ], count: 'indirect' },
         { entryPoint: 'evaluateFrontier', label: 'Evaluate GPU tile frontier', bindings: [ map, policy, metrics, current, slots, pages, visibility, decisionWrite, countersWrite ], count: 'indirect' },
-        { entryPoint: 'selectBudgets', label: 'Select GPU tile frontier budgets', bindings: [ map, policy, current, slots, lookupRead, decisionWrite, countersWrite ], count: [ 1, 1, 1 ] },
+        { entryPoint: 'selectBudgets', label: 'Select GPU tile frontier budgets', bindings: [ map, policy, metrics, current, slots, lookupRead, decisionWrite, countersWrite ], count: [ 1, 1, 1 ] },
         { entryPoint: 'resolveTransitions', label: 'Resolve GPU tile frontier transitions', bindings: [ map, policy, metrics, current, slots, visibility, decisionWrite, countersWrite ], count: 'indirect' },
         { entryPoint: 'balanceNeighbors', label: 'Balance GPU tile frontier neighbors', bindings: [ map, policy, current, lookupRead, visibility, decisionWrite, countersWrite ], count: 'indirect' },
         { entryPoint: 'scanBlocks', label: 'Scan GPU tile frontier blocks', bindings: [ decisionRead, prefixWrite, countersRead ], count: [ bounds.scanBlockCount, 1, 1 ] },

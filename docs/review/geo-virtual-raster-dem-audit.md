@@ -91,5 +91,5 @@ The observed run included:
 ## Depth Policy Correction
 
 The camera far plane now receives the manifest minimum elevation multiplied by the
-same terrain exaggeration used by the shader. The earlier hard-coded 30x floor is
-removed, so deep resident terrain is not clipped by a mismatched example constant.
+same 50x terrain exaggeration used by the shader. The earlier hard-coded 30x floor
+is removed, so deep resident terrain is not clipped by a mismatched example constant.

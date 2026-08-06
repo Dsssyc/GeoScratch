@@ -44,6 +44,9 @@ const cameraScenarios = Object.freeze([
     scenario('pitch70-bearing90-z10', 10, 70, 90),
     scenario('pitch85-bearing90-z9', 9, 85, 90),
     scenario('pitch85-bearing225-z10', 10, 85, 225),
+    scenario('mobile-pitch70-bearing90-z10', 10, 70, 90, {
+        width: 390, height: 844,
+    }),
 ])
 const failureScenarios = Object.freeze([
     'after-map-acquisition',
@@ -237,16 +240,25 @@ async function verifyNormalDem(activeBrowser) {
     }
 }
 
-function scenario(name, zoom, pitch, bearing) {
+function scenario(name, zoom, pitch, bearing, viewport) {
 
     return Object.freeze({
         name,
         camera: Object.freeze({ center: cameraCenter, zoom, pitch, bearing }),
+        viewport: viewport === undefined ? undefined : Object.freeze({ ...viewport }),
     })
 }
 
 async function captureConvergedCamera(page, definition) {
 
+    if (definition.viewport !== undefined) {
+        const current = await readDemFacts(page)
+        const resizeGeneration = Number(current.resizeGeneration)
+        await page.setViewportSize(definition.viewport)
+        await waitForConvergedFacts(page, facts => (
+            Number(facts.resizeGeneration) > resizeGeneration
+        ))
+    }
     const before = await readDemFacts(page)
     const facts = []
     const signatures = []
@@ -832,6 +844,13 @@ function validateNormalProof(proof, failures) {
         if (!cameraMatches(finalFacts, result.camera)) {
             failures.push(`${result.name} did not publish the requested MapLibre camera`)
         }
+        if (result.viewport !== undefined) {
+            const camera = parseJsonOrUndefined(finalFacts.cameraView)
+            if (camera?.viewport?.[0] !== result.viewport.width ||
+                camera?.viewport?.[1] !== result.viewport.height) {
+                failures.push(`${result.name} did not publish the requested viewport`)
+            }
+        }
     }
     validateDemFacts('resized', resized, failures)
     validateDemFacts('drained', drained, failures, 'stopped')
@@ -851,10 +870,15 @@ function validateNormalProof(proof, failures) {
     if (Number(resized.resizeGeneration) !== Number(beforeResize?.resizeGeneration) + 1) {
         failures.push('browser resize did not produce exactly one resize generation')
     }
+    const previousResize = parseJson(
+        beforeResize?.lastResizeFacts,
+        'pre-resize facts',
+        failures
+    )
     const resize = parseJson(resized.lastResizeFacts, 'resize facts', failures)
     if (resize?.resizeGeneration !== Number(resized.resizeGeneration) ||
         resize?.staleBindSetCount !== 0 || resize?.preparedBindSetCount !== 0 ||
-        resize?.depthAllocationVersion !== 2) {
+        resize?.depthAllocationVersion !== previousResize?.depthAllocationVersion + 1) {
         failures.push('Surface/depth resize or stale-BindSet acknowledgement was incorrect')
     }
     if (resized.staleBindSetPreparationCount !== '0') {
@@ -1154,6 +1178,7 @@ function summarizeNormalProof(proof) {
         scenarios: proof.scenarios.map(result => ({
             name: result.name,
             camera: result.camera,
+            viewport: result.viewport,
             stableFrameCount: result.facts.length,
             stableSignatureCount: new Set(result.signatures).size,
             signatures: new Set(result.signatures).size === 1 ? undefined : result.signatures,

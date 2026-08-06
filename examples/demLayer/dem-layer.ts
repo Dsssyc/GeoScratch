@@ -750,23 +750,29 @@ async function createBindSets(
     templates: RenderTemplates
 ) {
 
+    const lodInstances = []
+    for (const [ parity, template ] of templates.lodMap.entries()) {
+        lodInstances.push(await runtime.createBindSet(layouts.lodInstances, {
+            visibleInstances: template.visibleInstances.region(),
+        }, { label: `DEM LoD frontier instances ${parity}` }))
+    }
+
+    const terrainData = []
+    for (const [ parity, template ] of templates.terrain.entries()) {
+        terrainData.push(await runtime.createBindSet(layouts.terrainData, {
+            indices: buffers.indices.region,
+            gridPositions: buffers.positions.region,
+            visibleInstances: template.visibleInstances.region(),
+        }, { label: `DEM terrain frontier data ${parity}` }))
+    }
+
     return {
         scene: await runtime.createBindSet(layouts.scene, {
             mapMeta: templates.lodMap[0].mapMeta.region(),
             terrainConfig: uniforms.config.region,
         }, { label: 'DEM frontier scene' }),
-        lodInstances: await Promise.all(templates.lodMap.map((template, parity) =>
-            runtime.createBindSet(layouts.lodInstances, {
-                visibleInstances: template.visibleInstances.region(),
-            }, { label: `DEM LoD frontier instances ${parity}` })
-        )),
-        terrainData: await Promise.all(templates.terrain.map((template, parity) =>
-            runtime.createBindSet(layouts.terrainData, {
-                indices: buffers.indices.region,
-                gridPositions: buffers.positions.region,
-                visibleInstances: template.visibleInstances.region(),
-            }, { label: `DEM terrain frontier data ${parity}` })
-        )),
+        lodInstances,
+        terrainData,
         terrainTextures: await runtime.createBindSet(layouts.terrainTextures, {
             demPageTable: virtualRaster.gpu.pageTable.region(),
             demAtlas: virtualRaster.gpu.atlasView,

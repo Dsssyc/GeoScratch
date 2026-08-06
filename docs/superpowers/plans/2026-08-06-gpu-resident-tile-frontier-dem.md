@@ -427,7 +427,7 @@ Submit seed, MapMeta upload, compute commands, and a small indirect draw. Assert
 1. all children resident: four frames converge from root to expected visible descendants;
 2. children missing: parent remains visible and canonical demands are returned;
 3. tight active budget: result matches CPU oracle and remains complete;
-4. off-axis/high-pitch matrix: near tiles refine, far tiles coarsen, outside-frustum tiles are absent from visible output;
+4. off-axis/high-pitch matrix: near tiles refine, a far sibling group coarsens only when its parent would not immediately refine, and outside-frustum tiles are absent from visible output;
 5. identical seed/view run twice: visible/demand order and indirect words are byte-identical;
 6. stale generation: stale entry is not drawn and increments diagnostic count.
 
@@ -828,7 +828,10 @@ git diff 399a416..HEAD -- packages/geoscratch/src/scratch
 rg -n "selectTerrainNodes|nodeLevels|nodeBoxes|canonicalNodes|lodArguments\.upload|terrainArguments\.upload" examples/demLayer
 ```
 
-Expected: no Scratch diff, no legacy production symbol, and changed files remain inside the approved Geo/DEM/test/docs boundary.
+Expected: Scratch changes are limited to the Task 3 generic ordered-readback and
+submission-authority prerequisite, contain no Geo/DEM policy or imports, no legacy
+production symbol remains, and every other changed file stays inside the approved
+Geo/DEM/test/docs boundary.
 
 - [ ] **Step 5: Write the final audit**
 

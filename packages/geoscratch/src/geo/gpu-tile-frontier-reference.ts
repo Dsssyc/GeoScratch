@@ -224,13 +224,15 @@ export function evaluateGpuTileFrontierReference(
         input,
         evaluations,
         residents,
-        selectedRefineKeys
+        selectedRefineKeys,
+        metrics
     )
     const coarsenGracePendingCount = countPendingCoarsenGraceGroups(
         input,
         evaluations,
         residents,
-        selectedRefineKeys
+        selectedRefineKeys,
+        metrics
     )
     const coarsenOutputs = new Map<string, readonly GpuTileFrontierReferenceEntry[]>()
     let acceptedCoarsenCount = 0
@@ -657,7 +659,8 @@ function collectCoarsenCandidates(
     input: GpuTileFrontierReferenceInput,
     evaluations: readonly EntryEvaluation[],
     residents: ReadonlyMap<string, GpuTileFrontierReferenceResidentPage>,
-    selectedRefineKeys: ReadonlySet<string>
+    selectedRefineKeys: ReadonlySet<string>,
+    metrics: ReadonlyMap<number, GpuTileFrontierLevelMetric>
 ): readonly CoarsenCandidate[] {
 
     const eligible = evaluations.filter(evaluation =>
@@ -682,7 +685,8 @@ function collectCoarsenCandidates(
         const siblings = siblingPages.map(page => eligibleByKey.get(page.key))
         if (siblings.some(sibling => sibling === undefined) ||
             residents.get(parent.key)?.residencySnapshotEpoch !==
-                input.view.residencySnapshotEpoch) continue
+                input.view.residencySnapshotEpoch ||
+            pageWouldImmediatelyRefine(input, parent, residents, metrics)) continue
         candidates.push(Object.freeze({
             parent,
             siblings: Object.freeze(siblings as GpuTileFrontierReferenceEntry[]),
@@ -700,7 +704,8 @@ function countPendingCoarsenGraceGroups(
     input: GpuTileFrontierReferenceInput,
     evaluations: readonly EntryEvaluation[],
     residents: ReadonlyMap<string, GpuTileFrontierReferenceResidentPage>,
-    selectedRefineKeys: ReadonlySet<string>
+    selectedRefineKeys: ReadonlySet<string>,
+    metrics: ReadonlyMap<number, GpuTileFrontierLevelMetric>
 ): number {
 
     const evaluationsByKey = new Map(evaluations.map(evaluation => [
@@ -718,7 +723,8 @@ function countPendingCoarsenGraceGroups(
         if (parent === undefined || seenParents.has(parent.key)) continue
         seenParents.add(parent.key)
         if (residents.get(parent.key)?.residencySnapshotEpoch !==
-            input.view.residencySnapshotEpoch) continue
+            input.view.residencySnapshotEpoch ||
+            pageWouldImmediatelyRefine(input, parent, residents, metrics)) continue
         const siblingEvaluations = childPages(input.descriptor, parent).map(page =>
             evaluationsByKey.get(page.key)
         )
@@ -733,6 +739,25 @@ function countPendingCoarsenGraceGroups(
         if (groupCanCoarsenAfterGrace) pendingCount++
     }
     return pendingCount
+}
+
+function pageWouldImmediatelyRefine(
+    input: GpuTileFrontierReferenceInput,
+    page: VirtualRasterPageIdentity,
+    residents: ReadonlyMap<string, GpuTileFrontierReferenceResidentPage>,
+    metrics: ReadonlyMap<number, GpuTileFrontierLevelMetric>
+): boolean {
+
+    const resident = residents.get(page.key)
+    if (resident === undefined) return false
+    const evaluation = evaluateEntry(
+        entryFromResident(resident, input.view.frameEpoch, 'retain'),
+        input.view,
+        metrics
+    )
+    return evaluation.visible &&
+        evaluation.matrixLevel < input.descriptor.policy.maximumMatrixLevel &&
+        evaluation.sse > input.descriptor.policy.refineErrorPixels
 }
 
 function compactCanonical(
