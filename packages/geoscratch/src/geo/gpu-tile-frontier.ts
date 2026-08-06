@@ -217,6 +217,18 @@ type ViewTokenRecord = {
 
 const viewTokenRecords = new WeakMap<GpuTileFrontierViewToken, ViewTokenRecord>()
 
+type FeedbackOwner = Disposable
+
+type FrontierFeedbackRecord = {
+    gpuState: VirtualRasterGpuState
+    feedbackResource: BufferResource
+    feedbackOutput: GpuTileFrontierFeedbackOutput
+    owners: Set<FeedbackOwner>
+    disposed: boolean
+}
+
+const frontierFeedbackRecords = new WeakMap<GpuTileFrontier, FrontierFeedbackRecord>()
+
 export class GpuTileFrontier {
 
     readonly runtime: GPURuntime
@@ -264,6 +276,13 @@ export class GpuTileFrontier {
         })
         this.#frontierSequenceAuthority = runtime.createSubmissionAuthority({
             label: `${this.id} frontier sequence`,
+        })
+        frontierFeedbackRecords.set(this, {
+            gpuState: descriptor.gpuState,
+            feedbackResource: state.resources.feedbackOutput,
+            feedbackOutput: state.parityTemplates[0].feedbackOutput,
+            owners: new Set(),
+            disposed: false,
         })
         Object.preventExtensions(this)
     }
@@ -642,6 +661,12 @@ export class GpuTileFrontier {
 
         if (this.#disposed) return
         this.#disposed = true
+        const feedback = frontierFeedbackRecords.get(this)
+        if (feedback !== undefined) {
+            feedback.disposed = true
+            for (const owner of [ ...feedback.owners ]) owner.dispose()
+            feedback.owners.clear()
+        }
         this.#viewAuthority.dispose()
         this.#frontierSequenceAuthority.dispose()
         disposeReverse(this.#owned)
@@ -661,6 +686,56 @@ export class GpuTileFrontier {
 }
 
 Object.freeze(GpuTileFrontier.prototype)
+
+export type GpuTileFrontierFeedbackAccess = Readonly<{
+    gpuState: VirtualRasterGpuState
+    resource: BufferResource
+    region: BufferRegion
+    output: GpuTileFrontierFeedbackOutput
+}>
+
+/** @internal Package-owned feedback capability; not exported by geo/index. */
+export function gpuTileFrontierFeedbackAccess(
+    frontier: GpuTileFrontier
+): GpuTileFrontierFeedbackAccess {
+
+    const record = frontierFeedbackRecords.get(frontier)
+    if (record === undefined || record.disposed) {
+        return invalidFrontier(frontier, 'GPU tile frontier feedback requires an active frontier.', {
+            frontier: 'active GpuTileFrontier',
+        }, { frontierId: frontier?.id, disposed: record?.disposed })
+    }
+    return Object.freeze({
+        gpuState: record.gpuState,
+        resource: record.feedbackResource,
+        region: record.feedbackResource.region(),
+        output: record.feedbackOutput,
+    })
+}
+
+/** @internal Registers a bounded frontier-owned feedback lifecycle. */
+export function registerGpuTileFrontierFeedbackOwner(
+    frontier: GpuTileFrontier,
+    owner: FeedbackOwner
+): void {
+
+    const record = frontierFeedbackRecords.get(frontier)
+    if (record === undefined || record.disposed) {
+        return invalidFrontier(frontier, 'GPU tile frontier feedback owner requires an active frontier.', {
+            frontier: 'active GpuTileFrontier',
+        }, { frontierId: frontier?.id, disposed: record?.disposed })
+    }
+    record.owners.add(owner)
+}
+
+/** @internal Releases a frontier-owned feedback lifecycle registration. */
+export function unregisterGpuTileFrontierFeedbackOwner(
+    frontier: GpuTileFrontier,
+    owner: FeedbackOwner
+): void {
+
+    frontierFeedbackRecords.get(frontier)?.owners.delete(owner)
+}
 
 export type GpuTileFrontierTestFrameAccess = Readonly<{
     pass: ComputePassSpec
