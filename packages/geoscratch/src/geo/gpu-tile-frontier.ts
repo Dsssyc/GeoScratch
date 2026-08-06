@@ -124,6 +124,21 @@ export type GpuTileFrontierDrawArgument = Readonly<{
     size: 16
 }>
 
+export type GpuTileFrontierRenderTemplate = Readonly<{
+    frontierId: string
+    parity: 0 | 1
+    source: 'A' | 'B'
+    target: 'A' | 'B'
+    templateId: string
+    visibleInstances: BufferResource
+    drawArgument: Readonly<{
+        resource: BufferResource
+        region: BufferRegion
+        offset: number
+        size: 16
+    }>
+}>
+
 export type GpuTileFrontierSeed = Readonly<{
     snapshot: VirtualRasterSnapshot
     snapshotEpoch: number
@@ -645,6 +660,37 @@ export class GpuTileFrontier {
             offset,
             size: DRAW_ARGUMENT_BYTES,
         })
+    }
+
+    renderTemplates(id: string): readonly [
+        GpuTileFrontierRenderTemplate,
+        GpuTileFrontierRenderTemplate,
+    ] {
+
+        this.#assertActive()
+        const templateIndex = this.descriptor.drawTemplates.findIndex(template => template.id === id)
+        if (templateIndex < 0) {
+            return invalidFrontier(this, 'GPU tile frontier render template id is not declared.', {
+                templateIds: this.descriptor.drawTemplates.map(template => template.id),
+            }, { templateId: id })
+        }
+        return Object.freeze(this.#parityTemplates.map(template => {
+            const region = template.drawRegions.get(id)!
+            return Object.freeze({
+                frontierId: this.id,
+                parity: template.parity,
+                source: template.source,
+                target: template.target,
+                templateId: id,
+                visibleInstances: template.visibleInstances,
+                drawArgument: Object.freeze({
+                    resource: template.drawArguments,
+                    region,
+                    offset: templateIndex * DRAW_ARGUMENT_BYTES,
+                    size: DRAW_ARGUMENT_BYTES as 16,
+                }),
+            })
+        }) as [GpuTileFrontierRenderTemplate, GpuTileFrontierRenderTemplate])
     }
 
     facts(): GpuTileFrontierCoreFacts {

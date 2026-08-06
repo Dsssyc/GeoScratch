@@ -1,4 +1,4 @@
-import { layoutCodec, type LayoutCodec } from '../scratch/index.js'
+import { layoutCodec, type LayoutArtifact, type LayoutCodec } from '../scratch/index.js'
 import { throwGeoDiagnostic } from './diagnostics.js'
 import type { WebMercatorQuadAddressCodec } from './web-mercator-quad.js'
 import type { VirtualRasterGpuState } from './virtual-raster-gpu.js'
@@ -85,6 +85,15 @@ export type GpuTileFrontierFacts = Readonly<{
     demandOverflow: boolean
     visibleOverflow: boolean
     convergenceState: GpuTileFrontierConvergenceState
+}>
+
+export type GpuTileFrontierRenderWgslOptions = Readonly<{
+    namespace?: string
+}>
+
+export type GpuTileFrontierRenderWgslModule = Readonly<{
+    code: string
+    layoutDependencies: readonly LayoutArtifact[]
 }>
 
 export function compareGpuTileFrontierPathOrder(
@@ -207,6 +216,20 @@ export const gpuTileFrontierVisibleInstanceCodec = layoutCodec({
         { name: 'contentEpoch', type: 'u32' },
     ],
 })
+
+export function gpuTileFrontierRenderWgslModule(
+    options: GpuTileFrontierRenderWgslOptions = {}
+): GpuTileFrontierRenderWgslModule {
+
+    return Object.freeze({
+        code: gpuTileFrontierVisibleInstanceCodec.wgslAccessors({
+            namespace: options.namespace ?? 'FrontierVisible',
+        }),
+        layoutDependencies: Object.freeze([
+            gpuTileFrontierVisibleInstanceCodec.artifact,
+        ]),
+    })
+}
 
 export const gpuTileFrontierDemandCodec = layoutCodec({
     name: 'GpuTileFrontierDemand',

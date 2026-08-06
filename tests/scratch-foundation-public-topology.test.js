@@ -110,6 +110,7 @@ const geoValues = [
     'discardOwnedVirtualRasterPagePayload',
     'discardVirtualRasterPageTransfer',
     'gpuTileFrontierPolicy',
+    'gpuTileFrontierRenderWgslModule',
     'isGeoDiagnosticError',
     'localVector',
     'ownedVirtualRasterPagePayload',

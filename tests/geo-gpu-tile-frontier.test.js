@@ -8,6 +8,7 @@ import {
     WebMercatorQuad,
     createVirtualRasterGpuState,
     gpuTileFrontierPolicy,
+    gpuTileFrontierRenderWgslModule,
     ownedVirtualRasterPagePayload,
     tileMatrixCoverage,
     virtualRasterPlane,
@@ -725,6 +726,8 @@ describe('Geo GPU tile frontier contracts and reference oracle', () => {
             pipelines: fixture.calls.computePipelines.length,
         }
 
+        const renderTemplates = frontier.renderTemplates('terrain')
+        const renderWgsl = gpuTileFrontierRenderWgslModule()
         const seed = frontier.stageSeed(fixture.publication.snapshot)
         const evenView = frontier.writeView({ ...fixture.view, frameEpoch: 1 })
         const even = frontier.frame(evenView)
@@ -769,6 +772,28 @@ describe('Geo GPU tile frontier contracts and reference oracle', () => {
             .to.deep.equal(evenInternal.commands.map(command => command.id))
         expect(evenAgainInternal.currentFrontier).to.equal(evenInternal.currentFrontier)
         expect(evenAgainInternal.nextFrontier).to.equal(evenInternal.nextFrontier)
+        expect(renderTemplates).to.have.length(2)
+        expect(renderTemplates[0]).to.deep.include({
+            frontierId: frontier.id,
+            parity: 0,
+            source: 'A',
+            target: 'B',
+            templateId: 'terrain',
+        })
+        expect(renderTemplates[1]).to.deep.include({
+            frontierId: frontier.id,
+            parity: 1,
+            source: 'B',
+            target: 'A',
+            templateId: 'terrain',
+        })
+        expect(renderTemplates[0].visibleInstances).to.equal(even.visibleInstances)
+        expect(renderTemplates[1].visibleInstances).to.equal(odd.visibleInstances)
+        expect(renderTemplates[0].drawArgument.region).to.equal(terrain.region)
+        expect(Object.isFrozen(renderTemplates)).to.equal(true)
+        expect(Object.isFrozen(renderTemplates[0])).to.equal(true)
+        expect(renderWgsl.code).to.include('struct GpuTileFrontierVisibleInstance')
+        expect(renderWgsl.layoutDependencies).to.have.length(1)
         for (const resource of [
             evenInternal.currentDispatchArguments,
             evenInternal.nextDispatchArguments,

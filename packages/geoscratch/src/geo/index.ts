@@ -11,7 +11,10 @@ export type {
     GeoDiagnosticSeverity,
     GeoDiagnosticSubject,
 } from './diagnostics.js'
-export { gpuTileFrontierPolicy } from './gpu-tile-frontier-layout.js'
+export {
+    gpuTileFrontierPolicy,
+    gpuTileFrontierRenderWgslModule,
+} from './gpu-tile-frontier-layout.js'
 export type {
     GpuTileFrontierConvergenceState,
     GpuTileFrontierDemand,
@@ -20,6 +23,8 @@ export type {
     GpuTileFrontierFacts,
     GpuTileFrontierLevelMetric,
     GpuTileFrontierPolicy,
+    GpuTileFrontierRenderWgslModule,
+    GpuTileFrontierRenderWgslOptions,
     GpuTileFrontierView,
 } from './gpu-tile-frontier-layout.js'
 export { GpuTileFrontier } from './gpu-tile-frontier.js'
@@ -30,6 +35,7 @@ export type {
     GpuTileFrontierFeedbackOutput,
     GpuTileFrontierFeedbackSection,
     GpuTileFrontierFrame,
+    GpuTileFrontierRenderTemplate,
     GpuTileFrontierSeed,
     GpuTileFrontierViewToken,
 } from './gpu-tile-frontier.js'

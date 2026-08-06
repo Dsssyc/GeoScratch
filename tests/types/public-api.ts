@@ -17,6 +17,7 @@ import {
     cellLocalF32Codec,
     coordinateDomain,
     gpuTileFrontierPolicy,
+    gpuTileFrontierRenderWgslModule,
     localVector,
     ownedVirtualRasterPagePayload,
     surfaceDomain,
@@ -41,6 +42,8 @@ import {
     type GpuTileFrontierFrame,
     type GpuTileFrontierLevelMetric,
     type GpuTileFrontierPolicy,
+    type GpuTileFrontierRenderTemplate,
+    type GpuTileFrontierRenderWgslModule,
     type GpuTileFrontierSeed,
     type GpuTileFrontierView,
     type GpuTileFrontierViewToken,
@@ -368,6 +371,17 @@ const typedFrontierDraw: GpuTileFrontierDrawArgument = typedGpuFrontier.drawArgu
     typedFrontierFrame,
     'terrain',
 )
+const typedFrontierRenderTemplates: readonly GpuTileFrontierRenderTemplate[] =
+    typedGpuFrontier.renderTemplates('terrain')
+const typedFrontierRenderWgsl: GpuTileFrontierRenderWgslModule =
+    gpuTileFrontierRenderWgslModule({ namespace: 'TypedFrontierVisible' })
+const typedFrontierVisibleBuffer: scr.BufferResource =
+    typedFrontierRenderTemplates[0]!.visibleInstances
+const typedFrontierIndirectRegion: scr.BufferRegion =
+    typedFrontierRenderTemplates[0]!.drawArgument.region
+void typedFrontierRenderWgsl
+void typedFrontierVisibleBuffer
+void typedFrontierIndirectRegion
 const typedFrontierFacts: GpuTileFrontierCoreFacts = typedGpuFrontier.facts()
 const typedFrontierFeedback: GpuTileFrontierFeedbackOutput = typedFrontierFrame.feedbackOutput
 const typedFrontierFeedbackBufferId: string = typedFrontierFeedback.bufferId
