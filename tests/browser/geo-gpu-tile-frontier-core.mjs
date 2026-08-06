@@ -2043,6 +2043,7 @@ fn capture(@builtin(global_invocation_id) id: vec3u) {
             visibleInstanceCount: diagnostics.visibleInstanceCount,
             refineCandidateCount: diagnostics.refineCandidateCount,
             coarsenCandidateCount: diagnostics.coarsenCandidateCount,
+            coarsenGracePendingCount: diagnostics.coarsenGracePendingCount,
             demandCount: diagnostics.demandCount,
             fallbackCount: diagnostics.fallbackCount,
             staleGenerationCount: diagnostics.staleGenerationCount,
@@ -2097,6 +2098,7 @@ fn capture(@builtin(global_invocation_id) id: vec3u) {
             frameEpoch: counters[17],
             residencySnapshotEpoch: counters[18],
             fallbackCount: counters[19],
+            coarsenGracePendingCount: counters[22],
         }, {
             currentCount: facts.activeFrontierCount,
             nextCount: facts.activeFrontierCount,
@@ -2115,6 +2117,7 @@ fn capture(@builtin(global_invocation_id) id: vec3u) {
             frameEpoch: facts.frameEpoch,
             residencySnapshotEpoch: facts.residencySnapshotEpoch,
             fallbackCount: facts.fallbackCount,
+            coarsenGracePendingCount: facts.coarsenGracePendingCount,
         }, 'GPU packed counters differ from oracle facts')
     }
 

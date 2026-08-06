@@ -417,6 +417,16 @@ function createExecution(
         },
         accept: () => settle('accept'),
         discard: () => settle('discard'),
+        classifyFailure: error => {
+            const code = remoteFailureCode(error)
+            return code === 'DEM_TILE_MISSING'
+                ? Object.freeze({
+                    disposition: 'terminal' as const,
+                    code,
+                    detail: error instanceof Error ? error.message : String(error),
+                })
+                : undefined
+        },
         inspect: () => Object.freeze({
             state: phaseRequest?.inspect().state === 'queued'
                 ? 'queued'
@@ -435,6 +445,17 @@ function createExecution(
             score: next.score ?? priority.score,
         })
     }
+}
+
+function remoteFailureCode(error: unknown): string | undefined {
+
+    if (typeof error !== 'object' || error === null) return undefined
+    const direct = (error as { code?: unknown }).code
+    if (typeof direct === 'string') return direct
+    const remote = (error as {
+        diagnostic?: { actual?: { remoteCode?: unknown } }
+    }).diagnostic?.actual?.remoteCode
+    return typeof remote === 'string' ? remote : undefined
 }
 
 function aggregateFacts(

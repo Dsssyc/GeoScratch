@@ -44,6 +44,7 @@ export type GpuTileFrontierReferenceInput = Readonly<{
     view: GpuTileFrontierView
     currentFrontier: readonly GpuTileFrontierReferenceEntry[]
     residentPages: readonly GpuTileFrontierReferenceResidentPage[]
+    failedPages?: readonly VirtualRasterPageIdentity[]
 }>
 
 export type GpuTileFrontierReferenceOutput = Readonly<{
@@ -66,6 +67,7 @@ type RefineCandidate = Readonly<{
     children: readonly VirtualRasterPageIdentity[]
     missingChildren: readonly VirtualRasterPageIdentity[]
     priority: number
+    sticky: boolean
 }>
 
 type RefinePressure = Readonly<{
@@ -94,6 +96,7 @@ export function evaluateGpuTileFrontierReference(
         metric,
     ]))
     const residents = residentMap(input)
+    const failedPageKeys = terminalFailurePageKeys(input)
     const active: GpuTileFrontierReferenceEntry[] = []
     let staleGenerationCount = 0
     for (const entry of current) {
@@ -124,10 +127,18 @@ export function evaluateGpuTileFrontierReference(
             pages: evaluatedActive.map(entry => entry.page.key),
         })
     }
-    const liveRefineCandidates = evaluations
-        .filter(evaluation => evaluation.visible &&
+    const liveRefineEvaluations = evaluations.filter(evaluation => evaluation.visible &&
             evaluation.matrixLevel < input.descriptor.policy.maximumMatrixLevel &&
             evaluation.sse > input.descriptor.policy.refineErrorPixels)
+    const terminalBlockedRefineCount = liveRefineEvaluations.filter(evaluation =>
+        childPages(input.descriptor, evaluation.entry.page).some(child =>
+            failedPageKeys.has(child.key)
+        )
+    ).length
+    const liveRefineCandidates = liveRefineEvaluations
+        .filter(evaluation => !childPages(input.descriptor, evaluation.entry.page).some(child =>
+            failedPageKeys.has(child.key)
+        ))
         .map(evaluation => createRefineCandidate(input, evaluation, residents))
     const refinePressure = createRefinePressure(
         input,
@@ -149,7 +160,7 @@ export function evaluateGpuTileFrontierReference(
     const refineOutputs = new Map<string, readonly GpuTileFrontierReferenceEntry[]>()
     const acceptedRefineKeys = new Set<string>()
     const demands: GpuTileFrontierDemand[] = []
-    let fallbackCount = refinePressure.blockedKeys.size
+    let fallbackCount = refinePressure.blockedKeys.size + terminalBlockedRefineCount
     let acceptedRefineCount = 0
     for (const candidate of selectedRefines.selected) {
         const parent = candidate.evaluation.entry
@@ -181,8 +192,7 @@ export function evaluateGpuTileFrontierReference(
         fallbackCount++
         let childDemandMask = 0
         for (const child of candidate.missingChildren) {
-            const tile = child.tile!
-            const childMask = 1 << ((tile.tileRow % 2) * 2 + tile.tileCol % 2)
+            const childMask = physicalChildMask(child)
             childDemandMask |= childMask
             demands.push(Object.freeze({
                 page: child,
@@ -216,12 +226,21 @@ export function evaluateGpuTileFrontierReference(
         residents,
         selectedRefineKeys
     )
+    const coarsenGracePendingCount = countPendingCoarsenGraceGroups(
+        input,
+        evaluations,
+        residents,
+        selectedRefineKeys
+    )
     const coarsenOutputs = new Map<string, readonly GpuTileFrontierReferenceEntry[]>()
     let acceptedCoarsenCount = 0
     for (const candidate of coarsenCandidates) {
         const parentResident = residents.get(candidate.parent.key)
-        if (parentResident === undefined ||
-            !coarsenKeepsBalance(candidate, evaluatedActive, acceptedRefineKeys)) continue
+        if (parentResident === undefined) continue
+        if (!coarsenKeepsBalance(candidate, evaluatedActive, acceptedRefineKeys)) {
+            fallbackCount++
+            continue
+        }
         const lastVisibleFrame = Math.max(...candidate.siblings.map(sibling =>
             sibling.lastVisibleFrame
         ))
@@ -267,6 +286,7 @@ export function evaluateGpuTileFrontierReference(
         visibleInstanceCount: visible.length,
         refineCandidateCount: refinePressure.candidateCount,
         coarsenCandidateCount: coarsenCandidates.length,
+        coarsenGracePendingCount,
         demandCount: demands.length,
         fallbackCount,
         staleGenerationCount,
@@ -281,8 +301,8 @@ export function evaluateGpuTileFrontierReference(
         visibleOverflow: false,
         convergenceState: budgetLimitedCount > 0
             ? 'budget-limited'
-            : demands.length > 0 || fallbackCount > 0 ||
-                acceptedRefineCount > 0 || acceptedCoarsenCount > 0
+            : demands.length > 0 || acceptedRefineCount > 0 ||
+                acceptedCoarsenCount > 0 || coarsenGracePendingCount > 0
                 ? 'transitioning'
                 : 'converged',
     })
@@ -293,6 +313,23 @@ export function evaluateGpuTileFrontierReference(
         demands: Object.freeze(demands),
         facts,
     })
+}
+
+function terminalFailurePageKeys(
+    input: GpuTileFrontierReferenceInput
+): ReadonlySet<string> {
+
+    const result = new Set<string>()
+    for (const page of input.failedPages ?? []) {
+        input.descriptor.gpuState.addressSpace.assertPage(page)
+        if (result.has(page.key)) {
+            invalidReference('Terminally failed frontier pages must be unique.', {
+                page: page.key,
+            })
+        }
+        result.add(page.key)
+    }
+    return result
 }
 
 function residentMap(
@@ -548,11 +585,17 @@ function createRefineCandidate(
         return resident === undefined ||
             resident.residencySnapshotEpoch !== input.view.residencySnapshotEpoch
     })
+    const missingChildMask = missingChildren.reduce(
+        (mask, child) => mask | physicalChildMask(child),
+        0
+    )
     return Object.freeze({
         evaluation,
         children,
         missingChildren,
         priority: priorityBucket(input, evaluation, missingChildren.length),
+        sticky: evaluation.entry.previousLodState === 'refine' &&
+            (evaluation.entry.childDemandMask & missingChildMask) !== 0,
     })
 }
 
@@ -566,34 +609,48 @@ function selectRefineBudget(
         { length: PRIORITY_BUCKET_COUNT },
         () => [] as RefineCandidate[]
     )
-    for (const candidate of [ ...candidates ].sort((left, right) =>
+    const canonical = [ ...candidates ].sort((left, right) =>
         compareGpuTileFrontierPathOrder(
             left.evaluation.entry.page,
             right.evaluation.entry.page
         )
-    )) {
+    )
+    for (const candidate of canonical) {
         buckets[candidate.priority]!.push(candidate)
     }
     const selected: RefineCandidate[] = []
     let demandCount = 0
     let transitionPages = 0
+    const accept = (candidate: RefineCandidate): boolean => {
+        const nextActiveCount = currentCount + (selected.length + 1) * 3
+        const nextDemandCount = demandCount + candidate.missingChildren.length
+        const nextTransitionPages = transitionPages + candidate.missingChildren.length
+        if (nextActiveCount > input.descriptor.policy.maximumActiveTiles ||
+            nextDemandCount > input.descriptor.policy.maximumDemands ||
+            nextTransitionPages > input.descriptor.policy.transitionReservePages) return false
+        selected.push(candidate)
+        demandCount = nextDemandCount
+        transitionPages = nextTransitionPages
+        return true
+    }
+    for (const candidate of canonical) {
+        if (candidate.sticky) accept(candidate)
+    }
     for (let bucket = PRIORITY_BUCKET_COUNT - 1; bucket >= 0; bucket--) {
         for (const candidate of buckets[bucket]!) {
-            const nextActiveCount = currentCount + (selected.length + 1) * 3
-            const nextDemandCount = demandCount + candidate.missingChildren.length
-            const nextTransitionPages = transitionPages + candidate.missingChildren.length
-            if (nextActiveCount > input.descriptor.policy.maximumActiveTiles ||
-                nextDemandCount > input.descriptor.policy.maximumDemands ||
-                nextTransitionPages > input.descriptor.policy.transitionReservePages) continue
-            selected.push(candidate)
-            demandCount = nextDemandCount
-            transitionPages = nextTransitionPages
+            if (!candidate.sticky) accept(candidate)
         }
     }
     return Object.freeze({
         selected: Object.freeze(selected),
         rejectedCount: candidates.length - selected.length,
     })
+}
+
+function physicalChildMask(page: VirtualRasterPageIdentity): number {
+
+    const tile = page.tile!
+    return 1 << ((tile.tileRow % 2) * 2 + tile.tileCol % 2)
 }
 
 function collectCoarsenCandidates(
@@ -637,6 +694,45 @@ function collectCoarsenCandidates(
             right.siblings[0]!.page
         )
     ))
+}
+
+function countPendingCoarsenGraceGroups(
+    input: GpuTileFrontierReferenceInput,
+    evaluations: readonly EntryEvaluation[],
+    residents: ReadonlyMap<string, GpuTileFrontierReferenceResidentPage>,
+    selectedRefineKeys: ReadonlySet<string>
+): number {
+
+    const evaluationsByKey = new Map(evaluations.map(evaluation => [
+        evaluation.entry.page.key,
+        evaluation,
+    ]))
+    const seenParents = new Set<string>()
+    let pendingCount = 0
+    for (const evaluation of evaluations) {
+        if (evaluation.matrixLevel <= input.descriptor.policy.minimumMatrixLevel ||
+            evaluation.visible ||
+            Math.max(0, input.view.frameEpoch - evaluation.entry.lastVisibleFrame) >
+                input.descriptor.policy.invisibleGraceFrames) continue
+        const parent = input.descriptor.gpuState.addressSpace.parent(evaluation.entry.page)
+        if (parent === undefined || seenParents.has(parent.key)) continue
+        seenParents.add(parent.key)
+        if (residents.get(parent.key)?.residencySnapshotEpoch !==
+            input.view.residencySnapshotEpoch) continue
+        const siblingEvaluations = childPages(input.descriptor, parent).map(page =>
+            evaluationsByKey.get(page.key)
+        )
+        if (siblingEvaluations.some(sibling => sibling === undefined)) continue
+        const groupCanCoarsenAfterGrace = siblingEvaluations.every(sibling => {
+            const candidate = sibling!
+            if (selectedRefineKeys.has(candidate.entry.page.key)) return false
+            return candidate.visible
+                ? candidate.sse < input.descriptor.policy.coarsenErrorPixels
+                : candidate.matrixLevel > input.descriptor.policy.minimumMatrixLevel
+        })
+        if (groupCanCoarsenAfterGrace) pendingCount++
+    }
+    return pendingCount
 }
 
 function compactCanonical(

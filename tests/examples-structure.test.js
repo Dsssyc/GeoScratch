@@ -203,9 +203,15 @@ describe('examples structure', () => {
         expect(mapRuntime).to.include('globalThis.maplibregl')
         expect(mapRuntime).to.include('darkMatterStyle')
         expect(mapRuntime).to.include('getCameraPosition()')
-        expect(mapRuntime).to.include('underwaterTerrainMinElevation')
-        expect(mapRuntime).to.include('getScratchMercatorMatrix(transform)')
+        expect(mapRuntime).to.include('minimumTerrainElevationMeters')
+        expect(mapRuntime).to.include('maxPitch: DEM_MAP_DEFAULTS.maxPitch')
+        expect(mapRuntime).to.include('getPitch()')
+        expect(mapRuntime).to.include('getBearing()')
+        expect(mapRuntime).to.match(
+            /getScratchMercatorMatrix\(\s*transform,\s*minimumTerrainElevationMeters\s*\)/
+        )
         expect(mapRuntime).to.include('calculateFarZForTerrainPlane')
+        expect(mapRuntime).to.not.include('underwaterTerrainMinElevation')
         expect(source).to.not.include('VITE_MAPBOX_ACCESS_TOKEN')
         expect(source).to.not.include('accessToken')
         expect(mapRuntime).to.not.include('_computeCameraPosition')

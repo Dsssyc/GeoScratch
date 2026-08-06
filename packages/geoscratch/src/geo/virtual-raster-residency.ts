@@ -33,7 +33,12 @@ export type VirtualRasterStageOptions = Readonly<{
     generation: number
 }>
 
-export type VirtualRasterPageAvailability = 'staged' | 'resident' | 'missing'
+export type VirtualRasterFailureOptions = Readonly<{
+    generation: number
+    detail?: string
+}>
+
+export type VirtualRasterPageAvailability = 'staged' | 'resident' | 'failed' | 'missing'
 
 export type VirtualRasterResidencyDescriptor = Readonly<{
     addressSpace: VirtualRasterAddressSpace
@@ -494,7 +499,47 @@ export class VirtualRasterResidency {
         this.addressSpace.assertPage(page)
         if (this.#staged.has(page.key)) return 'staged'
         if (this.#resident.has(page.key)) return 'resident'
+        if (this.#failed.has(page.key)) return 'failed'
         return 'missing'
+    }
+
+    fail(
+        page: VirtualRasterPageIdentity,
+        options: VirtualRasterFailureOptions
+    ): VirtualRasterStageOutcome {
+
+        this.addressSpace.assertPage(page)
+        if (!nonNegativeInteger(options.generation)) {
+            return throwGeoDiagnostic({
+                code: 'GEO_VIRTUAL_RASTER_GENERATION_INVALID',
+                phase: 'residency',
+                subject: { kind: 'virtual-raster-page', id: page.key },
+                message: 'A terminal page failure requires a non-negative demand generation.',
+                actual: options,
+            })
+        }
+        if (this.#disposed) return freezeOutcome('disposed', page, options.generation)
+        const requiredGeneration = this.#requiredGenerations.get(page.key)
+        if (requiredGeneration !== undefined && requiredGeneration !== options.generation) {
+            this.#staleResponseCount++
+            this.#record('stale', page, `generation:${options.generation}`)
+            return freezeOutcome('stale', page, options.generation)
+        }
+        if (this.#resident.has(page.key)) {
+            return freezeOutcome('resident', page, options.generation)
+        }
+        const staged = this.#staged.get(page.key)
+        if (staged !== undefined) {
+            this.#staged.delete(page.key)
+            releaseOwnedVirtualRasterPagePayload(staged.payload, this)
+        }
+        if (!this.#failed.has(page.key)) {
+            this.#failed.add(page.key)
+            this.#failedCount++
+            this.#snapshotDirty = true
+            this.#record('failed', page, options.detail)
+        }
+        return freezeOutcome('failed', page, options.generation, options.detail)
     }
 
     stage(
@@ -877,6 +922,13 @@ export class VirtualRasterResidency {
         const table = this.addressSpace.pages().map(page => {
             const exact = this.#resident.get(page.key)
             if (exact !== undefined) return freezeEntry(page, exact, 'resident')
+            if (this.#failed.has(page.key)) {
+                return Object.freeze({
+                    requestedPage: page,
+                    status: 'failed' as const,
+                    requestedLevel: page.level,
+                })
+            }
             let parent = this.addressSpace.parent(page)
             while (parent !== undefined) {
                 const ancestor = this.#resident.get(parent.key)
@@ -888,7 +940,7 @@ export class VirtualRasterResidency {
             }
             return Object.freeze({
                 requestedPage: page,
-                status: this.#failed.has(page.key) ? 'failed' : 'missing',
+                status: 'missing' as const,
                 requestedLevel: page.level,
             })
         })

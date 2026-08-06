@@ -25,6 +25,8 @@ const tilePort = await findAvailablePort()
 const baseUrl = `http://127.0.0.1:${vitePort}`
 const tileBaseUrl = `http://127.0.0.1:${tilePort}`
 const cacheNamespace = `geoscratch-dem-proof-${vitePort}-${Date.now()}`
+const operationalAtlasPages = 64
+const tightAtlasPages = 2
 const defaultCamera = Object.freeze({ center: [ 120.980697, 31.684162 ], zoom: 10 })
 const pageBoundaryCamera = Object.freeze({
     center: [ 120.9375, 31.684162 ],
@@ -73,7 +75,7 @@ try {
     fatalError = serializeError(error)
 } finally {
     await cleanup('Chrome', async() => {
-        if (browser !== undefined) await withTimeout(browser.close(), 5_000, 'Chrome shutdown')
+        if (browser !== undefined) await withTimeout(browser.close(), 15_000, 'Chrome shutdown')
     })
     await cleanup('Vite', async() => {
         if (vite !== undefined) await stopProcess(vite, 'Vite')
@@ -98,7 +100,10 @@ const result = {
     browserVersion,
     baseUrl,
     tileBaseUrl,
-    atlasPages: 2,
+    atlasPages: {
+        operational: operationalAtlasPages,
+        tight: tightAtlasPages,
+    },
     outputDirectory,
     viteMode,
     sourceHash: parseBuildHash(build?.stdout),
@@ -117,6 +122,163 @@ if (failures.length > 0) process.exitCode = 1
 
 async function runProof(activeBrowser) {
 
+    const budget = await runBudgetLimitedProof(activeBrowser)
+    const terminalFailure = await runTerminalFailureProof(activeBrowser)
+    const cancellation = await runCancellationProof(activeBrowser)
+    const streaming = await runStreamingProof(activeBrowser)
+    return { ...streaming, budget, terminalFailure, cancellation }
+}
+
+async function runBudgetLimitedProof(activeBrowser) {
+
+    const context = await activeBrowser.newContext({
+        viewport: { width: 960, height: 720 },
+        deviceScaleFactor: 1,
+    })
+    const page = await context.newPage()
+    const events = observePage(page)
+    try {
+        const url = `${baseUrl}/demLayer/index.html?proof=1&atlasPages=${tightAtlasPages}` +
+            `&cache=none&tileServer=${encodeURIComponent(tileBaseUrl)}`
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout })
+        const first = await waitForStableFacts(page, facts => cameraMatches(facts, zoomedOutCamera))
+        const firstCapture = await capture(page, 'tight-budget-first')
+        const repeated = await moveAndWait(page, first, zoomedOutCamera)
+        const repeatedCapture = await capture(page, 'tight-budget-repeat')
+        const cleanupPair = await disposeTwice(page)
+        return {
+            first,
+            repeated,
+            captures: { first: firstCapture, repeated: repeatedCapture },
+            cleanupPair,
+            terminalStatus: await page.locator('#GPUFrame').getAttribute('data-status'),
+            events,
+        }
+    } finally {
+        await context.close()
+    }
+}
+
+async function runTerminalFailureProof(activeBrowser) {
+
+    const context = await activeBrowser.newContext({
+        viewport: { width: 960, height: 720 },
+        deviceScaleFactor: 1,
+    })
+    let failedTileUrl
+    await context.route(`${tileBaseUrl}/tiles/**`, async route => {
+        const url = new URL(route.request().url())
+        const match = /^\/tiles\/WebMercatorQuad\/(\d+)\/\d+\/\d+\.png$/.exec(url.pathname)
+        if (failedTileUrl === undefined && Number(match?.[1]) > 9) {
+            failedTileUrl = url.href
+            await route.fulfill({
+                status: 404,
+                contentType: 'application/json',
+                body: JSON.stringify({ code: 'DEM_TILE_MISSING' }),
+            })
+            return
+        }
+        await route.continue()
+    })
+    const page = await context.newPage()
+    const events = observePage(page)
+    try {
+        const url = `${baseUrl}/demLayer/index.html?proof=1&atlasPages=${operationalAtlasPages}` +
+            `&cache=none&tileServer=${encodeURIComponent(tileBaseUrl)}`
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout })
+        const facts = await waitForStableFacts(page, current => {
+            const virtualRaster = parseJson(current.virtualRaster)
+            return failedTileUrl !== undefined &&
+                virtualRaster?.residency?.failedCount > 0 &&
+                virtualRaster?.scheduler?.failedRequestCount > 0
+        })
+        const captureFacts = await capture(page, 'terminal-child-404')
+        const cleanupPair = await disposeTwice(page)
+        return {
+            facts,
+            capture: captureFacts,
+            failedTileUrl,
+            cleanupPair,
+            terminalStatus: await page.locator('#GPUFrame').getAttribute('data-status'),
+            events,
+        }
+    } finally {
+        await context.close()
+    }
+}
+
+async function disposeTwice(page) {
+
+    return await page.evaluate(async() => {
+        const first = window.__DEM_LAYER_PROOF__.dispose()
+        const second = window.__DEM_LAYER_PROOF__.dispose()
+        const reports = await Promise.all([ first, second ])
+        return {
+            reports,
+            equivalent: JSON.stringify(reports[0]) === JSON.stringify(reports[1]),
+        }
+    })
+}
+
+async function runCancellationProof(activeBrowser) {
+
+    const context = await activeBrowser.newContext({
+        viewport: { width: 960, height: 720 },
+        deviceScaleFactor: 1,
+    })
+    let tileDelayMs = 600
+    let delayedDetailedRequestCount = 0
+    await context.route(`${tileBaseUrl}/tiles/**`, async route => {
+        const path = new URL(route.request().url()).pathname
+        const matrixLevel = Number(
+            /^\/tiles\/WebMercatorQuad\/(\d+)\/\d+\/\d+\.png$/.exec(path)?.[1]
+        )
+        const capturedDelay = matrixLevel >= 10 ? tileDelayMs : 0
+        if (capturedDelay > 0) {
+            delayedDetailedRequestCount++
+            await delay(capturedDelay)
+            delayedDetailedRequestCount--
+        }
+        try {
+            await route.continue()
+        } catch {
+            // An obsolete Worker fetch can be aborted while the proof delays it.
+        }
+    })
+    const page = await context.newPage()
+    const events = observePage(page)
+    try {
+        const url = `${baseUrl}/demLayer/index.html?proof=1&atlasPages=${operationalAtlasPages}` +
+            `&cache=none&tileServer=${encodeURIComponent(tileBaseUrl)}`
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout })
+        const before = await waitForDemandActivity(
+            page,
+            () => delayedDetailedRequestCount > 0
+        )
+        await page.evaluate(async(cameras) => {
+            for (const camera of cameras) {
+                window.__DEM_LAYER_PROOF__.moveCamera(camera)
+                await new Promise(resolvePromise => setTimeout(resolvePromise, 80))
+            }
+        }, [ westCamera, northCamera, southCamera, eastCamera ])
+        tileDelayMs = 0
+        const facts = await waitForStableFacts(page, current => cameraMatches(current, eastCamera))
+        const cleanupPair = await disposeTwice(page)
+        return {
+            before,
+            facts,
+            cleanupPair,
+            terminalStatus: await page.locator('#GPUFrame').getAttribute('data-status'),
+            terminalError: await page.locator('#GPUFrame').getAttribute('data-error'),
+            events,
+        }
+    } finally {
+        await context.close()
+    }
+}
+
+async function runStreamingProof(activeBrowser) {
+
     const context = await activeBrowser.newContext({
         viewport: { width: 960, height: 720 },
         deviceScaleFactor: 1,
@@ -134,7 +296,7 @@ async function runProof(activeBrowser) {
     const page = await context.newPage()
     const events = observePage(page)
     try {
-        const url = `${baseUrl}/demLayer/index.html?proof=1&atlasPages=2` +
+        const url = `${baseUrl}/demLayer/index.html?proof=1&atlasPages=${operationalAtlasPages}` +
             `&cache=persistent&cacheNamespace=${encodeURIComponent(cacheNamespace)}` +
             `&tileServer=${encodeURIComponent(tileBaseUrl)}`
         await page.goto(url, { waitUntil: 'domcontentloaded', timeout })
@@ -156,7 +318,7 @@ async function runProof(activeBrowser) {
         }, [ eastCamera, churnWestCamera, northCamera, churnSouthCamera, eastCamera ])
         tileDelayMs = 0
         const churn = await waitForStableFacts(page, facts => (
-            selectionMatchesCamera(facts, eastCamera)
+            cameraMatches(facts, eastCamera)
         ))
         const churnCapture = await capture(page, 'rapid-churn-east')
 
@@ -257,16 +419,35 @@ async function moveAndWait(page, before, camera) {
     const previousFrames = Number(before.observedFrames)
     await page.evaluate(value => window.__DEM_LAYER_PROOF__.moveCamera(value), camera)
     return await waitForStableFacts(page, facts => (
-        Number(facts.observedFrames) > previousFrames && selectionMatchesCamera(facts, camera)
+        Number(facts.observedFrames) > previousFrames && cameraMatches(facts, camera)
     ))
 }
 
-function selectionMatchesCamera(facts, camera) {
+function cameraMatches(facts, camera) {
 
-    const selection = parseJson(facts.selection)
-    return Math.abs(selection?.zoomLevel - camera.zoom) < 1e-6 &&
-        Math.abs(selection?.cameraPos?.[0] - camera.center[0]) < 1e-9 &&
-        Math.abs(selection?.cameraPos?.[1] - camera.center[1]) < 1e-9
+    const view = parseJson(facts.cameraView)
+    return Math.abs(view?.zoom - camera.zoom) < 1e-6 &&
+        Math.abs(view?.center?.[0] - camera.center[0]) < 1e-9 &&
+        Math.abs(view?.center?.[1] - camera.center[1]) < 1e-9
+}
+
+function frontierSignature(facts) {
+
+    const frontier = parseJson(facts.frontier)
+    return JSON.stringify({
+        activeFrontierCount: frontier?.activeFrontierCount,
+        visibleInstanceCount: frontier?.visibleInstanceCount,
+        refineCandidateCount: frontier?.refineCandidateCount,
+        coarsenCandidateCount: frontier?.coarsenCandidateCount,
+        coarsenGracePendingCount: frontier?.coarsenGracePendingCount,
+        demandCount: frontier?.demandCount,
+        fallbackCount: frontier?.fallbackCount,
+        budgetLimitedCount: frontier?.budgetLimitedCount,
+        maximumObservedSse: frontier?.maximumObservedSse,
+        minimumSelectedMatrixLevel: frontier?.minimumSelectedMatrixLevel,
+        maximumSelectedMatrixLevel: frontier?.maximumSelectedMatrixLevel,
+        convergenceState: frontier?.convergenceState,
+    })
 }
 
 async function waitForStableFacts(page, additional = () => true) {
@@ -278,7 +459,11 @@ async function waitForStableFacts(page, additional = () => true) {
         lastFacts = facts
         if (facts.status === 'error') throw new Error(facts.error ?? 'DEM page failed')
         const virtualRaster = parseJson(facts.virtualRaster)
+        const frontier = parseJson(facts.frontier)
+        const terminalFrontier = frontier?.convergenceState === 'converged' ||
+            frontier?.convergenceState === 'budget-limited'
         if (facts.status === 'ready' && Number(facts.frames) === Number(facts.observedFrames) &&
+            terminalFrontier && frontier?.demandCount === 0 &&
             virtualRaster?.residency?.stagedCount === 0 &&
             virtualRaster?.residency?.stagingBytes === 0 &&
             virtualRaster?.scheduler?.activeRequestCount === 0 &&
@@ -301,10 +486,35 @@ async function waitForStableFacts(page, additional = () => true) {
         frames: lastFacts?.frames,
         observedFrames: lastFacts?.observedFrames,
         virtualRequestedPageCount: lastFacts?.virtualRequestedPageCount,
+        frontier: parseJson(lastFacts?.frontier),
         residency: virtualRaster?.residency,
         scheduler: virtualRaster?.scheduler,
         worker: virtualRaster?.worker,
         gpu: virtualRaster?.gpu,
+    })}`)
+}
+
+async function waitForDemandActivity(page, additional = () => true) {
+
+    const deadline = Date.now() + timeout
+    let lastFacts
+    while (Date.now() < deadline) {
+        const facts = await readFacts(page)
+        lastFacts = facts
+        if (facts.status === 'error') throw new Error(facts.error ?? 'DEM page failed')
+        const virtualRaster = parseJson(facts.virtualRaster)
+        if (facts.status === 'ready' &&
+            virtualRaster?.scheduler?.activeRequestCount > 0 &&
+            virtualRaster?.worker?.system?.activeTaskCount > 0 && additional()) {
+            return facts
+        }
+        await delay(16)
+    }
+    const virtualRaster = parseJson(lastFacts?.virtualRaster)
+    throw new Error(`Timed out waiting for active DEM demand: ${JSON.stringify({
+        status: lastFacts?.status,
+        scheduler: virtualRaster?.scheduler,
+        worker: virtualRaster?.worker,
     })}`)
 }
 
@@ -410,6 +620,18 @@ function validateProof(value, processState) {
         const worker = virtualRaster?.worker
         const phaseBudget = worker?.phaseBudget
         const gpu = virtualRaster?.gpu
+        const frontier = parseJson(facts.frontier)
+        if (facts.selectionPath !== 'gpu-resident-active-frontier' ||
+            facts.countPath !== 'gpu-produced-indirect-arguments' ||
+            facts.cpuSelectionUploadCount !== '0' ||
+            frontier?.demandCount !== 0 ||
+            (frontier?.convergenceState !== 'converged' &&
+                frontier?.convergenceState !== 'budget-limited') ||
+            frontier?.activeFrontierCount < 1 || frontier?.visibleInstanceCount < 1 ||
+            frontier?.staleGenerationCount !== 0 || frontier?.frontierOverflow !== false ||
+            frontier?.demandOverflow !== false || frontier?.visibleOverflow !== false) {
+            failures.push(`${name} frame violated the GPU frontier terminal contract`)
+        }
         if (virtualRaster?.coordinateEncoding !== 'wide-fixed' ||
             virtualRaster?.coordinateBits !== 40 ||
             virtualRaster?.tileMatrixSetId !== 'WebMercatorQuad' ||
@@ -418,8 +640,8 @@ function validateProof(value, processState) {
             virtualRaster?.cachePolicy !== 'persistent' ||
             virtualRaster?.demandStopped !== false || virtualRaster?.stopped !== false ||
             residency?.pinnedCount !== 1 ||
-            residency?.residentCount < 1 || residency?.residentCount > 2 ||
-            residency?.maxPhysicalPages !== 2 || residency?.stagedCount !== 0 ||
+            residency?.residentCount < 1 || residency?.residentCount > operationalAtlasPages ||
+            residency?.maxPhysicalPages !== operationalAtlasPages || residency?.stagedCount !== 0 ||
             residency?.stagingBytes !== 0 ||
             residency?.failedCount !== 0 || residency?.staleResponseCount !== 0 ||
             residency?.history?.length > 64) {
@@ -449,12 +671,105 @@ function validateProof(value, processState) {
             worker?.group?.workerCount < 1 ||
             worker?.group?.workerCount > worker?.system?.maxWorkers ||
             worker?.group?.maxActiveTasks > worker?.system?.maxWorkers ||
-            gpu?.maxPhysicalPages !== 2 || gpu?.pageTableEntryCount !== 49 ||
+            gpu?.maxPhysicalPages !== operationalAtlasPages || gpu?.pageTableEntryCount !== 49 ||
             gpu?.stagedSnapshotEpoch !== undefined) {
             failures.push(`${name} frame violated bounded Worker/cache/GPU state`)
         }
     }
     if (identityHashes.size !== 1) failures.push('persistent DEM graph identity changed')
+
+    const budgetFirst = value.budget?.first
+    const budgetRepeated = value.budget?.repeated
+    const budgetFrontier = parseJson(budgetFirst?.frontier)
+    const budgetVirtual = parseJson(budgetFirst?.virtualRaster)
+    if (budgetFirst?.status !== 'ready' || !cameraMatches(budgetFirst, zoomedOutCamera) ||
+        budgetFrontier?.convergenceState !== 'budget-limited' ||
+        budgetFrontier?.budgetLimitedCount < 1 || budgetFrontier?.demandCount !== 0 ||
+        budgetFrontier?.activeFrontierCount !== 1 ||
+        budgetFrontier?.visibleInstanceCount < 1 ||
+        budgetFrontier?.staleGenerationCount !== 0 ||
+        budgetVirtual?.residency?.maxPhysicalPages !== tightAtlasPages ||
+        budgetVirtual?.residency?.residentCount !== 1 ||
+        frontierSignature(budgetFirst) !== frontierSignature(budgetRepeated) ||
+        value.budget?.captures?.first?.hash !== value.budget?.captures?.repeated?.hash) {
+        failures.push('two-page atlas did not terminate on a stable visible parent cover')
+    }
+    if (!value.budget?.cleanupPair?.equivalent || value.budget?.terminalStatus !== 'disposed' ||
+        unexpectedEvents(value.budget?.events).length !== 0) {
+        failures.push('tight-budget proof did not dispose without browser failures')
+    }
+
+    const terminalFacts = value.terminalFailure?.facts
+    const terminalFrontier = parseJson(terminalFacts?.frontier)
+    const failedVirtual = parseJson(terminalFacts?.virtualRaster)
+    const terminalHistory = failedVirtual?.scheduler?.history ?? []
+    const failedRequestOccurrences = value.terminalFailure?.events?.tileRequests?.filter(url => (
+        url === value.terminalFailure.failedTileUrl
+    )).length
+    if (terminalFacts?.status !== 'ready' ||
+        typeof value.terminalFailure?.failedTileUrl !== 'string' ||
+        failedVirtual?.residency?.failedCount < 1 ||
+        failedVirtual?.scheduler?.failedRequestCount !== 1 ||
+        terminalFrontier?.convergenceState !== 'converged' ||
+        terminalFrontier?.demandCount !== 0 || terminalFrontier?.fallbackCount < 1 ||
+        terminalFrontier?.visibleInstanceCount < 1 ||
+        terminalFrontier?.staleGenerationCount !== 0 || failedRequestOccurrences !== 1) {
+        failures.push(`terminal child 404 did not publish one failed page and retain parent cover: ${JSON.stringify({
+            failedTileUrl: value.terminalFailure?.failedTileUrl,
+            failedRequestOccurrences,
+            residencyFailedCount: failedVirtual?.residency?.failedCount,
+            schedulerFailedRequestCount: failedVirtual?.scheduler?.failedRequestCount,
+            failedHistory: terminalHistory.filter(entry => entry.kind === 'failed'),
+            frontier: terminalFrontier,
+        })}`)
+    }
+    const terminalUnexpectedEvents = unexpectedEvents(value.terminalFailure?.events, {
+        allowedHttpUrl: value.terminalFailure?.failedTileUrl,
+    })
+    if (!value.terminalFailure?.cleanupPair?.equivalent ||
+        value.terminalFailure?.terminalStatus !== 'disposed' ||
+        terminalUnexpectedEvents.length !== 0) {
+        failures.push('terminal-failure proof retained lifecycle or browser failures')
+    }
+
+    const cancellationBefore = parseJson(value.cancellation?.before?.virtualRaster)
+    const cancellationFacts = value.cancellation?.facts
+    const cancellationAfter = parseJson(cancellationFacts?.virtualRaster)
+    const cancellationObserved =
+        cancellationAfter?.scheduler?.cancellationCount >
+            cancellationBefore?.scheduler?.cancellationCount ||
+        cancellationAfter?.scheduler?.staleResultCount >
+            cancellationBefore?.scheduler?.staleResultCount ||
+        cancellationAfter?.worker?.group?.cancelledTaskCount >
+            cancellationBefore?.worker?.group?.cancelledTaskCount
+    if (cancellationFacts?.status !== 'ready' || !cameraMatches(cancellationFacts, eastCamera) ||
+        !cancellationObserved || cancellationAfter?.residency?.staleResponseCount !== 0 ||
+        cancellationAfter?.scheduler?.activeRequestCount !== 0 ||
+        cancellationAfter?.scheduler?.queuedRequestCount !== 0) {
+        failures.push(`camera replacement did not cancel or reject obsolete Worker demand: ${JSON.stringify({
+            before: {
+                cancellationCount: cancellationBefore?.scheduler?.cancellationCount,
+                staleResultCount: cancellationBefore?.scheduler?.staleResultCount,
+                cancelledTaskCount: cancellationBefore?.worker?.group?.cancelledTaskCount,
+            },
+            after: {
+                cancellationCount: cancellationAfter?.scheduler?.cancellationCount,
+                staleResultCount: cancellationAfter?.scheduler?.staleResultCount,
+                cancelledTaskCount: cancellationAfter?.worker?.group?.cancelledTaskCount,
+                staleResponseCount: cancellationAfter?.residency?.staleResponseCount,
+            },
+        })}`)
+    }
+    if (!value.cancellation?.cleanupPair?.equivalent ||
+        value.cancellation?.terminalStatus !== 'disposed' ||
+        unexpectedEvents(value.cancellation?.events).length !== 0) {
+        failures.push(`camera-replacement proof retained lifecycle or browser failures: ${JSON.stringify({
+            cleanupEquivalent: value.cancellation?.cleanupPair?.equivalent,
+            terminalStatus: value.cancellation?.terminalStatus,
+            terminalError: value.cancellation?.terminalError,
+            unexpectedEvents: unexpectedEvents(value.cancellation?.events),
+        })}`)
+    }
 
     const detailedVirtual = parseJson(value.facts.detailed.virtualRaster)
     const boundaryVirtual = parseJson(value.facts.boundary.virtualRaster)
@@ -465,49 +780,32 @@ function validateProof(value, processState) {
         boundaryVirtual?.residency?.fallbackCount < detailedVirtual.residency.fallbackCount) {
         failures.push('parent fallback was not observable under the two-page atlas')
     }
-    if (churnVirtual?.residency?.evictionCount <= boundaryVirtual?.residency?.evictionCount) {
-        failures.push('cross-page pan did not force deterministic atlas eviction')
-    }
-    if (churnVirtual?.scheduler?.cancellationCount <=
-            boundaryVirtual?.scheduler?.cancellationCount &&
-        churnVirtual?.scheduler?.staleResultCount <=
-            boundaryVirtual?.scheduler?.staleResultCount &&
-        churnVirtual?.worker?.group?.cancelledTaskCount <=
-            boundaryVirtual?.worker?.group?.cancelledTaskCount) {
-        failures.push('rapid camera churn did not cancel or reject obsolete Worker demand')
-    }
     if (churnVirtual?.residency?.staleResponseCount !== 0 ||
-        !selectionMatchesCamera(value.facts.churn, eastCamera)) {
-        failures.push('obsolete camera demand overwrote the final churn selection')
+        !cameraMatches(value.facts.churn, eastCamera)) {
+        failures.push('obsolete camera demand overwrote the final GPU camera view')
     }
     for (const [ name, camera ] of [
         [ 'west', westCamera ],
         [ 'north', northCamera ],
         [ 'south', southCamera ],
     ]) {
-        if (!selectionMatchesCamera(value.facts[name], camera)) {
-            failures.push(`${name} camera did not produce its canonical selection`)
+        if (!cameraMatches(value.facts[name], camera)) {
+            failures.push(`${name} camera did not produce its GPU frontier view`)
         }
     }
-    const boundarySelection = parseJson(value.facts.boundary.selection)
-    const returnedSelection = parseJson(value.facts.returned.selection)
-    if (JSON.stringify(boundarySelection) !== JSON.stringify(returnedSelection)) {
-        failures.push('camera roundtrip did not restore canonical terrain selection')
-    }
-    if (value.facts.boundary.virtualPlan !== value.facts.returned.virtualPlan) {
-        failures.push('camera roundtrip changed the logical virtual-raster plan')
+    if (frontierSignature(value.facts.boundary) !== frontierSignature(value.facts.returned) ||
+        frontierSignature(value.facts.returned) !== frontierSignature(value.facts.repeated)) {
+        failures.push('camera roundtrip did not restore the canonical GPU frontier')
     }
     if (value.captures.boundary.hash !== value.captures.returned.hash ||
         value.captures.returned.hash !== value.captures.repeated.hash) {
         failures.push('camera roundtrip or repeated static frame changed terrain pixels')
     }
-    if (returnedVirtual?.worker?.cache?.hitCount <=
-            zoomedOutVirtual?.worker?.cache?.hitCount ||
-        returnedVirtual?.worker?.networkRequestCount !==
+    if (returnedVirtual?.worker?.networkRequestCount !==
             zoomedOutVirtual?.worker?.networkRequestCount ||
         returnedVirtual?.worker?.decodedPageCount !==
             zoomedOutVirtual?.worker?.decodedPageCount) {
-        failures.push('camera return did not reuse accepted persistent raw payloads without decode')
+        failures.push('camera return reloaded already resident or persistent raw payloads')
     }
     for (const [ name, captureFacts ] of Object.entries(value.captures)) {
         if (captureFacts.pixels.nonBackground < 5_000 ||
@@ -630,15 +928,26 @@ function summarizeProof(value) {
     const terminal = value.cleanupPair.reports?.[0]?.virtualRaster
     const summarizeFacts = facts => {
         const virtualRaster = parseJson(facts.virtualRaster)
-        const selection = parseJson(facts.selection)
+        const frontier = parseJson(facts.frontier)
+        const camera = parseJson(facts.cameraView)
         return {
             status: facts.status,
             frames: Number(facts.frames),
             visibleNodeCount: Number(facts.visibleNodeCount),
-            cameraPos: selection?.cameraPos,
-            tileBox: selection?.tileBox,
-            geometryLodRange: selection?.levelRange,
-            requestedLodRange: parseJson(facts.virtualPlan)?.requestedLodRange,
+            camera,
+            frontier: frontier === undefined ? undefined : {
+                activeFrontierCount: frontier.activeFrontierCount,
+                visibleInstanceCount: frontier.visibleInstanceCount,
+                demandCount: frontier.demandCount,
+                fallbackCount: frontier.fallbackCount,
+                budgetLimitedCount: frontier.budgetLimitedCount,
+                coarsenGracePendingCount: frontier.coarsenGracePendingCount,
+                levelRange: [
+                    frontier.minimumSelectedMatrixLevel,
+                    frontier.maximumSelectedMatrixLevel,
+                ],
+                convergenceState: frontier.convergenceState,
+            },
             snapshotEpoch: virtualRaster?.residency?.snapshotEpoch,
             residentCount: virtualRaster?.residency?.residentCount,
             fallbackCount: virtualRaster?.residency?.fallbackCount,
@@ -668,6 +977,28 @@ function summarizeProof(value) {
         tileStats: value.tileStats,
         tileStatsBeforeReload: value.tileStatsBeforeReload,
         reload: summarizeFacts(value.reload),
+        budget: value.budget === undefined ? undefined : {
+            first: summarizeFacts(value.budget.first),
+            repeated: summarizeFacts(value.budget.repeated),
+            captures: value.budget.captures,
+            cleanupEquivalent: value.budget.cleanupPair?.equivalent,
+            terminalStatus: value.budget.terminalStatus,
+        },
+        terminalFailure: value.terminalFailure === undefined ? undefined : {
+            facts: summarizeFacts(value.terminalFailure.facts),
+            failedTileUrl: value.terminalFailure.failedTileUrl,
+            capture: value.terminalFailure.capture,
+            cleanupEquivalent: value.terminalFailure.cleanupPair?.equivalent,
+            terminalStatus: value.terminalFailure.terminalStatus,
+        },
+        cancellation: value.cancellation === undefined ? undefined : {
+            before: summarizeFacts(value.cancellation.before),
+            facts: summarizeFacts(value.cancellation.facts),
+            cleanupEquivalent: value.cancellation.cleanupPair?.equivalent,
+            terminalStatus: value.cancellation.terminalStatus,
+            terminalError: value.cancellation.terminalError,
+            cancelledTileRequestCount: value.cancellation.events?.cancelledTileRequests?.length,
+        },
         cleanupEquivalent: value.cleanupPair.equivalent,
         reloadCleanupEquivalent: value.reloadCleanupPair.equivalent,
         cleanupTerminalVirtualRaster: terminal === undefined ? undefined : {
@@ -711,6 +1042,21 @@ function summarizeProof(value) {
             events.length,
         ])),
     }
+}
+
+function unexpectedEvents(events, options = {}) {
+
+    if (events === undefined) return [ 'missing browser events' ]
+    const httpFailures = events.httpFailures.filter(event => (
+        options.allowedHttpUrl === undefined || !event.endsWith(options.allowedHttpUrl)
+    ))
+    return [
+        ...events.consoleFailures,
+        ...events.consoleWarnings,
+        ...events.pageErrors,
+        ...events.requestFailures,
+        ...httpFailures,
+    ]
 }
 
 function observePage(page) {

@@ -57,7 +57,7 @@ const U32_MAX = 0xffff_ffff
 const DISPATCH_ARGUMENT_BYTES = 12
 const DRAW_ARGUMENT_BYTES = 16
 const LOOKUP_WORDS = 4
-const DECISION_WORDS = 17
+const DECISION_WORDS = 18
 const PREFIX_WORDS = 8
 const COUNTER_WORDS = 32
 const SLOT_TABLE_WORDS = 12
@@ -966,13 +966,16 @@ function validateCreation(
             },
         })
     }
-    if (runtime.isDisposed || descriptor.gpuState.slotTable.isDisposed) {
+    if (runtime.isDisposed || descriptor.gpuState.slotTable.isDisposed ||
+        descriptor.gpuState.pageTable.isDisposed) {
         return capacityInvalid('GPU tile frontier requires active caller-owned GPU objects.', {
             runtimeDisposed: false,
             slotTableDisposed: false,
+            pageTableDisposed: false,
         }, {
             runtimeDisposed: runtime.isDisposed,
             slotTableDisposed: descriptor.gpuState.slotTable.isDisposed,
+            pageTableDisposed: descriptor.gpuState.pageTable.isDisposed,
         })
     }
     validateCoverageBounds(descriptor)
@@ -997,6 +1000,11 @@ function validateCreation(
         return capacityInvalid('GPU tile frontier borrowed slot table exceeds the device storage binding limit.', {
             maxStorageBufferBindingSize: maximumStorageBytes,
         }, { slotTableBytes: descriptor.gpuState.slotTable.size })
+    }
+    if (descriptor.gpuState.pageTable.size > maximumStorageBytes) {
+        return capacityInvalid('GPU tile frontier borrowed page table exceeds the device storage binding limit.', {
+            maxStorageBufferBindingSize: maximumStorageBytes,
+        }, { pageTableBytes: descriptor.gpuState.pageTable.size })
     }
     const lookupCapacity = nextPowerOfTwo(checkedProduct(active, 2))
     const scanBlockCount = ceilDivide(active, GPU_TILE_FRONTIER_SCAN_BLOCK_SIZE)
@@ -1220,6 +1228,7 @@ async function createResources(
 
 type ResourceRole = keyof GpuTileFrontierResourceGraph |
     'slotTable' |
+    'pageTable' |
     'demands' |
     'retirements' |
     'counters' |
@@ -1381,6 +1390,7 @@ function kernelDefinitions(
     const current = binding('currentFrontier', 'read-storage', 'frontierA')
     const next = binding('nextFrontier', 'storage', 'frontierB')
     const slots = binding('slotTable', 'read-storage', 'slotTable')
+    const pages = binding('pageTable', 'read-storage', 'pageTable')
     const lookupWrite = binding('lookupWrite', 'storage', 'frontierLookup')
     const lookupRead = binding('lookupRead', 'read-storage', 'frontierLookup')
     const currentDispatch = binding('currentDispatchArguments', 'storage', 'dispatchArgumentsA')
@@ -1405,7 +1415,7 @@ function kernelDefinitions(
         { entryPoint: 'resetFrontier', label: 'Reset GPU tile frontier', bindings: [ map, currentDispatch, visibility, decisionWrite, prefixWrite, countersWrite ], count: [ activeGroups, 1, 1 ] },
         { entryPoint: 'clearLookup', label: 'Clear GPU tile frontier lookup', bindings: [ lookupWrite ], count: [ ceilDivide(bounds.lookupCapacity, GPU_TILE_FRONTIER_WORKGROUP_SIZE), 1, 1 ] },
         { entryPoint: 'buildLookup', label: 'Build GPU tile frontier lookup', bindings: [ map, current, lookupWrite, countersWrite ], count: 'indirect' },
-        { entryPoint: 'evaluateFrontier', label: 'Evaluate GPU tile frontier', bindings: [ map, policy, metrics, current, slots, visibility, decisionWrite, countersWrite ], count: 'indirect' },
+        { entryPoint: 'evaluateFrontier', label: 'Evaluate GPU tile frontier', bindings: [ map, policy, metrics, current, slots, pages, visibility, decisionWrite, countersWrite ], count: 'indirect' },
         { entryPoint: 'selectBudgets', label: 'Select GPU tile frontier budgets', bindings: [ map, policy, current, slots, lookupRead, decisionWrite, countersWrite ], count: [ 1, 1, 1 ] },
         { entryPoint: 'resolveTransitions', label: 'Resolve GPU tile frontier transitions', bindings: [ map, policy, metrics, current, slots, visibility, decisionWrite, countersWrite ], count: 'indirect' },
         { entryPoint: 'balanceNeighbors', label: 'Balance GPU tile frontier neighbors', bindings: [ map, policy, current, lookupRead, visibility, decisionWrite, countersWrite ], count: 'indirect' },
@@ -1508,6 +1518,7 @@ function resourceForRole(
 ): BufferResource {
 
     if (role === 'slotTable') return gpuState.slotTable
+    if (role === 'pageTable') return gpuState.pageTable
     if (role === 'demands' || role === 'retirements' ||
         role === 'counters' || role === 'diagnostics') return resources.feedbackOutput
     if (role === 'frontierA') return parity === 0 ? resources.frontierA : resources.frontierB

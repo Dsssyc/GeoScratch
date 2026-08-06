@@ -240,6 +240,27 @@ describe('Geo virtual raster', () => {
         await publication.acknowledge()
     })
 
+    it('keeps a terminal child failure distinct from an available parent fallback', async() => {
+
+        const { addressSpace, residency, pages } = fixture()
+        const parent = addressSpace.page({ level: 1, x: 0, y: 0 })
+        const child = addressSpace.page({ level: 0, x: 1, y: 0 })
+        stage(residency, pages.get(parent.key))
+        await residency.publish().acknowledge()
+
+        expect(residency.fail(child, {
+            generation: 0,
+            detail: 'SOURCE_PAGE_MISSING',
+        })).to.deep.include({ status: 'failed' })
+        const publication = residency.publish()
+
+        expect(publication.snapshot.resolve(child)).to.deep.include({
+            status: 'failed',
+            requestedLevel: child.level,
+        })
+        await publication.acknowledge()
+    })
+
     it('uses deterministic bounded LRU eviction and bounded history', async() => {
 
         const { addressSpace, residency, pages } = fixture({

@@ -195,13 +195,14 @@ function createFixture(options = {}) {
         }
     }
 
-    function evaluate(currentFrontier, residentPages, viewOverride = {}) {
+    function evaluate(currentFrontier, residentPages, viewOverride = {}, failedPages = []) {
 
         return evaluateGpuTileFrontierReference({
             descriptor,
             view: { ...view, ...viewOverride },
             currentFrontier,
             residentPages,
+            failedPages,
         })
     }
 
@@ -1774,7 +1775,11 @@ describe('Geo GPU tile frontier contracts and reference oracle', () => {
         })
         expect(keys(protectedResult.nextFrontier)).to.deep.equal(keys(siblings))
         expect(protectedResult.visible).to.deep.equal([])
-        expect(protectedResult.facts.coarsenCandidateCount).to.equal(0)
+        expect(protectedResult.facts).to.deep.include({
+            coarsenCandidateCount: 0,
+            coarsenGracePendingCount: 1,
+            convergenceState: 'transitioning',
+        })
 
         const expiredResult = fixture.evaluate(protectedResult.nextFrontier, residents, {
             ...offFrustum,
@@ -1784,7 +1789,24 @@ describe('Geo GPU tile frontier contracts and reference oracle', () => {
             fixture.page(1, 0, 0).key,
         ])
         expect(expiredResult.visible).to.deep.equal([])
-        expect(expiredResult.facts.coarsenCandidateCount).to.equal(1)
+        expect(expiredResult.facts).to.deep.include({
+            coarsenCandidateCount: 1,
+            coarsenGracePendingCount: 0,
+            convergenceState: 'transitioning',
+        })
+
+        const settledResult = fixture.evaluate(expiredResult.nextFrontier, residents, {
+            ...offFrustum,
+            frameEpoch: 14,
+        })
+        expect(keys(settledResult.nextFrontier)).to.deep.equal([
+            fixture.page(1, 0, 0).key,
+        ])
+        expect(settledResult.facts).to.deep.include({
+            coarsenCandidateCount: 0,
+            coarsenGracePendingCount: 0,
+            convergenceState: 'converged',
+        })
     })
 
     it('propagates current visibility into a coarsened parent grace epoch', () => {
@@ -1830,6 +1852,28 @@ describe('Geo GPU tile frontier contracts and reference oracle', () => {
             refineCandidateCount: 1,
             demandCount: 4,
             fallbackCount: 1,
+        })
+    })
+
+    it('keeps a parent without redemanding a terminally failed child', () => {
+
+        const fixture = createFixture({ errorByLevel: [ 100, 100_000, 100, 100 ] })
+        const parent = fixture.entry(1, 0, 0)
+        const failedChild = fixture.page(2, 0, 0)
+        const result = fixture.evaluate(
+            [ parent ],
+            [ fixture.resident(1, 0, 0) ],
+            {},
+            [ failedChild ]
+        )
+
+        expect(keys(result.nextFrontier)).to.deep.equal([ parent.page.key ])
+        expect(result.demands.map(demand => demand.page.key)).to.deep.equal([])
+        expect(result.facts).to.deep.include({
+            refineCandidateCount: 0,
+            demandCount: 0,
+            fallbackCount: 1,
+            convergenceState: 'converged',
         })
     })
 
@@ -1945,6 +1989,39 @@ describe('Geo GPU tile frontier contracts and reference oracle', () => {
         ].map(([ level, row, col ]) => fixture.page(level, row, col).key)
 
         expect(result.demands.map(demand => demand.page.key)).to.deep.equal(expectedDemands)
+    })
+
+    it('keeps an accepted missing-child transaction sticky until residency changes', () => {
+
+        const fixture = createFixture({
+            errorByLevel: [ 100, 100_000, 100, 100 ],
+            maximumDemands: 4,
+            transitionReservePages: 4,
+        })
+        const firstParent = fixture.entry(1, 0, 0, { lastDemandFrame: 0 })
+        const secondParent = fixture.entry(1, 0, 1, { lastDemandFrame: 9 })
+        const residents = [
+            fixture.resident(1, 0, 0),
+            fixture.resident(1, 0, 1),
+        ]
+        const first = fixture.evaluate([ firstParent, secondParent ], residents)
+        const second = fixture.evaluate(
+            first.nextFrontier,
+            residents,
+            { frameEpoch: fixture.view.frameEpoch + 1 }
+        )
+
+        expect(new Set(first.demands.map(demand => demand.parent.key))).to.deep.equal(
+            new Set([ firstParent.page.key ])
+        )
+        expect(second.demands.map(demand => demand.page.key)).to.deep.equal(
+            first.demands.map(demand => demand.page.key)
+        )
+        expect(second.nextFrontier.find(entry => entry.page.key === firstParent.page.key))
+            .to.deep.include({
+                previousLodState: 'refine',
+                childDemandMask: 15,
+            })
     })
 
     it('refines only the balancing neighbor when its children are already resident', () => {
@@ -2154,6 +2231,39 @@ describe('Geo GPU tile frontier contracts and reference oracle', () => {
         const incomplete = fixture.evaluate(siblings.slice(0, 3), residents)
         expect(keys(incomplete.nextFrontier)).to.deep.equal(keys(siblings.slice(0, 3)))
         expect(incomplete.facts.coarsenCandidateCount).to.equal(0)
+    })
+
+    it('treats a balance-blocked coarsen fallback as a stable frontier', () => {
+
+        const fixture = createFixture({ errorByLevel: [ 0.1, 0.1, 0.1, 0.1 ] })
+        const siblings = [
+            fixture.entry(2, 0, 0),
+            fixture.entry(2, 0, 1),
+            fixture.entry(2, 1, 0),
+            fixture.entry(2, 1, 1),
+        ]
+        const fineNeighbor = fixture.entry(3, 0, 4)
+        const current = [ ...siblings, fineNeighbor ]
+        const residents = [
+            fixture.resident(1, 0, 0),
+            ...siblings.map(entry => fixture.resident(
+                2,
+                entry.page.tile.tileRow,
+                entry.page.tile.tileCol
+            )),
+            fixture.resident(3, 0, 4),
+        ]
+
+        const result = fixture.evaluate(current, residents)
+
+        expect(keys(result.nextFrontier)).to.deep.equal(keys(current))
+        expect(result.demands).to.deep.equal([])
+        expect(result.facts).to.deep.include({
+            coarsenCandidateCount: 1,
+            fallbackCount: 1,
+            budgetLimitedCount: 0,
+            convergenceState: 'converged',
+        })
     })
 
     it('uses hierarchical path tie order and preserves complete cover under tight capacity', () => {

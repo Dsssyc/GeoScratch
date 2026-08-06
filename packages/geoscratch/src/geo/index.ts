@@ -134,6 +134,7 @@ export type {
     VirtualRasterPageDemand,
     VirtualRasterRequestExecution,
     VirtualRasterRequestExecutionFacts,
+    VirtualRasterRequestFailureClassification,
     VirtualRasterRequestExecutor,
     VirtualRasterRequestSchedulerDescriptor,
     VirtualRasterRequestSchedulerFacts,
@@ -184,6 +185,7 @@ export {
 } from './virtual-raster-residency.js'
 export type {
     VirtualRasterHistoryEntry,
+    VirtualRasterFailureOptions,
     VirtualRasterPageAvailability,
     VirtualRasterPublicationFacts,
     VirtualRasterPublicationState,

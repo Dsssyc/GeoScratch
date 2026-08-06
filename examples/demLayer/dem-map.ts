@@ -87,9 +87,17 @@ export type DemMap = {
         getNorth(): number
     }
     resize(): void
+    getCenter(): LngLat
+    getPitch(): number
+    getBearing(): number
     on(event: 'render', listener: () => void): void
     off(event: 'render' | 'load', listener: () => void): void
-    jumpTo(options: { center?: readonly [ number, number ]; zoom?: number }): void
+    jumpTo(options: {
+        center?: readonly [ number, number ]
+        zoom?: number
+        pitch?: number
+        bearing?: number
+    }): void
     remove(): void
 }
 
@@ -100,6 +108,7 @@ type MapApi = {
         zoom: number
         projection: string
         maxZoom: number
+        maxPitch: number
         container: HTMLElement
         antialias: boolean
     }) => DemMap
@@ -123,7 +132,6 @@ type Viewport = {
 }
 
 const mapApi = globalThis.maplibregl ?? globalThis.mapboxgl
-const underwaterTerrainMinElevation = -80.06899999999999 * 30
 
 if (!mapApi) throw new Error('Map runtime failed to load for DEM Layer')
 
@@ -132,6 +140,7 @@ export const DEM_MAP_DEFAULTS = Object.freeze({
     zoom: 9,
     projection: 'mercator',
     maxZoom: 18,
+    maxPitch: 85,
 })
 
 export const darkMatterStyle = Object.freeze({
@@ -183,6 +192,7 @@ export function createDemMap(canvas: HTMLCanvasElement, options: DemMapOptions =
         zoom: DEM_MAP_DEFAULTS.zoom,
         projection: DEM_MAP_DEFAULTS.projection,
         maxZoom: DEM_MAP_DEFAULTS.maxZoom,
+        maxPitch: DEM_MAP_DEFAULTS.maxPitch,
         container: mapContainer,
         antialias: true,
         ...mapOptions,
@@ -209,12 +219,19 @@ export function waitForDemMap(map: DemMap, signal?: AbortSignal): Promise<DemMap
 
 export function readDemCameraState(
     map: DemMap,
-    viewport: Viewport
+    viewport: Viewport,
+    minimumTerrainElevationMeters: number
 ): Omit<GpuTileFrontierView, 'frameEpoch' | 'residencySnapshotEpoch'> & Readonly<{
     far: number
     near: number
+    center: readonly [ number, number ]
+    pitchDegrees: number
+    bearingDegrees: number
 }> {
 
+    if (!Number.isFinite(minimumTerrainElevationMeters)) {
+        throw new TypeError('DEM camera requires a finite minimum terrain elevation')
+    }
     const transform = map.transform
     const cameraPosition = transform.getCameraPosition()
     const mercatorCenter = mapApi!.MercatorCoordinate.fromLngLat(
@@ -234,7 +251,10 @@ export function readDemCameraState(
     const normalizedY = encodeFloatToDouble(mercatorCenter.y)
     const normalizedZ = encodeFloatToDouble(mercatorCenter.z)
     const normalizedHigh: Vec3 = [ normalizedX[0], normalizedY[0], normalizedZ[0] ]
-    const { far, near, matrix } = getScratchMercatorMatrix(transform)
+    const { far, near, matrix } = getScratchMercatorMatrix(
+        transform,
+        minimumTerrainElevationMeters
+    )
     const clipFromRelativeWorld = (mat4.translate as (
         matrix: Matrix,
         vector: Vec3,
@@ -251,6 +271,7 @@ export function readDemCameraState(
         mercatorZfromAltitude(1, cameraPosition.lngLat.lat),
     ], clipFromRelativeWorld)
     const verticalFovRadians = radiansFromTransformValue(transform._fov, transform.fov)
+    const center = map.getCenter()
 
     return Object.freeze({
         far,
@@ -262,10 +283,16 @@ export function readDemCameraState(
         verticalFovRadians,
         cameraLatitudeRadians: cameraPosition.lngLat.lat * Math.PI / 180,
         zoomHint: map.getZoom(),
+        center: [ center.lng, center.lat ] as const,
+        pitchDegrees: map.getPitch(),
+        bearingDegrees: map.getBearing(),
     })
 }
 
-function getScratchMercatorMatrix(transform: MapTransform) {
+function getScratchMercatorMatrix(
+    transform: MapTransform,
+    minimumTerrainElevationMeters: number
+) {
 
     if (!transform.height || !transform.mercatorMatrix) {
         return {
@@ -277,7 +304,7 @@ function getScratchMercatorMatrix(transform: MapTransform) {
     }
 
     const near = transform.height / 50
-    const far = calculateFarZForTerrainPlane(transform, underwaterTerrainMinElevation)
+    const far = calculateFarZForTerrainPlane(transform, minimumTerrainElevationMeters)
     const offset = transform.centerOffset ?? { x: 0, y: 0 }
     const point = transform.point
     const fov = radiansFromTransformValue(transform._fov, transform.fov)

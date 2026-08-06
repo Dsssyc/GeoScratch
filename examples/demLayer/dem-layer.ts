@@ -128,6 +128,7 @@ type DemState = {
     virtualSnapshotEpoch: number
     virtualRequestedPageCount: number
     staleFeedbackCount: number
+    supersededFeedbackCount: number
     latestFrontierFacts?: GpuTileFrontierFacts
     latestFeedbackDiagnostics: readonly unknown[]
     stageActivity: { 'frontier-compute': number; 'lod-map': number; terrain: number }
@@ -154,13 +155,18 @@ type DemLayerOptions = {
 type PendingFeedback = Readonly<{
     frame: GpuTileFrontierFrame
     submitted: SubmittedWork
+    decisionKey: string
+}>
+
+type ConsumedFeedback = Readonly<{
+    decisionKey: string
+    feedback?: VirtualRasterGpuFeedbackBatch
 }>
 
 export const DEM_STAGE_ORDER = Object.freeze([ 'frontier-compute', 'lod-map', 'terrain' ])
 export const LOD_MAP_SIZE = Object.freeze({ width: 512, height: 256 })
 export const TERRAIN_SECTOR_SIZE = 64
 export const TERRAIN_EXAGGERATION = 50
-export const TERRAIN_ELEVATION_RANGE = Object.freeze([ -80.06899999999999, 4.3745 ])
 
 const bufferUsage = globalThis.GPUBufferUsage ?? Object.freeze({
     COPY_DST: 0x08,
@@ -306,6 +312,8 @@ export async function createDemLayer({
         assertPersistentCounts(persistentBaseline, persistentFactSnapshot(runtime), 'frame')
 
         const noOpPublication = await publishChangedResidency(graph, state)
+        const residencySnapshotEpoch = virtualRaster.gpu.facts().snapshotEpoch
+        const decisionKey = frontierDecisionKey(camera, residencySnapshotEpoch)
         const viewToken = frontier.writeView({
             clipFromRelativeWorld: camera.clipFromRelativeWorld,
             cameraHigh: camera.cameraHigh,
@@ -315,7 +323,7 @@ export async function createDemLayer({
             cameraLatitudeRadians: camera.cameraLatitudeRadians,
             zoomHint: camera.zoomHint,
             frameEpoch: state.frame + 1,
-            residencySnapshotEpoch: virtualRaster.gpu.facts().snapshotEpoch,
+            residencySnapshotEpoch,
         })
         let frame: GpuTileFrontierFrame
         let submitted: SubmittedWork
@@ -347,8 +355,25 @@ export async function createDemLayer({
             ? nativeObservation
             : nativeObservation.then(() => { throw provenanceFailure })
 
-        pendingFeedback.push(Object.freeze({ frame: frame!, submitted: submitted! }))
-        const feedback = await consumeReadyFeedback(graph, pendingFeedback, state)
+        pendingFeedback.push(Object.freeze({
+            frame: frame!,
+            submitted: submitted!,
+            decisionKey,
+        }))
+        const consumed = await consumeReadyFeedback(graph, pendingFeedback, state)
+        const feedback = consumed?.decisionKey === decisionKey
+            ? consumed.feedback
+            : undefined
+        if (consumed?.feedback !== undefined && consumed.decisionKey !== decisionKey) {
+            state.supersededFeedbackCount++
+        }
+        if (feedback === undefined) {
+            state.latestFrontierFacts = undefined
+            state.latestFeedbackDiagnostics = Object.freeze([])
+        } else {
+            state.latestFrontierFacts = feedback.facts
+            state.latestFeedbackDiagnostics = feedback.diagnostics
+        }
         const reconciliation = feedback === undefined
             ? undefined
             : virtualRaster.reconcileFeedback(feedback)
@@ -362,8 +387,8 @@ export async function createDemLayer({
         state.stageActivity['lod-map']++
         state.stageActivity.terrain++
         const needsFollowUp = feedback === undefined ||
-            feedback.facts.convergenceState !== 'converged' ||
-            reconciliation?.requestedCount !== 0
+            feedback.facts.convergenceState === 'transitioning' ||
+            (reconciliation?.requestedCount ?? 0) > 0
 
         return Object.freeze({
             submitted: submitted!,
@@ -948,21 +973,33 @@ async function consumeReadyFeedback(
     graph: DemGraph,
     pending: PendingFeedback[],
     state: DemState
-): Promise<VirtualRasterGpuFeedbackBatch | undefined> {
+): Promise<ConsumedFeedback | undefined> {
 
     if (pending.length < 2) return undefined
     const ready = pending.shift()!
     try {
         const feedback = await graph.feedbackRing.feedback(ready.frame, ready.submitted)
-        state.latestFrontierFacts = feedback.facts
-        state.latestFeedbackDiagnostics = feedback.diagnostics
-        return feedback
+        return Object.freeze({ decisionKey: ready.decisionKey, feedback })
     } catch (error) {
         const code = error instanceof GeoDiagnosticError ? error.diagnostic.code : undefined
         if (code !== 'GEO_GPU_TILE_FEEDBACK_STALE') throw error
         state.staleFeedbackCount++
-        return undefined
+        return Object.freeze({ decisionKey: ready.decisionKey })
     }
+}
+
+function frontierDecisionKey(camera: DemCameraState, residencySnapshotEpoch: number): string {
+
+    return JSON.stringify([
+        camera.clipFromRelativeWorld,
+        camera.cameraHigh,
+        camera.cameraLow,
+        camera.viewport,
+        camera.verticalFovRadians,
+        camera.cameraLatitudeRadians,
+        camera.zoomHint,
+        residencySnapshotEpoch,
+    ])
 }
 
 function verifyFrameProvenance(
@@ -1167,6 +1204,7 @@ function createState(size: SurfaceSize): DemState {
         virtualSnapshotEpoch: 0,
         virtualRequestedPageCount: 0,
         staleFeedbackCount: 0,
+        supersededFeedbackCount: 0,
         latestFrontierFacts: undefined,
         latestFeedbackDiagnostics: Object.freeze([]),
         stageActivity: {
@@ -1196,6 +1234,7 @@ function stateSnapshot(
         virtualRequestedPageCount: state.virtualRequestedPageCount,
         readbackInFlightCount: pendingFeedbackCount,
         staleFeedbackCount: state.staleFeedbackCount,
+        supersededFeedbackCount: state.supersededFeedbackCount,
         frontierCount: latest?.activeFrontierCount ?? 0,
         visibleNodeCount: latest?.visibleInstanceCount ?? 0,
         demandCount: latest?.demandCount ?? 0,
@@ -1208,6 +1247,7 @@ function stateSnapshot(
         ]),
         maximumObservedSse: latest?.maximumObservedSse ?? 0,
         convergenceState: latest?.convergenceState ?? 'transitioning',
+        frontierFacts: latest,
         latestFeedbackDiagnostics: state.latestFeedbackDiagnostics,
         feedback: feedbackRing.facts(),
         stageActivity: Object.freeze({ ...state.stageActivity }),

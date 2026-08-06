@@ -205,6 +205,7 @@ function packedFeedback(frame, options = {}) {
     counters[19] = options.fallbackCount ?? 0
     counters[20] = options.acceptedRefineCount ?? 0
     counters[21] = options.acceptedCoarsenCount ?? 0
+    counters[22] = options.coarsenGracePendingCount ?? 0
     gpuTileFrontierDiagnosticsCodec.write(bytes, {
         frameEpoch: decisionFrameEpoch,
         residencySnapshotEpoch: options.residencySnapshotEpoch ?? 0,
@@ -225,7 +226,7 @@ function packedFeedback(frame, options = {}) {
         convergenceState: options.convergenceState ?? 0,
         reserved0: counters[15],
         reserved1: counters[16],
-        reserved2: counters[6],
+        coarsenGracePendingCount: counters[22],
     }, { byteOffset: layout.diagnostics.offset })
     return bytes
 }
@@ -759,6 +760,7 @@ describe('Geo Virtual Raster GPU feedback ring', () => {
             'visibleInstanceCount',
             'refineCandidateCount',
             'coarsenCandidateCount',
+            'coarsenGracePendingCount',
             'retirementCount',
             'staleGenerationCount',
             'budgetLimitedCount',

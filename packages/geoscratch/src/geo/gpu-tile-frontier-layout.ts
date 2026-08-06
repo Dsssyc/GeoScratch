@@ -74,6 +74,7 @@ export type GpuTileFrontierFacts = Readonly<{
     visibleInstanceCount: number
     refineCandidateCount: number
     coarsenCandidateCount: number
+    coarsenGracePendingCount: number
     demandCount: number
     fallbackCount: number
     staleGenerationCount: number
@@ -275,7 +276,7 @@ export const gpuTileFrontierDiagnosticsCodec = layoutCodec({
         { name: 'convergenceState', type: 'u32' },
         { name: 'reserved0', type: 'u32' },
         { name: 'reserved1', type: 'u32' },
-        { name: 'reserved2', type: 'u32' },
+        { name: 'coarsenGracePendingCount', type: 'u32' },
     ],
 })
 

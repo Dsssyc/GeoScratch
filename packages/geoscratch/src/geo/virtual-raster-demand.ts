@@ -47,12 +47,19 @@ export type VirtualRasterRequestExecutionFacts = Readonly<{
     phase?: 'cache' | 'network' | 'decode'
 }>
 
+export type VirtualRasterRequestFailureClassification = Readonly<{
+    disposition: 'retryable' | 'terminal'
+    code?: string
+    detail?: string
+}>
+
 export type VirtualRasterRequestExecution = Readonly<{
     result: Promise<VirtualRasterPageTransfer>
     cancel(reason?: unknown): WorkerCancellationKind | 'none'
     reprioritize(priority: Partial<WorkerTaskPriority>): boolean
     accept(): Promise<void>
     discard(): Promise<void>
+    classifyFailure?(error: unknown): VirtualRasterRequestFailureClassification | undefined
     inspect?(): VirtualRasterRequestExecutionFacts
 }>
 
@@ -380,6 +387,17 @@ export class VirtualRasterRequestScheduler {
                     generation: record.demand.generation,
                 })
             }
+            const classification = record.execution.classifyFailure?.(error)
+            if (classification?.disposition === 'terminal') {
+                const detail = terminalFailureDetail(classification, error)
+                const outcome = this.residency.fail(record.demand.page, {
+                    generation: record.demand.generation,
+                    detail,
+                })
+                this.#failedRequestCount++
+                this.#record('failed', record.demand, detail)
+                return outcome
+            }
             this.#failedRequestCount++
             this.#record('failed', record.demand, errorMessage(error))
             return undefined
@@ -441,6 +459,15 @@ export class VirtualRasterRequestScheduler {
             )
         }
     }
+}
+
+function terminalFailureDetail(
+    classification: VirtualRasterRequestFailureClassification,
+    error: unknown
+): string {
+
+    const detail = classification.detail ?? errorMessage(error)
+    return classification.code === undefined ? detail : `${classification.code}: ${detail}`
 }
 
 export function virtualRasterDemandSet(

@@ -8,6 +8,7 @@ import type {
 } from 'geoscratch/scratch'
 import {
     DEM_STAGE_ORDER,
+    TERRAIN_EXAGGERATION,
     createDemLayer,
 } from './dem-layer.ts'
 import { createDemLifecycle } from './dem-lifecycle.ts'
@@ -37,6 +38,7 @@ type CleanupProof = Readonly<{
 type PageSettlement = Promise<FailureProof | CleanupProof | void | undefined>
 type PageContext = { graph: DemLayer; runtime: GPURuntime }
 type CameraMoveOptions = Parameters<DemMap['jumpTo']>[0]
+type DemCameraView = ReturnType<typeof readDemCameraState>
 type FrameWork = {
     scheduled: number
     completed: number
@@ -85,9 +87,9 @@ const cachePolicy = readCachePolicy(
 )
 const maxPhysicalPages = boundedIntegerParameter(
     parameters.get('atlasPages'),
-    18,
+    64,
     2,
-    18
+    64
 )
 const requestedFailureScenario = parameters.get('fault')
 const failureConfiguration = Object.freeze({
@@ -188,6 +190,7 @@ async function main(lifetime: DemLifecycle, proof: FailureProofController) {
     })
     lifetime.deferRelease({ label: 'dem-gpu-frontier', run: graph.dispose })
     lifetime.assertActive('continue DEM initialization')
+    const minimumTerrainElevationMeters = virtualRaster.manifest.offset * TERRAIN_EXAGGERATION
 
     const initialized = await graph.initialize()
     await lifetime.track(initialized.observation, 'dem-initial-submission')
@@ -200,6 +203,7 @@ async function main(lifetime: DemLifecycle, proof: FailureProofController) {
     let submittedFrames = 0
     let observedFrames = 0
     let latestProvenance: FrameProvenance = []
+    let latestCamera: DemCameraView | undefined
     let frameWorkScheduled = 0
     let frameWorkCompleted = 0
     let frameWorkCancelled = 0
@@ -255,6 +259,7 @@ async function main(lifetime: DemLifecycle, proof: FailureProofController) {
             submittedFrames,
             observedFrames,
             latestProvenance,
+            latestCamera,
             frameWork: {
                 scheduled: frameWorkScheduled,
                 completed: frameWorkCompleted,
@@ -314,10 +319,15 @@ async function main(lifetime: DemLifecycle, proof: FailureProofController) {
             if (!sameSize(state.size, nextSize)) await graph.resize(nextSize)
             if (!active) return
 
-            const camera = readDemCameraState(map, nextSize)
+            const camera = readDemCameraState(
+                map,
+                nextSize,
+                minimumTerrainElevationMeters
+            )
             const frame = await graph.renderFrame(camera)
             submittedFrames++
             latestProvenance = frame.provenance
+            latestCamera = camera
             if (frame.requestedPageCount > 0) {
                 const settlement = frame.residencySettlement.then(() => {
                     if (!active) return
@@ -359,12 +369,16 @@ async function main(lifetime: DemLifecycle, proof: FailureProofController) {
 
 function publishGraphFacts(runtime: GPURuntime, graph: DemLayer) {
 
+    const contract = graph.contractFacts()
     canvas.dataset.proofMode = String(proofMode)
     canvas.dataset.stageOrder = DEM_STAGE_ORDER.join('|')
     canvas.dataset.stageCount = String(DEM_STAGE_ORDER.length)
     canvas.dataset.stableIdentityCount = String(graph.stableIdentities.length)
     canvas.dataset.stableIdentityHash = graph.stableIdentityHash
-    canvas.dataset.graphContract = JSON.stringify(graph.contractFacts())
+    canvas.dataset.graphContract = JSON.stringify(contract)
+    canvas.dataset.countPath = contract.countPath
+    canvas.dataset.selectionPath = contract.selectionPath
+    canvas.dataset.cpuSelectionUploadCount = '0'
     canvas.dataset.adapterAcquired = String(runtime.adapter !== undefined)
     canvas.dataset.adapter = JSON.stringify(adapterFacts(runtime))
     canvas.dataset.tileServer = tileServerUrl
@@ -396,6 +410,7 @@ function publishFrameFacts({
     submittedFrames,
     observedFrames,
     latestProvenance,
+    latestCamera,
     frameWork,
 }: {
     runtime: GPURuntime
@@ -404,6 +419,7 @@ function publishFrameFacts({
     submittedFrames: number
     observedFrames: number
     latestProvenance: FrameProvenance
+    latestCamera?: DemCameraView
     frameWork: FrameWork
 }) {
 
@@ -428,11 +444,24 @@ function publishFrameFacts({
     canvas.dataset.convergenceState = state.convergenceState
     canvas.dataset.readbackInFlightCount = String(state.readbackInFlightCount)
     canvas.dataset.staleFeedbackCount = String(state.staleFeedbackCount)
+    canvas.dataset.supersededFeedbackCount = String(state.supersededFeedbackCount)
     canvas.dataset.virtualSnapshotEpoch = String(state.virtualSnapshotEpoch)
     canvas.dataset.virtualRequestedPageCount = String(state.virtualRequestedPageCount)
     canvas.dataset.virtualRaster = JSON.stringify(graph.virtualRasterFacts())
     canvas.dataset.stageActivity = JSON.stringify(state.stageActivity)
     canvas.dataset.provenance = JSON.stringify(latestProvenance)
+    canvas.dataset.frontier = JSON.stringify(state.frontierFacts ?? null)
+    canvas.dataset.frontierDiagnostics = JSON.stringify(state.latestFeedbackDiagnostics)
+    canvas.dataset.frontierConverged = String(state.convergenceState === 'converged')
+    canvas.dataset.cameraView = JSON.stringify(latestCamera === undefined ? null : {
+        center: latestCamera.center,
+        zoom: latestCamera.zoomHint,
+        pitch: latestCamera.pitchDegrees,
+        bearing: latestCamera.bearingDegrees,
+        cameraHigh: latestCamera.cameraHigh,
+        cameraLow: latestCamera.cameraLow,
+        viewport: latestCamera.viewport,
+    })
     canvas.dataset.persistentFacts = JSON.stringify(graph.persistentFacts())
     const identityFacts = graph.currentIdentityFacts()
     canvas.dataset.currentStableIdentityHash = identityFacts.hash

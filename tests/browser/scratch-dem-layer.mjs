@@ -25,15 +25,26 @@ const tilePort = process.env.DEM_LAYER_TILE_PORT === undefined
     ? await findAvailablePort()
     : positiveInteger(process.env.DEM_LAYER_TILE_PORT)
 const tileBaseUrl = `http://127.0.0.1:${tilePort}`
-const expectedStageOrder = Object.freeze([ 'lod-map', 'terrain' ])
+const expectedStageOrder = Object.freeze([ 'frontier-compute', 'lod-map', 'terrain' ])
 const requiredProvenanceNames = Object.freeze([
-    'node-level-upload-to-lod-draw',
-    'lod-arguments-upload-to-lod-draw',
-    'node-box-upload-to-terrain-draw',
-    'terrain-arguments-upload-to-terrain-draw',
+    'frontier-map-meta-to-lod-draw',
+    'frontier-visible-to-lod-draw',
+    'frontier-indirect-to-lod-draw',
+    'frontier-visible-to-terrain-draw',
+    'frontier-indirect-to-terrain-draw',
     'lod-map-pass-to-terrain-draw',
 ])
-const optionalProvenanceName = 'virtual-page-table-upload-to-terrain-draw'
+const cameraCenter = Object.freeze([ 120.980697, 31.684162 ])
+const cameraScenarios = Object.freeze([
+    scenario('flat-z9', 9, 0, 0),
+    scenario('flat-z10', 10, 0, 0),
+    scenario('pitch45-bearing90-z9', 9, 45, 90),
+    scenario('pitch45-bearing225-z10', 10, 45, 225),
+    scenario('pitch70-bearing0-z9', 9, 70, 0),
+    scenario('pitch70-bearing90-z10', 10, 70, 90),
+    scenario('pitch85-bearing90-z9', 9, 85, 90),
+    scenario('pitch85-bearing225-z10', 10, 85, 225),
+])
 const failureScenarios = Object.freeze([
     'after-map-acquisition',
     'invalid-terrain-shader-wgsl',
@@ -155,7 +166,7 @@ if (failures.length > 0) process.exitCode = 1
 async function verifyNormalDem(activeBrowser) {
 
     const context = await activeBrowser.newContext({
-        viewport: { width: 960, height: 720 },
+        viewport: { width: 1024, height: 768 },
         deviceScaleFactor: 1,
     })
     const page = await context.newPage()
@@ -169,45 +180,21 @@ async function verifyNormalDem(activeBrowser) {
             timeout,
             }
         )
-        await waitForDemFacts(page, facts => (
-            facts.status === 'ready' &&
-            Number(facts.observedFrames) >= 1 &&
-            Number(facts.currentPendingNativeObservations) === 0
+        const loadedFacts = await waitForDemFacts(page, facts => (
+            facts.status === 'ready' && Number(facts.observedFrames) >= 1
         ))
+        const adapterFacts = await readRuntimeAdapterFacts(page, loadedFacts)
+        const scenarios = []
+        for (const definition of cameraScenarios) {
+            scenarios.push(await captureConvergedCamera(page, definition))
+        }
 
-        const initialFacts = await readDemFacts(page)
-        const adapterFacts = await readRuntimeAdapterFacts(page, initialFacts)
-        const initialPath = resolve(outputDirectory, 'dem-initial.png')
-        const initialPng = await page.locator('#GPUFrame').screenshot({ path: initialPath })
-
-        await page.evaluate(() => {
-            window.__DEM_LAYER_PROOF__.moveCamera({
-                center: [ 120.980697, 31.684162 ],
-                zoom: 10,
-            })
-        })
-        await waitForDemFacts(page, facts => (
-            facts.status === 'ready' &&
-            Number(facts.observedFrames) > Number(initialFacts.observedFrames) &&
-            Number(facts.visibleNodeCount) !== Number(initialFacts.visibleNodeCount) &&
-            Number(facts.currentPendingNativeObservations) === 0
-        ))
-
-        const movedFacts = await readDemFacts(page)
-        const movedPath = resolve(outputDirectory, 'dem-moved.png')
-        const movedPng = await page.locator('#GPUFrame').screenshot({ path: movedPath })
-        const movementPixels = await inspectPixelPair(page, initialPng, movedPng)
-
-        const resizeGeneration = Number(movedFacts.resizeGeneration)
+        const lastFacts = scenarios.at(-1).facts.at(-1)
+        const resizeGeneration = Number(lastFacts.resizeGeneration)
         await page.setViewportSize({ width: 800, height: 600 })
-        await waitForDemFacts(page, facts => (
-            facts.status === 'ready' &&
-            Number(facts.resizeGeneration) > resizeGeneration &&
-            Number(facts.observedFrames) > Number(movedFacts.observedFrames) &&
-            Number(facts.currentPendingNativeObservations) === 0
+        const resizedFacts = await waitForConvergedFacts(page, facts => (
+            Number(facts.resizeGeneration) > resizeGeneration
         ))
-
-        const resizedFacts = await readDemFacts(page)
         const resizedPath = resolve(outputDirectory, 'dem-resized.png')
         const resizedPng = await page.locator('#GPUFrame').screenshot({ path: resizedPath })
         const resizedPixels = await inspectPixels(page, resizedPng)
@@ -228,27 +215,19 @@ async function verifyNormalDem(activeBrowser) {
         return {
             adapter: adapterFacts,
             proof: {
-                initialFacts,
-                movedFacts,
+                scenarios,
                 resizedFacts,
                 drainedFacts,
                 cleanupPair,
                 terminalStatus,
                 screenshots: {
-                    initial: initialPath,
-                    moved: movedPath,
                     resized: resizedPath,
                 },
                 pixelHashes: {
-                    initial: sha256(initialPng),
-                    moved: sha256(movedPng),
                     resized: sha256(resizedPng),
                 },
                 pixels: {
-                    initial: movementPixels.first,
-                    moved: movementPixels.second,
                     resized: resizedPixels,
-                    movement: movementPixels.difference,
                 },
                 ...events,
             },
@@ -256,6 +235,121 @@ async function verifyNormalDem(activeBrowser) {
     } finally {
         await context.close()
     }
+}
+
+function scenario(name, zoom, pitch, bearing) {
+
+    return Object.freeze({
+        name,
+        camera: Object.freeze({ center: cameraCenter, zoom, pitch, bearing }),
+    })
+}
+
+async function captureConvergedCamera(page, definition) {
+
+    const before = await readDemFacts(page)
+    const facts = []
+    const signatures = []
+    await page.evaluate(camera => window.__DEM_LAYER_PROOF__.moveCamera(camera), definition.camera)
+    let current = await waitForConvergedFacts(page, value => (
+        Number(value.observedFrames) > Number(before.observedFrames) &&
+        cameraMatches(value, definition.camera)
+    ))
+    facts.push(current)
+    signatures.push(frontierSignature(current))
+    const firstPath = resolve(outputDirectory, `${definition.name}-stable-first.png`)
+    const firstPng = await page.locator('#GPUFrame').screenshot({ path: firstPath })
+
+    for (let repetition = 0; repetition < 2; repetition++) {
+        const previousFrames = Number(current.observedFrames)
+        await page.evaluate(camera => window.__DEM_LAYER_PROOF__.moveCamera(camera), definition.camera)
+        current = await waitForConvergedFacts(page, value => (
+            Number(value.observedFrames) > previousFrames && cameraMatches(value, definition.camera)
+        ))
+        facts.push(current)
+        signatures.push(frontierSignature(current))
+    }
+
+    const finalPath = resolve(outputDirectory, `${definition.name}-stable-final.png`)
+    const finalPng = await page.locator('#GPUFrame').screenshot({ path: finalPath })
+    return {
+        ...definition,
+        facts,
+        signatures,
+        screenshots: { first: firstPath, final: finalPath },
+        pixelHashes: { first: sha256(firstPng), final: sha256(finalPng) },
+        pixels: await inspectPixelPair(page, firstPng, finalPng),
+    }
+}
+
+async function waitForConvergedFacts(page, additional = () => true) {
+
+    return await waitForDemFacts(page, facts => {
+        const frontier = parseJsonOrUndefined(facts.frontier)
+        const virtualRaster = parseJsonOrUndefined(facts.virtualRaster)
+        return facts.status === 'ready' &&
+            facts.frontierConverged === 'true' &&
+            frontier?.convergenceState === 'converged' &&
+            frontier?.demandCount === 0 &&
+            frontier?.staleGenerationCount === 0 &&
+            Number(facts.frames) === Number(facts.observedFrames) &&
+            Number(facts.currentPendingNativeObservations) === 0 &&
+            virtualRasterIdle(virtualRaster) && additional(facts)
+    })
+}
+
+function virtualRasterIdle(value) {
+
+    return value?.residency?.stagedCount === 0 &&
+        value?.residency?.stagingBytes === 0 &&
+        value?.scheduler?.activeRequestCount === 0 &&
+        value?.scheduler?.queuedRequestCount === 0 &&
+        value?.worker?.pendingCandidateCount === 0 &&
+        value?.worker?.senderDecodedByteLength === 0 &&
+        value?.worker?.system?.activeTaskCount === 0 &&
+        value?.worker?.system?.queuedTaskCount === 0 &&
+        value?.worker?.group?.activeTaskCount === 0 &&
+        value?.worker?.group?.queuedTaskCount === 0 &&
+        value?.gpu?.stagedSnapshotEpoch === undefined
+}
+
+function cameraMatches(facts, expected) {
+
+    const actual = parseJsonOrUndefined(facts.cameraView)
+    return Math.abs((actual?.center?.[0] ?? Infinity) - expected.center[0]) < 1e-8 &&
+        Math.abs((actual?.center?.[1] ?? Infinity) - expected.center[1]) < 1e-8 &&
+        Math.abs((actual?.zoom ?? Infinity) - expected.zoom) < 1e-6 &&
+        Math.abs((actual?.pitch ?? Infinity) - expected.pitch) < 1e-6 &&
+        bearingDistance(actual?.bearing, expected.bearing) < 1e-6
+}
+
+function bearingDistance(left, right) {
+
+    if (!Number.isFinite(left) || !Number.isFinite(right)) return Infinity
+    const difference = Math.abs(left - right) % 360
+    return Math.min(difference, 360 - difference)
+}
+
+function frontierSignature(facts) {
+
+    const frontier = parseJsonOrUndefined(facts.frontier)
+    const camera = parseJsonOrUndefined(facts.cameraView)
+    return JSON.stringify({
+        activeFrontierCount: frontier?.activeFrontierCount,
+        visibleInstanceCount: frontier?.visibleInstanceCount,
+        refineCandidateCount: frontier?.refineCandidateCount,
+        coarsenCandidateCount: frontier?.coarsenCandidateCount,
+        coarsenGracePendingCount: frontier?.coarsenGracePendingCount,
+        demandCount: frontier?.demandCount,
+        fallbackCount: frontier?.fallbackCount,
+        budgetLimitedCount: frontier?.budgetLimitedCount,
+        maximumObservedSse: frontier?.maximumObservedSse,
+        minimumSelectedMatrixLevel: frontier?.minimumSelectedMatrixLevel,
+        maximumSelectedMatrixLevel: frontier?.maximumSelectedMatrixLevel,
+        convergenceState: frontier?.convergenceState,
+        residencySnapshotEpoch: frontier?.residencySnapshotEpoch,
+        camera,
+    })
 }
 
 async function verifyFailureScenario(activeBrowser, scenario) {
@@ -295,16 +389,24 @@ function observePage(page) {
     const httpFailures = []
     const requests = []
     const tileRequests = []
+    const cancelledTileRequests = []
     const completeImageRequests = []
     page.on('console', (message) => {
         if (message.type() === 'error') pushBounded(consoleFailures, message.text())
         if (message.type() === 'warning') pushBounded(consoleWarnings, message.text())
     })
     page.on('pageerror', error => pushBounded(pageErrors, serializeError(error)))
-    page.on('requestfailed', request => pushBounded(
-        requestFailures,
-        `${request.method()} ${request.url()}: ${request.failure()?.errorText ?? 'unknown failure'}`
-    ))
+    page.on('requestfailed', request => {
+        const failure = `${request.method()} ${request.url()}: ` +
+            `${request.failure()?.errorText ?? 'unknown failure'}`
+        const parsed = new URL(request.url())
+        if (parsed.origin === tileBaseUrl && parsed.pathname.startsWith('/tiles/') &&
+            /abort|cancel/i.test(request.failure()?.errorText ?? '')) {
+            pushBounded(cancelledTileRequests, failure)
+            return
+        }
+        pushBounded(requestFailures, failure)
+    })
     page.on('request', (request) => {
         const url = request.url()
         pushBounded(requests, url)
@@ -329,6 +431,7 @@ function observePage(page) {
         httpFailures,
         requests,
         tileRequests,
+        cancelledTileRequests,
         completeImageRequests,
     }
 }
@@ -345,8 +448,10 @@ async function readRuntimeAdapterFacts(page, facts) {
 async function waitForDemFacts(page, predicate) {
 
     const deadline = Date.now() + timeout
+    let lastFacts
     while (Date.now() < deadline) {
         const facts = await readDemFacts(page)
+        lastFacts = facts
         if (facts.status === 'error') {
             throw new Error([
                 facts.error ?? 'DEM Layer failed.',
@@ -356,7 +461,75 @@ async function waitForDemFacts(page, predicate) {
         if (predicate(facts)) return facts
         await delay(16)
     }
-    throw new Error('Timed out waiting for DEM Layer proof facts.')
+    throw new Error(
+        `Timed out waiting for DEM Layer proof facts: ${JSON.stringify(waitFacts(lastFacts))}`
+    )
+}
+
+function waitFacts(facts) {
+
+    if (facts === undefined) return undefined
+    const frontier = parseJsonOrUndefined(facts.frontier)
+    const virtualRaster = parseJsonOrUndefined(facts.virtualRaster)
+    return {
+        status: facts.status,
+        frames: Number(facts.frames),
+        observedFrames: Number(facts.observedFrames),
+        currentPendingNativeObservations: Number(facts.currentPendingNativeObservations),
+        frameWork: parseJsonOrUndefined(facts.frameWork),
+        cameraView: parseJsonOrUndefined(facts.cameraView),
+        frontier,
+        virtualRaster: virtualRaster === undefined ? undefined : {
+            residency: selectFacts(virtualRaster.residency, [
+                'demandGeneration',
+                'snapshotEpoch',
+                'stagedCount',
+                'stagingBytes',
+                'residentCount',
+                'failedCount',
+                'staleResponseCount',
+            ]),
+            scheduler: selectFacts(virtualRaster.scheduler, [
+                'generation',
+                'demandedPageCount',
+                'activeRequestCount',
+                'queuedRequestCount',
+                'completedRequestCount',
+                'failedRequestCount',
+                'staleResultCount',
+                'cancellationCount',
+            ]),
+            worker: {
+                ...selectFacts(virtualRaster.worker, [
+                    'pendingCandidateCount',
+                    'senderDecodedByteLength',
+                    'networkRequestCount',
+                    'decodedPageCount',
+                    'acceptedCandidateCount',
+                    'discardedCandidateCount',
+                ]),
+                system: selectFacts(virtualRaster.worker?.system, [
+                    'activeTaskCount',
+                    'queuedTaskCount',
+                    'completedTaskCount',
+                    'cancelledTaskCount',
+                ]),
+                group: selectFacts(virtualRaster.worker?.group, [
+                    'activeTaskCount',
+                    'queuedTaskCount',
+                    'completedTaskCount',
+                    'cancelledTaskCount',
+                ]),
+            },
+            gpu: virtualRaster.gpu,
+        },
+    }
+}
+
+function selectFacts(value, names) {
+
+    if (value === undefined || value === null) return value
+    return Object.fromEntries(names.map(name => [ name, value[name] ]))
 }
 
 async function readDemFacts(page) {
@@ -398,18 +571,36 @@ async function inspectPixels(page, png) {
             let nonBackgroundPixels = 0
             let nonTransparentPixels = 0
             let lumaSum = 0
+            const terrainByBand = [ 0, 0, 0 ]
+            const pixelsByBand = [ 0, 0, 0 ]
+            const proofHeight = Math.max(1, value.height - 32)
+            let terrainMinX = value.width
+            let terrainMaxX = -1
+            let terrainMinY = proofHeight
+            let terrainMaxY = -1
             for (let index = 0; index < value.pixels.length; index += 4) {
                 const red = value.pixels[index]
                 const green = value.pixels[index + 1]
                 const blue = value.pixels[index + 2]
                 const pixelIndex = index / 4
+                const x = pixelIndex % value.width
                 const y = Math.floor(pixelIndex / value.width)
+                const terrain = y < proofHeight &&
+                    Math.abs(red - 16) + Math.abs(green - 20) + Math.abs(blue - 24) >= 12
                 minimumChannel = Math.min(minimumChannel, red, green, blue)
                 maximumChannel = Math.max(maximumChannel, red, green, blue)
                 if (Math.max(red, green, blue) > 8) nonDarkPixels++
-                if (y < value.height - 32 &&
-                    Math.abs(red - 16) + Math.abs(green - 20) + Math.abs(blue - 24) >= 12) {
+                if (y < proofHeight) {
+                    const band = Math.min(2, Math.floor(y * 3 / proofHeight))
+                    pixelsByBand[band]++
+                    if (terrain) terrainByBand[band]++
+                }
+                if (terrain) {
                     nonBackgroundPixels++
+                    terrainMinX = Math.min(terrainMinX, x)
+                    terrainMaxX = Math.max(terrainMaxX, x)
+                    terrainMinY = Math.min(terrainMinY, y)
+                    terrainMaxY = Math.max(terrainMaxY, y)
                 }
                 if (value.pixels[index + 3] > 0) nonTransparentPixels++
                 lumaSum += red * 0.2126 + green * 0.7152 + blue * 0.0722
@@ -422,7 +613,33 @@ async function inspectPixels(page, png) {
                 nonTransparentPixels,
                 channelRange: maximumChannel - minimumChannel,
                 meanLuma: lumaSum / (value.width * value.height),
+                terrainBands: bandFacts(terrainByBand, pixelsByBand),
+                terrainBounds: boundsFacts(),
             }
+
+            function boundsFacts() {
+                if (terrainMaxX < terrainMinX || terrainMaxY < terrainMinY) return null
+                const width = terrainMaxX - terrainMinX + 1
+                const height = terrainMaxY - terrainMinY + 1
+                return {
+                    minX: terrainMinX,
+                    maxX: terrainMaxX,
+                    minY: terrainMinY,
+                    maxY: terrainMaxY,
+                    width,
+                    height,
+                    horizontalRatio: width / value.width,
+                    verticalRatio: height / proofHeight,
+                }
+            }
+        }
+
+        function bandFacts(terrain, totals) {
+            return [ 'far', 'middle', 'near' ].map((name, index) => ({
+                name,
+                terrainPixels: terrain[index],
+                ratio: terrain[index] / Math.max(1, totals[index]),
+            }))
         }
     }, png.toString('base64'))
 }
@@ -453,18 +670,36 @@ async function inspectPixelPair(page, firstPng, secondPng) {
             let nonBackgroundPixels = 0
             let nonTransparentPixels = 0
             let lumaSum = 0
+            const terrainByBand = [ 0, 0, 0 ]
+            const pixelsByBand = [ 0, 0, 0 ]
+            const proofHeight = Math.max(1, value.height - 32)
+            let terrainMinX = value.width
+            let terrainMaxX = -1
+            let terrainMinY = proofHeight
+            let terrainMaxY = -1
             for (let index = 0; index < value.pixels.length; index += 4) {
                 const red = value.pixels[index]
                 const green = value.pixels[index + 1]
                 const blue = value.pixels[index + 2]
                 const pixelIndex = index / 4
+                const x = pixelIndex % value.width
                 const y = Math.floor(pixelIndex / value.width)
+                const terrain = y < proofHeight &&
+                    Math.abs(red - 16) + Math.abs(green - 20) + Math.abs(blue - 24) >= 12
                 minimumChannel = Math.min(minimumChannel, red, green, blue)
                 maximumChannel = Math.max(maximumChannel, red, green, blue)
                 if (Math.max(red, green, blue) > 8) nonDarkPixels++
-                if (y < value.height - 32 &&
-                    Math.abs(red - 16) + Math.abs(green - 20) + Math.abs(blue - 24) >= 12) {
+                if (y < proofHeight) {
+                    const band = Math.min(2, Math.floor(y * 3 / proofHeight))
+                    pixelsByBand[band]++
+                    if (terrain) terrainByBand[band]++
+                }
+                if (terrain) {
                     nonBackgroundPixels++
+                    terrainMinX = Math.min(terrainMinX, x)
+                    terrainMaxX = Math.max(terrainMaxX, x)
+                    terrainMinY = Math.min(terrainMinY, y)
+                    terrainMaxY = Math.max(terrainMaxY, y)
                 }
                 if (value.pixels[index + 3] > 0) nonTransparentPixels++
                 lumaSum += red * 0.2126 + green * 0.7152 + blue * 0.0722
@@ -477,6 +712,23 @@ async function inspectPixelPair(page, firstPng, secondPng) {
                 nonTransparentPixels,
                 channelRange: maximumChannel - minimumChannel,
                 meanLuma: lumaSum / (value.width * value.height),
+                terrainBands: [ 'far', 'middle', 'near' ].map((name, band) => ({
+                    name,
+                    terrainPixels: terrainByBand[band],
+                    ratio: terrainByBand[band] / Math.max(1, pixelsByBand[band]),
+                })),
+                terrainBounds: terrainMaxX < terrainMinX || terrainMaxY < terrainMinY
+                    ? null
+                    : {
+                        minX: terrainMinX,
+                        maxX: terrainMaxX,
+                        minY: terrainMinY,
+                        maxY: terrainMaxY,
+                        width: terrainMaxX - terrainMinX + 1,
+                        height: terrainMaxY - terrainMinY + 1,
+                        horizontalRatio: (terrainMaxX - terrainMinX + 1) / value.width,
+                        verticalRatio: (terrainMaxY - terrainMinY + 1) / proofHeight,
+                    },
             }
         }
         const first = await decode(firstBase64)
@@ -542,40 +794,61 @@ function validateResult(result) {
 
 function validateNormalProof(proof, failures) {
 
-    const initial = proof.initialFacts
-    const moved = proof.movedFacts
+    const scenarios = proof.scenarios ?? []
     const resized = proof.resizedFacts
     const drained = proof.drainedFacts
-    validateDemFacts('initial', initial, failures)
-    validateDemFacts('moved', moved, failures)
+    if (scenarios.length !== cameraScenarios.length) {
+        failures.push('normal DEM proof did not run every camera scenario')
+    }
+    const allFacts = []
+    for (const result of scenarios) {
+        if (result.facts?.length !== 3 || result.signatures?.length !== 3) {
+            failures.push(`${result.name} did not retain three stable frames`)
+            continue
+        }
+        allFacts.push(...result.facts)
+        for (const facts of result.facts) validateDemFacts(result.name, facts, failures)
+        if (new Set(result.signatures).size !== 1) {
+            failures.push(
+                `${result.name} frontier facts changed across identical camera frames: ` +
+                result.signatures.join(' -> ')
+            )
+        }
+        if (result.pixelHashes.first !== result.pixelHashes.final) {
+            failures.push(`${result.name} pixels changed across identical converged frames`)
+        }
+        for (const sample of [ result.pixels.first, result.pixels.second ]) {
+            if (sample.nonBackgroundPixels < 1_000 || sample.channelRange < 8 ||
+                sample.meanLuma < 0.05) {
+                failures.push(`${result.name} screenshot was blank or visually uniform`)
+            }
+            if (result.camera.pitch >= 70 && (sample.terrainBounds === null ||
+                sample.terrainBounds.horizontalRatio < 0.5 ||
+                sample.terrainBounds.verticalRatio < 0.05)) {
+                failures.push(`${result.name} high-pitch terrain projection was too narrow`)
+            }
+        }
+        const finalFacts = result.facts.at(-1)
+        if (!cameraMatches(finalFacts, result.camera)) {
+            failures.push(`${result.name} did not publish the requested MapLibre camera`)
+        }
+    }
     validateDemFacts('resized', resized, failures)
     validateDemFacts('drained', drained, failures, 'stopped')
-
-    const initialSelection = parseJson(initial.selection, 'initial selection', failures)
-    const movedSelection = parseJson(moved.selection, 'moved selection', failures)
-    const resizedSelection = parseJson(resized.selection, 'resized selection', failures)
-    if (initialSelection?.visibleNodeCount !== 24 || initialSelection?.levelRange?.[0] !== 9) {
-        failures.push('initial controlled zoom did not preserve the legacy zoom-9 LoD facts')
-    }
-    if (movedSelection?.visibleNodeCount !== 56 || movedSelection?.levelRange?.[1] !== 10) {
-        failures.push('controlled camera zoom did not produce the expected zoom-10 LoD facts')
-    }
-    if (JSON.stringify(selectionParityFacts(movedSelection)) !==
-        JSON.stringify(selectionParityFacts(resizedSelection))) {
-        failures.push('resize changed CPU LoD selection without a camera change')
-    }
-
-    for (const facts of [ initial, moved, resized, drained ]) {
-        if (facts.currentStableIdentityHash !== initial.currentStableIdentityHash ||
-            facts.currentStableIdentityCount !== initial.currentStableIdentityCount ||
-            facts.currentIdentityFacts !== initial.currentIdentityFacts) {
+    allFacts.push(resized, drained)
+    const initial = allFacts[0]
+    for (const facts of allFacts) {
+        if (facts.currentStableIdentityHash !== initial?.currentStableIdentityHash ||
+            facts.currentStableIdentityCount !== initial?.currentStableIdentityCount ||
+            facts.currentIdentityFacts !== initial?.currentIdentityFacts) {
             failures.push('persistent DEM graph identity changed')
             break
         }
     }
-    validatePersistentCounts(initial, resized, failures)
+    if (initial !== undefined) validatePersistentCounts(initial, resized, failures)
 
-    if (Number(resized.resizeGeneration) !== Number(moved.resizeGeneration) + 1) {
+    const beforeResize = scenarios.at(-1)?.facts?.at(-1)
+    if (Number(resized.resizeGeneration) !== Number(beforeResize?.resizeGeneration) + 1) {
         failures.push('browser resize did not produce exactly one resize generation')
     }
     const resize = parseJson(resized.lastResizeFacts, 'resize facts', failures)
@@ -607,8 +880,10 @@ function validateNormalProof(proof, failures) {
             'dem-frame-scheduler',
             'window-resize-listener',
             'map-render-listener',
-            'dem-virtual-raster-streaming',
+            'dem-virtual-raster-demand',
             'pagehide-listener',
+            'dem-gpu-frontier',
+            'dem-virtual-raster-streaming',
             'maplibre-map',
             'scratch-runtime',
         ], failures)
@@ -622,20 +897,14 @@ function validateNormalProof(proof, failures) {
         failures.push(`terminal page status was ${proof.terminalStatus}`)
     }
 
-    for (const [ label, sample ] of [
-        [ 'initial', proof.pixels.initial ],
-        [ 'moved', proof.pixels.moved ],
-        [ 'resized', proof.pixels.resized ],
-    ]) {
+    for (const [ label, sample ] of [ [ 'resized', proof.pixels.resized ] ]) {
         if (sample.nonBackgroundPixels < 1_000 || sample.nonTransparentPixels < 100 ||
             sample.channelRange < 8 || sample.meanLuma < 0.05) {
             failures.push(`${label} DEM screenshot was blank or visually uniform`)
         }
     }
-    if (proof.pixelHashes.initial === proof.pixelHashes.moved ||
-        proof.pixels.movement.changedPixels < 100 ||
-        proof.pixels.movement.meanRgbDelta < 0.01) {
-        failures.push('controlled camera change did not change enough terrain pixels')
+    if (scenarios.length >= 2 && scenarios[0].pixelHashes.final === scenarios[1].pixelHashes.final) {
+        failures.push('zoom 9 and zoom 10 produced identical terrain pixels')
     }
     if (proof.completeImageRequests.length > 0) {
         failures.push('normal DEM page requested the complete dem.png asset')
@@ -651,12 +920,18 @@ function validateDemFacts(label, facts, failures, expectedStatus = 'ready') {
     if (facts.status !== expectedStatus) failures.push(`${label} status was ${facts.status}`)
     if (facts.proofMode !== 'true') failures.push(`${label} deterministic proof mode was not active`)
     if (facts.adapterAcquired !== 'true') failures.push(`${label} runtime adapter was not acquired`)
-    if (facts.stageOrder !== expectedStageOrder.join('|') || facts.stageCount !== '2') {
+    if (facts.stageOrder !== expectedStageOrder.join('|') ||
+        facts.stageCount !== String(expectedStageOrder.length)) {
         failures.push(`${label} stage order was incorrect`)
     }
     const count = Number(facts.visibleNodeCount)
-    if (!Number.isSafeInteger(count) || count < 0 || count > 5_000) {
-        failures.push(`${label} visible node count was outside 0..5000`)
+    if (!Number.isSafeInteger(count) || count < 1 || count > 5_000) {
+        failures.push(`${label} visible node count was outside 1..5000`)
+    }
+    if (facts.selectionPath !== 'gpu-resident-active-frontier' ||
+        facts.countPath !== 'gpu-produced-indirect-arguments' ||
+        facts.cpuSelectionUploadCount !== '0') {
+        failures.push(`${label} did not use the clean GPU selection/count path`)
     }
     if (facts.diagnosticsBounded !== 'true') failures.push(`${label} diagnostics were not bounded`)
     if (facts.diagnosticIncidents !== '0') failures.push(`${label} retained a diagnostic incident`)
@@ -664,24 +939,9 @@ function validateDemFacts(label, facts, failures, expectedStatus = 'ready') {
     if (facts.deviceLosses !== '0') failures.push(`${label} reported device loss`)
 
     const identity = parseJson(facts.currentIdentityFacts, `${label} identity facts`, failures)
-    const expectedIdentityCounts = {
-        count: 46,
-        resources: 16,
-        uploads: 12,
-        bindLayouts: 5,
-        bindSets: 5,
-        programs: 2,
-        pipelines: 2,
-        passes: 2,
-        commands: 2,
-    }
-    for (const [ name, expected ] of Object.entries(expectedIdentityCounts)) {
-        if (identity?.[name] !== expected) {
-            failures.push(`${label} current identity ${name} was not ${expected}`)
-        }
-    }
     if (identity?.hash !== facts.currentStableIdentityHash ||
-        String(identity?.count) !== facts.currentStableIdentityCount) {
+        String(identity?.count) !== facts.currentStableIdentityCount ||
+        identity?.resources < 1 || identity?.commands < 1) {
         failures.push(`${label} current identity hash/count publication was inconsistent`)
     }
 
@@ -693,14 +953,11 @@ function validateDemFacts(label, facts, failures, expectedStatus = 'ready') {
     }
     const provenance = parseJson(facts.provenance, `${label} provenance`, failures)
     if (!Array.isArray(provenance) ||
-        provenance.length < requiredProvenanceNames.length ||
-        provenance.length > requiredProvenanceNames.length + 1) {
+        provenance.length !== requiredProvenanceNames.length) {
         failures.push(`${label} provenance did not contain the exact required chains`)
     } else {
         for (const [ index, chain ] of provenance.entries()) {
-            const expectedName = index < requiredProvenanceNames.length
-                ? requiredProvenanceNames[index]
-                : optionalProvenanceName
+            const expectedName = requiredProvenanceNames[index]
             if (chain.name !== expectedName) {
                 failures.push(`${label} provenance chain ${index} was incorrect`)
             }
@@ -716,15 +973,28 @@ function validateDemFacts(label, facts, failures, expectedStatus = 'ready') {
         }
     }
     const contract = parseJson(facts.graphContract, `${label} graph contract`, failures)
-    if (contract?.countPath !== 'uploaded-indirect-arguments' ||
-        contract?.maxNodes !== 5_000 || contract?.terrainVertexCount !== 24_576 ||
+    if (contract?.countPath !== 'gpu-produced-indirect-arguments' ||
+        contract?.selectionPath !== 'gpu-resident-active-frontier' ||
+        contract?.terrainVertexCount !== 24_576 ||
         JSON.stringify(contract?.stageOrder) !== JSON.stringify(expectedStageOrder)) {
         failures.push(`${label} persistent graph contract drifted`)
     }
     if (contract?.virtualRaster?.completeImageUpload !== false ||
         contract?.virtualRaster?.crossPageFiltering !== 'logical-bilinear' ||
-        contract?.virtualRaster?.coordinateEncoding !== 'cell-local-f32') {
+        contract?.virtualRaster?.coordinateEncoding !== 'wide-fixed') {
         failures.push(`${label} virtual raster graph contract drifted`)
+    }
+    const frontier = parseJson(facts.frontier, `${label} frontier facts`, failures)
+    if (frontier?.visibleInstanceCount !== count ||
+        frontier?.activeFrontierCount < frontier?.visibleInstanceCount ||
+        frontier?.demandCount !== Number(facts.demandCount) ||
+        frontier?.staleGenerationCount !== 0 || frontier?.frontierOverflow ||
+        frontier?.demandOverflow || frontier?.visibleOverflow) {
+        failures.push(`${label} GPU frontier facts were inconsistent`)
+    }
+    if (expectedStatus === 'ready' && (facts.frontierConverged !== 'true' ||
+        frontier?.convergenceState !== 'converged' || frontier?.demandCount !== 0)) {
+        failures.push(`${label} GPU frontier did not converge`)
     }
     validateVirtualRasterFacts(label, facts, failures)
 }
@@ -735,13 +1005,13 @@ function validateVirtualRasterFacts(label, facts, failures) {
     const residency = virtualRaster?.residency
     const gpu = virtualRaster?.gpu
     const maximumPages = Number(facts.maxPhysicalPages)
-    if (!Number.isSafeInteger(maximumPages) || maximumPages < 2 || maximumPages > 18) {
+    if (!Number.isSafeInteger(maximumPages) || maximumPages < 2 || maximumPages > 64) {
         failures.push(`${label} physical page budget was invalid`)
     }
-    if (virtualRaster?.coordinateEncoding !== 'cell-local-f32' ||
-        !Number.isFinite(virtualRaster?.coordinateQuantum) ||
-        !Array.isArray(virtualRaster?.failedPageKeys) ||
-        virtualRaster.failedPageKeys.length !== 0) {
+    if (virtualRaster?.coordinateEncoding !== 'wide-fixed' ||
+        virtualRaster?.coordinateBits !== 40 ||
+        !Number.isFinite(virtualRaster?.coordinateQuantumMeters) ||
+        virtualRaster.coordinateQuantumMeters <= 0 || residency?.failedCount !== 0) {
         failures.push(`${label} virtual raster precision or failure facts were invalid`)
     }
     if (residency?.residentCount < 1 || residency?.residentCount > maximumPages ||
@@ -764,14 +1034,9 @@ function validatePersistentCounts(before, after, failures) {
 
     const first = parseJson(before.persistentFacts, 'initial persistent facts', failures)
     const second = parseJson(after.persistentFacts, 'resized persistent facts', failures)
-    for (const [ name, expected ] of [
-        [ 'resources', 16 ],
-        [ 'bindLayouts', 5 ],
-        [ 'bindSets', 5 ],
-        [ 'pipelines', 2 ],
-    ]) {
-        if (first?.[name] !== expected || second?.[name] !== expected) {
-            failures.push(`persistent ${name} count changed or was not ${expected}`)
+    for (const name of [ 'resources', 'bindLayouts', 'bindSets', 'pipelines' ]) {
+        if (!Number.isSafeInteger(first?.[name]) || first[name] !== second?.[name]) {
+            failures.push(`persistent ${name} count changed across resize`)
         }
     }
 }
@@ -819,10 +1084,10 @@ function validateFailureProof(result, failures) {
     const compilation = proof?.incident?.shaderModuleCompilationReport
     if (compilation?.shaderModuleId !== target?.shaderModuleId ||
         compilation?.sourceHash !== target?.sourceHash ||
-        compilation?.sourcePartCount !== 2 ||
-        compilation?.retainedSourcePartCount !== 2 ||
+        compilation?.sourcePartCount !== 3 ||
+        compilation?.retainedSourcePartCount !== 3 ||
         compilation?.errorCount < 1) {
-        failures.push(`${prefix} did not retain the two localized source-part compilation report`)
+        failures.push(`${prefix} did not retain the three localized source-part compilation report`)
     }
     if (proof?.captureBounds?.maxOperations !== 1 ||
         proof?.captureBounds?.maxDurationMs !== 2_000 ||
@@ -845,8 +1110,9 @@ function validateFailureProof(result, failures) {
         failures.push(`${prefix} exported raw WGSL source evidence`)
     }
     validateCleanup(proof, [
-        'dem-virtual-raster-streaming',
+        'dem-virtual-raster-demand',
         'pagehide-listener',
+        'dem-virtual-raster-streaming',
         'maplibre-map',
         'scratch-runtime',
     ], failures)
@@ -883,13 +1149,21 @@ function validateCleanEvents(label, events, failures, expectedConsoleFailures) {
 
 function summarizeNormalProof(proof) {
 
-    const selection = facts => parseJsonOrUndefined(facts.selection)
     const resize = parseJsonOrUndefined(proof.resizedFacts.lastResizeFacts)
     return {
-        initial: summarizeFacts(proof.initialFacts, selection(proof.initialFacts)),
-        moved: summarizeFacts(proof.movedFacts, selection(proof.movedFacts)),
+        scenarios: proof.scenarios.map(result => ({
+            name: result.name,
+            camera: result.camera,
+            stableFrameCount: result.facts.length,
+            stableSignatureCount: new Set(result.signatures).size,
+            signatures: new Set(result.signatures).size === 1 ? undefined : result.signatures,
+            final: summarizeFacts(result.facts.at(-1)),
+            screenshots: result.screenshots,
+            pixelHashes: result.pixelHashes,
+            pixels: result.pixels,
+        })),
         resized: {
-            ...summarizeFacts(proof.resizedFacts, selection(proof.resizedFacts)),
+            ...summarizeFacts(proof.resizedFacts),
             resize,
         },
         drained: {
@@ -912,6 +1186,7 @@ function summarizeNormalProof(proof) {
         consoleWarnings: proof.consoleWarnings,
         pageErrors: proof.pageErrors,
         requestFailures: proof.requestFailures,
+        cancelledTileRequestCount: proof.cancelledTileRequests.length,
         httpFailures: proof.httpFailures,
         requestCount: proof.requests.length,
         tileRequestCount: proof.tileRequests.length,
@@ -919,14 +1194,21 @@ function summarizeNormalProof(proof) {
     }
 }
 
-function summarizeFacts(facts, selection) {
+function summarizeFacts(facts) {
 
+    const frontier = parseJsonOrUndefined(facts.frontier)
     return {
         status: facts.status,
         frames: Number(facts.frames),
         observedFrames: Number(facts.observedFrames),
         visibleNodeCount: Number(facts.visibleNodeCount),
-        levelRange: selection?.levelRange,
+        frontierCount: Number(facts.frontierCount),
+        levelRange: [
+            frontier?.minimumSelectedMatrixLevel,
+            frontier?.maximumSelectedMatrixLevel,
+        ],
+        convergenceState: frontier?.convergenceState,
+        cameraView: parseJsonOrUndefined(facts.cameraView),
         stableIdentityCount: Number(facts.currentStableIdentityCount),
         stableIdentityHash: facts.currentStableIdentityHash,
         identityFacts: parseJsonOrUndefined(facts.currentIdentityFacts),
@@ -999,23 +1281,6 @@ function parseJson(value, label, failures) {
     } catch {
         failures.push(`${label} was not valid JSON`)
         return undefined
-    }
-}
-
-function selectionParityFacts(selection) {
-
-    if (selection === undefined) return undefined
-    return {
-        candidateCount: selection.candidateCount,
-        selectedCount: selection.selectedCount,
-        cappedCount: selection.cappedCount,
-        droppedCount: selection.droppedCount,
-        visibleNodeCount: selection.visibleNodeCount,
-        tileBox: selection.tileBox,
-        levelRange: selection.levelRange,
-        sectorRange: selection.sectorRange,
-        nodeLevels: selection.nodeLevels,
-        nodeBoxes: selection.nodeBoxes,
     }
 }
 

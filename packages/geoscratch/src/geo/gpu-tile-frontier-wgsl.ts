@@ -53,6 +53,7 @@ export const gpuTileFrontierWgslBindings = Object.freeze({
     diagnosticsOutput: 19,
     drawArgumentsOutput: 20,
     nextDispatchArguments: 21,
+    pageTable: 22,
 })
 
 export type GpuTileFrontierWgslModule = Readonly<{
@@ -150,7 +151,7 @@ const LOOKUP_KEY: u32 = 0u;
 const LOOKUP_INDEX: u32 = 1u;
 const LOOKUP_EPOCH: u32 = 2u;
 
-const DECISION_STRIDE: u32 = 17u;
+const DECISION_STRIDE: u32 = 18u;
 const DECISION_TRANSITION: u32 = 0u;
 const DECISION_PRIORITY: u32 = 1u;
 const DECISION_ACCEPTED: u32 = 2u;
@@ -168,6 +169,7 @@ const DECISION_BLOCKED: u32 = 13u;
 const DECISION_COVERED_CHILD_COUNT: u32 = 14u;
 const DECISION_LIVE_REFINE: u32 = 15u;
 const DECISION_BASE_PRIORITY: u32 = 16u;
+const DECISION_COARSEN_GRACE_PENDING: u32 = 17u;
 
 const PREFIX_STRIDE: u32 = 8u;
 const PREFIX_NEXT: u32 = 0u;
@@ -199,12 +201,16 @@ const COUNTER_SNAPSHOT_EPOCH: u32 = 18u;
 const COUNTER_FALLBACK_COUNT: u32 = 19u;
 const COUNTER_ACCEPTED_REFINE: u32 = 20u;
 const COUNTER_ACCEPTED_COARSEN: u32 = 21u;
-const COUNTER_LAST: u32 = COUNTER_ACCEPTED_COARSEN;
+const COUNTER_COARSEN_GRACE_PENDING: u32 = 22u;
+const COUNTER_LAST: u32 = COUNTER_COARSEN_GRACE_PENDING;
 
 const TRANSITION_RETAIN: u32 = 0u;
 const TRANSITION_REFINE: u32 = 1u;
 const TRANSITION_COARSEN: u32 = 2u;
 const TRANSITION_STALE: u32 = 3u;
+const PAGE_TABLE_STRIDE: u32 = 8u;
+const PAGE_TABLE_STATUS: u32 = 3u;
+const PAGE_TABLE_SNAPSHOT_EPOCH: u32 = 7u;
 
 @group(0) @binding(${gpuTileFrontierWgslBindings.mapMeta}) var<uniform> mapMeta: GpuTileFrontierMapMeta;
 @group(0) @binding(${gpuTileFrontierWgslBindings.policy}) var<uniform> selectionPolicy: GpuTileFrontierPolicy;
@@ -228,6 +234,7 @@ const TRANSITION_STALE: u32 = 3u;
 @group(0) @binding(${gpuTileFrontierWgslBindings.diagnosticsOutput}) var<storage, read_write> diagnosticsOutput: GpuTileFrontierDiagnostics;
 @group(0) @binding(${gpuTileFrontierWgslBindings.drawArgumentsOutput}) var<storage, read_write> drawArgumentsOutput: array<u32>;
 @group(0) @binding(${gpuTileFrontierWgslBindings.nextDispatchArguments}) var<storage, read_write> nextDispatchArguments: array<u32>;
+@group(0) @binding(${gpuTileFrontierWgslBindings.pageTable}) var<storage, read> virtualPageTable: array<u32>;
 
 struct FrontierBounds {
     minimum: vec3f,
@@ -561,6 +568,22 @@ fn childMissingMask(entry: GpuTileFrontierEntry) -> u32 {
     return mask;
 }
 
+fn childTerminalFailureMask(entry: GpuTileFrontierEntry) -> u32 {
+    if (entry.matrixLevel >= selectionPolicy.maximumMatrixLevel) { return 0u; }
+    var mask = 0u;
+    for (var child = 0u; child < 4u; child += 1u) {
+        let row = entry.tileRow * 2u + child / 2u;
+        let column = entry.tileCol * 2u + child % 2u;
+        if (!tileWithinCoverage(entry.matrixLevel + 1u, row, column)) { continue; }
+        let base = compactIndexFor(entry.matrixLevel + 1u, row, column) * PAGE_TABLE_STRIDE;
+        if (virtualPageTable[base + PAGE_TABLE_STATUS] == 4u &&
+            virtualPageTable[base + PAGE_TABLE_SNAPSHOT_EPOCH] == mapMeta.residencySnapshotEpoch) {
+            mask = mask | (1u << child);
+        }
+    }
+    return mask;
+}
+
 fn addressesNeighbor(
     leftLevel: u32,
     leftRow: u32,
@@ -722,9 +745,14 @@ fn evaluateFrontier(@builtin(global_invocation_id) globalId: vec3u) {
     let visible = webGpuClipVisible(bounds);
     let sse = screenSpaceError(entry.matrixLevel, bounds);
     var transition = TRANSITION_RETAIN;
-    let liveRefine = visible && sse > selectionPolicy.refineErrorPixels &&
+    let refinePressure = visible && sse > selectionPolicy.refineErrorPixels &&
         entry.matrixLevel < selectionPolicy.maximumMatrixLevel;
+    let terminalChildMask = childTerminalFailureMask(entry);
+    let liveRefine = refinePressure && terminalChildMask == 0u;
     let invisibleAge = mapMeta.frameEpoch - min(mapMeta.frameEpoch, entry.transitionState);
+    let coarsenGracePending = !visible &&
+        entry.matrixLevel > selectionPolicy.minimumMatrixLevel &&
+        invisibleAge <= selectionPolicy.invisibleGraceFrames;
     let eligibleCoarsen = entry.matrixLevel > selectionPolicy.minimumMatrixLevel &&
         ((visible && sse < selectionPolicy.coarsenErrorPixels) ||
             (!visible && invisibleAge > selectionPolicy.invisibleGraceFrames));
@@ -749,6 +777,10 @@ fn evaluateFrontier(@builtin(global_invocation_id) globalId: vec3u) {
     atomicStore(&decisionWrite[decisionOffset(index, DECISION_CANDIDATE)], select(0u, 1u, liveRefine));
     atomicStore(&decisionWrite[decisionOffset(index, DECISION_COVERED_CHILD_COUNT)], coveredChildren);
     atomicStore(&decisionWrite[decisionOffset(index, DECISION_LIVE_REFINE)], select(0u, 1u, liveRefine));
+    atomicStore(&decisionWrite[decisionOffset(index, DECISION_COARSEN_GRACE_PENDING)], select(0u, 1u, coarsenGracePending));
+    if (refinePressure && terminalChildMask != 0u) {
+        atomicAdd(&countersWrite[COUNTER_FALLBACK_COUNT], 1u);
+    }
     atomicMax(&countersWrite[COUNTER_MAXIMUM_SSE_BITS], bitcast<u32>(max(sse, 0.0)));
 }
 
@@ -789,6 +821,37 @@ fn siblingGroupReady(entry: GpuTileFrontierEntry) -> bool {
     ) != FRONTIER_INVALID_U32;
 }
 
+fn siblingGroupGracePending(entry: GpuTileFrontierEntry) -> bool {
+    if (!isCanonicalCoveredSibling(entry)) { return false; }
+    let parentLevel = entry.matrixLevel - 1u;
+    let parentRow = entry.tileRow / 2u;
+    let parentColumn = entry.tileCol / 2u;
+    if (residentSlotFor(
+        parentLevel,
+        parentRow,
+        parentColumn,
+        mapMeta.residencySnapshotEpoch
+    ) == FRONTIER_INVALID_U32) { return false; }
+    var hasPendingSibling = false;
+    for (var sibling = 0u; sibling < 4u; sibling += 1u) {
+        let row = parentRow * 2u + sibling / 2u;
+        let column = parentColumn * 2u + sibling % 2u;
+        if (!tileWithinCoverage(entry.matrixLevel, row, column)) { continue; }
+        let siblingIndex = lookupIndex(compactIndexFor(entry.matrixLevel, row, column));
+        if (siblingIndex == FRONTIER_INVALID_U32) { return false; }
+        let transition = atomicLoad(&decisionWrite[decisionOffset(siblingIndex, DECISION_TRANSITION)]);
+        let pending = atomicLoad(&decisionWrite[decisionOffset(siblingIndex, DECISION_COARSEN_GRACE_PENDING)]) == 1u;
+        if (transition != TRANSITION_COARSEN && !pending) { return false; }
+        hasPendingSibling = hasPendingSibling || pending;
+    }
+    return hasPendingSibling;
+}
+
+fn stickyDemandCandidate(entry: GpuTileFrontierEntry, missingMask: u32) -> bool {
+    return entry.previousLodState == TRANSITION_REFINE &&
+        (entry.childDemandMask & missingMask) != 0u;
+}
+
 @compute @workgroup_size(1)
 fn selectBudgets(@builtin(global_invocation_id) globalId: vec3u) {
     if (globalId.x != 0u) { return; }
@@ -823,6 +886,28 @@ fn selectBudgets(@builtin(global_invocation_id) globalId: vec3u) {
     var acceptedActiveCount = currentCount - staleCount;
     var acceptedDemandCount = 0u;
     var acceptedTransitionPages = 0u;
+    for (var index = 0u; index < currentCount; index += 1u) {
+        if (atomicLoad(&decisionWrite[decisionOffset(index, DECISION_CANDIDATE)]) != 1u ||
+            atomicLoad(&decisionWrite[decisionOffset(index, DECISION_BLOCKED)]) == 1u) {
+            continue;
+        }
+        let entry = currentFrontier[index];
+        let missingMask = atomicLoad(&decisionWrite[decisionOffset(index, DECISION_MISSING_CHILD_MASK)]);
+        if (!stickyDemandCandidate(entry, missingMask)) { continue; }
+        let missingCount = countOneBits(missingMask);
+        let activeCost = 3u;
+        if (acceptedActiveCount + activeCost <= selectionPolicy.maximumActiveTiles &&
+            acceptedDemandCount + missingCount <= selectionPolicy.maximumDemands &&
+            acceptedTransitionPages + missingCount <= selectionPolicy.transitionReservePages) {
+            atomicStore(&decisionWrite[decisionOffset(index, DECISION_ACCEPTED)], 1u);
+            atomicStore(&decisionWrite[decisionOffset(index, DECISION_TRANSITION)], TRANSITION_REFINE);
+            acceptedActiveCount += activeCost;
+            acceptedDemandCount += missingCount;
+            acceptedTransitionPages += missingCount;
+        } else {
+            atomicAdd(&countersWrite[COUNTER_BUDGET_LIMITED_COUNT], 1u);
+        }
+    }
     var bucket = 255i;
     loop {
         for (var index = 0u; index < currentCount; index += 1u) {
@@ -831,7 +916,10 @@ fn selectBudgets(@builtin(global_invocation_id) globalId: vec3u) {
                 atomicLoad(&decisionWrite[decisionOffset(index, DECISION_PRIORITY)]) != u32(bucket)) {
                 continue;
             }
-            let missingCount = countOneBits(atomicLoad(&decisionWrite[decisionOffset(index, DECISION_MISSING_CHILD_MASK)]));
+            let entry = currentFrontier[index];
+            let missingMask = atomicLoad(&decisionWrite[decisionOffset(index, DECISION_MISSING_CHILD_MASK)]);
+            if (stickyDemandCandidate(entry, missingMask)) { continue; }
+            let missingCount = countOneBits(missingMask);
             let activeCost = 3u;
             if (acceptedActiveCount + activeCost <= selectionPolicy.maximumActiveTiles &&
                 acceptedDemandCount + missingCount <= selectionPolicy.maximumDemands &&
@@ -866,6 +954,13 @@ fn selectBudgets(@builtin(global_invocation_id) globalId: vec3u) {
         }
         atomicAdd(&countersWrite[COUNTER_COARSEN_COUNT], 1u);
     }
+    var gracePendingCount = 0u;
+    for (var index = 0u; index < currentCount; index += 1u) {
+        if (siblingGroupGracePending(currentFrontier[index])) {
+            gracePendingCount += 1u;
+        }
+    }
+    atomicStore(&countersWrite[COUNTER_COARSEN_GRACE_PENDING], gracePendingCount);
 }
 
 fn resolvedVisibleCount(index: u32, entry: GpuTileFrontierEntry, transition: u32, accepted: bool, missingMask: u32) -> u32 {
@@ -1325,6 +1420,7 @@ fn finalizeArguments(@builtin(global_invocation_id) globalId: vec3u) {
     diagnosticsOutput.visibleInstanceCount = visibleCount;
     diagnosticsOutput.refineCandidateCount = atomicLoad(&countersWrite[COUNTER_REFINE_COUNT]);
     diagnosticsOutput.coarsenCandidateCount = atomicLoad(&countersWrite[COUNTER_COARSEN_COUNT]);
+    diagnosticsOutput.coarsenGracePendingCount = atomicLoad(&countersWrite[COUNTER_COARSEN_GRACE_PENDING]);
     diagnosticsOutput.demandCount = demandCount;
     diagnosticsOutput.fallbackCount = atomicLoad(&countersWrite[COUNTER_FALLBACK_COUNT]);
     diagnosticsOutput.staleGenerationCount = atomicLoad(&countersWrite[COUNTER_STALE_COUNT]);
@@ -1335,9 +1431,10 @@ fn finalizeArguments(@builtin(global_invocation_id) globalId: vec3u) {
     diagnosticsOutput.frontierOverflow = atomicLoad(&countersWrite[COUNTER_FRONTIER_OVERFLOW]);
     diagnosticsOutput.demandOverflow = atomicLoad(&countersWrite[COUNTER_DEMAND_OVERFLOW]);
     diagnosticsOutput.visibleOverflow = atomicLoad(&countersWrite[COUNTER_VISIBLE_OVERFLOW]);
-    let transitioning = demandCount > 0u || diagnosticsOutput.fallbackCount > 0u ||
+    let transitioning = demandCount > 0u ||
         atomicLoad(&countersWrite[COUNTER_ACCEPTED_REFINE]) > 0u ||
-        atomicLoad(&countersWrite[COUNTER_ACCEPTED_COARSEN]) > 0u;
+        atomicLoad(&countersWrite[COUNTER_ACCEPTED_COARSEN]) > 0u ||
+        atomicLoad(&countersWrite[COUNTER_COARSEN_GRACE_PENDING]) > 0u;
     diagnosticsOutput.convergenceState = select(
         select(0u, 1u, transitioning),
         2u,
@@ -1345,7 +1442,6 @@ fn finalizeArguments(@builtin(global_invocation_id) globalId: vec3u) {
     );
     diagnosticsOutput.reserved0 = atomicLoad(&countersWrite[COUNTER_LOOKUP_DUPLICATE]);
     diagnosticsOutput.reserved1 = atomicLoad(&countersWrite[COUNTER_BALANCE_REJECTED]);
-    diagnosticsOutput.reserved2 = atomicLoad(&countersWrite[COUNTER_RETIRE_COUNT]);
 }
 `
 

@@ -141,6 +141,38 @@ describe('virtual raster demand reconciliation', () => {
         await fixture.scheduler.dispose()
     })
 
+    it('publishes classified terminal failures and does not request them again', async() => {
+
+        const fixture = createFixture({ terminalFailureCode: 'SOURCE_PAGE_MISSING' })
+        const page = fixture.pages[0]
+        const first = fixture.scheduler.reconcile(virtualRasterDemandSet({
+            generation: 1,
+            demands: [ demand(page, 1, 'user-visible', 1, 'detail', 'required') ],
+        }))
+        const request = fixture.executor.requests.get(page.key)
+        request.reject(new Error('source returned 404'))
+
+        expect(await first.settled).to.deep.include({ failedCount: 1 })
+        expect(request.discarded).to.equal(true)
+        expect(fixture.residency.availability(page)).to.equal('failed')
+        expect(fixture.scheduler.publish().snapshot.resolve(page).status).to.equal('failed')
+
+        const repeated = fixture.scheduler.reconcile(virtualRasterDemandSet({
+            generation: 2,
+            demands: [ demand(page, 2, 'user-visible', 2, 'detail', 'required') ],
+        }))
+        expect(repeated).to.deep.include({ requestedCount: 0, retainedCount: 1 })
+        expect(fixture.executor.order).to.deep.equal([ page.key ])
+        expect(fixture.scheduler.inspect().history).to.deep.include({
+            sequence: 2,
+            kind: 'failed',
+            generation: 1,
+            pageKey: page.key,
+            detail: 'SOURCE_PAGE_MISSING: source returned 404',
+        })
+        await fixture.scheduler.dispose()
+    })
+
     it('waits for cancelled request disposal before scheduler disposal resolves', async() => {
 
         const fixture = createFixture({ rejectOnCancel: true })
@@ -269,6 +301,13 @@ class FakeExecutor {
             },
             accept: async() => { request.accepted = true },
             discard: async() => { request.discarded = true },
+            classifyFailure: error => this.options.terminalFailureCode === undefined
+                ? undefined
+                : {
+                    disposition: 'terminal',
+                    code: this.options.terminalFailureCode,
+                    detail: error.message,
+                },
             resolve: value => deferred.resolve(value),
             reject: error => deferred.reject(error),
         }

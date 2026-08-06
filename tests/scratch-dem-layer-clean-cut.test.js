@@ -143,6 +143,9 @@ describe('DEM Layer clean cut', () => {
         expect(layerSource).to.include('GpuTileFrontier.create(')
         expect(layerSource).to.include('frontier.encode(builder, frame)')
         expect(layerSource).to.include('feedbackRing.encode(builder, frame)')
+        expect(layerSource).to.include("feedback.facts.convergenceState === 'transitioning'")
+        expect(layerSource).to.include('consumed?.decisionKey === decisionKey')
+        expect(layerSource).to.include('state.supersededFeedbackCount++')
         expect(layerSource).not.to.match(/selectTerrainNodes|nodeLevels|nodeBoxes|canonicalNodes/)
         expect(layerSource).not.to.match(/lodArguments\.upload|terrainArguments\.upload/)
         expect(virtualRasterSource).not.to.match(/\bprepare\(selection\)|planDemVirtualPages/)
@@ -150,6 +153,10 @@ describe('DEM Layer clean cut', () => {
         expect(mapSource).to.include('verticalFovRadians')
         expect(mapSource).to.include('cameraLatitudeRadians')
         expect(mapSource).to.include('zoomHint')
+        expect(mapSource).to.include('minimumTerrainElevationMeters')
+        expect(mainSourceFacts()).to.include('canvas.dataset.cpuSelectionUploadCount = \'0\'')
+        expect(mainSourceFacts()).to.include('canvas.dataset.frontier = JSON.stringify(')
+        expect(mainSourceFacts()).to.include('canvas.dataset.cameraView = JSON.stringify(')
         expect(mapSource).not.to.match(/\bcenter(?:High|Low)\b|\bcameraPos\b/)
     })
 
@@ -505,6 +512,9 @@ describe('DEM Layer clean cut', () => {
         const second = await graph.renderFrame(cameraState(10, [ 320, 180 ]))
         await second.observation
 
+        expect(second.needsFollowUp).to.equal(true)
+        expect(second.feedback).to.equal(undefined)
+
         expect(first.provenance.map(fact => fact.name)).to.deep.equal([
             'frontier-map-meta-to-lod-draw',
             'frontier-visible-to-lod-draw',
@@ -569,6 +579,11 @@ describe('DEM Layer clean cut', () => {
         await runtime.dispose()
     })
 })
+
+function mainSourceFacts() {
+
+    return read('examples', 'demLayer', 'main.ts')
+}
 
 function cameraState(zoomHint, viewport) {
 

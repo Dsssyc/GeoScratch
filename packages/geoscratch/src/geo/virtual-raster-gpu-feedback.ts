@@ -69,6 +69,7 @@ export type VirtualRasterGpuFeedbackCounters = Readonly<{
     visibleInstanceCount: number
     refineCandidateCount: number
     coarsenCandidateCount: number
+    coarsenGracePendingCount: number
     demandCount: number
     retirementCount: number
     staleGenerationCount: number
@@ -450,7 +451,7 @@ function decodeFeedback(
     assertCounterMatches(record, 'fallbackCount', counters[19]!)
     assertCounterMatches(record, 'reserved0', counters[15]!)
     assertCounterMatches(record, 'reserved1', counters[16]!)
-    assertCounterMatches(record, 'reserved2', counters[6]!)
+    assertCounterMatches(record, 'coarsenGracePendingCount', counters[22]!)
     const frontierOverflow = booleanField(record, 'frontierOverflow')
     const demandOverflow = booleanField(record, 'demandOverflow')
     const visibleOverflow = booleanField(record, 'visibleOverflow')
@@ -474,6 +475,7 @@ function decodeFeedback(
         visibleInstanceCount: counters[2]!,
         refineCandidateCount: counters[3]!,
         coarsenCandidateCount: counters[4]!,
+        coarsenGracePendingCount: counters[22]!,
         retirementCount: counters[6]!,
         staleGenerationCount: counters[7]!,
         budgetLimitedCount: counters[8]!,
@@ -533,6 +535,7 @@ function decodeFeedback(
         visibleInstanceCount: number
         refineCandidateCount: number
         coarsenCandidateCount: number
+        coarsenGracePendingCount: number
         demandCount: number
         fallbackCount: number
         staleGenerationCount: number
@@ -551,6 +554,7 @@ function decodeFeedback(
         visibleInstanceCount: numberField(record, 'visibleInstanceCount'),
         refineCandidateCount: numberField(record, 'refineCandidateCount'),
         coarsenCandidateCount: numberField(record, 'coarsenCandidateCount'),
+        coarsenGracePendingCount: numberField(record, 'coarsenGracePendingCount'),
         demandCount: numberField(record, 'demandCount'),
         fallbackCount: numberField(record, 'fallbackCount'),
         staleGenerationCount: numberField(record, 'staleGenerationCount'),
@@ -589,6 +593,7 @@ function decodeFeedback(
         visibleInstanceCount: counters[2]!,
         refineCandidateCount: counters[3]!,
         coarsenCandidateCount: counters[4]!,
+        coarsenGracePendingCount: counters[22]!,
         demandCount: counters[5]!,
         retirementCount: counters[6]!,
         staleGenerationCount: counters[7]!,
