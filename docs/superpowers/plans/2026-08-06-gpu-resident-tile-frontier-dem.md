@@ -57,6 +57,7 @@
 - Modify: `packages/geoscratch/src/geo/virtual-raster-gpu.ts`
 - Modify: `packages/geoscratch/src/geo/virtual-raster.ts`
 - Modify: `tests/geo-virtual-raster.test.js`
+- Modify: `tests/scratch-persistent-binding-final-parity.test.js`
 - Modify: `tests/types/public-api.ts`
 
 **Interfaces:**
@@ -80,7 +81,7 @@ expect(update.commands.at(-1)).to.equal(update.slotTableUpload)
 
 再使用 fake queue write bytes 断言两个 occupied slots 的 `valid/generation/contentEpoch/snapshotEpoch`，并断言 publication eviction 后被释放槽的 12 words 全为零。
 
-同一 test block 还必须锁定：terminal `failed` page 即使没有 physical slot，page-table status 仍编码为 `4` 而不是全零 `missing`；`gpuState.acknowledge()` 在 `submitted.nativeOutcome.status === 'observed-failed' | 'observation-failed' | 'unobserved'` 时拒绝 publication，保持 staged state 且不释放 staging bytes。`observed-succeeded` 才能推进 acknowledged epoch；无上传的 unchanged publication 只接受 `no-native-work`。
+同一 test block 还必须锁定：terminal `failed` page 即使没有 physical slot，page-table status 仍编码为 `4` 而不是全零 `missing`。包含本 publication upload command 的 changed publication 仅在 `submitted.nativeOutcome.status === 'observed-succeeded'` 时推进 acknowledged epoch；`observed-failed`、`observation-failed` 或 `unobserved` 必须保持 staged state 且不释放 staging bytes。无 upload、无 staging bytes、snapshot epoch 已经是当前 acknowledged epoch 的 unchanged publication 不归因于 submission 中的其他 native work，因此在同 runtime/command-membership 验证后直接 settle；既不要求整个 submission 是 `no-native-work`，也不让无关 draw failure阻塞这个 no-op settlement。
 
 - [ ] **Step 2: Run the focused test and record RED**
 
@@ -112,7 +113,7 @@ function encodeSlotTable(
 
 `#encodePageTable()` 不再跳过 terminal failure：写 status `4`、requested/resolved level、snapshot epoch 与无效 slot sentinel。`VirtualRasterSampleStatus` 增加 `failed`；`VirtualRasterAccessor.wgslModule()` 在 page-table/sample status `4` 时返回 distinct failed sample，不允许把它当 atlas slot、missing 或现有 status `3` 的 no-data。
 
-`acknowledge()` 在任何 residency mutation 前 `await submitted.nativeOutcome`，按前述规则 fail closed；失败诊断包含 submission id、snapshot epoch 和 native outcome。失败路径由调用方显式 `abandon(publication)` 或重试，不得暗中 acknowledge。
+Changed publication 的 `acknowledge()` 在任何 residency mutation 前 `await submitted.nativeOutcome`，按前述规则 fail closed；失败诊断包含 submission id、snapshot epoch 和 native outcome。失败路径由调用方显式 `abandon(publication)` 或重试，不得暗中 acknowledge。Unchanged publication 不等待或继承不相关 native work 的成败。
 
 - [ ] **Step 4: Keep non-tile Virtual Raster generic**
 
@@ -139,12 +140,12 @@ npm run typecheck
 git diff --check
 ```
 
-Expected: all commands PASS; fake queue writes show atlas uploads plus exactly two stable buffer uploads when a snapshot changes.
+Update the intentional declaration-signature count in `tests/scratch-persistent-binding-final-parity.test.js` for the three new public declarations, then run the full suite. Expected: all commands PASS; fake queue writes show atlas uploads plus exactly two stable buffer uploads when a snapshot changes.
 
 - [ ] **Step 6: Commit Task 1**
 
 ```bash
-git add packages/geoscratch/src/geo/virtual-raster-gpu.ts packages/geoscratch/src/geo/virtual-raster.ts tests/geo-virtual-raster.test.js tests/types/public-api.ts
+git add packages/geoscratch/src/geo/virtual-raster-gpu.ts packages/geoscratch/src/geo/virtual-raster.ts tests/geo-virtual-raster.test.js tests/scratch-persistent-binding-final-parity.test.js tests/types/public-api.ts
 git commit -m "Expose virtual raster GPU slot metadata"
 ```
 
