@@ -179,10 +179,10 @@ export function evaluateGpuTileFrontierReference(
             continue
         }
         fallbackCount++
-        const childIndexes = new Map(candidate.children.map((page, index) => [ page.key, index ]))
         let childDemandMask = 0
         for (const child of candidate.missingChildren) {
-            const childMask = 1 << childIndexes.get(child.key)!
+            const tile = child.tile!
+            const childMask = 1 << ((tile.tileRow % 2) * 2 + tile.tileCol % 2)
             childDemandMask |= childMask
             demands.push(Object.freeze({
                 page: child,

@@ -555,12 +555,7 @@ fn childMissingMask(entry: GpuTileFrontierEntry) -> u32 {
         let column = entry.tileCol * 2u + child % 2u;
         if (!tileWithinCoverage(entry.matrixLevel + 1u, row, column)) { continue; }
         if (residentSlotFor(entry.matrixLevel + 1u, row, column, mapMeta.residencySnapshotEpoch) == FRONTIER_INVALID_U32) {
-            mask = mask | (1u << coveredChildOrdinal(
-                entry.matrixLevel,
-                entry.tileRow,
-                entry.tileCol,
-                child
-            ));
+            mask = mask | (1u << child);
         }
     }
     return mask;
@@ -1246,13 +1241,7 @@ fn compactOutputs(@builtin(global_invocation_id) globalId: vec3u) {
             let childRow = entry.tileRow * 2u + child / 2u;
             let childColumn = entry.tileCol * 2u + child % 2u;
             if (!tileWithinCoverage(childLevel, childRow, childColumn)) { continue; }
-            let childOrdinal = coveredChildOrdinal(
-                entry.matrixLevel,
-                entry.tileRow,
-                entry.tileCol,
-                child
-            );
-            if ((missingMask & (1u << childOrdinal)) == 0u) { continue; }
+            if ((missingMask & (1u << child)) == 0u) { continue; }
             demandOutput[demandOffset] = GpuTileFrontierDemand(
                 samplingLevelFor(childLevel),
                 childLevel,
@@ -1265,7 +1254,7 @@ fn compactOutputs(@builtin(global_invocation_id) globalId: vec3u) {
                 decisionRead[decisionOffset(index, DECISION_PRIORITY)],
                 mapMeta.frameEpoch,
                 mapMeta.residencySnapshotEpoch,
-                1u << childOrdinal
+                1u << child
             );
             demandOffset += 1u;
         }

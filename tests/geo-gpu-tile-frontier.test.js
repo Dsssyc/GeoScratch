@@ -1833,6 +1833,39 @@ describe('Geo GPU tile frontier contracts and reference oracle', () => {
         })
     })
 
+    it('keeps physical quadrant bits when covered children are sparse', () => {
+
+        const fixture = createFixture({
+            minimumMatrixLevel: 1,
+            maximumMatrixLevel: 2,
+            errorByLevel: [ 100, 100_000, 100 ],
+            coverageLimits: {
+                1: {
+                    matrixId: '1',
+                    minTileRow: 0,
+                    maxTileRow: 0,
+                    minTileCol: 0,
+                    maxTileCol: 0,
+                },
+                2: {
+                    matrixId: '2',
+                    minTileRow: 0,
+                    maxTileRow: 1,
+                    minTileCol: 1,
+                    maxTileCol: 1,
+                },
+            },
+        })
+        const parent = fixture.entry(1, 0, 0)
+        const result = fixture.evaluate([ parent ], [ fixture.resident(1, 0, 0) ])
+
+        expect(result.demands.map(demand => demand.page.key)).to.deep.equal([
+            fixture.page(2, 0, 1).key,
+            fixture.page(2, 1, 1).key,
+        ])
+        expect(result.demands.map(demand => demand.childMask)).to.deep.equal([ 2, 8 ])
+    })
+
     it('replaces a parent only after all acknowledged children are resident', () => {
 
         const fixture = createFixture({ errorByLevel: [ 100, 100_000, 100, 100 ] })
