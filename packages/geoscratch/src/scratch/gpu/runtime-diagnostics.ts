@@ -10,6 +10,7 @@ import {
     serializedEvidenceBytes,
 } from './gpu-operation.js'
 import type { GPUDiagnosticSubjectDraft, ScratchDiagnosticSubject } from './diagnostics.js'
+import type { CommandResourceReadEpoch } from './command.js'
 import type {
     GPUAttributionConfidence,
     GPUDescriptorEvidence,
@@ -196,7 +197,7 @@ export type GPURuntimeReadbackCommandFact = Readonly<{
     label?: string
     sourceResourceId: string
     allocationVersion: number
-    contentEpoch: number
+    contentEpoch: CommandResourceReadEpoch
     byteLength: number
     state: GPUReadbackCommandState
     stagingAllocationOperationId?: string

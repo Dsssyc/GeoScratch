@@ -2377,6 +2377,33 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     const readbackCommand: scr.ReadbackCommand = await readbackCommandPromise
     const readbackCommandAlias: scratchCompat.ReadbackCommand = await readbackCommandAliasPromise
     const publicReadbackCommandSource: scr.ReadbackCommandSourceDescriptor = readbackCommand.source
+    const readbackCommandFact: scr.GPURuntimeReadbackCommandFact = {
+        id: 'typed-readback-command',
+        sourceResourceId: storageOutput.id,
+        allocationVersion: storageOutput.allocationVersion,
+        contentEpoch: currentReadEpoch,
+        byteLength: storageOutputRegion.size,
+        state: 'idle',
+    }
+    const readbackOperationFact: scr.GPURuntimeReadbackOperationFact = {
+        id: 'typed-readback-operation',
+        path: 'ordered',
+        state: 'scheduled',
+        retain: 'consume-on-read',
+        sourceKind: 'buffer',
+        sourceResourceId: storageOutput.id,
+        allocationVersion: storageOutput.allocationVersion,
+        contentEpoch: storageOutput.contentEpoch,
+        byteLength: storageOutputRegion.size,
+        stagingBytes: storageOutputRegion.size,
+        retainedHostBytes: 0,
+        isMapping: false,
+    }
+    const invalidCurrentReadbackOperationFact: scr.GPURuntimeReadbackOperationFact = {
+        ...readbackOperationFact,
+        // @ts-expect-error Readback operation facts always snapshot a numeric epoch
+        contentEpoch: currentReadEpoch,
+    }
     const orderedSubmitted: scr.SubmittedWork = runtime.submission()
         .readback(readbackCommand)
         .readback(readbackCommandAlias)
@@ -2568,6 +2595,9 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     void readbackCommandSource
     void compatReadbackCommandSource
     void publicReadbackCommandSource
+    void readbackCommandFact
+    void readbackOperationFact
+    void invalidCurrentReadbackOperationFact
     void compatReadbackCommandDescriptor
     void orderedSubmitted
     void orderedReadback

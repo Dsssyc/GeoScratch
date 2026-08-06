@@ -3584,7 +3584,7 @@ function readbackCommandFact(command: ReadbackCommand) {
         ...(command.label !== undefined ? { label: command.label } : {}),
         sourceResourceId: command.source.region.buffer.id,
         allocationVersion: command.source.region.buffer.allocationVersion,
-        contentEpoch: command.source.contentEpoch as number,
+        contentEpoch: command.source.contentEpoch,
         byteLength: command.source.region.size,
         state: state.state,
         stagingAllocationOperationId: state.slot.allocationOperationId,
