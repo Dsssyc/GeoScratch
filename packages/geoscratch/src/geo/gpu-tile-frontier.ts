@@ -223,6 +223,7 @@ type FrontierFeedbackRecord = {
     gpuState: VirtualRasterGpuState
     feedbackResource: BufferResource
     feedbackOutput: GpuTileFrontierFeedbackOutput
+    sequenceAuthority: SubmissionAuthority
     owners: Set<FeedbackOwner>
     disposed: boolean
 }
@@ -281,6 +282,7 @@ export class GpuTileFrontier {
             gpuState: descriptor.gpuState,
             feedbackResource: state.resources.feedbackOutput,
             feedbackOutput: state.parityTemplates[0].feedbackOutput,
+            sequenceAuthority: this.#frontierSequenceAuthority,
             owners: new Set(),
             disposed: false,
         })
@@ -692,6 +694,7 @@ export type GpuTileFrontierFeedbackAccess = Readonly<{
     resource: BufferResource
     region: BufferRegion
     output: GpuTileFrontierFeedbackOutput
+    sequenceRevision: number
 }>
 
 /** @internal Package-owned feedback capability; not exported by geo/index. */
@@ -710,6 +713,35 @@ export function gpuTileFrontierFeedbackAccess(
         resource: record.feedbackResource,
         region: record.feedbackResource.region(),
         output: record.feedbackOutput,
+        sequenceRevision: record.sequenceAuthority.revision,
+    })
+}
+
+export type GpuTileFrontierFeedbackFrameAccess = Readonly<{
+    pass: ComputePassSpec
+    commands: readonly DispatchCommand[]
+    viewCommand: UploadCommand
+    sequenceRevision: number
+}>
+
+/** @internal Package-owned frame provenance for bounded feedback scheduling. */
+export function gpuTileFrontierFeedbackFrameAccess(
+    frontier: GpuTileFrontier,
+    frame: GpuTileFrontierFrame
+): GpuTileFrontierFeedbackFrameAccess {
+
+    gpuTileFrontierFeedbackAccess(frontier)
+    const record = frameRecords.get(frame)
+    if (record?.owner !== frontier || frame.frontierId !== frontier.id) {
+        return invalidFrontier(frontier, 'GPU tile frontier feedback requires an owned frame.', {
+            frontierId: frontier.id,
+        }, { frontierId: frame?.frontierId })
+    }
+    return Object.freeze({
+        pass: record.pass,
+        commands: record.template.commands,
+        viewCommand: record.view.command,
+        sequenceRevision: record.view.sequenceStamp.revision,
     })
 }
 

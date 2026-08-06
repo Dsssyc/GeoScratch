@@ -1,6 +1,7 @@
 import { expect } from 'chai'
 import { GPURuntime } from 'geoscratch/scratch'
 import {
+    GeoDiagnosticError,
     GpuTileFrontier,
     VirtualRasterGpuFeedbackRing,
     VirtualRasterResidency,
@@ -91,6 +92,13 @@ async function createFeedbackFixture() {
         roots: [ root ],
         drawTemplates: [ { id: 'terrain', vertexCount: 6 } ],
     })
+    const seed = frontier.stageSeed(publication.snapshot)
+    const seedBuilder = runtime.createSubmission({ validation: 'throw' })
+    for (const command of seed.commands) {
+        if (command.commandKind === 'clear') seedBuilder.clear(command)
+        else seedBuilder.upload(command)
+    }
+    seedBuilder.submit()
     const view = frameEpoch => ({
         clipFromRelativeWorld: [
             1 / HALF_WORLD, 0, 0, 0,
@@ -155,6 +163,63 @@ describe('Geo Virtual Raster GPU feedback ring', () => {
         ])
         expect(fixture.gpuState.slotTable.isDisposed).to.equal(false)
 
+        fixture.gpuState.dispose()
+        fixture.residency.dispose()
+        fixture.runtime.dispose()
+    })
+
+    it('applies three-slot backpressure without blocking frontier submission', async() => {
+
+        const fixture = await createFeedbackFixture()
+        const ring = await VirtualRasterGpuFeedbackRing.create(fixture.frontier)
+        const issued = []
+
+        for (let frameEpoch = 0; frameEpoch < 3; frameEpoch++) {
+            const token = fixture.frontier.writeView(fixture.view(frameEpoch))
+            const frame = fixture.frontier.frame(token)
+            const builder = fixture.frontier.encode(
+                fixture.runtime.createSubmission({ validation: 'throw' }),
+                frame
+            )
+            expect(ring.encode(builder, frame)).to.equal(builder)
+            const submitted = builder.submit()
+            token.dispose()
+            issued.push({ frame, submitted })
+        }
+
+        expect(issued.map(({ submitted }) => submitted.readbacks.length))
+            .to.deep.equal([ 1, 1, 1 ])
+        expect(ring.facts().issuedCount).to.equal(3)
+        expect(ring.facts().slots.map(slot => slot.state)).to.deep.equal([
+            'submitted',
+            'submitted',
+            'submitted',
+        ])
+
+        const token = fixture.frontier.writeView(fixture.view(3))
+        const frame = fixture.frontier.frame(token)
+        const builder = fixture.frontier.encode(
+            fixture.runtime.createSubmission({ validation: 'throw' }),
+            frame
+        )
+        const stepCount = builder.steps.length
+        let backpressure
+        try {
+            ring.encode(builder, frame)
+        } catch (error) {
+            backpressure = error
+        }
+        expect(backpressure).to.be.instanceOf(GeoDiagnosticError)
+        expect(backpressure.diagnostic).to.deep.include({
+            code: 'GEO_GPU_TILE_FEEDBACK_BACKPRESSURE',
+            phase: 'selection',
+        })
+        expect(builder.steps).to.have.length(stepCount)
+        const submittedWithoutFeedback = builder.submit()
+        token.dispose()
+        expect(submittedWithoutFeedback.readbacks).to.deep.equal([])
+
+        fixture.frontier.dispose()
         fixture.gpuState.dispose()
         fixture.residency.dispose()
         fixture.runtime.dispose()
