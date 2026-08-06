@@ -222,10 +222,14 @@ export function gpuTileFrontierRenderWgslModule(
 ): GpuTileFrontierRenderWgslModule {
 
     return Object.freeze({
-        code: gpuTileFrontierVisibleInstanceCodec.wgslAccessors({
-            namespace: options.namespace ?? 'FrontierVisible',
-        }),
+        code: [
+            gpuTileFrontierMapMetaCodec.wgslAccessors({ namespace: 'FrontierMapMeta' }),
+            gpuTileFrontierVisibleInstanceCodec.wgslAccessors({
+                namespace: options.namespace ?? 'FrontierVisible',
+            }),
+        ].join('\n'),
         layoutDependencies: Object.freeze([
+            gpuTileFrontierMapMetaCodec.artifact,
             gpuTileFrontierVisibleInstanceCodec.artifact,
         ]),
     })

@@ -377,10 +377,13 @@ const typedFrontierRenderWgsl: GpuTileFrontierRenderWgslModule =
     gpuTileFrontierRenderWgslModule({ namespace: 'TypedFrontierVisible' })
 const typedFrontierVisibleBuffer: scr.BufferResource =
     typedFrontierRenderTemplates[0]!.visibleInstances
+const typedFrontierMapMetaBuffer: scr.BufferResource =
+    typedFrontierRenderTemplates[0]!.mapMeta
 const typedFrontierIndirectRegion: scr.BufferRegion =
     typedFrontierRenderTemplates[0]!.drawArgument.region
 void typedFrontierRenderWgsl
 void typedFrontierVisibleBuffer
+void typedFrontierMapMetaBuffer
 void typedFrontierIndirectRegion
 const typedFrontierFacts: GpuTileFrontierCoreFacts = typedGpuFrontier.facts()
 const typedFrontierFeedback: GpuTileFrontierFeedbackOutput = typedFrontierFrame.feedbackOutput

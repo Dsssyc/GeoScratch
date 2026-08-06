@@ -130,6 +130,7 @@ export type GpuTileFrontierRenderTemplate = Readonly<{
     source: 'A' | 'B'
     target: 'A' | 'B'
     templateId: string
+    mapMeta: BufferResource
     visibleInstances: BufferResource
     drawArgument: Readonly<{
         resource: BufferResource
@@ -682,6 +683,7 @@ export class GpuTileFrontier {
                 source: template.source,
                 target: template.target,
                 templateId: id,
+                mapMeta: this.#resources.mapMeta,
                 visibleInstances: template.visibleInstances,
                 drawArgument: Object.freeze({
                     resource: template.drawArguments,

@@ -789,11 +789,14 @@ describe('Geo GPU tile frontier contracts and reference oracle', () => {
         })
         expect(renderTemplates[0].visibleInstances).to.equal(even.visibleInstances)
         expect(renderTemplates[1].visibleInstances).to.equal(odd.visibleInstances)
+        expect(renderTemplates[0].mapMeta).to.equal(renderTemplates[1].mapMeta)
+        expect(renderTemplates[0].mapMeta.label).to.equal('GPU tile frontier mapMeta')
         expect(renderTemplates[0].drawArgument.region).to.equal(terrain.region)
         expect(Object.isFrozen(renderTemplates)).to.equal(true)
         expect(Object.isFrozen(renderTemplates[0])).to.equal(true)
         expect(renderWgsl.code).to.include('struct GpuTileFrontierVisibleInstance')
-        expect(renderWgsl.layoutDependencies).to.have.length(1)
+        expect(renderWgsl.code).to.include('struct GpuTileFrontierMapMeta')
+        expect(renderWgsl.layoutDependencies).to.have.length(2)
         for (const resource of [
             evenInternal.currentDispatchArguments,
             evenInternal.nextDispatchArguments,
