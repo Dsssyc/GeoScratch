@@ -43,6 +43,34 @@ export type VirtualRasterResidencyDescriptor = Readonly<{
     maxHistory?: number
 }>
 
+export type VirtualRasterResidencyLeaseDescriptor = Readonly<{
+    id: string
+    maximumPages: number
+    maxHistory?: number
+}>
+
+export type VirtualRasterResidencyLeasePageFacts = Readonly<{
+    pageKey: string
+    generation: number
+}>
+
+export type VirtualRasterResidencyLeaseHistoryEntry = Readonly<{
+    sequence: number
+    kind: 'retain' | 'release' | 'stale-retain' | 'stale-release' |
+        'invalidate' | 'dispose'
+    pageKey: string
+    generation: number
+}>
+
+export type VirtualRasterResidencyLeaseFacts = Readonly<{
+    id: string
+    disposed: boolean
+    retainedPageCount: number
+    maximumPages: number
+    retainedPages: readonly VirtualRasterResidencyLeasePageFacts[]
+    history: readonly VirtualRasterResidencyLeaseHistoryEntry[]
+}>
+
 export type VirtualRasterHistoryEntry = Readonly<{
     sequence: number
     kind: 'staged' | 'resident' | 'fallback' | 'eviction' | 'failed' | 'stale' |
@@ -130,6 +158,28 @@ const publicationUploads = new WeakMap<
     readonly PublicationUpload[]
 >()
 const publications = new WeakSet<VirtualRasterPublication>()
+
+type ResidencyLeaseRecord = Readonly<{
+    page: VirtualRasterPageIdentity
+    generation: number
+}>
+
+type ResidencyLeaseState = {
+    id: string
+    maximumPages: number
+    maxHistory: number
+    disposed: boolean
+    sequence: number
+    records: Map<string, ResidencyLeaseRecord>
+    history: VirtualRasterResidencyLeaseHistoryEntry[]
+    assertPage(page: VirtualRasterPageIdentity): void
+    currentGeneration(page: VirtualRasterPageIdentity): number | undefined
+    onDispose(): void
+}
+
+const residencyLeaseToken = Symbol('VirtualRasterResidencyLease')
+const residencyLeaseStates = new WeakMap<VirtualRasterResidencyLease, ResidencyLeaseState>()
+const MAX_U32 = 0xffff_ffff
 
 export class VirtualRasterPublication {
 
@@ -228,6 +278,119 @@ export function uploadPagesForPublication(
     return publicationUploads.get(publication) ?? Object.freeze([])
 }
 
+export class VirtualRasterResidencyLease {
+
+    private constructor(token: symbol, state: ResidencyLeaseState) {
+
+        if (token !== residencyLeaseToken || new.target !== VirtualRasterResidencyLease) {
+            throw new TypeError(
+                'VirtualRasterResidencyLease must be created by VirtualRasterResidency.createLease().'
+            )
+        }
+        residencyLeaseStates.set(this, state)
+        Object.freeze(this)
+    }
+
+    /** @internal */
+    static create(token: symbol, state: ResidencyLeaseState): VirtualRasterResidencyLease {
+
+        if (token !== residencyLeaseToken) {
+            throw new TypeError(
+                'VirtualRasterResidencyLease creation requires residency-owned authority.'
+            )
+        }
+        return new VirtualRasterResidencyLease(residencyLeaseToken, state)
+    }
+
+    retain(page: VirtualRasterPageIdentity, generation: number): boolean {
+
+        const state = residencyLeaseState(this)
+        assertLeaseGeneration(state, page, generation)
+        if (state.disposed) {
+            return throwGeoDiagnostic({
+                code: 'GEO_VIRTUAL_RASTER_RESIDENCY_LEASE_DISPOSED',
+                phase: 'residency',
+                subject: { kind: 'virtual-raster-residency-lease', id: state.id },
+                message: 'A disposed residency lease cannot retain physical assignments.',
+                actual: { pageKey: page.key, generation },
+            })
+        }
+        if (state.currentGeneration(page) !== generation) {
+            recordLease(state, 'stale-retain', page.key, generation)
+            return false
+        }
+        const existing = state.records.get(page.key)
+        if (existing?.generation === generation) return true
+        if (existing === undefined && state.records.size >= state.maximumPages) {
+            return throwGeoDiagnostic({
+                code: 'GEO_VIRTUAL_RASTER_RESIDENCY_LEASE_OVERFLOW',
+                phase: 'residency',
+                subject: { kind: 'virtual-raster-residency-lease', id: state.id },
+                message: 'A residency lease cannot exceed its explicit retained-page budget.',
+                expected: { maximumPages: state.maximumPages },
+                actual: {
+                    retainedPageCount: state.records.size,
+                    pageKey: page.key,
+                    generation,
+                },
+            })
+        }
+        if (existing !== undefined) {
+            recordLease(state, 'invalidate', existing.page.key, existing.generation)
+        }
+        state.records.set(page.key, Object.freeze({ page, generation }))
+        recordLease(state, 'retain', page.key, generation)
+        return true
+    }
+
+    release(page: VirtualRasterPageIdentity, generation: number): boolean {
+
+        const state = residencyLeaseState(this)
+        assertLeaseGeneration(state, page, generation)
+        if (state.disposed) return false
+        const existing = state.records.get(page.key)
+        if (existing?.generation !== generation) {
+            recordLease(state, 'stale-release', page.key, generation)
+            return false
+        }
+        state.records.delete(page.key)
+        recordLease(state, 'release', page.key, generation)
+        return true
+    }
+
+    facts(): VirtualRasterResidencyLeaseFacts {
+
+        const state = residencyLeaseState(this)
+        const retainedPages = [ ...state.records.values() ]
+            .sort((left, right) => left.page.key.localeCompare(right.page.key))
+            .map(record => Object.freeze({
+                pageKey: record.page.key,
+                generation: record.generation,
+            }))
+        return Object.freeze({
+            id: state.id,
+            disposed: state.disposed,
+            retainedPageCount: retainedPages.length,
+            maximumPages: state.maximumPages,
+            retainedPages: Object.freeze(retainedPages),
+            history: Object.freeze([ ...state.history ]),
+        })
+    }
+
+    dispose(): void {
+
+        const state = residencyLeaseState(this)
+        if (state.disposed) return
+        state.disposed = true
+        for (const record of state.records.values()) {
+            recordLease(state, 'release', record.page.key, record.generation)
+        }
+        state.records.clear()
+        recordLease(state, 'dispose', '', 0)
+        state.onDispose()
+    }
+}
+
 export class VirtualRasterResidency {
 
     readonly addressSpace: VirtualRasterAddressSpace
@@ -243,6 +406,7 @@ export class VirtualRasterResidency {
     #staged = new Map<string, StagedPage>()
     #resident = new Map<string, ResidentPage>()
     #pinned = new Set<string>()
+    #leases = new Set<VirtualRasterResidencyLease>()
     #failed = new Set<string>()
     #slotGenerations: number[]
     #pageEpochs = new Map<string, number>()
@@ -420,6 +584,54 @@ export class VirtualRasterResidency {
         this.#record('unpin', page)
     }
 
+    createLease(
+        descriptor: VirtualRasterResidencyLeaseDescriptor
+    ): VirtualRasterResidencyLease {
+
+        this.#assertActive()
+        if (typeof descriptor.id !== 'string' || descriptor.id.length === 0 ||
+            !positiveInteger(descriptor.maximumPages) ||
+            (descriptor.maxHistory !== undefined &&
+                !nonNegativeInteger(descriptor.maxHistory))) {
+            return throwGeoDiagnostic({
+                code: 'GEO_VIRTUAL_RASTER_RESIDENCY_LEASE_INVALID',
+                phase: 'residency',
+                subject: { kind: 'virtual-raster-residency-lease', id: descriptor.id },
+                message: 'A residency lease requires a stable id and finite page/history budgets.',
+                expected: {
+                    id: 'non-empty string',
+                    maximumPages: 'positive integer',
+                    maxHistory: 'optional non-negative integer',
+                },
+                actual: descriptor,
+            })
+        }
+        if ([ ...this.#leases ].some(lease => lease.facts().id === descriptor.id)) {
+            return throwGeoDiagnostic({
+                code: 'GEO_VIRTUAL_RASTER_RESIDENCY_LEASE_INVALID',
+                phase: 'residency',
+                subject: { kind: 'virtual-raster-residency-lease', id: descriptor.id },
+                message: 'Live residency lease ids must be unique within one residency owner.',
+                actual: { id: descriptor.id },
+            })
+        }
+        let lease: VirtualRasterResidencyLease
+        lease = VirtualRasterResidencyLease.create(residencyLeaseToken, {
+            id: descriptor.id,
+            maximumPages: descriptor.maximumPages,
+            maxHistory: descriptor.maxHistory ?? this.maxHistory,
+            disposed: false,
+            sequence: 0,
+            records: new Map(),
+            history: [],
+            assertPage: page => { this.addressSpace.assertPage(page) },
+            currentGeneration: page => this.#resident.get(page.key)?.generation,
+            onDispose: () => { this.#leases.delete(lease) },
+        })
+        this.#leases.add(lease)
+        return lease
+    }
+
     publish(): VirtualRasterPublication {
 
         this.#assertActive()
@@ -492,6 +704,7 @@ export class VirtualRasterResidency {
         this.#staged.clear()
         const publication = this.#activePublication
         if (publication !== undefined) void publication.abandon()
+        for (const lease of [ ...this.#leases ]) lease.dispose()
         this.#resident.clear()
         this.#pinned.clear()
         this.#failed.clear()
@@ -539,8 +752,13 @@ export class VirtualRasterResidency {
 
         const existing = this.#resident.get(candidate.page.key)
         if (existing !== undefined) {
-            existing.generation = ++this.#slotGenerations[existing.physicalSlot]!
-            existing.contentEpoch++
+            this.#invalidateLeases(existing)
+            const previousContentEpoch = existing.contentEpoch
+            existing.generation = this.#nextPhysicalGeneration(
+                existing.physicalSlot,
+                previousContentEpoch
+            )
+            existing.contentEpoch = previousContentEpoch + 1
             existing.byteLength = candidate.payload.data.byteLength
             existing.width = candidate.payload.width
             existing.height = candidate.payload.height
@@ -563,8 +781,9 @@ export class VirtualRasterResidency {
             return undefined
         }
         const physicalSlot = this.#firstFreeSlot()
-        const generation = ++this.#slotGenerations[physicalSlot]!
-        const contentEpoch = (this.#pageEpochs.get(candidate.page.key) ?? 0) + 1
+        const previousContentEpoch = this.#pageEpochs.get(candidate.page.key) ?? 0
+        const generation = this.#nextPhysicalGeneration(physicalSlot, previousContentEpoch)
+        const contentEpoch = previousContentEpoch + 1
         this.#pageEpochs.set(candidate.page.key, contentEpoch)
         const resident: ResidentPage = {
             page: candidate.page,
@@ -586,7 +805,9 @@ export class VirtualRasterResidency {
     #evictOne(): boolean {
 
         const victim = [ ...this.#resident.values() ]
-            .filter(candidate => !this.#pinned.has(candidate.page.key))
+            .filter(candidate =>
+                !this.#pinned.has(candidate.page.key) && !this.#isLeased(candidate)
+            )
             .sort((left, right) =>
                 left.lastUsed - right.lastUsed ||
                 left.physicalSlot - right.physicalSlot ||
@@ -594,6 +815,7 @@ export class VirtualRasterResidency {
             )[0]
         if (victim === undefined) return false
         this.#resident.delete(victim.page.key)
+        this.#invalidateLeases(victim)
         this.#evictionCount++
         this.#record('eviction', victim.page, `slot:${victim.physicalSlot}`)
         return true
@@ -606,6 +828,33 @@ export class VirtualRasterResidency {
             if (!used.has(slot)) return slot
         }
         throw new TypeError('Virtual raster physical slot budget is inconsistent.')
+    }
+
+    #nextPhysicalGeneration(physicalSlot: number, pageEpoch: number): number {
+
+        const generation = Math.max(this.#slotGenerations[physicalSlot]!, pageEpoch) + 1
+        if (generation > MAX_U32) {
+            return throwGeoDiagnostic({
+                code: 'GEO_VIRTUAL_RASTER_GENERATION_EXHAUSTED',
+                phase: 'residency',
+                subject: { kind: 'virtual-raster-residency', id: this.addressSpace.id },
+                message: 'Physical assignment generations exhausted their u32 GPU representation.',
+                expected: { maximum: MAX_U32 },
+                actual: { physicalSlot, generation },
+            })
+        }
+        this.#slotGenerations[physicalSlot] = generation
+        return generation
+    }
+
+    #isLeased(resident: ResidentPage): boolean {
+
+        return [ ...this.#leases ].some(lease => leaseRetains(lease, resident))
+    }
+
+    #invalidateLeases(resident: ResidentPage): void {
+
+        for (const lease of this.#leases) invalidateLease(lease, resident)
     }
 
     #createSnapshot(): VirtualRasterSnapshot {
@@ -675,6 +924,7 @@ export class VirtualRasterResidency {
                 if (resident?.physicalSlot === upload.facts.physicalSlot &&
                     resident.generation === upload.facts.generation) {
                     this.#resident.delete(resident.page.key)
+                    this.#invalidateLeases(resident)
                 }
             }
             releaseOwnedVirtualRasterPagePayload(upload.payload, publication)
@@ -805,6 +1055,68 @@ function publicationStateError(
         })
     } catch (error) {
         return error as Error
+    }
+}
+
+function residencyLeaseState(lease: VirtualRasterResidencyLease): ResidencyLeaseState {
+
+    const state = residencyLeaseStates.get(lease)
+    if (state === undefined) {
+        throw new TypeError('Virtual raster residency lease authority is unavailable.')
+    }
+    return state
+}
+
+function assertLeaseGeneration(
+    state: ResidencyLeaseState,
+    page: VirtualRasterPageIdentity,
+    generation: number
+): void {
+
+    state.assertPage(page)
+    if (!positiveInteger(generation) || generation > MAX_U32) {
+        return throwGeoDiagnostic({
+            code: 'GEO_VIRTUAL_RASTER_RESIDENCY_LEASE_INVALID',
+            phase: 'residency',
+            subject: { kind: 'virtual-raster-residency-lease', id: state.id },
+            message: 'A residency lease targets one positive u32 physical assignment generation.',
+            expected: { minimum: 1, maximum: MAX_U32 },
+            actual: { pageKey: page.key, generation },
+        })
+    }
+}
+
+function leaseRetains(lease: VirtualRasterResidencyLease, resident: ResidentPage): boolean {
+
+    const state = residencyLeaseState(lease)
+    return !state.disposed && state.records.get(resident.page.key)?.generation === resident.generation
+}
+
+function invalidateLease(lease: VirtualRasterResidencyLease, resident: ResidentPage): void {
+
+    const state = residencyLeaseState(lease)
+    const record = state.records.get(resident.page.key)
+    if (record?.generation !== resident.generation) return
+    state.records.delete(resident.page.key)
+    recordLease(state, 'invalidate', resident.page.key, resident.generation)
+}
+
+function recordLease(
+    state: ResidencyLeaseState,
+    kind: VirtualRasterResidencyLeaseHistoryEntry['kind'],
+    pageKey: string,
+    generation: number
+): void {
+
+    if (state.maxHistory === 0) return
+    state.history.push(Object.freeze({
+        sequence: ++state.sequence,
+        kind,
+        pageKey,
+        generation,
+    }))
+    if (state.history.length > state.maxHistory) {
+        state.history.splice(0, state.history.length - state.maxHistory)
     }
 }
 

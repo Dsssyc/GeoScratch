@@ -166,14 +166,172 @@ describe('virtual raster payload ownership contract', () => {
         expect(physicalPage).not.to.include('payload:')
         expect(virtualRaster).not.to.include('snapshotPhysicalPages')
     })
+
+    it('keeps independent residency leases authoritative until each owner releases', async() => {
+
+        const { addressSpace, residency } = fixture({
+            extent: [ 6, 2 ],
+            maxPhysicalPages: 2,
+        })
+        const first = addressSpace.page({ level: 0, x: 0, y: 0 })
+        const second = addressSpace.page({ level: 0, x: 1, y: 0 })
+        const third = addressSpace.page({ level: 0, x: 2, y: 0 })
+        stagePage(residency, first, 1)
+        stagePage(residency, second, 1)
+        const initial = residency.publish()
+        const firstGeneration = initial.snapshot.resolve(first).generation
+        const secondGeneration = initial.snapshot.resolve(second).generation
+        await initial.acknowledge()
+        const terrain = residency.createLease({ id: 'terrain-frontier', maximumPages: 1 })
+        const analysis = residency.createLease({ id: 'analysis-frontier', maximumPages: 1 })
+
+        expect(terrain.retain(first, firstGeneration)).to.equal(true)
+        expect(analysis.retain(second, secondGeneration)).to.equal(true)
+        stagePage(residency, third, 2)
+        const blocked = residency.publish()
+        expect(blocked.snapshot.resolve(third).status).to.equal('failed')
+        expect(blocked.snapshot.resolve(first).status).to.equal('resident')
+        expect(blocked.snapshot.resolve(second).status).to.equal('resident')
+        await blocked.acknowledge()
+
+        expect(terrain.release(first, firstGeneration)).to.equal(true)
+        stagePage(residency, third, 3, 'v2')
+        const admitted = residency.publish()
+        expect(admitted.snapshot.resolve(first).status).to.equal('missing')
+        expect(admitted.snapshot.resolve(second).status).to.equal('resident')
+        expect(admitted.snapshot.resolve(third).status).to.equal('resident')
+        await admitted.acknowledge()
+    })
+
+    it('does not let a stale release target a later assignment of the same page', async() => {
+
+        const { addressSpace, residency } = fixture({
+            extent: [ 4, 2 ],
+            maxPhysicalPages: 1,
+        })
+        const first = addressSpace.page({ level: 0, x: 0, y: 0 })
+        const second = addressSpace.page({ level: 0, x: 1, y: 0 })
+        stagePage(residency, first, 1)
+        const firstPublication = residency.publish()
+        const staleGeneration = firstPublication.snapshot.resolve(first).generation
+        await firstPublication.acknowledge()
+        const lease = residency.createLease({ id: 'frontier', maximumPages: 1 })
+        lease.retain(first, staleGeneration)
+        lease.release(first, staleGeneration)
+
+        stagePage(residency, second, 2)
+        await residency.publish().acknowledge()
+        stagePage(residency, first, 3, 'v2')
+        const replacement = residency.publish()
+        const currentGeneration = replacement.snapshot.resolve(first).generation
+        await replacement.acknowledge()
+        expect(currentGeneration).not.to.equal(staleGeneration)
+        expect(lease.retain(first, currentGeneration)).to.equal(true)
+        expect(lease.release(first, staleGeneration)).to.equal(false)
+
+        stagePage(residency, second, 4, 'v2')
+        const blocked = residency.publish()
+        expect(blocked.snapshot.resolve(first)).to.deep.include({
+            status: 'resident',
+            generation: currentGeneration,
+        })
+        expect(blocked.snapshot.resolve(second).status).to.equal('failed')
+        await blocked.acknowledge()
+    })
+
+    it('reports bounded lease facts and rejects owner budget overflow', async() => {
+
+        const { addressSpace, residency } = fixture({
+            extent: [ 4, 2 ],
+            maxPhysicalPages: 2,
+        })
+        const first = addressSpace.page({ level: 0, x: 0, y: 0 })
+        const second = addressSpace.page({ level: 0, x: 1, y: 0 })
+        stagePage(residency, first, 1)
+        stagePage(residency, second, 1)
+        const publication = residency.publish()
+        const firstGeneration = publication.snapshot.resolve(first).generation
+        const secondGeneration = publication.snapshot.resolve(second).generation
+        await publication.acknowledge()
+        const lease = residency.createLease({
+            id: 'bounded-owner',
+            maximumPages: 1,
+            maxHistory: 2,
+        })
+
+        expect(lease.retain(first, firstGeneration)).to.equal(true)
+        let failure
+        try {
+            lease.retain(second, secondGeneration)
+        } catch (error) {
+            failure = error
+        }
+        expect(failure).to.be.instanceOf(GeoDiagnosticError)
+        expect(failure.diagnostic).to.include({
+            code: 'GEO_VIRTUAL_RASTER_RESIDENCY_LEASE_OVERFLOW',
+            phase: 'residency',
+        })
+        expect(lease.facts()).to.deep.include({
+            id: 'bounded-owner',
+            disposed: false,
+            retainedPageCount: 1,
+            maximumPages: 1,
+        })
+        expect(lease.facts().retainedPages).to.deep.equal([
+            { pageKey: first.key, generation: firstGeneration },
+        ])
+        expect(lease.facts().history).to.have.length.at.most(2)
+        expect(Object.isFrozen(lease.facts().retainedPages)).to.equal(true)
+    })
+
+    it('invalidates a lease when its pending publication is abandoned', async() => {
+
+        const { page, residency } = fixture()
+        stagePage(residency, page, 1)
+        const publication = residency.publish()
+        const generation = publication.snapshot.resolve(page).generation
+        const lease = residency.createLease({ id: 'pending-upload', maximumPages: 1 })
+        expect(lease.retain(page, generation)).to.equal(true)
+
+        await publication.abandon()
+
+        expect(lease.facts()).to.deep.include({ retainedPageCount: 0 })
+        expect(residency.currentSnapshot.resolve(page).status).to.equal('missing')
+    })
+
+    it('releases eviction authority when a residency lease is disposed', async() => {
+
+        const { addressSpace, residency } = fixture({
+            extent: [ 4, 2 ],
+            maxPhysicalPages: 1,
+        })
+        const first = addressSpace.page({ level: 0, x: 0, y: 0 })
+        const second = addressSpace.page({ level: 0, x: 1, y: 0 })
+        stagePage(residency, first, 1)
+        const initial = residency.publish()
+        const generation = initial.snapshot.resolve(first).generation
+        await initial.acknowledge()
+        const lease = residency.createLease({ id: 'disposable-owner', maximumPages: 1 })
+        lease.retain(first, generation)
+
+        lease.dispose()
+        lease.dispose()
+        stagePage(residency, second, 2)
+        const replacement = residency.publish()
+
+        expect(lease.facts()).to.deep.include({ disposed: true, retainedPageCount: 0 })
+        expect(replacement.snapshot.resolve(first).status).to.equal('missing')
+        expect(replacement.snapshot.resolve(second).status).to.equal('resident')
+        await replacement.acknowledge()
+    })
 })
 
-function fixture() {
+function fixture({ extent = [ 2, 2 ], maxPhysicalPages = 1 } = {}) {
 
     const addressSpace = virtualRasterAddressSpace({
         id: 'ownership.raster',
         dimensions: 2,
-        extent: [ 2, 2 ],
+        extent,
         pageSize: [ 2, 2 ],
         levelCount: 1,
     })
@@ -188,8 +346,8 @@ function fixture() {
     const residency = new VirtualRasterResidency({
         addressSpace,
         plane,
-        maxPhysicalPages: 1,
-        maxStagingBytes: 4,
+        maxPhysicalPages,
+        maxStagingBytes: maxPhysicalPages * 4,
     })
     return {
         addressSpace,
@@ -197,4 +355,16 @@ function fixture() {
         residency,
         page: addressSpace.page({ level: 0, x: 0, y: 0 }),
     }
+}
+
+function stagePage(residency, page, generation, contentVersion = 'v1') {
+
+    return residency.stage(ownedVirtualRasterPagePayload({
+        page,
+        width: 2,
+        height: 2,
+        channels: 1,
+        data: new Uint8Array([ 1, 2, 3, 4 ]),
+        contentVersion,
+    }), { generation })
 }

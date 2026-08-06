@@ -93,6 +93,7 @@ const geoValues = [
     'VirtualRasterPublication',
     'VirtualRasterRequestScheduler',
     'VirtualRasterResidency',
+    'VirtualRasterResidencyLease',
     'VirtualRasterSnapshot',
     'WEB_MERCATOR_QUAD_HALF_WORLD',
     'WEB_MERCATOR_QUAD_MAX_LATITUDE',

@@ -174,6 +174,7 @@ export type {
 export {
     VirtualRasterPublication,
     VirtualRasterResidency,
+    VirtualRasterResidencyLease,
 } from './virtual-raster-residency.js'
 export type {
     VirtualRasterHistoryEntry,
@@ -182,6 +183,10 @@ export type {
     VirtualRasterPublicationState,
     VirtualRasterResidencyDescriptor,
     VirtualRasterResidencyFacts,
+    VirtualRasterResidencyLeaseDescriptor,
+    VirtualRasterResidencyLeaseFacts,
+    VirtualRasterResidencyLeaseHistoryEntry,
+    VirtualRasterResidencyLeasePageFacts,
     VirtualRasterStageOptions,
     VirtualRasterStageOutcome,
     VirtualRasterStageStatus,
