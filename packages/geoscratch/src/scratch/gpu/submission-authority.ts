@@ -20,6 +20,7 @@ type SubmissionAuthorityState = {
     runtime: GPURuntime
     revision: number
     disposed: boolean
+    claim: SubmissionAuthorityConsumptionClaim | undefined
 }
 
 type SubmissionAuthorityStampRecord = Readonly<{
@@ -30,6 +31,24 @@ type SubmissionAuthorityStampRecord = Readonly<{
 
 const authorityStates = new WeakMap<SubmissionAuthority, SubmissionAuthorityState>()
 const stampRecords = new WeakMap<SubmissionAuthorityStamp, SubmissionAuthorityStampRecord>()
+const consumptionClaimStates = new WeakMap<
+    SubmissionAuthorityConsumptionClaim,
+    SubmissionAuthorityConsumptionClaimState
+>()
+
+export type SubmissionAuthorityConsumptionClaim = Readonly<{
+    kind: 'submission-authority-consumption-claim'
+}>
+
+type SubmissionAuthorityConsumptionClaimRecord = {
+    authority: SubmissionAuthority
+    committed: boolean
+}
+
+type SubmissionAuthorityConsumptionClaimState = {
+    records: Map<SubmissionAuthorityStamp, SubmissionAuthorityConsumptionClaimRecord>
+    released: boolean
+}
 
 export class SubmissionAuthority {
 
@@ -50,7 +69,12 @@ export class SubmissionAuthority {
             runtime: immutableValue(runtime),
             label: immutableValue(descriptor.label),
         })
-        authorityStates.set(this, { runtime, revision: 0, disposed: false })
+        authorityStates.set(this, {
+            runtime,
+            revision: 0,
+            disposed: false,
+            claim: undefined,
+        })
         Object.preventExtensions(this)
     }
 
@@ -73,6 +97,7 @@ export class SubmissionAuthority {
     advance(): SubmissionAuthorityStamp {
 
         const state = assertAuthorityActive(this)
+        assertAuthorityUnclaimed(this, state)
         if (state.revision === Number.MAX_SAFE_INTEGER) {
             return authorityInvalid('SubmissionAuthority revision exhausted safe integer storage.', {
                 revision: '< Number.MAX_SAFE_INTEGER',
@@ -147,6 +172,7 @@ export function assertSubmissionAuthorityStamp(
             actual: { disposed: true, revision: state.revision },
         })
     }
+    assertAuthorityUnclaimed(record.authority, state)
     if (record.revision !== state.revision) {
         return throwGPUDiagnostic({
             code: 'SCRATCH_SUBMISSION_AUTHORITY_STALE',
@@ -186,14 +212,77 @@ export function assertSubmissionAuthorityStampsConsumable(
     }
 }
 
-export function commitSubmissionAuthorityStamps(
+export function claimSubmissionAuthorityStamps(
     runtime: GPURuntime,
+    stamps: readonly SubmissionAuthorityStamp[]
+): SubmissionAuthorityConsumptionClaim {
+
+    assertSubmissionAuthorityStampsConsumable(runtime, stamps)
+    const claim = Object.freeze({
+        kind: 'submission-authority-consumption-claim' as const,
+    })
+    const claimRecords = new Map<
+        SubmissionAuthorityStamp,
+        SubmissionAuthorityConsumptionClaimRecord
+    >()
+    for (const stamp of stamps) {
+        const record = stampRecords.get(stamp)!
+        const authorityState = stateFor(record.authority)
+        if (authorityState.claim !== undefined) {
+            return authorityBusy(record.authority)
+        }
+        claimRecords.set(stamp, {
+            authority: record.authority,
+            committed: false,
+        })
+    }
+    const state: SubmissionAuthorityConsumptionClaimState = {
+        records: claimRecords,
+        released: false,
+    }
+    consumptionClaimStates.set(claim, state)
+    for (const record of claimRecords.values()) {
+        stateFor(record.authority).claim = claim
+    }
+    return claim
+}
+
+export function commitSubmissionAuthorityClaim(
+    claim: SubmissionAuthorityConsumptionClaim,
     stamps: readonly SubmissionAuthorityStamp[]
 ): void {
 
-    assertSubmissionAuthorityStampsConsumable(runtime, stamps)
-    const records = stamps.map(stamp => stampRecords.get(stamp)!)
-    for (const record of records) stateFor(record.authority).revision += 1
+    const claimState = consumptionClaimStateFor(claim)
+    if (claimState.released) {
+        throw new TypeError('Submission authority consumption claim is released.')
+    }
+    const records = stamps.map(stamp => {
+        const record = claimState.records.get(stamp)
+        if (record === undefined || record.committed) {
+            throw new TypeError('Submission authority stamp is not an open member of this claim.')
+        }
+        return record
+    })
+    for (const record of records) {
+        const authorityState = stateFor(record.authority)
+        authorityState.revision += 1
+        if (authorityState.claim === claim) authorityState.claim = undefined
+        record.committed = true
+    }
+}
+
+export function releaseSubmissionAuthorityClaim(
+    claim: SubmissionAuthorityConsumptionClaim
+): void {
+
+    const claimState = consumptionClaimStateFor(claim)
+    if (claimState.released) return
+    claimState.released = true
+    for (const record of claimState.records.values()) {
+        if (record.committed) continue
+        const authorityState = stateFor(record.authority)
+        if (authorityState.claim === claim) authorityState.claim = undefined
+    }
 }
 
 function createStamp(
@@ -229,6 +318,26 @@ function assertAuthorityActive(authority: SubmissionAuthority): SubmissionAuthor
         expected: { disposed: false },
         actual: { disposed: true, revision: state.revision },
     })
+}
+
+function assertAuthorityUnclaimed(
+    authority: SubmissionAuthority,
+    state: SubmissionAuthorityState
+): void {
+
+    if (state.claim === undefined) return
+    return authorityBusy(authority)
+}
+
+function consumptionClaimStateFor(
+    claim: SubmissionAuthorityConsumptionClaim
+): SubmissionAuthorityConsumptionClaimState {
+
+    const state = consumptionClaimStates.get(claim)
+    if (state === undefined) {
+        throw new TypeError('Submission authority consumption claim identity is invalid.')
+    }
+    return state
 }
 
 function stateFor(authority: SubmissionAuthority): SubmissionAuthorityState {
@@ -273,5 +382,19 @@ function authorityInvalid(
         message,
         expected,
         ...(actual === undefined ? {} : { actual }),
+    })
+}
+
+function authorityBusy(authority: SubmissionAuthority): never {
+
+    const state = stateFor(authority)
+    return throwGPUDiagnostic({
+        code: 'SCRATCH_SUBMISSION_AUTHORITY_BUSY',
+        severity: 'error',
+        phase: 'submission',
+        subject: authoritySubject(authority),
+        message: 'Submission authority is claimed by an in-progress submission.',
+        expected: { claim: 'available' },
+        actual: { claim: 'active', revision: state.revision },
     })
 }

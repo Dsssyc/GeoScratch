@@ -221,27 +221,37 @@ const builder = runtime.createSubmission().require(stamp)
 
 const sequence = runtime.createSubmissionAuthority({ label: 'A/B sequence' })
 const sequenceStamp = sequence.stamp()
-const statefulBuilder = runtime.createSubmission().consume(sequenceStamp)
+const statefulBuilder = runtime.createSubmission()
+    .upload(stateUpload)
+    .compute(statePass, stateCommands)
+    .consume(sequenceStamp)
 ```
 
 `require(stamp)` 只校验、不改变 authority。`consume(stamp)` 增加同样的 requirement，
-并且仅在所有同步 queue action 成功、`SubmittedWork` 已构造、全部 readback claim 已
-adopt 后把该 authority 精确推进一次。未提交的 builder 与同步失败都不消费；捕获同一
-consumed stamp 的竞争 builder 不可能都提交成功。
+并在 builder 已追加 steps 之后放置一个 ordered issue boundary。Scratch 会在这里
+flush 当前 encoder segment；只有该 boundary 之前的全部 queue action 都同步返回成功，
+authority 才精确推进一次。空 boundary 以
+`SCRATCH_SUBMISSION_AUTHORITY_CONSUMPTION_EMPTY` 失败。boundary 之前失败不消费，
+boundary 之后失败也不会回滚已 issue 的工作；捕获同一 consumed stamp 的竞争 builder
+不可能都跨过 boundary。
 
 Submission 会在 submit 入口校验所有 required 或 consumed stamp，并在全部 caller-owned
 materialization、Surface preparation 与 readback claim 完成后、紧邻 native
-observation、encoder creation 或 queue effect 之前再次校验。该 primitive 不执行
-callback，也不拥有 lock、wait queue、retry、preparation state 或 history。
+observation、encoder creation 或 queue effect 之前再次校验。随后它获取一个有界、
+不等待的 module-private claim，使可重入 `advance()` 或竞争 submission 以
+`SCRATCH_SUBMISSION_AUTHORITY_BUSY` 失败。该 primitive 不执行 callback，也不拥有
+wait queue、retry 或 history。
 伪造 stamp、错误 Runtime、过期 revision 与已 disposed authority 分别以
 `SCRATCH_SUBMISSION_AUTHORITY_INVALID`、
 `SCRATCH_SUBMISSION_AUTHORITY_WRONG_RUNTIME`、
 `SCRATCH_SUBMISSION_AUTHORITY_STALE` 与
 `SCRATCH_SUBMISSION_AUTHORITY_DISPOSED` 失败。
 
-Consumption 表示 native work 已同步 issue，不表示后续异步 native observation 必然
-成功。之后出现 `observed-failed` 时不会回滚 revision；`nativeOutcome`、`done`、
-potential writes 与 content-indeterminacy facts 会保留这个区别。
+Consumption 表示 boundary 之前的 queue-action prefix 已同步 issue，不表示后续 queue
+action 成功、`SubmittedWork` 已返回或异步 native observation 必然成功。之后出现同步
+失败或 `observed-failed` 时不会回滚 revision；存在 `SubmittedWork` 时，
+`nativeOutcome`、`done`、potential writes 与 content-indeterminacy facts 会保留这个
+区别。
 
 这是 supported composition 的一致性边界，不是 same-realm security boundary。
 Scratch 继续允许检查 resource、region、command、bind-set 与 declared-access
@@ -432,6 +442,11 @@ submit(render + readback)
 ```
 
 连续 upload 不创建空 command buffer。skipped command、skipped pass 与 effect-free empty pass 不创建 segment。没有 upload boundary 的 encoder-only work 仍保持一个 encoder、一个 command buffer 和一次 `queue.submit(...)`。
+
+Ordered `consume(stamp)` boundary 同样结束其前面的 encoder segment，但自身不增加
+native queue action。replay 时，只有该 boundary 的 queue-action prefix 全部成功，
+authority commit 才会立刻发生，并先于任何后续 action。这个有意的 segmentation 保证
+后续组合工作同步失败时，持久 A/B 状态仍与真正已 issue 的工作一致。
 
 `SubmittedWork.commandBuffers` 按物理 queue 顺序包含每个真实 segment。upload-only work 的 command-buffer array 为空，但仍在最后一次 queue write 后注册 completion。effect-free work 不创建 encoder 或 queue action，并使用已 resolve 的 `done` promise。见 ADR-029。
 

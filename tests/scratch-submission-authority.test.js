@@ -107,23 +107,55 @@ describe('Scratch SubmissionAuthority', () => {
         runtimeB.dispose()
     })
 
-    it('consumes a current stamp exactly once only after submit returns work', async() => {
+    it('rejects consumption when no preceding GPU work can cross the boundary', async() => {
+
+        const fake = createFakeGpu()
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
+        const authority = runtime.createSubmissionAuthority({ label: 'empty sequence' })
+        const stamp = authority.stamp()
+
+        expect(() => runtime.createSubmission({ validation: 'throw' })
+            .consume(stamp)
+            .submit()).to.throw(ScratchDiagnosticError)
+            .with.nested.property(
+                'diagnostic.code',
+                'SCRATCH_SUBMISSION_AUTHORITY_CONSUMPTION_EMPTY'
+            )
+        expect(authority.revision).to.equal(0)
+        expect(fake.calls.queueTimeline).to.deep.equal([])
+
+        authority.dispose()
+        runtime.dispose()
+    })
+
+    it('consumes a current stamp exactly once at its issued-work boundary', async() => {
 
         const fake = createFakeGpu()
         const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const authority = runtime.createSubmissionAuthority({ label: 'frontier sequence' })
         const stamp = authority.stamp()
-        const first = runtime.createSubmission({ validation: 'throw' }).consume(stamp)
-        const competitor = runtime.createSubmission({ validation: 'throw' }).consume(stamp)
+        const buffer = await runtime.createBuffer({ size: 4, usage: 0x08 })
+        const upload = runtime.createUploadCommand({
+            target: buffer.region(),
+            data: new Uint32Array([ 1 ]),
+        })
+        const first = runtime.createSubmission({ validation: 'throw' })
+            .upload(upload)
+            .consume(stamp)
+        const competitor = runtime.createSubmission({ validation: 'throw' })
+            .upload(upload)
+            .consume(stamp)
 
         expect(authority.revision).to.equal(0)
         const submitted = first.submit()
-        expect(submitted.executionOutcomes).to.deep.equal([])
+        expect(submitted.resourceAccesses).to.have.length(1)
         expect(authority.revision).to.equal(1)
         expect(() => competitor.submit()).to.throw(ScratchDiagnosticError)
             .with.nested.property('diagnostic.code', 'SCRATCH_SUBMISSION_AUTHORITY_STALE')
         expect(authority.revision).to.equal(1)
 
+        upload.dispose()
+        buffer.dispose()
         authority.dispose()
         runtime.dispose()
     })
@@ -145,15 +177,15 @@ describe('Scratch SubmissionAuthority', () => {
         }
 
         expect(() => runtime.createSubmission({ validation: 'throw' })
-            .consume(stamp)
             .upload(upload)
+            .consume(stamp)
             .submit()).to.throw('injected sequence upload failure')
         expect(authority.revision).to.equal(0)
 
         runtime.queue.writeBuffer = writeBuffer
         const submitted = runtime.createSubmission({ validation: 'throw' })
-            .consume(stamp)
             .upload(upload)
+            .consume(stamp)
             .submit()
         expect(submitted.resourceAccesses).to.have.length(1)
         expect(authority.revision).to.equal(1)
@@ -179,8 +211,8 @@ describe('Scratch SubmissionAuthority', () => {
         fake.errors.failNext('writeBuffer', 'validation', new Error('deferred native failure'))
 
         const submitted = runtime.createSubmission({ validation: 'throw' })
-            .consume(authority.stamp())
             .upload(upload)
+            .consume(authority.stamp())
             .submit()
         expect(authority.revision).to.equal(1)
         for (let attempt = 0; attempt < 16; attempt++) {
@@ -194,6 +226,126 @@ describe('Scratch SubmissionAuthority', () => {
 
         upload.dispose()
         buffer.dispose()
+        authority.dispose()
+        runtime.dispose()
+    })
+
+    it('keeps a consumed boundary after later queue replay fails', async() => {
+
+        const fake = createFakeGpu()
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
+        const authority = runtime.createSubmissionAuthority({ label: 'partial issue' })
+        const leadingBuffer = await runtime.createBuffer({ size: 4, usage: 0x08 })
+        const trailingBuffer = await runtime.createBuffer({ size: 4, usage: 0x08 })
+        const leading = runtime.createUploadCommand({
+            target: leadingBuffer.region(),
+            data: new Uint32Array([ 1 ]),
+        })
+        const trailing = runtime.createUploadCommand({
+            target: trailingBuffer.region(),
+            data: new Uint32Array([ 2 ]),
+        })
+        const writeBuffer = runtime.queue.writeBuffer.bind(runtime.queue)
+        runtime.queue.writeBuffer = (buffer, ...args) => {
+            if (buffer === trailingBuffer.gpuBuffer) {
+                throw new Error('injected trailing upload failure')
+            }
+            return writeBuffer(buffer, ...args)
+        }
+
+        expect(() => runtime.createSubmission({ validation: 'throw' })
+            .upload(leading)
+            .consume(authority.stamp())
+            .upload(trailing)
+            .submit()).to.throw('injected trailing upload failure')
+        expect(fake.calls.queueWrites).to.have.length(1)
+        expect(authority.revision).to.equal(1)
+
+        runtime.queue.writeBuffer = writeBuffer
+        trailing.dispose()
+        leading.dispose()
+        trailingBuffer.dispose()
+        leadingBuffer.dispose()
+        authority.dispose()
+        runtime.dispose()
+    })
+
+    it('keeps a consumed boundary when completion registration throws after issue', async() => {
+
+        const fake = createFakeGpu()
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
+        const authority = runtime.createSubmissionAuthority({ label: 'completion registration' })
+        const buffer = await runtime.createBuffer({ size: 4, usage: 0x08 })
+        const upload = runtime.createUploadCommand({
+            target: buffer.region(),
+            data: new Uint32Array([ 1 ]),
+        })
+        runtime.queue.onSubmittedWorkDone = () => {
+            throw new Error('injected completion registration failure')
+        }
+
+        expect(() => runtime.createSubmission({ validation: 'throw' })
+            .upload(upload)
+            .consume(authority.stamp())
+            .submit()).to.throw('injected completion registration failure')
+        expect(fake.calls.queueWrites).to.have.length(1)
+        expect(authority.revision).to.equal(1)
+
+        upload.dispose()
+        buffer.dispose()
+        authority.dispose()
+        runtime.dispose()
+    })
+
+    it('locks a claimed boundary against a reentrant competing submission', async() => {
+
+        const fake = createFakeGpu()
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
+        const authority = runtime.createSubmissionAuthority({ label: 'reentrant sequence' })
+        const stamp = authority.stamp()
+        const firstBuffer = await runtime.createBuffer({ size: 4, usage: 0x08 })
+        const competingBuffer = await runtime.createBuffer({ size: 4, usage: 0x08 })
+        const firstUpload = runtime.createUploadCommand({
+            target: firstBuffer.region(),
+            data: new Uint32Array([ 1 ]),
+        })
+        const competingUpload = runtime.createUploadCommand({
+            target: competingBuffer.region(),
+            data: new Uint32Array([ 2 ]),
+        })
+        const competitor = runtime.createSubmission({ validation: 'throw' })
+            .upload(competingUpload)
+            .consume(stamp)
+        const writeBuffer = runtime.queue.writeBuffer.bind(runtime.queue)
+        let reentered = false
+        let competingError
+        runtime.queue.writeBuffer = (buffer, ...args) => {
+            if (!reentered) {
+                reentered = true
+                try {
+                    competitor.submit()
+                } catch (error) {
+                    competingError = error
+                }
+            }
+            return writeBuffer(buffer, ...args)
+        }
+
+        const submitted = runtime.createSubmission({ validation: 'throw' })
+            .upload(firstUpload)
+            .consume(stamp)
+            .submit()
+        expect(submitted.resourceAccesses).to.have.length(1)
+        expect(competingError).to.be.instanceOf(ScratchDiagnosticError)
+        expect(competingError.diagnostic.code).to.equal('SCRATCH_SUBMISSION_AUTHORITY_BUSY')
+        expect(authority.revision).to.equal(1)
+        expect(fake.calls.queueWrites).to.have.length(1)
+
+        runtime.queue.writeBuffer = writeBuffer
+        competingUpload.dispose()
+        firstUpload.dispose()
+        competingBuffer.dispose()
+        firstBuffer.dispose()
         authority.dispose()
         runtime.dispose()
     })

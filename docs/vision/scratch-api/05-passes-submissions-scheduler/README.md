@@ -228,29 +228,38 @@ const builder = runtime.createSubmission().require(stamp)
 
 const sequence = runtime.createSubmissionAuthority({ label: 'A/B sequence' })
 const sequenceStamp = sequence.stamp()
-const statefulBuilder = runtime.createSubmission().consume(sequenceStamp)
+const statefulBuilder = runtime.createSubmission()
+    .upload(stateUpload)
+    .compute(statePass, stateCommands)
+    .consume(sequenceStamp)
 ```
 
 `require(stamp)` validates without changing the authority. `consume(stamp)` adds the
-same requirement and advances that authority exactly once only after every synchronous
-queue action succeeds, `SubmittedWork` is constructed, and all readback claims are
-adopted. Unsubmitted builders and synchronous failures do not consume. Competing
-builders with the same consumed stamp cannot both submit.
+same requirement and places an ordered issue boundary after the steps already appended
+to the builder. Scratch flushes the current encoder segment there and advances the
+authority exactly once after every queue action in that prefix returns successfully.
+An empty boundary fails with `SCRATCH_SUBMISSION_AUTHORITY_CONSUMPTION_EMPTY`.
+Failure before the boundary does not consume; failure after it does not roll back work
+already issued. Competing builders with the same consumed stamp cannot both cross a
+boundary.
 
 Submission validates every required or consumed stamp at submit entry and again after all
 caller-owned materialization, Surface preparation, and readback claims, immediately
-before native observation, encoder creation, or queue effects. The primitive executes
-no callback and owns no lock, wait queue, retry, preparation state, or history.
+before native observation, encoder creation, or queue effects. It then takes a bounded,
+non-waiting module-private claim so reentrant `advance()` or competing submission fails
+with `SCRATCH_SUBMISSION_AUTHORITY_BUSY`. The primitive executes no callback and owns no
+wait queue, retry, or history.
 Forged stamps, wrong-Runtime stamps, stale revisions, and disposed authorities fail with
 `SCRATCH_SUBMISSION_AUTHORITY_INVALID`,
 `SCRATCH_SUBMISSION_AUTHORITY_WRONG_RUNTIME`,
 `SCRATCH_SUBMISSION_AUTHORITY_STALE`, and
 `SCRATCH_SUBMISSION_AUTHORITY_DISPOSED`, respectively.
 
-Consumption means native work was synchronously issued, not that asynchronous native
-observation succeeded. A later `observed-failed` outcome does not roll the revision
-back; `nativeOutcome`, `done`, potential writes, and content-indeterminacy facts retain
-that distinction.
+Consumption means the queue-action prefix before the boundary was synchronously issued,
+not that later queue actions completed, a `SubmittedWork` was returned, or asynchronous
+native observation succeeded. A later synchronous failure or `observed-failed` outcome
+does not roll the revision back; `nativeOutcome`, `done`, potential writes, and
+content-indeterminacy facts retain that distinction when a `SubmittedWork` exists.
 
 This is a consistency boundary for supported composition, not a same-realm security
 boundary. Scratch keeps resource, region, command, bind-set, and declared-access
@@ -451,6 +460,12 @@ submit(render + readback)
 ```
 
 Consecutive uploads do not create empty command buffers. Skipped commands, skipped passes, and effect-free empty passes do not create segments. Encoder-only work with no upload boundary remains one encoder, one command buffer, and one `queue.submit(...)`.
+
+An ordered `consume(stamp)` boundary also ends the preceding encoder segment, but adds no
+native queue action of its own. During replay, the authority commit occurs immediately
+after the boundary's queue-action prefix succeeds and before any later action. This
+deliberate segmentation keeps persistent A/B state aligned with work actually issued
+when later composed work fails synchronously.
 
 `SubmittedWork.commandBuffers` contains every real segment in physical queue order. Upload-only work has an empty command-buffer array but still registers completion after the final queue write. Effect-free work creates no encoder or queue action and uses an already-resolved `done` promise. See ADR-029.
 

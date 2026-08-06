@@ -76,7 +76,9 @@ import {
 import {
     assertSubmissionAuthorityStamp,
     assertSubmissionAuthorityStampsConsumable,
-    commitSubmissionAuthorityStamps,
+    claimSubmissionAuthorityStamps,
+    commitSubmissionAuthorityClaim,
+    releaseSubmissionAuthorityClaim,
 } from './submission-authority.js'
 import {
     prepareSurfaceAttachment,
@@ -111,7 +113,10 @@ import type {
     SubmissionNativeObservation,
     SubmissionNativeSettlement,
 } from './submission-native-observation.js'
-import type { SubmissionAuthorityStamp } from './submission-authority.js'
+import type {
+    SubmissionAuthorityConsumptionClaim,
+    SubmissionAuthorityStamp,
+} from './submission-authority.js'
 import type {
     GPUNativeErrorCategory,
     GPUIncidentReport,
@@ -457,6 +462,16 @@ type PreparedQueueAction =
 
 type PreparedUploadQueueAction = Exclude<PreparedQueueAction, { kind: 'command-buffer' }>
 
+type SubmissionAuthorityConsumption = Readonly<{
+    stamp: SubmissionAuthorityStamp
+    afterStepCount: number
+}>
+
+type PreparedSubmissionAuthorityBoundary = Readonly<{
+    afterActionCount: number
+    stamps: readonly SubmissionAuthorityStamp[]
+}>
+
 function createPreparedUploadQueueAction(
     command: UploadCommand | TextureUploadCommand | ExternalImageUploadCommand,
     effects: PreparedQueueEffect[]
@@ -579,7 +594,7 @@ const submissionAuthorityRequirements = new WeakMap<
 >()
 const submissionAuthorityConsumptions = new WeakMap<
     SubmissionBuilder,
-    SubmissionAuthorityStamp[]
+    SubmissionAuthorityConsumption[]
 >()
 
 export class SubmissionBuilder {
@@ -692,7 +707,10 @@ export class SubmissionBuilder {
 
     consume(stamp: SubmissionAuthorityStamp) {
 
-        submissionAuthorityConsumptions.get(this)!.push(stamp)
+        submissionAuthorityConsumptions.get(this)!.push(Object.freeze({
+            stamp,
+            afterStepCount: this.steps.length,
+        }))
         return this
     }
 
@@ -731,13 +749,19 @@ export class SubmissionBuilder {
         const attemptTextureAuthority = new AttemptTextureAuthority(this)
 
         const submittedId = `scratch-submitted-${UUID()}`
+        const authorityConsumptionGroups = groupSubmissionAuthorityConsumptions(this)
+        const authorityConsumptionStamps = authorityConsumptionGroups.flatMap(
+            group => group.stamps
+        )
         const nativeIssuePlan = createSubmissionNativeIssuePlan(
             submittedId,
             resolvedPlan.steps,
-            surfaceAttachments
+            surfaceAttachments,
+            authorityConsumptionGroups
         )
         const commandBuffers: GPUCommandBuffer[] = []
         const queueTimeline: PreparedQueueAction[] = []
+        const authorityBoundaries: PreparedSubmissionAuthorityBoundary[] = []
         const resourceAccesses: SubmissionResourceAccess[] = []
         const submittedRenderBundles: SubmittedRenderBundleFact[] = []
         const pendingReadbacks: PendingReadback[] = []
@@ -754,6 +778,7 @@ export class SubmissionBuilder {
         let segmentReadbacks: PendingReadback[] = []
         const nativeRenderBundles = new Map<RenderBundle, GPURenderBundle>()
         let replayedQueueActionCount = 0
+        let authorityClaim: SubmissionAuthorityConsumptionClaim | undefined
 
         try {
             for (const [stepIndex, step] of resolvedPlan.steps.entries()) {
@@ -769,6 +794,18 @@ export class SubmissionBuilder {
             throw cause
         }
 
+        try {
+            if (authorityConsumptionStamps.length > 0) {
+                authorityClaim = claimSubmissionAuthorityStamps(
+                    this.runtime,
+                    authorityConsumptionStamps
+                )
+            }
+        } catch (cause) {
+            releaseUnsubmittedReadbackClaims(readbackClaims.values())
+            throw cause
+        }
+
         let nativeObservation: SubmissionNativeObservation
         try {
             nativeObservation = beginSubmissionNativeObservation({
@@ -778,6 +815,9 @@ export class SubmissionBuilder {
                 plan: nativeIssuePlan,
             })
         } catch (cause) {
+            if (authorityClaim !== undefined) {
+                releaseSubmissionAuthorityClaim(authorityClaim)
+            }
             releaseUnsubmittedReadbackClaims(readbackClaims.values())
             throw cause
         }
@@ -868,8 +908,46 @@ export class SubmissionBuilder {
             segmentReadbacks = []
         }
 
+        let nextAuthorityConsumptionGroup = 0
+        let previousAuthorityBoundaryActionCount = 0
+        const prepareAuthorityBoundaries = (afterStepCount: number) => {
+
+            while (
+                nextAuthorityConsumptionGroup < authorityConsumptionGroups.length &&
+                authorityConsumptionGroups[nextAuthorityConsumptionGroup]!.afterStepCount === afterStepCount
+            ) {
+                finishEncoderSegment()
+                const group = authorityConsumptionGroups[nextAuthorityConsumptionGroup]!
+                const afterActionCount = queueTimeline.length
+                if (afterActionCount === previousAuthorityBoundaryActionCount) {
+                    throwGPUDiagnostic({
+                        code: 'SCRATCH_SUBMISSION_AUTHORITY_CONSUMPTION_EMPTY',
+                        severity: 'error',
+                        phase: 'submission',
+                        subject: this.subject,
+                        message: 'Submission authority consumption requires preceding GPU work at its ordered boundary.',
+                        expected: {
+                            queueActionsSincePreviousBoundary: '>= 1',
+                            afterStepCount,
+                        },
+                        actual: {
+                            queueActionsSincePreviousBoundary: 0,
+                            afterStepCount,
+                        },
+                    })
+                }
+                authorityBoundaries.push(Object.freeze({
+                    afterActionCount,
+                    stamps: group.stamps,
+                }))
+                previousAuthorityBoundaryActionCount = afterActionCount
+                nextAuthorityConsumptionGroup++
+            }
+        }
+
         try {
             for (const [stepIndex, step] of resolvedPlan.steps.entries()) {
+                prepareAuthorityBoundaries(stepIndex)
                 if (step.kind === 'debug') {
                     const encoder = getEncoder()
                     issueStandaloneCommandEncoding(
@@ -1266,6 +1344,20 @@ export class SubmissionBuilder {
             }
 
             finishEncoderSegment()
+            prepareAuthorityBoundaries(resolvedPlan.steps.length)
+            if (nextAuthorityConsumptionGroup !== authorityConsumptionGroups.length) {
+                throwGPUDiagnostic({
+                    code: 'SCRATCH_SUBMISSION_AUTHORITY_INVALID',
+                    severity: 'error',
+                    phase: 'submission',
+                    subject: this.subject,
+                    message: 'Submission authority consumption boundary no longer matches the builder step sequence.',
+                    expected: { maximumStepCount: resolvedPlan.steps.length },
+                    actual: {
+                        afterStepCount: authorityConsumptionGroups[nextAuthorityConsumptionGroup]?.afterStepCount,
+                    },
+                })
+            }
         } catch (cause) {
             releaseUnsubmittedReadbackClaims(readbackClaims.values())
             throw cause
@@ -1273,6 +1365,23 @@ export class SubmissionBuilder {
             restorePreparedContentState(resourceSnapshots, querySlotSnapshots)
         }
         this.isSubmitted = true
+        let nextAuthorityBoundary = 0
+        const commitReadyAuthorityBoundaries = () => {
+
+            while (
+                nextAuthorityBoundary < authorityBoundaries.length &&
+                authorityBoundaries[nextAuthorityBoundary]!.afterActionCount === replayedQueueActionCount
+            ) {
+                if (authorityClaim === undefined) {
+                    throw new TypeError('Submission authority boundary has no consumption claim.')
+                }
+                commitSubmissionAuthorityClaim(
+                    authorityClaim,
+                    authorityBoundaries[nextAuthorityBoundary]!.stamps
+                )
+                nextAuthorityBoundary++
+            }
+        }
         try {
             for (const [ actionIndex, action ] of queueTimeline.entries()) {
                 const location = submissionQueueActionLocation(
@@ -1304,8 +1413,12 @@ export class SubmissionBuilder {
                         assertNeverPreparedQueueAction(action)
                 }
 
-                applyPreparedQueueEffects(action.effects)
                 replayedQueueActionCount++
+                commitReadyAuthorityBoundaries()
+                applyPreparedQueueEffects(action.effects)
+            }
+            if (nextAuthorityBoundary !== authorityBoundaries.length) {
+                throw new TypeError('Submission authority boundary was not reached by queue replay.')
             }
         } catch (cause) {
             observeSubmissionPotentialWriteNativeFailures(
@@ -1319,6 +1432,9 @@ export class SubmissionBuilder {
             attemptTextureAuthority.close()
             expireSurfaceTextureLeasesForOwner(this)
             nativeObservation.finish()
+            if (authorityClaim !== undefined) {
+                releaseSubmissionAuthorityClaim(authorityClaim)
+            }
         }
 
         let nativeDone: Promise<unknown>
@@ -1392,11 +1508,6 @@ export class SubmissionBuilder {
             markReadbackCommandClaimAdopted(pending.claim)
             registerReadbackCommandResult(pending.command, submitted, operation)
         }
-        commitSubmissionAuthorityStamps(
-            this.runtime,
-            submissionAuthorityConsumptions.get(this) ?? []
-        )
-
         return submitted
     }
 
@@ -1473,7 +1584,8 @@ function assertResolvedSubmissionBufferGpuUseAvailable(
 function createSubmissionNativeIssuePlan(
     submissionId: string,
     steps: readonly ResolvedSubmissionStep[],
-    surfaceAttachments: PreparedSurfaceAttachments
+    surfaceAttachments: PreparedSurfaceAttachments,
+    authorityConsumptionGroups: readonly SubmissionAuthorityConsumptionGroup[]
 ): SubmissionNativeIssue[] {
 
     const encoding: SubmissionNativeIssue[] = []
@@ -1501,7 +1613,20 @@ function createSubmissionNativeIssuePlan(
         activeSegmentIndex = undefined
     }
 
+    let nextAuthorityConsumptionGroup = 0
+    const finishAuthorityBoundaries = (afterStepCount: number) => {
+
+        while (
+            nextAuthorityConsumptionGroup < authorityConsumptionGroups.length &&
+            authorityConsumptionGroups[nextAuthorityConsumptionGroup]!.afterStepCount === afterStepCount
+        ) {
+            finishEncoder()
+            nextAuthorityConsumptionGroup++
+        }
+    }
+
     for (const [ stepIndex, step ] of steps.entries()) {
+        finishAuthorityBoundaries(stepIndex)
         if (step.kind === 'debug') {
             ensureEncoder()
             encoding.push({
@@ -1615,6 +1740,7 @@ function createSubmissionNativeIssuePlan(
         encoding.push({ stage: 'pass-end', location: passLocation })
     }
     finishEncoder()
+    finishAuthorityBoundaries(steps.length)
 
     return [
         ...encoding,
@@ -5757,8 +5883,40 @@ function assertSubmissionAuthorityRequirements(builder: SubmissionBuilder): void
     }
     assertSubmissionAuthorityStampsConsumable(
         builder.runtime,
-        submissionAuthorityConsumptions.get(builder) ?? []
+        (submissionAuthorityConsumptions.get(builder) ?? []).map(
+            consumption => consumption.stamp
+        )
     )
+}
+
+type SubmissionAuthorityConsumptionGroup = Readonly<{
+    afterStepCount: number
+    stamps: readonly SubmissionAuthorityStamp[]
+}>
+
+function groupSubmissionAuthorityConsumptions(
+    builder: SubmissionBuilder
+): readonly SubmissionAuthorityConsumptionGroup[] {
+
+    const groups: {
+        afterStepCount: number
+        stamps: SubmissionAuthorityStamp[]
+    }[] = []
+    for (const consumption of submissionAuthorityConsumptions.get(builder) ?? []) {
+        const previous = groups.at(-1)
+        if (previous?.afterStepCount === consumption.afterStepCount) {
+            previous.stamps.push(consumption.stamp)
+            continue
+        }
+        groups.push({
+            afterStepCount: consumption.afterStepCount,
+            stamps: [ consumption.stamp ],
+        })
+    }
+    return Object.freeze(groups.map(group => Object.freeze({
+        afterStepCount: group.afterStepCount,
+        stamps: Object.freeze([ ...group.stamps ]),
+    })))
 }
 
 type ResolvedReadbackStep = ReadbackStep & {

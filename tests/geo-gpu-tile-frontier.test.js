@@ -830,6 +830,51 @@ describe('Geo GPU tile frontier contracts and reference oracle', () => {
         fixture.runtime.dispose()
     })
 
+    it('advances A/B after frontier issue even when a later composed queue action fails', async() => {
+
+        const fixture = await createGpuResourceGraphFixture()
+        const frontier = await GpuTileFrontier.create(fixture.runtime, fixture.descriptor)
+        const seed = frontier.stageSeed(fixture.publication.snapshot)
+        const firstView = frontier.writeView(fixture.view)
+        const firstFrame = frontier.frame(firstView)
+        const trailingBuffer = await fixture.runtime.createBuffer({ size: 4, usage: 0x08 })
+        const trailingUpload = fixture.runtime.createUploadCommand({
+            target: trailingBuffer.region(),
+            data: new Uint32Array([ 0xdecafbad ]),
+        })
+        const writeBuffer = fixture.runtime.queue.writeBuffer.bind(fixture.runtime.queue)
+        fixture.runtime.queue.writeBuffer = (buffer, ...args) => {
+            if (buffer === trailingBuffer.gpuBuffer) {
+                throw new Error('injected post-frontier upload failure')
+            }
+            return writeBuffer(buffer, ...args)
+        }
+
+        expect(() => frontier.encode(appendSeed(
+            fixture.runtime.createSubmission({ validation: 'throw' }),
+            seed
+        ), firstFrame)
+            .upload(trailingUpload)
+            .submit()).to.throw('injected post-frontier upload failure')
+
+        const nextView = frontier.writeView({ ...fixture.view, frameEpoch: 1 })
+        expect(frontier.frame(nextView)).to.deep.include({
+            source: 'B',
+            target: 'A',
+            parity: 1,
+        })
+
+        fixture.runtime.queue.writeBuffer = writeBuffer
+        firstView.dispose()
+        nextView.dispose()
+        trailingUpload.dispose()
+        trailingBuffer.dispose()
+        frontier.dispose()
+        fixture.gpuState.dispose()
+        fixture.residency.dispose()
+        fixture.runtime.dispose()
+    })
+
     it('packs acknowledged roots once and keeps writeView as the sole per-frame host upload', async() => {
 
         const fixture = await createGpuResourceGraphFixture()

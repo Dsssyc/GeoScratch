@@ -562,9 +562,9 @@ export class GpuTileFrontier {
         return builder
             .require(record.view.residencyStamp)
             .require(record.view.viewStamp)
-            .consume(record.view.sequenceStamp)
             .upload(record.view.command)
             .compute(this.#pass, [ ...record.template.commands ])
+            .consume(record.view.sequenceStamp)
     }
 
     drawArgument(frame: GpuTileFrontierFrame, id: string): GpuTileFrontierDrawArgument {

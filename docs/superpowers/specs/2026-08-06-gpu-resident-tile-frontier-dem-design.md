@@ -198,7 +198,7 @@ nextDispatchArguments
 
 `frontierLookupBuffer` 是只覆盖当前有限前沿的 GPU membership index，用于按 canonical tile key 查询相邻 cover entry。它可以使用有界 open-addressed hash；并发插入允许改变内部槽位，但 lookup 的 membership 结果、后续 prefix-scan offset 和最终 canonical 输出顺序必须确定。该索引不扩展成完整世界四叉树，也不进入 Virtual Raster 的通用 page-table ABI。
 
-ping-pong 的 A/B buffer 和 indirect-argument offsets 在创建时固定。实现可以预构建 `A -> B` 与 `B -> A` 两份等价 submission template，并仅按 `frameEpoch` 奇偶选择模板；这属于资源角色轮换，不是 CPU tile decision。CPU 不读取 count，也不重写 indirect bytes。
+ping-pong 的 A/B buffer 和 indirect-argument offsets 在创建时固定。实现预构建 `A -> B` 与 `B -> A` 两份等价 submission template，并按已跨过 frontier ordered issue boundary 的单调 sequence 选择模板；caller `frameEpoch` 只作为 decision metadata，不能控制资源角色。取消、未提交或 boundary 前失败不推进 sequence，boundary 后的组合工作失败也不能回滚已经 issue 的 A/B 转换。CPU 不读取 count，也不重写 indirect bytes。
 
 ### GPU 输出
 
