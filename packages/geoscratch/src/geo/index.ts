@@ -22,6 +22,15 @@ export type {
     GpuTileFrontierPolicy,
     GpuTileFrontierView,
 } from './gpu-tile-frontier-layout.js'
+export { GpuTileFrontier } from './gpu-tile-frontier.js'
+export type {
+    GpuTileFrontierCoreFacts,
+    GpuTileFrontierDrawArgument,
+    GpuTileFrontierFrame,
+    GpuTileFrontierResourceGraph,
+    GpuTileFrontierSeed,
+    GpuTileFrontierViewUpload,
+} from './gpu-tile-frontier.js'
 export {
     coordinateDomain,
     localVector,

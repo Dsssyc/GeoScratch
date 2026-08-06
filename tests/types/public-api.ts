@@ -5,6 +5,7 @@ import * as geoApi from 'geoscratch/geo'
 import {
     CellLocalF32Codec,
     GeoDiagnosticError,
+    GpuTileFrontier,
     MercatorCoordinate,
     TileMatrixCoverage,
     WebMercatorQuad,
@@ -29,10 +30,16 @@ import {
     type CellLocalPosition,
     type CoordinateDomain,
     type GpuTileFrontierDescriptor,
+    type GpuTileFrontierCoreFacts,
+    type GpuTileFrontierDrawArgument,
     type GpuTileFrontierDrawTemplate,
+    type GpuTileFrontierFrame,
     type GpuTileFrontierLevelMetric,
     type GpuTileFrontierPolicy,
+    type GpuTileFrontierResourceGraph,
+    type GpuTileFrontierSeed,
     type GpuTileFrontierView,
+    type GpuTileFrontierViewUpload,
     type PositionPrecisionFacts,
     type WideFixedPosition,
     type WebMercatorQuadPosition,
@@ -291,6 +298,29 @@ const typedFrontierView: GpuTileFrontierView = {
     frameEpoch: 1,
     residencySnapshotEpoch: 1,
 }
+declare const typedFrontierRuntime: scr.GPURuntime
+declare const typedGpuFrontier: GpuTileFrontier
+const typedFrontierCreation: Promise<GpuTileFrontier> = GpuTileFrontier.create(
+    typedFrontierRuntime,
+    typedFrontierDescriptor,
+)
+const typedFrontierSeed: GpuTileFrontierSeed = typedGpuFrontier.stageSeed(
+    typedRasterResidency.currentSnapshot,
+)
+const typedFrontierUpload: GpuTileFrontierViewUpload = typedGpuFrontier.writeView(
+    typedFrontierView,
+)
+const typedFrontierFrame: GpuTileFrontierFrame = typedGpuFrontier.frame(1)
+const typedFrontierDraw: GpuTileFrontierDrawArgument = typedGpuFrontier.drawArgument(
+    typedFrontierFrame,
+    'terrain',
+)
+const typedFrontierFacts: GpuTileFrontierCoreFacts = typedGpuFrontier.facts()
+const typedFrontierResources: GpuTileFrontierResourceGraph = typedFrontierFacts.resources
+// @ts-expect-error Task 3C owns bounded feedback integration
+typedGpuFrontier.feedback(typedFrontierFrame)
+// @ts-expect-error Task 3C owns bounded capture integration
+typedGpuFrontier.capture(typedFrontierFrame)
 // @ts-expect-error Frontier descriptors require an explicit WebMercatorQuad address codec
 const typedFrontierWithoutProjection: GpuTileFrontierDescriptor = {
     gpuState: typedFrontierGpuState,
@@ -328,6 +358,13 @@ void typedRasterGpuState
 void typedWebMercatorAddress
 void typedFrontierDescriptor
 void typedFrontierView
+void typedFrontierCreation
+void typedFrontierSeed
+void typedFrontierUpload
+void typedFrontierFrame
+void typedFrontierDraw
+void typedFrontierFacts
+void typedFrontierResources
 void typedFrontierWithoutProjection
 void typedFrontierInvalidTuple
 void typedFrontierInvalidDraw

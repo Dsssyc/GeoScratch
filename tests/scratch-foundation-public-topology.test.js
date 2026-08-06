@@ -82,6 +82,7 @@ const scratchValues = [
 const geoValues = [
     'CellLocalF32Codec',
     'GeoDiagnosticError',
+    'GpuTileFrontier',
     'MercatorCoordinate',
     'TileMatrixCoverage',
     'VirtualRasterAccessor',

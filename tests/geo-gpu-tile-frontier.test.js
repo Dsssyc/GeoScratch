@@ -1,9 +1,15 @@
 import { expect } from 'chai'
+import { GPURuntime } from 'geoscratch/scratch'
 import {
     GeoDiagnosticError,
+    GpuTileFrontier,
+    VirtualRasterResidency,
     WebMercatorQuad,
+    createVirtualRasterGpuState,
     gpuTileFrontierPolicy,
+    ownedVirtualRasterPagePayload,
     tileMatrixCoverage,
+    virtualRasterPlane,
     virtualRasterTileAddressSpace,
     webMercatorQuadAddressCodec,
 } from 'geoscratch/geo'
@@ -13,21 +19,63 @@ import {
 import {
     gpuTileFrontierLayouts,
 } from '../packages/geoscratch/dist/geo/gpu-tile-frontier-layout.js'
+import {
+    createGpuTileFrontierWgsl,
+    gpuTileFrontierEntryPoints,
+} from '../packages/geoscratch/dist/geo/gpu-tile-frontier-wgsl.js'
+import {
+    createFakeGpu,
+    createTestProgram,
+    triangleWgsl,
+} from './scratch-test-utils.js'
 
 const HALF_WORLD = 20_037_508.3427892
 const SNAPSHOT_EPOCH = 7
 const U32_LIMIT = 0x1_0000_0000
+const GPU_BUFFER_USAGE_STORAGE = 0x80
+const GPU_BUFFER_USAGE_INDIRECT = 0x100
+
+const FRONTIER_COMMAND_LABELS = [
+    'Reset GPU tile frontier',
+    'Clear GPU tile frontier lookup',
+    'Build GPU tile frontier lookup',
+    'Evaluate GPU tile frontier',
+    'Select GPU tile frontier budgets',
+    'Resolve GPU tile frontier transitions',
+    'Balance GPU tile frontier neighbors',
+    'Scan GPU tile frontier blocks',
+    'Scan GPU tile frontier block sums',
+    'Add GPU tile frontier scan offsets',
+    'Compact GPU tile frontier outputs',
+    'Finalize GPU tile frontier arguments',
+]
+
+const FRONTIER_COMMAND_COUNTS = [
+    'direct',
+    'direct',
+    'indirect',
+    'indirect',
+    'direct',
+    'indirect',
+    'indirect',
+    'direct',
+    'direct',
+    'direct',
+    'indirect',
+    'direct',
+]
 
 function createFixture(options = {}) {
 
     const minimumMatrixLevel = options.minimumMatrixLevel ?? 0
     const maximumMatrixLevel = options.maximumMatrixLevel ?? 3
+    const coverageLevels = options.coverageMatrixLevels ?? Array.from(
+        { length: maximumMatrixLevel - minimumMatrixLevel + 1 },
+        (_, index) => minimumMatrixLevel + index
+    )
     const coverage = tileMatrixCoverage({
         tileMatrixSet: WebMercatorQuad,
-        limits: Array.from(
-            { length: maximumMatrixLevel - minimumMatrixLevel + 1 },
-            (_, index) => minimumMatrixLevel + index
-        ).map(matrixLevel => ({
+        limits: coverageLevels.map(matrixLevel => ({
             matrixId: String(matrixLevel),
             minTileRow: 0,
             maxTileRow: 2 ** matrixLevel - 1,
@@ -168,7 +216,561 @@ function expectFrontierInvalid(action) {
     }
 }
 
+async function createGpuResourceGraphFixture(options = {}) {
+
+    const logical = createFixture({
+        maximumMatrixLevel: options.maximumMatrixLevel ?? 0,
+        coverageMatrixLevels: options.coverageMatrixLevels,
+    })
+    const fake = createFakeGpu()
+    const runtime = await GPURuntime.create({ gpu: fake.gpu })
+    const addressSpace = logical.descriptor.gpuState.addressSpace
+    const plane = virtualRasterPlane({
+        id: 'frontier-height',
+        addressSpace,
+        kind: 'scalar',
+        channels: 1,
+        sampleType: 'unorm8',
+        gpuFormat: 'r8unorm',
+    })
+    const [ width, height ] = addressSpace.pageSize
+    const residency = new VirtualRasterResidency({
+        addressSpace,
+        plane,
+        maxPhysicalPages: 32,
+        maxStagingBytes: width * height,
+    })
+    const root = logical.descriptor.roots[0]
+    residency.stage(ownedVirtualRasterPagePayload({
+        page: root,
+        width,
+        height,
+        channels: 1,
+        data: new Uint8Array(width * height),
+        contentVersion: 'frontier-root-v1',
+    }), { generation: 3 })
+    const publication = residency.publish()
+    const gpuState = await createVirtualRasterGpuState(runtime, {
+        addressSpace,
+        plane,
+        maxPhysicalPages: 32,
+    })
+    const update = gpuState.stage(publication)
+    const builder = runtime.createSubmission({ validation: 'throw' })
+    for (const command of update.commands) builder.upload(command)
+    const submitted = builder.submit()
+    await gpuState.acknowledge(publication, submitted)
+
+    return {
+        ...fake,
+        runtime,
+        residency,
+        publication,
+        gpuState,
+        view: {
+            ...logical.view,
+            frameEpoch: 0,
+            residencySnapshotEpoch: publication.snapshot.epoch,
+        },
+        descriptor: {
+            ...logical.descriptor,
+            gpuState,
+        },
+    }
+}
+
+function appendSeed(builder, seed) {
+
+    for (const command of seed.commands) {
+        if (command.commandKind === 'clear') builder.clear(command)
+        else builder.upload(command)
+    }
+    return builder
+}
+
+async function createDrawConsumer(fixture, frontier, frame) {
+
+    const program = await createTestProgram(fixture.runtime, {
+        sourceParts: [ triangleWgsl ],
+        vertex: 'vsMain',
+        fragment: 'fsMain',
+    })
+    const pipeline = await fixture.runtime.createRenderPipeline({
+        program,
+        targets: [ { format: 'rgba8unorm' } ],
+    })
+    const target = await fixture.runtime.createTexture({
+        label: 'frontier provenance target',
+        size: { width: 4, height: 4 },
+        format: 'rgba8unorm',
+        usage: 0x10,
+    })
+    const pass = fixture.runtime.createRenderPass({
+        label: 'frontier provenance draw pass',
+        color: [ {
+            target: target.view(),
+            load: 'clear',
+            store: 'store',
+            clear: [ 0, 0, 0, 1 ],
+        } ],
+    })
+    const argument = frontier.drawArgument(frame, 'terrain')
+    const draw = fixture.runtime.createDrawCommand({
+        label: 'Draw GPU tile frontier terrain',
+        pipeline,
+        count: { indirect: argument.region },
+        resources: {
+            read: [
+                { resource: argument.resource, contentEpoch: 'current-at-step' },
+                { resource: frame.visibleInstances, contentEpoch: 'current-at-step' },
+            ],
+            write: [],
+        },
+        whenMissing: 'throw',
+    })
+    return { program, pipeline, target, pass, argument, draw }
+}
+
+async function expectGpuFrontierDiagnostic(action, expectedCode) {
+
+    let failure
+    try {
+        await action()
+    } catch (error) {
+        failure = error
+    }
+    expect(failure).to.be.instanceOf(GeoDiagnosticError)
+    expect(failure.diagnostic).to.include({ code: expectedCode, phase: 'selection' })
+    return failure.diagnostic
+}
+
 describe('Geo GPU tile frontier contracts and reference oracle', () => {
+
+    it('creates the persistent bounded GPU resource graph and two parity templates', async() => {
+
+        const fixture = await createGpuResourceGraphFixture()
+        const frontier = await GpuTileFrontier.create(fixture.runtime, fixture.descriptor)
+        const nativeCounts = {
+            buffers: fixture.calls.buffers.length,
+            bindLayouts: fixture.calls.bindGroupLayouts.length,
+            bindSets: fixture.calls.bindGroups.length,
+            pipelines: fixture.calls.computePipelines.length,
+        }
+
+        const even = frontier.frame(0)
+        const odd = frontier.frame(1)
+        const evenAgain = frontier.frame(2)
+        const facts = frontier.facts()
+        const terrain = frontier.drawArgument(even, 'terrain')
+
+        expect(Object.keys(facts.resources)).to.have.length(19)
+        expect(fixture.calls.computePipelines).to.have.length(12)
+        expect(fixture.calls.bindGroupLayouts).to.have.length(12)
+        expect(fixture.calls.bindGroups).to.have.length(24)
+        for (const layout of fixture.calls.bindGroupLayouts) {
+            const storageBindings = layout.descriptor.entries.filter(entry =>
+                entry.buffer?.type === 'storage' || entry.buffer?.type === 'read-only-storage'
+            )
+            expect(storageBindings.length, layout.descriptor.label).to.be.at.most(8)
+        }
+        expect(even.commands.map(command => command.label)).to.deep.equal(FRONTIER_COMMAND_LABELS)
+        expect(odd.commands.map(command => command.label)).to.deep.equal(FRONTIER_COMMAND_LABELS)
+        expect(even.commands.map(command => 'indirect' in command.count ? 'indirect' : 'direct'))
+            .to.deep.equal(FRONTIER_COMMAND_COUNTS)
+        expect(even).to.deep.include({ source: 'A', target: 'B', parity: 0 })
+        expect(odd).to.deep.include({ source: 'B', target: 'A', parity: 1 })
+        expect(even.currentFrontier).to.equal(facts.resources.frontierA)
+        expect(even.nextFrontier).to.equal(facts.resources.frontierB)
+        expect(odd.currentFrontier).to.equal(facts.resources.frontierB)
+        expect(odd.nextFrontier).to.equal(facts.resources.frontierA)
+        expect(evenAgain.commands.map(command => command.id))
+            .to.deep.equal(even.commands.map(command => command.id))
+        expect(evenAgain.currentFrontier).to.equal(even.currentFrontier)
+        expect(evenAgain.nextFrontier).to.equal(even.nextFrontier)
+        for (const resource of [
+            facts.resources.dispatchArgumentsA,
+            facts.resources.dispatchArgumentsB,
+            facts.resources.drawArgumentsA,
+            facts.resources.drawArgumentsB,
+            terrain.resource,
+        ]) {
+            expect(resource.usage & GPU_BUFFER_USAGE_STORAGE).to.not.equal(0)
+            expect(resource.usage & GPU_BUFFER_USAGE_INDIRECT).to.not.equal(0)
+        }
+        expect(terrain).to.deep.include({ templateId: 'terrain', offset: 0, size: 16 })
+        expect(terrain.resource).to.equal(facts.resources.drawArgumentsB)
+        expect(fixture.calls.maps).to.deep.equal([])
+        expect({
+            buffers: fixture.calls.buffers.length,
+            bindLayouts: fixture.calls.bindGroupLayouts.length,
+            bindSets: fixture.calls.bindGroups.length,
+            pipelines: fixture.calls.computePipelines.length,
+        }).to.deep.equal(nativeCounts)
+
+        frontier.dispose()
+        frontier.dispose()
+        expect(Object.values(facts.resources).every(resource => resource.isDisposed)).to.equal(true)
+        expect(fixture.gpuState.slotTable.isDisposed).to.equal(false)
+        fixture.gpuState.dispose()
+        fixture.residency.dispose()
+        fixture.runtime.dispose()
+    })
+
+    it('packs acknowledged roots once and keeps writeView as the sole per-frame host upload', async() => {
+
+        const fixture = await createGpuResourceGraphFixture()
+        const frontier = await GpuTileFrontier.create(fixture.runtime, fixture.descriptor)
+        const queueWritesBeforeSeed = fixture.calls.queueWrites.length
+        const seed = frontier.stageSeed(fixture.publication.snapshot)
+        const sameSeed = frontier.stageSeed(fixture.publication.snapshot)
+        const rootUpload = seed.uploads.find(command => command.label === 'Upload GPU tile frontier roots')
+        const rootWords = new Uint32Array(
+            rootUpload.data.buffer,
+            rootUpload.data.byteOffset,
+            rootUpload.data.byteLength / Uint32Array.BYTES_PER_ELEMENT
+        )
+        const resolvedRoot = fixture.publication.snapshot.resolve(fixture.descriptor.roots[0])
+
+        expect(seed).to.equal(sameSeed)
+        expect(seed.snapshotEpoch).to.equal(fixture.publication.snapshot.epoch)
+        expect(fixture.calls.queueWrites).to.have.length(queueWritesBeforeSeed)
+        expect(Array.from(rootWords.slice(0, 7))).to.deep.equal([
+            resolvedRoot.physicalSlot,
+            resolvedRoot.generation,
+            fixture.descriptor.roots[0].level,
+            0,
+            0,
+            0,
+            0,
+        ])
+        expect(rootWords[11]).to.equal(fixture.publication.snapshot.epoch)
+
+        const firstView = frontier.writeView(fixture.view)
+        const firstFrame = frontier.frame(0)
+        const firstDraw = await createDrawConsumer(fixture, frontier, firstFrame)
+        const firstBuilder = appendSeed(
+            fixture.runtime.createSubmission({ validation: 'throw' }),
+            seed
+        )
+        const firstSubmitted = firstBuilder
+            .upload(firstView.command)
+            .compute(firstFrame.pass, firstFrame.commands)
+            .render(firstDraw.pass, [ firstDraw.draw ])
+            .submit()
+        expect(await firstSubmitted.nativeOutcome).to.deep.include({ status: 'observed-succeeded' })
+
+        const objectCounts = {
+            buffers: fixture.calls.buffers.length,
+            bindGroups: fixture.calls.bindGroups.length,
+            pipelines: fixture.calls.computePipelines.length,
+        }
+        const queueWritesBeforeSecondFrame = fixture.calls.queueWrites.length
+        const secondView = frontier.writeView({ ...fixture.view, frameEpoch: 1 })
+        const secondFrame = frontier.frame(1)
+        const secondDraw = await createDrawConsumer(fixture, frontier, secondFrame)
+        const secondSubmitted = fixture.runtime.createSubmission({ validation: 'throw' })
+            .upload(secondView.command)
+            .compute(secondFrame.pass, secondFrame.commands)
+            .render(secondDraw.pass, [ secondDraw.draw ])
+            .submit()
+
+        expect(secondView.command).to.equal(firstView.command)
+        expect(secondView.data).to.equal(firstView.data)
+        expect(fixture.calls.queueWrites).to.have.length(queueWritesBeforeSecondFrame + 1)
+        expect(fixture.calls.maps).to.deep.equal([])
+        expect({
+            buffers: fixture.calls.buffers.length,
+            bindGroups: fixture.calls.bindGroups.length,
+            pipelines: fixture.calls.computePipelines.length,
+        }).to.deep.equal(objectCounts)
+        expect(await secondSubmitted.nativeOutcome).to.deep.include({ status: 'observed-succeeded' })
+
+        firstDraw.draw.dispose()
+        firstDraw.pass.dispose()
+        firstDraw.pipeline.dispose()
+        firstDraw.program.dispose()
+        firstDraw.target.dispose()
+        secondDraw.draw.dispose()
+        secondDraw.pass.dispose()
+        secondDraw.pipeline.dispose()
+        secondDraw.program.dispose()
+        secondDraw.target.dispose()
+        frontier.dispose()
+        fixture.gpuState.dispose()
+        fixture.residency.dispose()
+        fixture.runtime.dispose()
+    })
+
+    it('records current-at-step producer and consumer epochs for dispatch and draw arguments', async() => {
+
+        const fixture = await createGpuResourceGraphFixture()
+        const frontier = await GpuTileFrontier.create(fixture.runtime, fixture.descriptor)
+        const seed = frontier.stageSeed(fixture.publication.snapshot)
+        const view = frontier.writeView(fixture.view)
+        const frame = frontier.frame(0)
+        const drawFixture = await createDrawConsumer(fixture, frontier, frame)
+        const submitted = appendSeed(
+            fixture.runtime.createSubmission({ validation: 'throw' }),
+            seed
+        )
+            .upload(view.command)
+            .compute(frame.pass, frame.commands)
+            .render(drawFixture.pass, [ drawFixture.draw ])
+            .submit()
+        const reset = frame.commands[0]
+        const finalize = frame.commands.at(-1)
+        const dispatchWrites = submitted.resourceAccesses.filter(access =>
+            access.commandId === reset.id &&
+            access.resourceId === frame.currentDispatchArguments.id &&
+            access.access === 'write'
+        )
+        const dispatchReads = submitted.resourceAccesses.filter(access =>
+            frame.commands.slice(2, 11).includes(frame.commands.find(command => command.id === access.commandId)) &&
+            access.resourceId === frame.currentDispatchArguments.id &&
+            access.access === 'read'
+        )
+        const drawWrite = submitted.resourceAccesses.find(access =>
+            access.commandId === finalize.id &&
+            access.resourceId === drawFixture.argument.resource.id &&
+            access.access === 'write'
+        )
+        const drawRead = submitted.resourceAccesses.find(access =>
+            access.commandId === drawFixture.draw.id &&
+            access.resourceId === drawFixture.argument.resource.id &&
+            access.access === 'read'
+        )
+
+        expect(dispatchWrites).to.have.length(1)
+        expect(dispatchReads).to.have.length(5)
+        expect(dispatchReads.every(access =>
+            access.declaredContentEpoch === 'current-at-step' &&
+            access.contentEpochBefore === dispatchWrites[0].contentEpochAfter
+        )).to.equal(true)
+        expect(drawWrite).to.exist
+        expect(drawRead).to.include({
+            declaredContentEpoch: 'current-at-step',
+            contentEpochBefore: drawWrite.contentEpochAfter,
+        })
+        expect(submitted.producerEpochs.some(epoch =>
+            epoch.resourceId === frame.nextDispatchArguments.id
+        )).to.equal(true)
+        expect(fixture.calls.maps).to.deep.equal([])
+
+        drawFixture.draw.dispose()
+        drawFixture.pass.dispose()
+        drawFixture.pipeline.dispose()
+        drawFixture.program.dispose()
+        drawFixture.target.dispose()
+        frontier.dispose()
+        fixture.gpuState.dispose()
+        fixture.residency.dispose()
+        fixture.runtime.dispose()
+    })
+
+    it('publishes output producer epochs for zero-work and overflow count inputs', async() => {
+
+        for (const input of [ 'zero', 'overflow' ]) {
+            const fixture = await createGpuResourceGraphFixture()
+            const frontier = await GpuTileFrontier.create(fixture.runtime, fixture.descriptor)
+            const seed = frontier.stageSeed(fixture.publication.snapshot)
+            const view = frontier.writeView(fixture.view)
+            const frame = frontier.frame(0)
+            const facts = frontier.facts()
+            const counters = new Uint32Array(32)
+            counters[0] = input === 'zero' ? 0 : facts.capacities.activeTiles + 1
+            const dispatch = new Uint32Array([
+                Math.ceil(counters[0] / 64),
+                1,
+                1,
+            ])
+            const counterUpload = fixture.runtime.createUploadCommand({
+                label: `Set ${input} GPU tile frontier counter input`,
+                target: facts.resources.counters.region(),
+                data: counters,
+            })
+            const dispatchUpload = fixture.runtime.createUploadCommand({
+                label: `Set ${input} GPU tile frontier dispatch input`,
+                target: facts.resources.dispatchArgumentsA.region(),
+                data: dispatch,
+            })
+            const submitted = appendSeed(
+                fixture.runtime.createSubmission({ validation: 'throw' }),
+                seed
+            )
+                .upload(counterUpload)
+                .upload(dispatchUpload)
+                .upload(view.command)
+                .compute(frame.pass, frame.commands)
+                .submit()
+            const finalizer = frame.commands.at(-1)
+            const expectedProducerIds = [
+                frame.nextDispatchArguments.id,
+                frame.drawArguments.id,
+                frame.visibleInstances.id,
+                facts.resources.diagnostics.id,
+            ]
+
+            for (const resourceId of expectedProducerIds) {
+                expect(submitted.producerEpochs.some(epoch =>
+                    epoch.resourceId === resourceId
+                ), `${input} producer ${resourceId}`).to.equal(true)
+            }
+            expect(submitted.resourceAccesses.some(access =>
+                access.commandId === finalizer.id &&
+                access.resourceId === frame.nextDispatchArguments.id &&
+                access.access === 'write'
+            )).to.equal(true)
+            expect(fixture.calls.maps).to.deep.equal([])
+            expect(await submitted.nativeOutcome).to.deep.include({ status: 'observed-succeeded' })
+
+            counterUpload.dispose()
+            dispatchUpload.dispose()
+            frontier.dispose()
+            fixture.gpuState.dispose()
+            fixture.residency.dispose()
+            fixture.runtime.dispose()
+        }
+    })
+
+    it('accepts newer acknowledged residency epochs without rebuilding or reseeding', async() => {
+
+        const fixture = await createGpuResourceGraphFixture({ maximumMatrixLevel: 1 })
+        const frontier = await GpuTileFrontier.create(fixture.runtime, fixture.descriptor)
+        const seed = frontier.stageSeed(fixture.publication.snapshot)
+        const rootUploadId = seed.uploads.find(command =>
+            command.label === 'Upload GPU tile frontier roots'
+        ).id
+        const child = fixture.gpuState.addressSpace.pageFromTile({
+            matrixId: '1',
+            tileRow: 0,
+            tileCol: 0,
+        })
+        const [ width, height ] = fixture.gpuState.addressSpace.pageSize
+        fixture.residency.stage(ownedVirtualRasterPagePayload({
+            page: child,
+            width,
+            height,
+            channels: 1,
+            data: new Uint8Array(width * height),
+            contentVersion: 'frontier-child-v1',
+        }), { generation: 1 })
+        const publication = fixture.residency.publish()
+        const update = fixture.gpuState.stage(publication)
+        const builder = fixture.runtime.createSubmission({ validation: 'throw' })
+        for (const command of update.commands) builder.upload(command)
+        await fixture.gpuState.acknowledge(publication, builder.submit())
+
+        const upload = frontier.writeView({
+            ...fixture.view,
+            frameEpoch: 1,
+            residencySnapshotEpoch: publication.snapshot.epoch,
+        })
+
+        expect(upload.residencySnapshotEpoch).to.equal(publication.snapshot.epoch)
+        expect(frontier.stageSeed(fixture.publication.snapshot)).to.equal(seed)
+        expect(seed.uploads.find(command =>
+            command.label === 'Upload GPU tile frontier roots'
+        ).id).to.equal(rootUploadId)
+
+        frontier.dispose()
+        fixture.gpuState.dispose()
+        fixture.residency.dispose()
+        fixture.runtime.dispose()
+    })
+
+    it('rejects wrong runtime, stale snapshot, forged frame, unknown template, and disposed use', async() => {
+
+        const fixture = await createGpuResourceGraphFixture()
+        const otherFake = createFakeGpu()
+        const otherRuntime = await GPURuntime.create({ gpu: otherFake.gpu })
+        const buffersBefore = otherFake.calls.buffers.length
+        await expectGpuFrontierDiagnostic(
+            () => GpuTileFrontier.create(otherRuntime, fixture.descriptor),
+            'GEO_GPU_TILE_FRONTIER_INVALID'
+        )
+        expect(otherFake.calls.buffers).to.have.length(buffersBefore)
+
+        const incomplete = await createGpuResourceGraphFixture({
+            maximumMatrixLevel: 2,
+            coverageMatrixLevels: [ 0, 2 ],
+        })
+        const incompleteBuffers = incomplete.calls.buffers.length
+        await expectGpuFrontierDiagnostic(
+            () => GpuTileFrontier.create(incomplete.runtime, incomplete.descriptor),
+            'GEO_GPU_TILE_FRONTIER_INVALID'
+        )
+        expect(incomplete.calls.buffers).to.have.length(incompleteBuffers)
+
+        const frontier = await GpuTileFrontier.create(fixture.runtime, fixture.descriptor)
+        const frame = frontier.frame(0)
+        expect(() => frontier.drawArgument({ ...frame }, 'terrain')).to.throw(GeoDiagnosticError)
+        expect(() => frontier.drawArgument(frame, 'missing')).to.throw(GeoDiagnosticError)
+
+        fixture.residency.stage(ownedVirtualRasterPagePayload({
+            page: fixture.descriptor.roots[0],
+            width: fixture.gpuState.addressSpace.pageSize[0],
+            height: fixture.gpuState.addressSpace.pageSize[1],
+            channels: 1,
+            data: new Uint8Array(
+                fixture.gpuState.addressSpace.pageSize[0] *
+                fixture.gpuState.addressSpace.pageSize[1]
+            ),
+            contentVersion: 'unacknowledged-root-v2',
+        }), { generation: 4 })
+        const unacknowledged = fixture.residency.publish().snapshot
+        expect(() => frontier.stageSeed(unacknowledged)).to.throw(GeoDiagnosticError)
+
+        frontier.dispose()
+        expect(() => frontier.frame(0)).to.throw(GeoDiagnosticError)
+        expect(() => frontier.writeView(fixture.view)).to.throw(GeoDiagnosticError)
+        expect(() => frontier.drawArgument(frame, 'terrain')).to.throw(GeoDiagnosticError)
+        otherRuntime.dispose()
+        incomplete.gpuState.dispose()
+        incomplete.residency.dispose()
+        incomplete.runtime.dispose()
+        fixture.gpuState.dispose()
+        fixture.residency.dispose()
+        fixture.runtime.dispose()
+    })
+
+    it('generates all real WGSL stages from the LayoutCodec ABI without placeholder kernels', async() => {
+
+        const fixture = await createGpuResourceGraphFixture()
+        const module = createGpuTileFrontierWgsl(fixture.descriptor, 32, 1)
+
+        expect(module.entryPoints).to.deep.equal(gpuTileFrontierEntryPoints)
+        for (const entryPoint of gpuTileFrontierEntryPoints) {
+            expect(module.code).to.match(new RegExp(`fn ${entryPoint}\\(`))
+            expect(module.code).to.not.match(new RegExp(`fn ${entryPoint}\\([^)]*\\)\\s*\\{\\s*\\}`))
+        }
+        expect(module.layoutDependencies).to.include.members(
+            Object.values(gpuTileFrontierLayouts).map(layout => layout.codec.artifact)
+        )
+        expect(module.code).to.include('atomicCompareExchangeWeak')
+        expect(module.code).to.include('2654435761u')
+        expect(module.code).to.include('row3 - row2')
+        expect(module.code).to.include('distanceToAabb')
+        expect(module.code).to.include('coveredChildOrdinal')
+        expect(module.code).to.include('coveredChildCount')
+        expect(module.code).to.include('projectedArea')
+        expect(module.code).to.include('sseScore')
+        expect(module.code).to.include('costPenalty')
+        expect(module.code).to.include('DECISION_CANDIDATE')
+        expect(module.code).to.include('DECISION_BLOCKED')
+        expect(module.code).to.include('entry.previousLodState')
+        expect(module.code).to.include('entry.childDemandMask')
+        expect(module.code).to.include('bucket = 255i')
+        expect(module.code).to.include('countOneBits')
+        expect(module.code).to.include('PREFIX_BLOCK_BASE')
+        expect(module.code).to.include('nextDispatchArguments[0]')
+        expect(module.code).to.include('drawArgumentsOutput[base + 1u] = visibleCount')
+        expect(module.code).to.not.include('atomic<u32>(0u)')
+        expect(module.code).to.not.include('let activeCost = select(3u, 0u')
+
+        fixture.gpuState.dispose()
+        fixture.residency.dispose()
+        fixture.runtime.dispose()
+    })
 
     it('rejects invalid policies with structured selection diagnostics', () => {
 
