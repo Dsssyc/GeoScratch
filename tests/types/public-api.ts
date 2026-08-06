@@ -308,6 +308,9 @@ const typedSubmissionStamp: scr.SubmissionAuthorityStamp = typedSubmissionAuthor
 const typedRequiredSubmission: scr.SubmissionBuilder = typedFrontierRuntime
     .createSubmission()
     .require(typedSubmissionStamp)
+const typedConsumedSubmission: scr.SubmissionBuilder = typedFrontierRuntime
+    .createSubmission()
+    .consume(typedSubmissionStamp)
 const typedFrontierCreation: Promise<GpuTileFrontier> = GpuTileFrontier.create(
     typedFrontierRuntime,
     typedFrontierDescriptor,

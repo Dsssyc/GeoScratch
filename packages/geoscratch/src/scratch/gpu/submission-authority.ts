@@ -120,7 +120,7 @@ export function assertSubmissionAuthorityStamp(
 
     const record = stampRecords.get(stamp)
     if (record === undefined) {
-        return authorityInvalid('SubmissionBuilder.require() needs a genuine immutable authority stamp.', {
+        return authorityInvalid('SubmissionBuilder.require() and consume() need a genuine immutable authority stamp.', {
             stamp: 'SubmissionAuthorityStamp',
         }, stamp)
     }
@@ -158,6 +158,42 @@ export function assertSubmissionAuthorityStamp(
             actual: { revision: record.revision },
         })
     }
+}
+
+export function assertSubmissionAuthorityStampsConsumable(
+    runtime: GPURuntime,
+    stamps: readonly SubmissionAuthorityStamp[]
+): void {
+
+    const records = stamps.map(stamp => {
+        assertSubmissionAuthorityStamp(runtime, stamp)
+        return stampRecords.get(stamp)!
+    })
+    const authorities = new Set<SubmissionAuthority>()
+    for (const record of records) {
+        if (authorities.has(record.authority)) {
+            return authorityInvalid('SubmissionBuilder.consume() may consume an authority only once.', {
+                authority: 'one consumed stamp per SubmissionAuthority',
+            }, { authorityId: record.authority.id }, record.authority)
+        }
+        authorities.add(record.authority)
+        const state = stateFor(record.authority)
+        if (state.revision === Number.MAX_SAFE_INTEGER) {
+            return authorityInvalid('SubmissionAuthority revision exhausted safe integer storage.', {
+                revision: '< Number.MAX_SAFE_INTEGER',
+            }, { revision: state.revision }, record.authority)
+        }
+    }
+}
+
+export function commitSubmissionAuthorityStamps(
+    runtime: GPURuntime,
+    stamps: readonly SubmissionAuthorityStamp[]
+): void {
+
+    assertSubmissionAuthorityStampsConsumable(runtime, stamps)
+    const records = stamps.map(stamp => stampRecords.get(stamp)!)
+    for (const record of records) stateFor(record.authority).revision += 1
 }
 
 function createStamp(

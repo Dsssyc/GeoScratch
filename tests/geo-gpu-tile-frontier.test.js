@@ -18,6 +18,7 @@ import {
     evaluateGpuTileFrontierReference,
 } from '../packages/geoscratch/dist/geo/gpu-tile-frontier-reference.js'
 import {
+    gpuTileFrontierMapMetaCodec,
     gpuTileFrontierLayouts,
 } from '../packages/geoscratch/dist/geo/gpu-tile-frontier-layout.js'
 import {
@@ -618,7 +619,7 @@ describe('Geo GPU tile frontier contracts and reference oracle', () => {
         })
         const frame = frontier.frame(currentView)
         const currentCommand = gpuTileFrontierTestFrameAccess(frontier, frame).viewCommand
-        expect(frame).to.deep.include({ frameEpoch: 1, parity: 1 })
+        expect(frame).to.deep.include({ frameEpoch: 1, parity: 0 })
         expect(currentCommand).not.to.equal(oldCommand)
         expect(Array.from(new Uint8Array(
             oldCommand.data.buffer,
@@ -716,14 +717,23 @@ describe('Geo GPU tile frontier contracts and reference oracle', () => {
             pipelines: fixture.calls.computePipelines.length,
         }
 
-        const evenView = frontier.writeView(fixture.view)
+        const seed = frontier.stageSeed(fixture.publication.snapshot)
+        const evenView = frontier.writeView({ ...fixture.view, frameEpoch: 1 })
         const even = frontier.frame(evenView)
-        const oddView = frontier.writeView({ ...fixture.view, frameEpoch: 1 })
-        const odd = frontier.frame(oddView)
-        const evenAgainView = frontier.writeView({ ...fixture.view, frameEpoch: 2 })
-        const evenAgain = frontier.frame(evenAgainView)
         const evenInternal = gpuTileFrontierTestFrameAccess(frontier, even)
+        const evenSubmitted = frontier.encode(appendSeed(
+            fixture.runtime.createSubmission({ validation: 'throw' }),
+            seed
+        ), even).submit()
+        const oddView = frontier.writeView({ ...fixture.view, frameEpoch: 0 })
+        const odd = frontier.frame(oddView)
         const oddInternal = gpuTileFrontierTestFrameAccess(frontier, odd)
+        const oddSubmitted = frontier.encode(
+            fixture.runtime.createSubmission({ validation: 'throw' }),
+            odd
+        ).submit()
+        const evenAgainView = frontier.writeView({ ...fixture.view, frameEpoch: 99 })
+        const evenAgain = frontier.frame(evenAgainView)
         const evenAgainInternal = gpuTileFrontierTestFrameAccess(frontier, evenAgain)
         const facts = frontier.facts()
         const terrain = frontier.drawArgument(even, 'terrain')
@@ -744,6 +754,7 @@ describe('Geo GPU tile frontier contracts and reference oracle', () => {
             .to.deep.equal(FRONTIER_COMMAND_COUNTS)
         expect(even).to.deep.include({ source: 'A', target: 'B', parity: 0 })
         expect(odd).to.deep.include({ source: 'B', target: 'A', parity: 1 })
+        expect(evenAgain).to.deep.include({ source: 'A', target: 'B', parity: 0 })
         expect(evenInternal.currentFrontier).to.equal(oddInternal.nextFrontier)
         expect(evenInternal.nextFrontier).to.equal(oddInternal.currentFrontier)
         expect(evenAgainInternal.commands.map(command => command.id))
@@ -769,6 +780,8 @@ describe('Geo GPU tile frontier contracts and reference oracle', () => {
             bindSets: fixture.calls.bindGroups.length,
             pipelines: fixture.calls.computePipelines.length,
         }).to.deep.equal(nativeCounts)
+        expect(await evenSubmitted.nativeOutcome).to.deep.include({ status: 'observed-succeeded' })
+        expect(await oddSubmitted.nativeOutcome).to.deep.include({ status: 'observed-succeeded' })
 
         evenView.dispose()
         oddView.dispose()
@@ -777,6 +790,41 @@ describe('Geo GPU tile frontier contracts and reference oracle', () => {
         frontier.dispose()
         expect(frontierNativeBuffers.every(buffer => buffer.destroyed)).to.equal(true)
         expect(fixture.gpuState.slotTable.isDisposed).to.equal(false)
+        fixture.gpuState.dispose()
+        fixture.residency.dispose()
+        fixture.runtime.dispose()
+    })
+
+    it('keeps cancelled views on A and rejects a competing consumer after one submit', async() => {
+
+        const fixture = await createGpuResourceGraphFixture()
+        const frontier = await GpuTileFrontier.create(fixture.runtime, fixture.descriptor)
+        const seed = frontier.stageSeed(fixture.publication.snapshot)
+        const cancelled = frontier.writeView(fixture.view)
+        expect(frontier.frame(cancelled)).to.deep.include({ source: 'A', target: 'B', parity: 0 })
+        cancelled.dispose()
+
+        const replacement = frontier.writeView({ ...fixture.view, frameEpoch: 1 })
+        const frame = frontier.frame(replacement)
+        expect(frame).to.deep.include({ source: 'A', target: 'B', parity: 0 })
+        const firstBuilder = frontier.encode(appendSeed(
+            fixture.runtime.createSubmission({ validation: 'throw' }),
+            seed
+        ), frame)
+        const competingBuilder = frontier.encode(appendSeed(
+            fixture.runtime.createSubmission({ validation: 'throw' }),
+            seed
+        ), frame)
+
+        firstBuilder.submit()
+        expect(() => competingBuilder.submit()).to.throw(ScratchDiagnosticError)
+            .with.nested.property('diagnostic.code', 'SCRATCH_SUBMISSION_AUTHORITY_STALE')
+        const next = frontier.writeView({ ...fixture.view, frameEpoch: 2 })
+        expect(frontier.frame(next)).to.deep.include({ source: 'B', target: 'A', parity: 1 })
+
+        replacement.dispose()
+        next.dispose()
+        frontier.dispose()
         fixture.gpuState.dispose()
         fixture.residency.dispose()
         fixture.runtime.dispose()
@@ -874,6 +922,42 @@ describe('Geo GPU tile frontier contracts and reference oracle', () => {
         secondDraw.target.dispose()
         firstView.dispose()
         secondView.dispose()
+        frontier.dispose()
+        fixture.gpuState.dispose()
+        fixture.residency.dispose()
+        fixture.runtime.dispose()
+    })
+
+    it('packs camera x and y through the address codec wide-fixed ABI', async() => {
+
+        const fixture = await createGpuResourceGraphFixture()
+        const frontier = await GpuTileFrontier.create(fixture.runtime, fixture.descriptor)
+        const view = {
+            ...fixture.view,
+            cameraHigh: [ HALF_WORLD, 100, 50 ],
+            cameraLow: [ -1.3, 0.25, 0 ],
+        }
+        const token = frontier.writeView(view)
+        const frame = frontier.frame(token)
+        const access = gpuTileFrontierTestFrameAccess(frontier, frame)
+        const packed = gpuTileFrontierMapMetaCodec.createReadbackView(new Uint8Array(
+            access.viewCommand.data.buffer,
+            access.viewCommand.data.byteOffset,
+            access.viewCommand.data.byteLength
+        )).toArray()[0]
+        const fixed = fixture.descriptor.addressCodec.fromProjected([
+            view.cameraHigh[0] + view.cameraLow[0],
+            view.cameraHigh[1] + view.cameraLow[1],
+        ]).fixed.limbs
+
+        expect(packed).to.deep.include({
+            cameraFixedLow: [ fixed[0].low, fixed[1].low ],
+            cameraFixedHigh: [ fixed[0].high, fixed[1].high ],
+        })
+        expect(packed).not.to.have.property('cameraMercatorHigh')
+        expect(packed).not.to.have.property('cameraMercatorLow')
+
+        token.dispose()
         frontier.dispose()
         fixture.gpuState.dispose()
         fixture.residency.dispose()
@@ -1117,6 +1201,8 @@ describe('Geo GPU tile frontier contracts and reference oracle', () => {
         expect(module.code).to.include('costPenalty')
         expect(module.code).to.include('DECISION_CANDIDATE')
         expect(module.code).to.include('DECISION_BLOCKED')
+        expect(module.code).to.include('DECISION_BASE_PRIORITY')
+        expect(module.code).to.include('decisionOffset(index, DECISION_BASE_PRIORITY)')
         expect(module.code).to.include('entry.previousLodState')
         expect(module.code).to.include('entry.childDemandMask')
         expect(module.code).to.include('bucket = 255i')
@@ -1137,8 +1223,19 @@ describe('Geo GPU tile frontier contracts and reference oracle', () => {
         const fixture = createFixture()
         const generated = createGpuTileFrontierWgsl(fixture.descriptor, 32, 1).code
 
-        expect(generated).to.include('let normalizedEast = f32(column + 1u) / dimension;')
-        expect(generated).to.include('let normalizedSouth = f32(row + 1u) / dimension;')
+        expect(generated).to.include('fn boundaryQuanta(')
+        expect(generated).to.include('fn relativeQuantaMeters(')
+        expect(generated).to.include('let west = boundaryQuanta(column, matrixLevel);')
+        expect(generated).to.include('let east = boundaryQuanta(column + 1u, matrixLevel);')
+        expect(generated).to.include('let north = boundaryQuanta(row, matrixLevel);')
+        expect(generated).to.include('let south = boundaryQuanta(row + 1u, matrixLevel);')
+        expect(generated).to.include('mapMeta.cameraFixedLow.x')
+        expect(generated).to.include('mapMeta.cameraFixedHigh.x')
+        expect(generated).to.include('mapMeta.cameraFixedLow.y')
+        expect(generated).to.include('mapMeta.cameraFixedHigh.y')
+        expect(generated).to.not.include('cameraMercatorHigh')
+        expect(generated).to.not.include('cameraMercatorLow')
+        expect(generated).to.not.include('normalizedWest')
         expect(generated).to.not.include('let tileExtent =')
         expect(generated).to.not.include('minimumX + tileExtent')
         expect(generated).to.not.include('maximumY - tileExtent')
@@ -1195,8 +1292,8 @@ describe('Geo GPU tile frontier contracts and reference oracle', () => {
                 clipFromRelativeWorld: 0,
                 cameraHigh: 64,
                 cameraLow: 80,
-                cameraMercatorHigh: 96,
-                cameraMercatorLow: 104,
+                cameraFixedLow: 96,
+                cameraFixedHigh: 104,
                 viewport: 112,
                 verticalFovRadians: 120,
                 cameraLatitudeRadians: 124,
@@ -1872,6 +1969,49 @@ describe('Geo GPU tile frontier contracts and reference oracle', () => {
             refineCandidateCount: 3,
             budgetLimitedCount: 0,
             fallbackCount: 2,
+        })
+    })
+
+    it('does not propagate promoted priority through a blocked pressure chain', () => {
+
+        const fixture = createFixture({
+            maximumMatrixLevel: 4,
+            maximumActiveTiles: 7,
+            errorByLevel: [ 0.1, 5_000, 5_000, 100_000, 5_000 ],
+        })
+        const fine = fixture.entry(3, 0, 1, { lastDemandFrame: 0 })
+        const middle = fixture.entry(2, 0, 1, { lastDemandFrame: 63 })
+        const coarse = fixture.entry(1, 0, 1, { lastDemandFrame: 63 })
+        const competitor = fixture.entry(1, 1, 0, { lastDemandFrame: 0 })
+        const competitorChildren = [
+            fixture.resident(2, 2, 0),
+            fixture.resident(2, 2, 1),
+            fixture.resident(2, 3, 0),
+            fixture.resident(2, 3, 1),
+        ]
+        const result = fixture.evaluate(
+            [ competitor, coarse, middle, fine ],
+            [
+                fixture.resident(3, 0, 1),
+                fixture.resident(2, 0, 1),
+                fixture.resident(1, 0, 1),
+                fixture.resident(1, 1, 0),
+                ...competitorChildren,
+            ],
+            { frameEpoch: 63 }
+        )
+
+        expect(keys(result.nextFrontier)).to.deep.equal([
+            fine.page.key,
+            middle.page.key,
+            coarse.page.key,
+            ...competitorChildren.map(child => child.page.key),
+        ])
+        expect(result.facts).to.deep.include({
+            refineCandidateCount: 4,
+            budgetLimitedCount: 2,
+            fallbackCount: 1,
+            activeFrontierCount: 7,
         })
     })
 

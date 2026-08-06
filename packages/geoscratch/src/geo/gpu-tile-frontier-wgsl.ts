@@ -12,7 +12,6 @@ import {
 
 export const GPU_TILE_FRONTIER_WORKGROUP_SIZE = 64
 export const GPU_TILE_FRONTIER_SCAN_BLOCK_SIZE = 64
-const WEB_MERCATOR_HALF_WORLD_METERS = 20_037_508.3427892
 
 export const gpuTileFrontierEntryPoints = Object.freeze([
     'resetFrontier',
@@ -79,9 +78,8 @@ export function createGpuTileFrontierWgsl(
 ): GpuTileFrontierWgslModule {
 
     const levels = descriptor.levelMetrics.map(metric => metric.matrixLevel)
-    const worldWidth = WEB_MERCATOR_HALF_WORLD_METERS * 2
-    const worldWidthHigh = Math.fround(worldWidth)
-    const worldWidthLow = Math.fround(worldWidth - worldWidthHigh)
+    const quantumMeters = descriptor.addressCodec.quantumMeters
+    const highLimbMeters = quantumMeters * 2 ** 32
     const limits = levels.map(matrixLevel => {
         const limit = descriptor.addressCodec.coverage.limit(String(matrixLevel))
         if (limit === undefined) throw new TypeError('GPU tile frontier WGSL coverage is incomplete.')
@@ -121,8 +119,9 @@ const FRONTIER_LEVEL_COUNT: u32 = ${levels.length}u;
 const FRONTIER_DRAW_TEMPLATE_COUNT: u32 = ${drawTemplates.length}u;
 const FRONTIER_INVALID_U32: u32 = 0xffffffffu;
 const FRONTIER_PI: f32 = 3.141592653589793;
-const FRONTIER_WORLD_WIDTH_HIGH: f32 = ${f32Literal(worldWidthHigh)};
-const FRONTIER_WORLD_WIDTH_LOW: f32 = ${f32Literal(worldWidthLow)};
+const FRONTIER_COORDINATE_BITS: u32 = ${descriptor.addressCodec.coordinateBits}u;
+const FRONTIER_QUANTUM_METERS: f32 = ${f32Literal(quantumMeters)};
+const FRONTIER_HIGH_LIMB_METERS: f32 = ${f32Literal(highLimbMeters)};
 
 const FRONTIER_COVERAGE_OFFSETS: array<u32, ${levels.length}> = array<u32, ${levels.length}>(${u32List(limits.map(limit => limit.offset))});
 const FRONTIER_COVERAGE_MIN_ROWS: array<u32, ${levels.length}> = array<u32, ${levels.length}>(${u32List(limits.map(limit => limit.minimumRow))});
@@ -151,7 +150,7 @@ const LOOKUP_KEY: u32 = 0u;
 const LOOKUP_INDEX: u32 = 1u;
 const LOOKUP_EPOCH: u32 = 2u;
 
-const DECISION_STRIDE: u32 = 16u;
+const DECISION_STRIDE: u32 = 17u;
 const DECISION_TRANSITION: u32 = 0u;
 const DECISION_PRIORITY: u32 = 1u;
 const DECISION_ACCEPTED: u32 = 2u;
@@ -168,6 +167,7 @@ const DECISION_CANDIDATE: u32 = 12u;
 const DECISION_BLOCKED: u32 = 13u;
 const DECISION_COVERED_CHILD_COUNT: u32 = 14u;
 const DECISION_LIVE_REFINE: u32 = 15u;
+const DECISION_BASE_PRIORITY: u32 = 16u;
 
 const PREFIX_STRIDE: u32 = 8u;
 const PREFIX_NEXT: u32 = 0u;
@@ -232,6 +232,11 @@ const TRANSITION_STALE: u32 = 3u;
 struct FrontierBounds {
     minimum: vec3f,
     maximum: vec3f,
+}
+
+struct FrontierQuanta {
+    low: u32,
+    high: u32,
 }
 
 struct FrontierPlane {
@@ -352,44 +357,52 @@ fn subtractExpansions(
     return difference + (roundoff + leftLow - rightLow);
 }
 
-fn normalizedWorldMeters(relative: f32) -> f32 {
-    let high = relative * FRONTIER_WORLD_WIDTH_HIGH;
-    let low = fma(relative, FRONTIER_WORLD_WIDTH_HIGH, -high) +
-        relative * FRONTIER_WORLD_WIDTH_LOW;
-    return high + low;
+fn boundaryQuanta(index: u32, matrixLevel: u32) -> FrontierQuanta {
+    let shift = FRONTIER_COORDINATE_BITS - matrixLevel;
+    if (shift >= 32u) {
+        return FrontierQuanta(0u, index << (shift - 32u));
+    }
+    if (shift == 0u) {
+        return FrontierQuanta(index, 0u);
+    }
+    return FrontierQuanta(index << shift, index >> (32u - shift));
+}
+
+fn subtractQuanta(left: FrontierQuanta, right: FrontierQuanta) -> FrontierQuanta {
+    let borrow = select(0u, 1u, left.low < right.low);
+    return FrontierQuanta(left.low - right.low, left.high - right.high - borrow);
+}
+
+fn quantaMagnitude(value: FrontierQuanta) -> FrontierQuanta {
+    if ((value.high & 0x80000000u) == 0u) {
+        return value;
+    }
+    let low = ~value.low + 1u;
+    let carry = select(0u, 1u, low == 0u);
+    return FrontierQuanta(low, ~value.high + carry);
+}
+
+fn relativeQuantaMeters(left: FrontierQuanta, right: FrontierQuanta) -> f32 {
+    let difference = subtractQuanta(left, right);
+    let negative = (difference.high & 0x80000000u) != 0u;
+    let magnitude = quantaMagnitude(difference);
+    let meters = f32(magnitude.high) * FRONTIER_HIGH_LIMB_METERS +
+        f32(magnitude.low) * FRONTIER_QUANTUM_METERS;
+    return select(meters, -meters, negative);
 }
 
 fn boundsFor(matrixLevel: u32, row: u32, column: u32) -> FrontierBounds {
     let metric = metricFor(matrixLevel);
-    let dimension = exp2(f32(matrixLevel));
-    let normalizedWest = f32(column) / dimension;
-    let normalizedEast = f32(column + 1u) / dimension;
-    let normalizedNorth = f32(row) / dimension;
-    let normalizedSouth = f32(row + 1u) / dimension;
-    let minimumX = normalizedWorldMeters(subtractExpansions(
-        normalizedWest,
-        0.0,
-        mapMeta.cameraMercatorHigh.x,
-        mapMeta.cameraMercatorLow.x
-    ));
-    let maximumX = normalizedWorldMeters(subtractExpansions(
-        normalizedEast,
-        0.0,
-        mapMeta.cameraMercatorHigh.x,
-        mapMeta.cameraMercatorLow.x
-    ));
-    let maximumY = normalizedWorldMeters(subtractExpansions(
-        mapMeta.cameraMercatorHigh.y,
-        mapMeta.cameraMercatorLow.y,
-        normalizedNorth,
-        0.0
-    ));
-    let minimumY = normalizedWorldMeters(subtractExpansions(
-        mapMeta.cameraMercatorHigh.y,
-        mapMeta.cameraMercatorLow.y,
-        normalizedSouth,
-        0.0
-    ));
+    let west = boundaryQuanta(column, matrixLevel);
+    let east = boundaryQuanta(column + 1u, matrixLevel);
+    let north = boundaryQuanta(row, matrixLevel);
+    let south = boundaryQuanta(row + 1u, matrixLevel);
+    let cameraX = FrontierQuanta(mapMeta.cameraFixedLow.x, mapMeta.cameraFixedHigh.x);
+    let cameraY = FrontierQuanta(mapMeta.cameraFixedLow.y, mapMeta.cameraFixedHigh.y);
+    let minimumX = relativeQuantaMeters(west, cameraX);
+    let maximumX = relativeQuantaMeters(east, cameraX);
+    let maximumY = relativeQuantaMeters(cameraY, north);
+    let minimumY = relativeQuantaMeters(cameraY, south);
     let minimumZ = subtractExpansions(
         metric.minimumElevationMeters,
         0.0,
@@ -731,7 +744,9 @@ fn evaluateFrontier(@builtin(global_invocation_id) globalId: vec3u) {
     let area = select(0.0, projectedArea(bounds), visible);
     atomicStore(&visibilityFlags[index], select(0u, 1u, visible));
     atomicStore(&decisionWrite[decisionOffset(index, DECISION_TRANSITION)], transition);
-    atomicStore(&decisionWrite[decisionOffset(index, DECISION_PRIORITY)], priorityBucket(sse, area, incrementalSlotCost, entry));
+    let basePriority = priorityBucket(sse, area, incrementalSlotCost, entry);
+    atomicStore(&decisionWrite[decisionOffset(index, DECISION_PRIORITY)], basePriority);
+    atomicStore(&decisionWrite[decisionOffset(index, DECISION_BASE_PRIORITY)], basePriority);
     atomicStore(&decisionWrite[decisionOffset(index, DECISION_MISSING_CHILD_MASK)], missingMask);
     atomicStore(&decisionWrite[decisionOffset(index, DECISION_TRANSITION_VISIBLE_EPOCH)], entry.transitionState);
     atomicStore(&decisionWrite[decisionOffset(index, DECISION_SSE_BITS)], bitcast<u32>(max(sse, 0.0)));
@@ -787,7 +802,7 @@ fn selectBudgets(@builtin(global_invocation_id) globalId: vec3u) {
         if (atomicLoad(&decisionWrite[decisionOffset(index, DECISION_LIVE_REFINE)]) != 1u) { continue; }
         let entry = currentFrontier[index];
         var blocked = false;
-        let candidatePriority = atomicLoad(&decisionWrite[decisionOffset(index, DECISION_PRIORITY)]);
+        let candidatePriority = atomicLoad(&decisionWrite[decisionOffset(index, DECISION_BASE_PRIORITY)]);
         for (var otherIndex = 0u; otherIndex < currentCount; otherIndex += 1u) {
             if (otherIndex == index ||
                 atomicLoad(&decisionWrite[decisionOffset(otherIndex, DECISION_TRANSITION)]) == TRANSITION_STALE) {

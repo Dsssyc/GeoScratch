@@ -52,11 +52,10 @@ const U32_MAX = 0xffff_ffff
 const DISPATCH_ARGUMENT_BYTES = 12
 const DRAW_ARGUMENT_BYTES = 16
 const LOOKUP_WORDS = 4
-const DECISION_WORDS = 16
+const DECISION_WORDS = 17
 const PREFIX_WORDS = 8
 const COUNTER_WORDS = 32
 const SLOT_TABLE_WORDS = 12
-const WEB_MERCATOR_HALF_WORLD_METERS = 20_037_508.3427892
 
 let nextFrontierId = 1
 
@@ -212,6 +211,7 @@ type ViewTokenRecord = {
     command: UploadCommand
     viewStamp: SubmissionAuthorityStamp
     residencyStamp: SubmissionAuthorityStamp
+    sequenceStamp: SubmissionAuthorityStamp
     disposed: boolean
 }
 
@@ -234,6 +234,7 @@ export class GpuTileFrontier {
     readonly #lookupCapacity: number
     readonly #scanBlockCount: number
     readonly #viewAuthority: SubmissionAuthority
+    readonly #frontierSequenceAuthority: SubmissionAuthority
     #disposed = false
     #seed: GpuTileFrontierSeed | undefined
     #lastViewFrameEpoch: number | undefined
@@ -260,6 +261,9 @@ export class GpuTileFrontier {
         this.#scanBlockCount = state.capacities.scanBlocks
         this.#viewAuthority = runtime.createSubmissionAuthority({
             label: `${this.id} view`,
+        })
+        this.#frontierSequenceAuthority = runtime.createSubmissionAuthority({
+            label: `${this.id} frontier sequence`,
         })
         Object.preventExtensions(this)
     }
@@ -434,7 +438,10 @@ export class GpuTileFrontier {
         this.#assertActive()
         validateView(this, view)
         const authority = this.descriptor.gpuState.facts()
-        const uploadView = gpuTileFrontierMapMetaCodec.uploadView(mapMetaRecord(view))
+        const uploadView = gpuTileFrontierMapMetaCodec.uploadView(mapMetaRecord(
+            this.descriptor,
+            view
+        ))
         const command = this.runtime.createUploadCommand({
             label: `Upload GPU tile frontier view ${view.frameEpoch}`,
             target: this.#resources.mapMeta.region({
@@ -444,8 +451,10 @@ export class GpuTileFrontier {
         })
         let viewStamp: SubmissionAuthorityStamp
         let residencyStamp: SubmissionAuthorityStamp
+        let sequenceStamp: SubmissionAuthorityStamp
         try {
             residencyStamp = virtualRasterResidencySubmissionStamp(this.descriptor.gpuState)
+            sequenceStamp = this.#frontierSequenceAuthority.stamp()
             viewStamp = this.#viewAuthority.advance()
         } catch (error) {
             command.dispose()
@@ -457,6 +466,7 @@ export class GpuTileFrontier {
             command,
             viewStamp,
             residencyStamp,
+            sequenceStamp,
             disposed: false,
         }
         const token = Object.freeze({
@@ -485,7 +495,8 @@ export class GpuTileFrontier {
             viewToken.frontierId !== this.id ||
             viewToken.residencySnapshotEpoch !== authority.snapshotEpoch ||
             record.acknowledgementSerial !== authority.acknowledgementSerial ||
-            record.viewStamp.revision !== this.#viewAuthority.revision) {
+            record.viewStamp.revision !== this.#viewAuthority.revision ||
+            record.sequenceStamp.revision !== this.#frontierSequenceAuthority.revision) {
             return invalidFrontier(this, 'GPU tile frontier frame requires a live owned view from current residency authority.', {
                 frontierId: this.id,
                 residencySnapshotEpoch: authority.snapshotEpoch,
@@ -496,11 +507,13 @@ export class GpuTileFrontier {
                 acknowledgementSerial: record?.acknowledgementSerial,
                 viewRevision: record?.viewStamp.revision,
                 currentViewRevision: this.#viewAuthority.revision,
+                sequenceRevision: record?.sequenceStamp.revision,
+                currentSequenceRevision: this.#frontierSequenceAuthority.revision,
                 disposed: record?.disposed ?? record?.command?.isDisposed,
             })
         }
         const frameEpoch = viewToken.frameEpoch
-        const template = this.#parityTemplates[frameEpoch & 1]!
+        const template = this.#parityTemplates[record.sequenceStamp.revision & 1]!
         const frame = Object.freeze({
             kind: 'gpu-tile-frontier-frame' as const,
             frontierId: this.id,
@@ -529,23 +542,27 @@ export class GpuTileFrontier {
             frame.frontierId !== this.id || record.view.disposed ||
             record.view.command.isDisposed ||
             record.view.acknowledgementSerial !== authority.acknowledgementSerial ||
-            record.view.viewStamp.revision !== this.#viewAuthority.revision) {
+            record.view.viewStamp.revision !== this.#viewAuthority.revision ||
+            record.view.sequenceStamp.revision !== this.#frontierSequenceAuthority.revision) {
             return invalidFrontier(this, 'GPU tile frontier encoding requires a current owned frame and builder.', {
                 frontierId: this.id,
                 runtimeId: this.runtime.id,
                 acknowledgementSerial: authority.acknowledgementSerial,
                 viewRevision: this.#viewAuthority.revision,
+                sequenceRevision: this.#frontierSequenceAuthority.revision,
             }, {
                 frontierId: frame?.frontierId,
                 runtimeId: builder?.runtime?.id,
                 acknowledgementSerial: record?.view.acknowledgementSerial,
                 viewRevision: record?.view.viewStamp.revision,
+                sequenceRevision: record?.view.sequenceStamp.revision,
                 disposed: record?.view.disposed ?? record?.view.command.isDisposed,
             })
         }
         return builder
             .require(record.view.residencyStamp)
             .require(record.view.viewStamp)
+            .consume(record.view.sequenceStamp)
             .upload(record.view.command)
             .compute(this.#pass, [ ...record.template.commands ])
     }
@@ -626,6 +643,7 @@ export class GpuTileFrontier {
         if (this.#disposed) return
         this.#disposed = true
         this.#viewAuthority.dispose()
+        this.#frontierSequenceAuthority.dispose()
         disposeReverse(this.#owned)
     }
 
@@ -1463,18 +1481,16 @@ function validateView(frontier: GpuTileFrontier, view: GpuTileFrontierView): voi
     }
 }
 
-function mapMetaRecord(view: GpuTileFrontierView): Record<string, unknown> {
+function mapMetaRecord(
+    descriptor: GpuTileFrontierDescriptor,
+    view: GpuTileFrontierView
+): Record<string, unknown> {
 
     const matrix = view.clipFromRelativeWorld
-    const worldWidth = WEB_MERCATOR_HALF_WORLD_METERS * 2
-    const cameraX = view.cameraHigh[0] + view.cameraLow[0]
-    const cameraY = view.cameraHigh[1] + view.cameraLow[1]
-    const cameraMercatorX = splitF32(
-        (cameraX + WEB_MERCATOR_HALF_WORLD_METERS) / worldWidth
-    )
-    const cameraMercatorY = splitF32(
-        (WEB_MERCATOR_HALF_WORLD_METERS - cameraY) / worldWidth
-    )
+    const camera = descriptor.addressCodec.fromProjected([
+        view.cameraHigh[0] + view.cameraLow[0],
+        view.cameraHigh[1] + view.cameraLow[1],
+    ]).fixed.limbs
     return {
         clipFromRelativeWorld: [
             [ matrix[0], matrix[1], matrix[2], matrix[3] ],
@@ -1484,8 +1500,8 @@ function mapMetaRecord(view: GpuTileFrontierView): Record<string, unknown> {
         ],
         cameraHigh: view.cameraHigh,
         cameraLow: view.cameraLow,
-        cameraMercatorHigh: [ cameraMercatorX[0], cameraMercatorY[0] ],
-        cameraMercatorLow: [ cameraMercatorX[1], cameraMercatorY[1] ],
+        cameraFixedLow: [ camera[0]!.low, camera[1]!.low ],
+        cameraFixedHigh: [ camera[0]!.high, camera[1]!.high ],
         viewport: view.viewport,
         verticalFovRadians: view.verticalFovRadians,
         cameraLatitudeRadians: view.cameraLatitudeRadians,
@@ -1493,12 +1509,6 @@ function mapMetaRecord(view: GpuTileFrontierView): Record<string, unknown> {
         frameEpoch: view.frameEpoch,
         residencySnapshotEpoch: view.residencySnapshotEpoch,
     }
-}
-
-function splitF32(value: number): readonly [number, number] {
-
-    const high = Math.fround(value)
-    return Object.freeze([ high, Math.fround(value - high) ])
 }
 
 function layoutUpload(bytes: Uint8Array, artifact: Parameters<BufferRegion['interpretAs']>[0]) {

@@ -106,4 +106,95 @@ describe('Scratch SubmissionAuthority', () => {
         runtimeA.dispose()
         runtimeB.dispose()
     })
+
+    it('consumes a current stamp exactly once only after submit returns work', async() => {
+
+        const fake = createFakeGpu()
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
+        const authority = runtime.createSubmissionAuthority({ label: 'frontier sequence' })
+        const stamp = authority.stamp()
+        const first = runtime.createSubmission({ validation: 'throw' }).consume(stamp)
+        const competitor = runtime.createSubmission({ validation: 'throw' }).consume(stamp)
+
+        expect(authority.revision).to.equal(0)
+        const submitted = first.submit()
+        expect(submitted.executionOutcomes).to.deep.equal([])
+        expect(authority.revision).to.equal(1)
+        expect(() => competitor.submit()).to.throw(ScratchDiagnosticError)
+            .with.nested.property('diagnostic.code', 'SCRATCH_SUBMISSION_AUTHORITY_STALE')
+        expect(authority.revision).to.equal(1)
+
+        authority.dispose()
+        runtime.dispose()
+    })
+
+    it('does not consume a stamp when synchronous queue replay fails', async() => {
+
+        const fake = createFakeGpu()
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
+        const authority = runtime.createSubmissionAuthority({ label: 'failed sequence' })
+        const stamp = authority.stamp()
+        const buffer = await runtime.createBuffer({ size: 4, usage: 0x08 })
+        const upload = runtime.createUploadCommand({
+            target: buffer.region(),
+            data: new Uint32Array([ 1 ]),
+        })
+        const writeBuffer = runtime.queue.writeBuffer.bind(runtime.queue)
+        runtime.queue.writeBuffer = () => {
+            throw new Error('injected sequence upload failure')
+        }
+
+        expect(() => runtime.createSubmission({ validation: 'throw' })
+            .consume(stamp)
+            .upload(upload)
+            .submit()).to.throw('injected sequence upload failure')
+        expect(authority.revision).to.equal(0)
+
+        runtime.queue.writeBuffer = writeBuffer
+        const submitted = runtime.createSubmission({ validation: 'throw' })
+            .consume(stamp)
+            .upload(upload)
+            .submit()
+        expect(submitted.resourceAccesses).to.have.length(1)
+        expect(authority.revision).to.equal(1)
+
+        upload.dispose()
+        buffer.dispose()
+        authority.dispose()
+        runtime.dispose()
+    })
+
+    it('does not roll back a consumed revision after asynchronous native failure', async() => {
+
+        const fakeOptions = { deferErrorScopePops: false }
+        const fake = createFakeGpu(fakeOptions)
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
+        const authority = runtime.createSubmissionAuthority({ label: 'issued sequence' })
+        const buffer = await runtime.createBuffer({ size: 4, usage: 0x08 })
+        const upload = runtime.createUploadCommand({
+            target: buffer.region(),
+            data: new Uint32Array([ 1 ]),
+        })
+        fakeOptions.deferErrorScopePops = true
+        fake.errors.failNext('writeBuffer', 'validation', new Error('deferred native failure'))
+
+        const submitted = runtime.createSubmission({ validation: 'throw' })
+            .consume(authority.stamp())
+            .upload(upload)
+            .submit()
+        expect(authority.revision).to.equal(1)
+        for (let attempt = 0; attempt < 16; attempt++) {
+            for (const [ index, pending ] of fake.errors.pendingPops.entries()) {
+                if (!pending.settled) fake.errors.settlePop(index)
+            }
+            await Promise.resolve()
+        }
+        expect((await submitted.nativeOutcome).status).to.equal('observed-failed')
+        expect(authority.revision).to.equal(1)
+
+        upload.dispose()
+        buffer.dispose()
+        authority.dispose()
+        runtime.dispose()
+    })
 })

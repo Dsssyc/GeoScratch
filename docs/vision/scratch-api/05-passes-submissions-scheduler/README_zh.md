@@ -218,9 +218,18 @@ submission 仍绑定某个外部 current revision。
 const authority = runtime.createSubmissionAuthority({ label: 'residency' })
 const stamp = authority.stamp()
 const builder = runtime.createSubmission().require(stamp)
+
+const sequence = runtime.createSubmissionAuthority({ label: 'A/B sequence' })
+const sequenceStamp = sequence.stamp()
+const statefulBuilder = runtime.createSubmission().consume(sequenceStamp)
 ```
 
-Submission 会在 submit 入口校验所有 required stamp，并在全部 caller-owned
+`require(stamp)` 只校验、不改变 authority。`consume(stamp)` 增加同样的 requirement，
+并且仅在所有同步 queue action 成功、`SubmittedWork` 已构造、全部 readback claim 已
+adopt 后把该 authority 精确推进一次。未提交的 builder 与同步失败都不消费；捕获同一
+consumed stamp 的竞争 builder 不可能都提交成功。
+
+Submission 会在 submit 入口校验所有 required 或 consumed stamp，并在全部 caller-owned
 materialization、Surface preparation 与 readback claim 完成后、紧邻 native
 observation、encoder creation 或 queue effect 之前再次校验。该 primitive 不执行
 callback，也不拥有 lock、wait queue、retry、preparation state 或 history。
@@ -229,6 +238,10 @@ callback，也不拥有 lock、wait queue、retry、preparation state 或 histor
 `SCRATCH_SUBMISSION_AUTHORITY_WRONG_RUNTIME`、
 `SCRATCH_SUBMISSION_AUTHORITY_STALE` 与
 `SCRATCH_SUBMISSION_AUTHORITY_DISPOSED` 失败。
+
+Consumption 表示 native work 已同步 issue，不表示后续异步 native observation 必然
+成功。之后出现 `observed-failed` 时不会回滚 revision；`nativeOutcome`、`done`、
+potential writes 与 content-indeterminacy facts 会保留这个区别。
 
 这是 supported composition 的一致性边界，不是 same-realm security boundary。
 Scratch 继续允许检查 resource、region、command、bind-set 与 declared-access

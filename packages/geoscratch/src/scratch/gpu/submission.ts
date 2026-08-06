@@ -73,7 +73,11 @@ import {
     beginSubmissionNativeObservation,
     compareSubmissionNativeStages,
 } from './submission-native-observation.js'
-import { assertSubmissionAuthorityStamp } from './submission-authority.js'
+import {
+    assertSubmissionAuthorityStamp,
+    assertSubmissionAuthorityStampsConsumable,
+    commitSubmissionAuthorityStamps,
+} from './submission-authority.js'
 import {
     prepareSurfaceAttachment,
     preparedSurfaceAttachmentFacts,
@@ -573,6 +577,10 @@ const submissionAuthorityRequirements = new WeakMap<
     SubmissionBuilder,
     SubmissionAuthorityStamp[]
 >()
+const submissionAuthorityConsumptions = new WeakMap<
+    SubmissionBuilder,
+    SubmissionAuthorityStamp[]
+>()
 
 export class SubmissionBuilder {
 
@@ -586,6 +594,7 @@ export class SubmissionBuilder {
         this.steps = []
         this.isSubmitted = false
         submissionAuthorityRequirements.set(this, [])
+        submissionAuthorityConsumptions.set(this, [])
     }
 
     render(passSpec: RenderPassSpec, commands: RenderCommand[] = []) {
@@ -678,6 +687,12 @@ export class SubmissionBuilder {
     require(stamp: SubmissionAuthorityStamp) {
 
         submissionAuthorityRequirements.get(this)!.push(stamp)
+        return this
+    }
+
+    consume(stamp: SubmissionAuthorityStamp) {
+
+        submissionAuthorityConsumptions.get(this)!.push(stamp)
         return this
     }
 
@@ -1377,6 +1392,10 @@ export class SubmissionBuilder {
             markReadbackCommandClaimAdopted(pending.claim)
             registerReadbackCommandResult(pending.command, submitted, operation)
         }
+        commitSubmissionAuthorityStamps(
+            this.runtime,
+            submissionAuthorityConsumptions.get(this) ?? []
+        )
 
         return submitted
     }
@@ -5736,6 +5755,10 @@ function assertSubmissionAuthorityRequirements(builder: SubmissionBuilder): void
     for (const stamp of submissionAuthorityRequirements.get(builder) ?? []) {
         assertSubmissionAuthorityStamp(builder.runtime, stamp)
     }
+    assertSubmissionAuthorityStampsConsumable(
+        builder.runtime,
+        submissionAuthorityConsumptions.get(builder) ?? []
+    )
 }
 
 type ResolvedReadbackStep = ReadbackStep & {

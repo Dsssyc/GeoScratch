@@ -127,8 +127,8 @@ type MapMeta = {
     relativeViewProjection: Float32Array
     cameraHigh: readonly [number, number, number]
     cameraLow: readonly [number, number, number]
-    cameraMercatorHigh: readonly [number, number]
-    cameraMercatorLow: readonly [number, number]
+    cameraFixedLow: readonly [number, number]
+    cameraFixedHigh: readonly [number, number]
     viewport: readonly [number, number]
     verticalFov: number
     centerZoom: number
@@ -136,7 +136,7 @@ type MapMeta = {
 }
 ```
 
-`relativeViewProjection` 必须在 CPU 的 `f64` 计算域中移除 camera/world origin translation 后再转换为 `f32`；shader 以 tile integer address、page-local coordinate 和 split camera origin 构造相机相对位置，不能把 WebMercator 全局大坐标直接塞入 `f32` matrix。WebMercator XY 必须先在 normalized world domain 中计算 tile-minus-camera，再乘 split world width 转成米；不得先在 `f32` 中物化接近 world edge 的绝对米坐标。`cameraMercatorHigh/cameraMercatorLow` 是该 normalized origin 的 high/low split，`cameraHigh/cameraLow` 继续承载 meter-space camera facts。`centerZoom` 只用于兼容、初始化提示和诊断；最终 LoD authority 是投影后的屏幕空间误差。
+`relativeViewProjection` 必须在 CPU 的 `f64` 计算域中移除 camera/world origin translation 后再转换为 `f32`；shader 以 tile integer address、page-local coordinate 和 wide-fixed camera origin 构造相机相对位置，不能把 WebMercator 全局大坐标直接塞入 `f32` matrix。CPU 按 `WebMercatorQuadAddressCodec.coordinateBits` 把 camera XY 量化到 `cameraFixedLow/cameraFixedHigh` 两个 u32 limb；shader 独立构造 west/east/north/south boundary quanta，以 borrow 和二补码 magnitude 计算四条相机相对边，最后才把相对 magnitude 转为 `f32` 米。不得从一条边以大 `f32` extent 推导另一条边，也不得把 normalized high/low float 当跨设备 correctness contract；这是依据 ADR-055 对早期 split-float 表述的设计纠正。`cameraHigh/cameraLow` 继续承载 meter-space camera facts，尤其是 elevation 相对量。`centerZoom` 只用于兼容、初始化提示和诊断；最终 LoD authority 是投影后的屏幕空间误差。
 
 ### SelectionPolicyBuffer
 
