@@ -24,7 +24,7 @@ import terrainShader from './shaders/terrain-mesh.wgsl?raw'
 type DemLayer = Awaited<ReturnType<typeof createDemLayer>>
 type DemLifecycle = ReturnType<typeof createDemLifecycle>
 type CleanupReport = Awaited<ReturnType<DemLifecycle['dispose']>>
-type FrameProvenance = ReturnType<DemLayer['renderFrame']>['provenance']
+type FrameProvenance = Awaited<ReturnType<DemLayer['renderFrame']>>['provenance']
 type FailureConfiguration = Readonly<{ scenario?: string }>
 type FailureProofController = ReturnType<typeof createFailureProofController>
 type FailureProof = Exclude<ReturnType<FailureProofController['finalize']>, undefined>
@@ -186,6 +186,7 @@ async function main(lifetime: DemLifecycle, proof: FailureProofController) {
         shaders: { lodMap: lodMapShader, terrain: terrainShader },
         failureProof: proof,
     })
+    lifetime.deferRelease({ label: 'dem-gpu-frontier', run: graph.dispose })
     lifetime.assertActive('continue DEM initialization')
 
     const initialized = await graph.initialize()
@@ -202,6 +203,8 @@ async function main(lifetime: DemLifecycle, proof: FailureProofController) {
     let frameWorkScheduled = 0
     let frameWorkCompleted = 0
     let frameWorkCancelled = 0
+    let convergenceFollowUps = 0
+    const maximumConvergenceFollowUps = 8
 
     function stopScheduling() {
 
@@ -223,7 +226,10 @@ async function main(lifetime: DemLifecycle, proof: FailureProofController) {
         frameWorkScheduled++
     }
 
-    const handleMapRender = () => requestRender()
+    const handleMapRender = () => {
+        convergenceFollowUps = 0
+        requestRender()
+    }
     const handleResize = () => {
         map.resize()
         requestRender()
@@ -309,12 +315,14 @@ async function main(lifetime: DemLifecycle, proof: FailureProofController) {
             if (!active) return
 
             const camera = readDemCameraState(map, nextSize)
-            const frame = graph.renderFrame(camera)
+            const frame = await graph.renderFrame(camera)
             submittedFrames++
             latestProvenance = frame.provenance
             if (frame.requestedPageCount > 0) {
                 const settlement = frame.residencySettlement.then(() => {
-                    if (active) requestRender()
+                    if (!active) return
+                    convergenceFollowUps = 0
+                    requestRender()
                 })
                 void lifetime.track(
                     settlement,
@@ -332,6 +340,13 @@ async function main(lifetime: DemLifecycle, proof: FailureProofController) {
             observedFrames = Math.max(observedFrames, frameNumber)
             publish()
             if (active) setStatus('ready')
+            if (frame.needsFollowUp &&
+                convergenceFollowUps < maximumConvergenceFollowUps) {
+                convergenceFollowUps++
+                requestRender()
+            } else if (!frame.needsFollowUp) {
+                convergenceFollowUps = 0
+            }
         } finally {
             rendering = false
         }
@@ -403,8 +418,16 @@ function publishFrameFacts({
     canvas.dataset.observedFrames = String(observedFrames)
     canvas.dataset.resizeGeneration = String(state.resizeGeneration)
     canvas.dataset.visibleNodeCount = String(state.visibleNodeCount)
-    canvas.dataset.selection = JSON.stringify(state.selection ?? null)
-    canvas.dataset.virtualPlan = JSON.stringify(state.virtualPlan ?? null)
+    canvas.dataset.frontierCount = String(state.frontierCount)
+    canvas.dataset.demandCount = String(state.demandCount)
+    canvas.dataset.fallbackCount = String(state.fallbackCount)
+    canvas.dataset.staleGenerationCount = String(state.staleGenerationCount)
+    canvas.dataset.budgetLimitedCount = String(state.budgetLimitedCount)
+    canvas.dataset.levelRange = JSON.stringify(state.levelRange)
+    canvas.dataset.maximumObservedSse = String(state.maximumObservedSse)
+    canvas.dataset.convergenceState = state.convergenceState
+    canvas.dataset.readbackInFlightCount = String(state.readbackInFlightCount)
+    canvas.dataset.staleFeedbackCount = String(state.staleFeedbackCount)
     canvas.dataset.virtualSnapshotEpoch = String(state.virtualSnapshotEpoch)
     canvas.dataset.virtualRequestedPageCount = String(state.virtualRequestedPageCount)
     canvas.dataset.virtualRaster = JSON.stringify(graph.virtualRasterFacts())

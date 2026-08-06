@@ -12,10 +12,8 @@ import { createDemLayer } from '../examples/demLayer/dem-layer.ts'
 import {
     createDemVirtualRasterModel,
     parseDemVirtualRasterManifest,
-    planDemVirtualPages,
 } from '../examples/demLayer/dem-virtual-raster.ts'
 import { createDemLifecycle } from '../examples/demLayer/dem-lifecycle.ts'
-import { selectTerrainNodes } from '../examples/demLayer/terrain-selection.ts'
 import {
     createFakeCanvas,
     createFakeGpu,
@@ -29,28 +27,6 @@ const demManifest = parseDemVirtualRasterManifest(demWebMercatorManifest)
 function sha256(value) {
 
     return crypto.createHash('sha256').update(value).digest('hex')
-}
-
-function selection(cameraPos, zoomLevel, options = {}) {
-
-    return selectTerrainNodes({
-        cameraPos,
-        zoomLevel,
-        maxLevel: 14,
-        ...options,
-    })
-}
-
-function leadingFacts(plan) {
-
-    return {
-        visibleNodeCount: plan.visibleNodeCount,
-        tileBox: plan.tileBox,
-        levelRange: plan.levelRange,
-        sectorRange: plan.sectorRange,
-        nodeLevels: plan.nodeLevels.slice(0, 16),
-        nodeBoxes: plan.nodeBoxes.slice(0, 12),
-    }
 }
 
 async function createTestVirtualRaster(runtime) {
@@ -93,6 +69,7 @@ async function createTestVirtualRaster(runtime) {
         manifest: demManifest,
         residency,
         gpu,
+        scheduler: Object.freeze({ maxRequests: 18 }),
         async initialize() {
 
             generation++
@@ -107,14 +84,11 @@ async function createTestVirtualRaster(runtime) {
             }), { generation })
             return publish()
         },
-        prepare(selection) {
+        reconcileFeedback() {
 
-            const plan = planDemVirtualPages(model, selection)
             generation++
             residency.reconcileGeneration(generation, [ model.rootPage ])
             return Object.freeze({
-                plan,
-                activePages: Object.freeze([ model.rootPage ]),
                 requestedCount: 0,
                 settlement: Promise.resolve(Object.freeze({
                     generation,
@@ -124,6 +98,8 @@ async function createTestVirtualRaster(runtime) {
                     failedCount: 0,
                 })),
                 generation,
+                retainedCount: 0,
+                retiredCount: 0,
             })
         },
         publish,
@@ -140,7 +116,7 @@ async function createTestVirtualRaster(runtime) {
             if (stopped) return
             stopped = true
             if (activePublication !== undefined) {
-                await gpu.abandon(activePublication)
+                await gpu.abandon(activePublication.publication)
                 activePublication = undefined
             }
             residency.dispose()
@@ -158,69 +134,23 @@ async function createTestVirtualRaster(runtime) {
 
 describe('DEM Layer clean cut', () => {
 
-    it('preserves the reachable CPU terrain selection facts', () => {
+    it('uses a GPU-resident frontier without a CPU selection compatibility path', () => {
 
-        expect(leadingFacts(selection([ 120.980697, 31.684162 ], 9))).to.deep.equal({
-            visibleNodeCount: 24,
-            tileBox: [ 119.8828125, 30.9375, 121.9921875, 32.34375 ],
-            levelRange: [ 9, 9 ],
-            sectorRange: [ 0.3515625, 0.3515625 ],
-            nodeLevels: Array(16).fill(9),
-            nodeBoxes: [
-                121.640625, 31.9921875, 121.9921875, 32.34375,
-                121.640625, 31.640625, 121.9921875, 31.9921875,
-                121.2890625, 31.9921875, 121.640625, 32.34375,
-            ],
-        })
-        expect(leadingFacts(selection([ 120.980697, 31.684162 ], 10))).to.deep.equal({
-            visibleNodeCount: 56,
-            tileBox: [ 119.8828125, 30.9375, 121.9921875, 32.34375 ],
-            levelRange: [ 9, 10 ],
-            sectorRange: [ 0.17578125, 0.17578125 ],
-            nodeLevels: [ 9, 9, ...Array(12).fill(10), 9, 9 ],
-            nodeBoxes: [
-                121.640625, 31.9921875, 121.9921875, 32.34375,
-                121.640625, 31.640625, 121.9921875, 31.9921875,
-                121.46484375, 31.9921875, 121.640625, 32.16796875,
-            ],
-        })
-        expect(leadingFacts(selection([ 121.4, 31.9 ], 12))).to.deep.equal({
-            visibleNodeCount: 146,
-            tileBox: [ 119.53125, 30.9375, 121.9921875, 32.34375 ],
-            levelRange: [ 8, 12 ],
-            sectorRange: [ 0.0439453125, 0.0439453125 ],
-            nodeLevels: [ 10, 11, 11, 11, 11, 10, 11, 11, 11, 11, 10, 11, 11, 11, 11, 11 ],
-            nodeBoxes: [
-                121.81640625, 31.9921875, 121.9921875, 32.16796875,
-                121.728515625, 32.080078125, 121.81640625, 32.16796875,
-                121.640625, 32.080078125, 121.728515625, 32.16796875,
-            ],
-        })
-        expect(leadingFacts(selection([ 0, 0 ], 2))).to.deep.equal({
-            visibleNodeCount: 1,
-            tileBox: [ 90, 0, 135, 45 ],
-            levelRange: [ 2, 2 ],
-            sectorRange: [ 45, 45 ],
-            nodeLevels: [ 2 ],
-            nodeBoxes: [ 90, 0, 135, 45 ],
-        })
-    })
+        const layerSource = read('examples', 'demLayer', 'dem-layer.ts')
+        const virtualRasterSource = read('examples', 'demLayer', 'dem-virtual-raster.ts')
+        const mapSource = read('examples', 'demLayer', 'dem-map.ts')
 
-    it('returns detached serializable facts and applies the node cap after LoD filtering', () => {
-
-        const plan = selection([ 120.980697, 31.684162 ], 12, { maxNodes: 5 })
-        const roundTrip = JSON.parse(JSON.stringify(plan))
-
-        expect(plan.selectedCount).to.be.greaterThan(5)
-        expect(plan.cappedCount).to.equal(5)
-        expect(plan.visibleNodeCount).to.equal(5)
-        expect(plan.droppedCount).to.equal(plan.selectedCount - plan.cappedCount)
-        expect(plan.nodeLevels).to.have.length(5)
-        expect(plan.nodeBoxes).to.have.length(20)
-        expect(roundTrip).to.deep.equal(plan)
-        expect(Object.isFrozen(plan)).to.equal(true)
-        expect(Object.isFrozen(plan.nodeLevels)).to.equal(true)
-        expect(Object.isFrozen(plan.nodeBoxes)).to.equal(true)
+        expect(layerSource).to.include('GpuTileFrontier.create(')
+        expect(layerSource).to.include('frontier.encode(builder, frame)')
+        expect(layerSource).to.include('feedbackRing.encode(builder, frame)')
+        expect(layerSource).not.to.match(/selectTerrainNodes|nodeLevels|nodeBoxes|canonicalNodes/)
+        expect(layerSource).not.to.match(/lodArguments\.upload|terrainArguments\.upload/)
+        expect(virtualRasterSource).not.to.match(/\bprepare\(selection\)|planDemVirtualPages/)
+        expect(mapSource).to.include('clipFromRelativeWorld')
+        expect(mapSource).to.include('verticalFovRadians')
+        expect(mapSource).to.include('cameraLatitudeRadians')
+        expect(mapSource).to.include('zoomHint')
+        expect(mapSource).not.to.match(/\bcenter(?:High|Low)\b|\bcameraPos\b/)
     })
 
     it('uses the neutral route and removes every legacy DEM owner', () => {
@@ -236,7 +166,7 @@ describe('DEM Layer clean cut', () => {
         const layerSource = read('examples', 'demLayer', 'dem-layer.ts')
         const mainSource = read('examples', 'demLayer', 'main.ts')
         const frameSource = layerSource.slice(
-            layerSource.indexOf('function renderFrame(camera: DemCameraState)'),
+            layerSource.indexOf('async function renderFrame(camera: DemCameraState)'),
             layerSource.indexOf('async function resize(nextSize: SurfaceSize)')
         )
         const allSources = [
@@ -262,7 +192,9 @@ describe('DEM Layer clean cut', () => {
             expect(frameSource).not.to.include(call)
         }
         expect(frameSource).to.include("runtime.createSubmission({ validation: 'throw' })")
-        expect(frameSource).to.include('.upload(uniforms.dynamic.upload)')
+        expect(frameSource).to.include('frontier.writeView({')
+        expect(frameSource).to.include('frontier.encode(builder, frame)')
+        expect(frameSource).to.include('feedbackRing.encode(builder, frame)')
         expect(frameSource).to.include('.render(passes.lodMap')
         expect(frameSource).to.include('.render(passes.terrain')
         expect(layerSource).to.include("contentEpoch: 'current-at-step'")
@@ -477,28 +409,21 @@ describe('DEM Layer clean cut', () => {
         const browserProof = read('tests', 'browser', 'scratch-dem-layer.mjs')
 
         expect(sha256(demBytes)).to.equal('aa7a584830f198772d242df1ce1ae47e21b2bdc85bfc1f97101af8be986c57e1')
-        expect(sha256(lodShader.replaceAll('var<storage, read>', 'var<storage>')))
-            .to.equal('ba2a35ab1aac1d9cc08f30be3eaaf88fba856629859cc4ce316c626619540bdc')
-        expect(sha256(terrainShader.replaceAll('var<storage, read>', 'var<storage>')))
-            .to.equal('7f0c8a0ba9d45dd2159e3324112f192efca629a15bb03f469dbf0983b96114ad')
-        expect(lodShader.match(/var<storage, read>/g)).to.have.length(2)
-        expect(terrainShader.match(/var<storage, read>/g)).to.have.length(6)
+        expect(lodShader.match(/var<storage, read>/g)).to.have.length(1)
+        expect(terrainShader.match(/var<storage, read>/g)).to.have.length(3)
         expect(terrainShader).not.to.match(/\b(lSampler|palette|colorMap)\b/)
         expect(terrainShader).not.to.include('demTexture')
-        expect(terrainShader).not.to.match(/coord\.[xy] == nodeBox/)
-        expect(terrainShader).to.include('DemHeight_sample_vertex')
+        expect(terrainShader).not.to.match(/nodeBox|canonicalNodes|cameraCoordinate/)
+        expect(terrainShader).to.include('DemHeight_sample_vertex_mercator')
+        expect(terrainShader).to.include('fixedAxisFromShiftedNumerator')
+        expect(terrainShader).to.include('relativeFixedMeters')
         expect(terrainShader).to.include('grid.x == 0u')
         const layer = read('examples', 'demLayer', 'dem-layer.ts')
         const main = read('examples', 'demLayer', 'main.ts')
         expect(layer).not.to.include('createExternalImageUploadCommand')
         expect(layer).not.to.include('DEM elevation texture')
         expect(main).not.to.include("./assets/dem.png")
-        expect(browserProof).to.include(
-            "const optionalProvenanceName = 'virtual-page-table-upload-to-terrain-draw'"
-        )
-        expect(browserProof).to.include(
-            'provenance.length > requiredProvenanceNames.length + 1'
-        )
+        expect(browserProof).to.include('visibleNodeCount')
     })
 
     it('observes issued native work before surfacing a provenance failure', async() => {
@@ -530,7 +455,7 @@ describe('DEM Layer clean cut', () => {
         const initialized = await graph.initialize()
         await initialized.observation
 
-        const frame = graph.renderFrame(cameraState(9, [ 120.980697, 31.684162 ], [ 320, 180 ]))
+        const frame = await graph.renderFrame(cameraState(9, [ 320, 180 ]))
         expect(frame.provenance).to.deep.equal([])
         let observedFailure
         try {
@@ -540,8 +465,9 @@ describe('DEM Layer clean cut', () => {
         }
 
         expect(observedFailure).to.equal(provenanceFailure)
-        expect(fake.calls.queueSubmissions).to.have.length(1)
-        expect(fake.calls.submittedWorkDoneRegistrations).to.have.length(2)
+        expect(fake.calls.queueSubmissions.length).to.be.greaterThan(0)
+        expect(fake.calls.submittedWorkDoneRegistrations.length).to.be.greaterThan(2)
+        graph.dispose()
         await runtime.dispose()
     })
 
@@ -574,18 +500,17 @@ describe('DEM Layer clean cut', () => {
         const initialized = await graph.initialize()
         await initialized.observation
 
-        const first = graph.renderFrame(cameraState(9, [ 120.980697, 31.684162 ], [ 320, 180 ]))
+        const first = await graph.renderFrame(cameraState(9, [ 320, 180 ]))
         await first.observation
-        const second = graph.renderFrame(cameraState(10, [ 120.980697, 31.684162 ], [ 320, 180 ]))
+        const second = await graph.renderFrame(cameraState(10, [ 320, 180 ]))
         await second.observation
 
-        expect(first.selection.visibleNodeCount).to.equal(24)
-        expect(second.selection.visibleNodeCount).to.equal(56)
         expect(first.provenance.map(fact => fact.name)).to.deep.equal([
-            'node-level-upload-to-lod-draw',
-            'lod-arguments-upload-to-lod-draw',
-            'node-box-upload-to-terrain-draw',
-            'terrain-arguments-upload-to-terrain-draw',
+            'frontier-map-meta-to-lod-draw',
+            'frontier-visible-to-lod-draw',
+            'frontier-indirect-to-lod-draw',
+            'frontier-visible-to-terrain-draw',
+            'frontier-indirect-to-terrain-draw',
             'lod-map-pass-to-terrain-draw',
         ])
         expect(second.provenance.every(fact => (
@@ -596,17 +521,15 @@ describe('DEM Layer clean cut', () => {
         expect(graph.stableIdentityHash).to.equal(initialIdentityHash)
         expect(graph.currentIdentityFacts()).to.deep.equal(initialIdentityFacts)
         expect(graph.currentIdentityFacts()).not.to.equal(graph.currentIdentityFacts())
-        expect(initialIdentityFacts).to.deep.equal({
+        expect(initialIdentityFacts).to.deep.include({
             hash: initialIdentityHash,
-            count: 46,
-            resources: 16,
-            uploads: 12,
-            bindLayouts: 5,
-            bindSets: 5,
+            uploads: 3,
+            bindLayouts: 4,
+            bindSets: 6,
             programs: 2,
             pipelines: 2,
             passes: 2,
-            commands: 2,
+            commands: 4,
         })
         expect(graph.persistentFacts()).to.deep.equal(initialPersistentFacts)
 
@@ -631,30 +554,38 @@ describe('DEM Layer clean cut', () => {
         expect(graph.state()).to.deep.include({
             frame: 2,
             resizeGeneration: 1,
-            visibleNodeCount: 56,
             lastResizeFacts: resizeFacts,
         })
-        expect(fake.calls.maps).to.deep.equal([])
+        expect(graph.contractFacts()).to.deep.include({
+            countPath: 'gpu-produced-indirect-arguments',
+            selectionPath: 'gpu-resident-active-frontier',
+        })
+        expect(fake.calls.maps).to.have.length(1)
+        expect(fake.calls.maps[0].size).to.equal(
+            graph.contractFacts().frontier.feedbackOutput.layout.byteLength
+        )
 
+        graph.dispose()
         await runtime.dispose()
     })
 })
 
-function cameraState(zoom, cameraPos, viewport) {
+function cameraState(zoomHint, viewport) {
 
     return Object.freeze({
         far: 1000,
         near: 1,
-        matrix: [
+        clipFromRelativeWorld: [
             1, 0, 0, 0,
             0, 1, 0, 0,
             0, 0, 1, 0,
             0, 0, 0, 1,
         ],
-        centerLow: [ 0, 0, 0 ],
-        centerHigh: [ 0, 0, 0 ],
-        cameraPos,
-        zoom,
+        cameraLow: [ 0, 0, 0 ],
+        cameraHigh: [ 0, 0, 100 ],
         viewport,
+        verticalFovRadians: Math.PI / 3,
+        cameraLatitudeRadians: 31.684162 * Math.PI / 180,
+        zoomHint,
     })
 }

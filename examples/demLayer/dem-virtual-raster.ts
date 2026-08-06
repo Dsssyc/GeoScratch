@@ -35,15 +35,8 @@ import {
 } from './dem-worker-source.ts'
 import type { DemWorkerRequestExecutor } from './dem-worker-source.ts'
 import type { DemCachePolicy } from './dem-tile-protocol.ts'
-import { MAX_TERRAIN_NODES } from './terrain-selection.ts'
 
 type NumberSequence = ArrayLike<number> & Iterable<number>
-type TerrainSelection = Readonly<{
-    visibleNodeCount: number
-    cameraPos?: readonly number[]
-    nodeLevels: readonly number[]
-    nodeBoxes: readonly number[]
-}>
 
 export type DemTileMatrixLimit = Readonly<{
     matrixId: string
@@ -109,13 +102,6 @@ export type DemVirtualRasterManifest = Readonly<{
 
 export type DemVirtualRasterModel = ReturnType<typeof createDemVirtualRasterModel>
 
-export type DemVirtualRasterPagePlan = Readonly<{
-    pages: readonly VirtualRasterPageIdentity[]
-    requestedPages: readonly VirtualRasterPageIdentity[]
-    requestedLodRange: readonly [number, number]
-    geometryLodRange: readonly [number, number]
-}>
-
 export type DemStitchInput = Readonly<{
     x: number
     y: number
@@ -180,7 +166,6 @@ export type DemVirtualRasterDemandAdapterFacts = Readonly<{
 }>
 
 export const DEM_WEB_MERCATOR_COORDINATE_BITS = 40
-export const DEM_CANONICAL_NODE_BYTES = 32
 export const DEM_DEFAULT_PHYSICAL_PAGES = 18
 export const DEM_DEFAULT_HISTORY = 64
 export const DEM_DEFAULT_MAX_REQUESTS = 24
@@ -605,7 +590,6 @@ export async function createDemVirtualRasterRuntime({
         maxStagingBytes,
         maxHistory,
     })
-    residency.pin(model.rootPage)
     let executor: DemWorkerRequestExecutor | undefined
     let gpu: VirtualRasterGpuState | undefined
     try {
@@ -646,7 +630,12 @@ export async function createDemVirtualRasterRuntime({
         maxRequests,
         maxHistory,
     })
-    let generation = 0
+    const demandAdapter = createDemVirtualRasterDemandAdapter({
+        model,
+        residency,
+        scheduler,
+        maxPhysicalPages,
+    })
     let demandStopped = false
     let stopped = false
     let stopDemandPromise: Promise<void> | undefined
@@ -655,52 +644,12 @@ export async function createDemVirtualRasterRuntime({
 
     async function initialize() {
 
-        const demandGeneration = ++generation
-        const reconciliation = scheduler.reconcile(virtualRasterDemandSet({
-            generation: demandGeneration,
-            demands: [ pageDemand(model.rootPage, demandGeneration, 'critical', 1_000_000,
-                'root-fallback', 'required') ],
-        }))
+        const reconciliation = demandAdapter.initialize()
         const settlement = await reconciliation.settled
-        if (settlement.stagedCount + settlement.residentCount < 1) {
-            throw new Error('DEM root WebMercatorQuad tile failed to become available')
+        if (settlement.stagedCount + settlement.residentCount < model.safetyCoverPages.length) {
+            throw new Error('DEM minimum-matrix safety cover failed to become available')
         }
         return publish()
-    }
-
-    function prepare(selection: TerrainSelection) {
-
-        if (demandStopped) throw new Error('DEM virtual raster demand is stopped')
-        const plan = planDemVirtualPages(model, selection)
-        const demandGeneration = ++generation
-        const required = new Set(plan.requestedPages.map(page => page.key))
-        const activePages = [
-            model.rootPage,
-            ...plan.pages.filter(page => page.key !== model.rootPage.key),
-        ].slice(0, maxPhysicalPages)
-        const demands = activePages.map((page, index) => {
-            if (page.key === model.rootPage.key) {
-                return pageDemand(page, demandGeneration, 'critical', 1_000_000,
-                    'root-fallback', 'required')
-            }
-            if (required.has(page.key)) {
-                return pageDemand(page, demandGeneration, 'user-visible', 100_000 - index,
-                    'visible-terrain', 'required')
-            }
-            return pageDemand(page, demandGeneration, 'background', 10_000 - index,
-                'covered-parent', 'prefetch')
-        })
-        const reconciliation = scheduler.reconcile(virtualRasterDemandSet({
-            generation: demandGeneration,
-            demands,
-        }))
-        return Object.freeze({
-            plan,
-            activePages: Object.freeze(activePages),
-            requestedCount: reconciliation.requestedCount,
-            settlement: reconciliation.settled,
-            generation: demandGeneration,
-        })
     }
 
     function publish(): DemVirtualRasterPublication {
@@ -709,7 +658,16 @@ export async function createDemVirtualRasterRuntime({
             throw new Error('DEM publication must be acknowledged before the next publication')
         }
         const publication = scheduler.publish()
-        const update = gpuState.stage(publication)
+        demandAdapter.retainPublication(publication)
+        let update: VirtualRasterGpuUpdate
+        try {
+            update = gpuState.stage(publication)
+        } catch (error) {
+            void publication.abandon().then(() => {
+                demandAdapter.abandonPublication(publication)
+            })
+            throw error
+        }
         const wrapped = Object.freeze({
             snapshotEpoch: publication.snapshot.epoch,
             changed: update.commands.length > 0,
@@ -729,6 +687,7 @@ export async function createDemVirtualRasterRuntime({
             throw new Error('DEM can only acknowledge its active virtual raster publication')
         }
         await gpuState.acknowledge(wrapped.publication, submitted)
+        demandAdapter.acknowledgePublication(wrapped.publication)
         activePublication = undefined
     }
 
@@ -754,10 +713,12 @@ export async function createDemVirtualRasterRuntime({
         await stopDemand()
         if (activePublication !== undefined) {
             await gpuState.abandon(activePublication.publication)
+            demandAdapter.abandonPublication(activePublication.publication)
             activePublication = undefined
         }
         await requestExecutor.refreshFacts()
         await requestExecutor.dispose()
+        demandAdapter.dispose()
         residency.dispose()
         gpuState.dispose()
     }
@@ -769,9 +730,10 @@ export async function createDemVirtualRasterRuntime({
         residency,
         gpu: gpuState,
         scheduler,
+        residencyLease: demandAdapter.lease,
         executor: requestExecutor,
         initialize,
-        prepare,
+        reconcileFeedback: demandAdapter.reconcileFeedback,
         publish,
         acknowledge,
         stopDemand,
@@ -789,93 +751,10 @@ export async function createDemVirtualRasterRuntime({
             stopped,
             residency: residency.inspect(),
             scheduler: scheduler.inspect(),
+            demand: demandAdapter.facts(),
             worker: requestExecutor.inspect(),
             gpu: gpuState.facts(),
         }),
-    })
-}
-
-export function planDemVirtualPages(
-    model: DemVirtualRasterModel,
-    selection: TerrainSelection
-): DemVirtualRasterPagePlan {
-
-    const pages = new Map<string, VirtualRasterPageIdentity>()
-    const requested = new Map<string, VirtualRasterPageIdentity>()
-    let minimumRequestedLevel = model.addressSpace.levelCount - 1
-    let maximumRequestedLevel = 0
-    let minimumGeometryLevel = Number.POSITIVE_INFINITY
-    let maximumGeometryLevel = 0
-    const sourceBounds = model.manifest.source.geographicBounds
-    const addWithParents = (page: VirtualRasterPageIdentity) => {
-        let current: VirtualRasterPageIdentity | undefined = page
-        while (current !== undefined) {
-            pages.set(current.key, current)
-            current = model.addressSpace.parent(current)
-        }
-    }
-
-    for (let index = 0; index < selection.visibleNodeCount; index++) {
-        const offset = index * 4
-        const intersection = intersectBounds(
-            selection.nodeBoxes.slice(offset, offset + 4),
-            sourceBounds
-        )
-        if (intersection === undefined) continue
-        const geometryLevel = selection.nodeLevels[index]!
-        const level = Math.min(
-            model.addressSpace.levelCount - 1,
-            demHeightSamplingLevel(geometryLevel)
-        )
-        minimumRequestedLevel = Math.min(minimumRequestedLevel, level)
-        maximumRequestedLevel = Math.max(maximumRequestedLevel, level)
-        minimumGeometryLevel = Math.min(minimumGeometryLevel, geometryLevel)
-        maximumGeometryLevel = Math.max(maximumGeometryLevel, geometryLevel)
-        const matrixId = model.addressSpace.matrixId(level)
-        const limit = model.coverage.limit(matrixId)!
-        const northwest = WebMercatorQuad.tileFromLonLat(
-            [ intersection[0], intersection[3] ],
-            matrixId
-        )
-        const southeast = WebMercatorQuad.tileFromLonLat(
-            [ nextDown(intersection[2]), nextUp(intersection[1]) ],
-            matrixId
-        )
-        const minimumRow = clamp(northwest.tileRow - 1, limit.minTileRow, limit.maxTileRow)
-        const maximumRow = clamp(southeast.tileRow + 1, limit.minTileRow, limit.maxTileRow)
-        const minimumCol = clamp(northwest.tileCol - 1, limit.minTileCol, limit.maxTileCol)
-        const maximumCol = clamp(southeast.tileCol + 1, limit.minTileCol, limit.maxTileCol)
-        for (let row = minimumRow; row <= maximumRow; row++) {
-            for (let col = minimumCol; col <= maximumCol; col++) {
-                const page = model.addressSpace.pageFromTile({ matrixId, tileRow: row, tileCol: col })
-                requested.set(page.key, page)
-                addWithParents(page)
-            }
-        }
-    }
-    addWithParents(model.rootPage)
-    const requestedPages = [ ...requested.values() ].sort((left, right) =>
-        comparePagesForCamera(left, right, selection.cameraPos)
-    )
-    const requestedKeys = new Set(requestedPages.map(page => page.key))
-    const parents = [ ...pages.values() ].filter(page =>
-        page.key !== model.rootPage.key && !requestedKeys.has(page.key)
-    ).sort((left, right) => right.level - left.level || comparePages(left, right))
-    return Object.freeze({
-        pages: Object.freeze([
-            model.rootPage,
-            ...requestedPages.filter(page => page.key !== model.rootPage.key),
-            ...parents,
-        ]),
-        requestedPages: Object.freeze(requestedPages),
-        requestedLodRange: Object.freeze([
-            minimumRequestedLevel,
-            Math.max(maximumRequestedLevel, model.addressSpace.levelCount - 1),
-        ]) as readonly [number, number],
-        geometryLodRange: Object.freeze([
-            Number.isFinite(minimumGeometryLevel) ? minimumGeometryLevel : 0,
-            maximumGeometryLevel,
-        ]) as readonly [number, number],
     })
 }
 
@@ -938,60 +817,6 @@ export function canonicalDemCoordinateQuanta(
     ])
 }
 
-export function encodeDemCanonicalNodes(
-    selection: TerrainSelection,
-    manifest: DemVirtualRasterManifest
-): Uint8Array<ArrayBuffer> {
-
-    const model = createDemVirtualRasterModel(manifest)
-    const bytes = new Uint8Array(MAX_TERRAIN_NODES * DEM_CANONICAL_NODE_BYTES)
-    return writeDemCanonicalNodes(bytes, selection, model)
-}
-
-export function writeDemCanonicalNodes(
-    bytes: Uint8Array<ArrayBuffer>,
-    selection: TerrainSelection,
-    model: DemVirtualRasterModel
-): Uint8Array<ArrayBuffer> {
-
-    if (selection.visibleNodeCount > MAX_TERRAIN_NODES ||
-        selection.nodeLevels.length < selection.visibleNodeCount ||
-        selection.nodeBoxes.length < selection.visibleNodeCount * 4) {
-        throw new RangeError('DEM terrain selection exceeds the canonical node buffer')
-    }
-    if (bytes.byteLength !== MAX_TERRAIN_NODES * DEM_CANONICAL_NODE_BYTES) {
-        throw new RangeError('DEM canonical node target has the wrong byte length')
-    }
-    bytes.fill(0)
-    for (let index = 0; index < selection.visibleNodeCount; index++) {
-        const offset = index * 4
-        const minimum = canonicalPosition(model.addressCodec, [
-            selection.nodeBoxes[offset]!,
-            selection.nodeBoxes[offset + 1]!,
-        ])
-        const maximum = canonicalPosition(model.addressCodec, [
-            selection.nodeBoxes[offset + 2]!,
-            selection.nodeBoxes[offset + 3]!,
-        ])
-        bytes.set(
-            model.addressCodec.positionCodec.pack([ minimum, maximum ]),
-            index * DEM_CANONICAL_NODE_BYTES
-        )
-    }
-    return bytes
-}
-
-export function encodeDemCameraCoordinate(
-    model: DemVirtualRasterModel,
-    coordinate: NumberSequence
-): Uint8Array {
-
-    if (!isFiniteTuple(coordinate, 2)) throw new TypeError('DEM camera coordinate is invalid')
-    return model.addressCodec.positionCodec.pack([
-        canonicalPosition(model.addressCodec, [ coordinate[0], coordinate[1] ]),
-    ])
-}
-
 export function demVirtualRasterWgslModule(model: DemVirtualRasterModel): string {
 
     const codec = model.addressCodec
@@ -1036,6 +861,8 @@ export function demVirtualRasterWgslModule(model: DemVirtualRasterModel): string
         demCanonicalWgsl(codec.coordinateBits) + '\n' +
         `fn DemHeight_missing(level: u32) -> DemHeightSample {\n` +
         `    return DemHeightSample(vec4f(0.0), 0u, level, level);\n}\n\n` +
+        `fn DemHeight_failed(level: u32) -> DemHeightSample {\n` +
+        `    return DemHeightSample(vec4f(0.0), 4u, level, level);\n}\n\n` +
         `fn DemHeight_mercator_position(value: DemAddressFixedPosition) -> DemAddressFixedPosition {\n` +
         `    let south = DemCanonical_axis_fraction(value.axes[1]);\n` +
         `    let latitude = (0.5f - south) * 3.141592653589793f;\n` +
@@ -1063,6 +890,7 @@ export function demVirtualRasterWgslModule(model: DemVirtualRasterModel): string
         `    let base = table_index * 8u;\n` +
         `    let status = DemHeight_page_table[base + 3u];\n` +
         `    if (status == 0u) { return DemHeight_missing(level); }\n` +
+        `    if (status == 4u) { return DemHeight_failed(level); }\n` +
         `    let resolved_level = DemHeight_page_table[base + 2u];\n` +
         `    let resolved_matrix = DemHeight_matrix[resolved_level];\n` +
         `    let resolved_texel = texel >> vec2u(matrix - resolved_matrix);\n` +
@@ -1075,8 +903,7 @@ export function demVirtualRasterWgslModule(model: DemVirtualRasterModel): string
         `    let address = DemAddress_address(DemHeight_mercator_position(position), DemHeight_matrix[level]);\n` +
         `    let texel = address.tile * vec2u(256u) + address.texel;\n` +
         `    return DemHeight_load_global(vec2i(texel), level);\n}\n\n` +
-        `fn DemHeight_sample_level(position: DemAddressFixedPosition, level: u32) -> DemHeightSample {\n` +
-        `    let mercator_position = DemHeight_mercator_position(position);\n` +
+        `fn DemHeight_sample_level_mercator(mercator_position: DemAddressFixedPosition, level: u32) -> DemHeightSample {\n` +
         `    var sample_level = level;\n` +
         `    var address = DemAddress_address(mercator_position, DemHeight_matrix[sample_level]);\n` +
         `    for (var iteration = 0u; iteration < DemHeight_level_count; iteration++) {\n` +
@@ -1085,6 +912,7 @@ export function demVirtualRasterWgslModule(model: DemVirtualRasterModel): string
         `        let tr_resolution = DemHeight_resolution_global(base + vec2i(1, 0), sample_level);\n` +
         `        let bl_resolution = DemHeight_resolution_global(base + vec2i(0, 1), sample_level);\n` +
         `        let br_resolution = DemHeight_resolution_global(base + vec2i(1, 1), sample_level);\n` +
+        `        if (tl_resolution.x == 4u || tr_resolution.x == 4u || bl_resolution.x == 4u || br_resolution.x == 4u) { return DemHeight_failed(level); }\n` +
         `        if (tl_resolution.x == 0u || tr_resolution.x == 0u || bl_resolution.x == 0u || br_resolution.x == 0u) { return DemHeight_missing(level); }\n` +
         `        let resolved_level = max(max(tl_resolution.y, tr_resolution.y), max(bl_resolution.y, br_resolution.y));\n` +
         `        if (resolved_level == sample_level) { break; }\n` +
@@ -1096,6 +924,7 @@ export function demVirtualRasterWgslModule(model: DemVirtualRasterModel): string
         `    let tr = DemHeight_load_global(base + vec2i(1, 0), sample_level);\n` +
         `    let bl = DemHeight_load_global(base + vec2i(0, 1), sample_level);\n` +
         `    let br = DemHeight_load_global(base + vec2i(1, 1), sample_level);\n` +
+        `    if (tl.status == 4u || tr.status == 4u || bl.status == 4u || br.status == 4u) { return DemHeight_failed(level); }\n` +
         `    if (tl.status == 0u || tr.status == 0u || bl.status == 0u || br.status == 0u) { return DemHeight_missing(level); }\n` +
         `    if (tl.status == 3u || tr.status == 3u || bl.status == 3u || br.status == 3u) {\n` +
         `        return DemHeightSample(vec4f(0.0), 3u, level, sample_level);\n` +
@@ -1103,8 +932,11 @@ export function demVirtualRasterWgslModule(model: DemVirtualRasterModel): string
         `    let value = mix(mix(tl.value, tr.value, address.sub_texel.x), mix(bl.value, br.value, address.sub_texel.x), address.sub_texel.y);\n` +
         `    return DemHeightSample(value, max(max(tl.status, tr.status), max(bl.status, br.status)), level, sample_level);\n` +
         `}\n\n` +
-        `fn DemHeight_edge_blend_weight(position: DemAddressFixedPosition, level: u32) -> f32 {\n` +
-        `    let address = DemAddress_address(DemHeight_mercator_position(position), DemHeight_matrix[level]);\n` +
+        `fn DemHeight_sample_level(position: DemAddressFixedPosition, level: u32) -> DemHeightSample {\n` +
+        `    return DemHeight_sample_level_mercator(DemHeight_mercator_position(position), level);\n` +
+        `}\n\n` +
+        `fn DemHeight_edge_blend_weight_mercator(mercator_position: DemAddressFixedPosition, level: u32) -> f32 {\n` +
+        `    let address = DemAddress_address(mercator_position, DemHeight_matrix[level]);\n` +
         `    let local = vec2f(address.texel) + address.sub_texel;\n` +
         `    let origin = vec2i(address.tile * vec2u(256u));\n` +
         `    var weight = 1.0f;\n` +
@@ -1126,15 +958,20 @@ export function demVirtualRasterWgslModule(model: DemVirtualRasterModel): string
         `    }\n` +
         `    return weight;\n` +
         `}\n\n` +
-        `fn DemHeight_sample_bilinear(position: DemAddressFixedPosition, level: u32) -> DemHeightSample {\n` +
-        `    let fine = DemHeight_sample_level(position, level);\n` +
-        `    if (fine.status == 0u || fine.status == 3u || fine.resolved_level != level || level + 1u >= DemHeight_level_count) { return fine; }\n` +
-        `    let weight = DemHeight_edge_blend_weight(position, level);\n` +
+        `fn DemHeight_edge_blend_weight(position: DemAddressFixedPosition, level: u32) -> f32 {\n` +
+        `    return DemHeight_edge_blend_weight_mercator(DemHeight_mercator_position(position), level);\n` +
+        `}\n\n` +
+        `fn DemHeight_sample_bilinear_mercator(position: DemAddressFixedPosition, level: u32) -> DemHeightSample {\n` +
+        `    let fine = DemHeight_sample_level_mercator(position, level);\n` +
+        `    if (fine.status == 0u || fine.status == 3u || fine.status == 4u || fine.resolved_level != level || level + 1u >= DemHeight_level_count) { return fine; }\n` +
+        `    let weight = DemHeight_edge_blend_weight_mercator(position, level);\n` +
         `    if (weight >= 1.0f) { return fine; }\n` +
-        `    let parent = DemHeight_sample_level(position, level + 1u);\n` +
-        `    if (parent.status == 0u || parent.status == 3u) { return fine; }\n` +
+        `    let parent = DemHeight_sample_level_mercator(position, level + 1u);\n` +
+        `    if (parent.status == 0u || parent.status == 3u || parent.status == 4u) { return fine; }\n` +
         `    return DemHeightSample(mix(parent.value, fine.value, weight), max(parent.status, fine.status), level, max(parent.resolved_level, fine.resolved_level));\n` +
         `}\n\n` +
+        `fn DemHeight_sample_bilinear(position: DemAddressFixedPosition, level: u32) -> DemHeightSample { return DemHeight_sample_bilinear_mercator(DemHeight_mercator_position(position), level); }\n` +
+        `fn DemHeight_sample_vertex_mercator(position: DemAddressFixedPosition, level: u32) -> DemHeightSample { return DemHeight_sample_bilinear_mercator(position, level); }\n` +
         `fn DemHeight_sample_vertex(position: DemAddressFixedPosition, level: u32) -> DemHeightSample { return DemHeight_sample_bilinear(position, level); }\n` +
         `fn DemHeight_sample_fragment(position: DemAddressFixedPosition, level: u32) -> DemHeightSample { return DemHeight_sample_bilinear(position, level); }\n` +
         `fn DemHeight_sample_compute(position: DemAddressFixedPosition, level: u32) -> DemHeightSample { return DemHeight_sample_bilinear(position, level); }\n`
@@ -1426,34 +1263,6 @@ function coveredTexel(
         : Math.floor(pixelCoordinate - 0.5)
 }
 
-function comparePages(left: VirtualRasterPageIdentity, right: VirtualRasterPageIdentity): number {
-
-    return left.level - right.level ||
-        left.coordinates[1]! - right.coordinates[1]! ||
-        left.coordinates[0]! - right.coordinates[0]!
-}
-
-function comparePagesForCamera(
-    left: VirtualRasterPageIdentity,
-    right: VirtualRasterPageIdentity,
-    camera: readonly number[] | undefined
-): number {
-
-    const levelOrder = left.level - right.level
-    if (levelOrder !== 0 || camera === undefined || camera.length !== 2) return levelOrder || comparePages(left, right)
-    const leftTile = left.tile!
-    const rightTile = right.tile!
-    const center = WebMercatorQuad.tileFromLonLat(
-        [ camera[0]!, camera[1]! ],
-        leftTile.matrixId
-    )
-    const leftDistance = Math.abs(leftTile.tileCol - center.tileCol) +
-        Math.abs(leftTile.tileRow - center.tileRow)
-    const rightDistance = Math.abs(rightTile.tileCol - center.tileCol) +
-        Math.abs(rightTile.tileRow - center.tileRow)
-    return leftDistance - rightDistance || comparePages(left, right)
-}
-
 function assertCanonicalGrid(
     bounds: NumberSequence,
     grid: Readonly<{ x: number; y: number }>
@@ -1472,29 +1281,6 @@ function interpolateBigInt(minimum: bigint, maximum: bigint, index: number, coun
     const quotient = delta / BigInt(count)
     const remainder = delta - quotient * BigInt(count)
     return minimum + quotient * BigInt(index) + remainder * BigInt(index) / BigInt(count)
-}
-
-function intersectBounds(left: NumberSequence, right: NumberSequence) {
-
-    const intersection = [
-        Math.max(left[0], right[0]),
-        Math.max(left[1], right[1]),
-        Math.min(left[2], right[2]),
-        Math.min(left[3], right[3]),
-    ]
-    return intersection[0] > intersection[2] || intersection[1] > intersection[3]
-        ? undefined
-        : intersection
-}
-
-function nextDown(value: number): number {
-
-    return value - Math.max(Number.EPSILON, Math.abs(value) * Number.EPSILON)
-}
-
-function nextUp(value: number): number {
-
-    return value + Math.max(Number.EPSILON, Math.abs(value) * Number.EPSILON)
 }
 
 function assertOrderedBounds(value: NumberSequence, name: string): void {

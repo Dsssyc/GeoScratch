@@ -1,4 +1,9 @@
 import { mat4 } from 'wgpu-matrix'
+import {
+    WEB_MERCATOR_QUAD_WORLD_WIDTH,
+    WebMercatorQuad,
+} from 'geoscratch/geo'
+import type { GpuTileFrontierView } from 'geoscratch/geo'
 
 type Vec3 = [ number, number, number ]
 type Matrix = Float32Array<ArrayBuffer>
@@ -202,7 +207,13 @@ export function waitForDemMap(map: DemMap, signal?: AbortSignal): Promise<DemMap
     })
 }
 
-export function readDemCameraState(map: DemMap, viewport: Viewport) {
+export function readDemCameraState(
+    map: DemMap,
+    viewport: Viewport
+): Omit<GpuTileFrontierView, 'frameEpoch' | 'residencySnapshotEpoch'> & Readonly<{
+    far: number
+    near: number
+}> {
 
     const transform = map.transform
     const cameraPosition = transform.getCameraPosition()
@@ -210,26 +221,47 @@ export function readDemCameraState(map: DemMap, viewport: Viewport) {
         cameraPosition.lngLat,
         cameraPosition.altitude
     )
-    const centerX = encodeFloatToDouble(mercatorCenter.x)
-    const centerY = encodeFloatToDouble(mercatorCenter.y)
-    const centerZ = encodeFloatToDouble(mercatorCenter.z)
-    const centerHigh: Vec3 = [ centerX[0], centerY[0], centerZ[0] ]
-    const centerLow: Vec3 = [ centerX[1], centerY[1], centerZ[1] ]
+    const projected = WebMercatorQuad.project([
+        cameraPosition.lngLat.lng,
+        cameraPosition.lngLat.lat,
+    ])
+    const cameraX = encodeFloatToDouble(projected[0])
+    const cameraY = encodeFloatToDouble(projected[1])
+    const cameraZ = encodeFloatToDouble(cameraPosition.altitude)
+    const cameraHigh: Vec3 = [ cameraX[0], cameraY[0], cameraZ[0] ]
+    const cameraLow: Vec3 = [ cameraX[1], cameraY[1], cameraZ[1] ]
+    const normalizedX = encodeFloatToDouble(mercatorCenter.x)
+    const normalizedY = encodeFloatToDouble(mercatorCenter.y)
+    const normalizedZ = encodeFloatToDouble(mercatorCenter.z)
+    const normalizedHigh: Vec3 = [ normalizedX[0], normalizedY[0], normalizedZ[0] ]
     const { far, near, matrix } = getScratchMercatorMatrix(transform)
+    const clipFromRelativeWorld = (mat4.translate as (
+        matrix: Matrix,
+        vector: Vec3,
+        destination?: Matrix
+    ) => Matrix)(matrix, normalizedHigh)
+    const scaleMatrix = mat4.scale as (
+        matrix: Matrix,
+        vector: Vec3,
+        destination?: Matrix
+    ) => Matrix
+    scaleMatrix(clipFromRelativeWorld, [
+        1 / WEB_MERCATOR_QUAD_WORLD_WIDTH,
+        -1 / WEB_MERCATOR_QUAD_WORLD_WIDTH,
+        mercatorZfromAltitude(1, cameraPosition.lngLat.lat),
+    ], clipFromRelativeWorld)
+    const verticalFovRadians = radiansFromTransformValue(transform._fov, transform.fov)
 
     return Object.freeze({
         far,
         near,
-        matrix: Array.from((mat4.translate as (
-            matrix: Matrix,
-            vector: Vec3,
-            destination?: Matrix
-        ) => Matrix)(matrix, centerHigh)),
-        centerHigh,
-        centerLow,
-        cameraPos: [ cameraPosition.lngLat.lng, cameraPosition.lngLat.lat ],
-        zoom: map.getZoom(),
-        viewport: [ viewport.width, viewport.height ],
+        clipFromRelativeWorld: Array.from(clipFromRelativeWorld),
+        cameraHigh,
+        cameraLow,
+        viewport: [ viewport.width, viewport.height ] as const,
+        verticalFovRadians,
+        cameraLatitudeRadians: cameraPosition.lngLat.lat * Math.PI / 180,
+        zoomHint: map.getZoom(),
     })
 }
 

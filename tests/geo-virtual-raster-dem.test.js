@@ -7,7 +7,6 @@ import {
     prepareVirtualRasterPageTransfer,
 } from 'geoscratch/geo'
 import {
-    DEM_CANONICAL_NODE_BYTES,
     DEM_WEB_MERCATOR_COORDINATE_BITS,
     canonicalDemCoordinateQuanta,
     createDemVirtualRasterDemandAdapter,
@@ -15,13 +14,10 @@ import {
     demHeightSamplingLevel,
     demTileUrl,
     demVirtualRasterWgslModule,
-    encodeDemCanonicalNodes,
     fetchDemVirtualRasterManifest,
     parseDemVirtualRasterManifest,
-    planDemVirtualPages,
     resolveDemStitchedGrid,
 } from '../examples/demLayer/dem-virtual-raster.ts'
-import { selectTerrainNodes } from '../examples/demLayer/terrain-selection.ts'
 import { DemPhaseBudget } from '../examples/demLayer/dem-phase-budget.ts'
 import { demWebMercatorManifest as manifest } from './fixtures/dem-webmercator-manifest.js'
 
@@ -367,28 +363,6 @@ describe('DEM WebMercator virtual raster', () => {
         expect(result.contentVersion).to.equal(manifest.contentVersion)
     })
 
-    it('plans standard visible tiles plus covered parents without physical addresses', () => {
-
-        const model = createDemVirtualRasterModel(parseDemVirtualRasterManifest(manifest))
-        const selection = selectTerrainNodes({
-            cameraPos: [ 120.980697, 31.684162 ],
-            zoomLevel: 12,
-            maxLevel: 14,
-        })
-        const plan = planDemVirtualPages(model, selection)
-
-        expect(plan.pages[0].key).to.equal('4/6/13')
-        expect(plan.pages.some(page => page.tile?.matrixId === '10')).to.equal(true)
-        expect(plan.pages.every(page =>
-            page.tile?.tileMatrixSetId === 'WebMercatorQuad' &&
-            !('texel' in page) && !('physicalSlot' in page)
-        )).to.equal(true)
-        expect(plan.requestedLodRange).to.deep.equal([ 0, 6 ])
-        expect(plan.pages.map(page => page.key)).to.deep.equal(
-            [ ...new Set(plan.pages.map(page => page.key)) ]
-        )
-    })
-
     it('stitches first and then derives one shared wide-fixed canonical coordinate', () => {
 
         const model = createDemVirtualRasterModel(parseDemVirtualRasterManifest(manifest))
@@ -439,27 +413,24 @@ describe('DEM WebMercator virtual raster', () => {
         expect(stitched.heightSamplingLevel).to.equal(3)
     })
 
-    it('packs only two wide-fixed endpoints per node and emits transient tile sampling WGSL', () => {
+    it('emits direct fixed-Mercator sampling without persistent per-node addresses', () => {
 
         const parsed = parseDemVirtualRasterManifest(manifest)
         const model = createDemVirtualRasterModel(parsed)
-        const selection = selectTerrainNodes({
-            cameraPos: [ 120.980697, 31.684162 ],
-            zoomLevel: 10,
-            maxLevel: 14,
-        })
-        const packed = encodeDemCanonicalNodes(selection, parsed)
         const wgsl = demVirtualRasterWgslModule(model)
 
-        expect(packed.byteLength).to.equal(5000 * DEM_CANONICAL_NODE_BYTES)
-        expect(DEM_CANONICAL_NODE_BYTES).to.equal(32)
         expect(model.addressCodec.bytesPerPosition).to.equal(16)
         expect(wgsl).to.include('fn DemAddress_address(')
         expect(wgsl).to.include('fn DemHeight_load_position(')
         expect(wgsl).to.include('fn DemHeight_sample_vertex(')
+        expect(wgsl).to.include('fn DemHeight_sample_vertex_mercator(')
+        expect(wgsl).to.include('fn DemHeight_sample_level_mercator(')
         expect(wgsl).to.include('fn DemHeight_resolution_global(')
         expect(wgsl).to.include('fn DemHeight_sample_level(')
         expect(wgsl).to.include('fn DemHeight_edge_blend_weight(')
+        expect(wgsl).to.include('fn DemHeight_failed(level: u32)')
+        expect(wgsl).to.include('if (status == 4u) { return DemHeight_failed(level); }')
+        expect(wgsl).to.include('tl.status == 4u || tr.status == 4u')
         expect(wgsl).to.include('const DemHeight_transition_texels = 16.0f')
         expect(wgsl).to.include('iteration < DemHeight_level_count')
         expect(wgsl).to.include('DemHeight_matrix[sample_level]')
@@ -467,6 +438,7 @@ describe('DEM WebMercator virtual raster', () => {
         expect(wgsl).to.include('vec2u(3414u, 1662u)')
         expect(wgsl).to.include('vec2u(3435u, 1673u)')
         expect(wgsl).to.not.include('logicalTexel')
+        expect(wgsl).to.not.include('canonicalNodes')
         expect(wgsl).to.not.include('f64')
     })
 })

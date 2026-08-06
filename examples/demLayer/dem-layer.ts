@@ -3,7 +3,6 @@ import {
     layoutCodec,
     plane,
 } from 'geoscratch/scratch'
-import { mat4 } from 'wgpu-matrix'
 import type {
     BindLayoutEntry,
     BindVisibility,
@@ -11,23 +10,29 @@ import type {
     LayoutCodec,
     LayoutFixedFieldDescriptor,
     ProgramBufferLayoutRequirement,
-    GPURuntimeDiagnosticsSnapshot,
     SubmittedWork,
     Surface,
     SurfaceSize,
     TextureResource,
 } from 'geoscratch/scratch'
 import {
-    MAX_TERRAIN_NODES,
-    TERRAIN_BOUNDARY,
-    selectTerrainNodes,
-} from './terrain-selection.ts'
-import {
-    DEM_CANONICAL_NODE_BYTES,
-    demVirtualRasterWgslModule,
-    encodeDemCameraCoordinate,
-    writeDemCanonicalNodes,
-} from './dem-virtual-raster.ts'
+    GeoDiagnosticError,
+    GpuTileFrontier,
+    VirtualRasterGpuFeedbackRing,
+    WEB_MERCATOR_QUAD_HALF_WORLD,
+    WEB_MERCATOR_QUAD_WORLD_WIDTH,
+    WebMercatorQuad,
+    gpuTileFrontierPolicy,
+    gpuTileFrontierRenderWgslModule,
+} from 'geoscratch/geo'
+import type {
+    GpuTileFrontierFacts,
+    GpuTileFrontierFrame,
+    GpuTileFrontierRenderTemplate,
+    GpuTileFrontierView,
+    VirtualRasterGpuFeedbackBatch,
+} from 'geoscratch/geo'
+import { demVirtualRasterWgslModule } from './dem-virtual-raster.ts'
 import type {
     DemVirtualRasterPublication,
     createDemVirtualRasterRuntime,
@@ -43,24 +48,22 @@ type DemFailureProof = {
     beforeTerrainShaderModule(runtime: GPURuntime): void
 }
 
-type DemCameraState = {
+type DemCameraState = Omit<
+    GpuTileFrontierView,
+    'frameEpoch' | 'residencySnapshotEpoch'
+> & Readonly<{
     far: number
     near: number
-    matrix: ArrayLike<number>
-    centerLow: ArrayLike<number>
-    centerHigh: ArrayLike<number>
-    cameraPos: ArrayLike<number> & Iterable<number>
-    zoom: number
-    viewport: ArrayLike<number>
-}
+}>
 
-type TerrainSelection = ReturnType<typeof selectTerrainNodes>
 type DemVirtualRaster = Awaited<ReturnType<typeof createDemVirtualRasterRuntime>>
 type Codecs = ReturnType<typeof createCodecs>
-type Uniforms = Awaited<ReturnType<typeof createUniformResources>>
 type TerrainGeometry = ReturnType<typeof createTerrainGeometry>
+type Uniforms = Awaited<ReturnType<typeof createUniformResources>>
 type Buffers = Awaited<ReturnType<typeof createBufferResources>>
 type Textures = Awaited<ReturnType<typeof createTextures>>
+type Frontier = Awaited<ReturnType<typeof createFrontier>>
+type RenderTemplates = ReturnType<typeof createRenderTemplates>
 type Layouts = Awaited<ReturnType<typeof createBindLayouts>>
 type BindSets = Awaited<ReturnType<typeof createBindSets>>
 type Programs = Awaited<ReturnType<typeof createPrograms>>
@@ -68,7 +71,7 @@ type Pipelines = Awaited<ReturnType<typeof createPipelines>>
 type Passes = ReturnType<typeof createPasses>
 type Commands = ReturnType<typeof createCommands>
 type LayoutValues = Parameters<LayoutCodec['pack']>[0]
-type BufferData = Float32Array<ArrayBuffer> | Uint32Array<ArrayBuffer> | Uint8Array<ArrayBuffer>
+type BufferData = Uint32Array<ArrayBuffer>
 type ContentResource = BufferResource | TextureResource
 
 type DemGraph = {
@@ -80,6 +83,9 @@ type DemGraph = {
     uniforms: Uniforms
     buffers: Buffers
     textures: Textures
+    frontier: Frontier
+    feedbackRing: VirtualRasterGpuFeedbackRing
+    renderTemplates: RenderTemplates
     layouts: Layouts
     bindSets: BindSets
     programs: Programs
@@ -101,7 +107,7 @@ type ProvenanceFact = Readonly<{
 type ProvenanceVerifier = (
     submitted: SubmittedWork,
     graph: DemGraph,
-    publication: DemVirtualRasterPublication
+    frame: GpuTileFrontierFrame
 ) => readonly ProvenanceFact[]
 
 type ResizeFacts = Readonly<{
@@ -113,16 +119,18 @@ type ResizeFacts = Readonly<{
 
 type DemState = {
     initialized: boolean
+    disposed: boolean
     frame: number
     size: SurfaceSize
     resizeGeneration: number
     staleBindSetPreparationCount: number
     lastResizeFacts?: ResizeFacts
-    selection?: TerrainSelection
-    virtualPlan?: ReturnType<DemVirtualRaster['prepare']>['plan']
     virtualSnapshotEpoch: number
     virtualRequestedPageCount: number
-    stageActivity: { 'lod-map': number; terrain: number }
+    staleFeedbackCount: number
+    latestFrontierFacts?: GpuTileFrontierFacts
+    latestFeedbackDiagnostics: readonly unknown[]
+    stageActivity: { 'frontier-compute': number; 'lod-map': number; terrain: number }
 }
 
 type PersistentFacts = Readonly<{
@@ -143,9 +151,13 @@ type DemLayerOptions = {
     provenanceVerifier?: ProvenanceVerifier
 }
 
-export const DEM_STAGE_ORDER = Object.freeze([ 'lod-map', 'terrain' ])
+type PendingFeedback = Readonly<{
+    frame: GpuTileFrontierFrame
+    submitted: SubmittedWork
+}>
+
+export const DEM_STAGE_ORDER = Object.freeze([ 'frontier-compute', 'lod-map', 'terrain' ])
 export const LOD_MAP_SIZE = Object.freeze({ width: 512, height: 256 })
-export const TERRAIN_MAX_LEVEL = 14
 export const TERRAIN_SECTOR_SIZE = 64
 export const TERRAIN_EXAGGERATION = 50
 export const TERRAIN_ELEVATION_RANGE = Object.freeze([ -80.06899999999999, 4.3745 ])
@@ -154,7 +166,6 @@ const bufferUsage = globalThis.GPUBufferUsage ?? Object.freeze({
     COPY_DST: 0x08,
     UNIFORM: 0x40,
     STORAGE: 0x80,
-    INDIRECT: 0x100,
 })
 const textureUsage = globalThis.GPUTextureUsage ?? Object.freeze({
     TEXTURE_BINDING: 0x04,
@@ -181,54 +192,66 @@ export async function createDemLayer({
 
     const codecs = createCodecs()
     const geometry = createTerrainGeometry()
-    const uniforms = await createUniformResources(runtime, codecs)
-    const buffers = await createBufferResources(runtime, geometry, virtualRaster)
+    const uniforms = await createUniformResources(runtime, codecs, virtualRaster)
+    const buffers = await createBufferResources(runtime, geometry)
     const textures = await createTextures(runtime, size)
-    const layouts = await createBindLayouts(runtime, codecs)
+    const frontier = await createFrontier(runtime, virtualRaster, geometry)
+    const feedbackRing = await VirtualRasterGpuFeedbackRing.create(frontier)
+    const renderTemplates = createRenderTemplates(frontier)
+    const layouts = await createBindLayouts(
+        runtime,
+        codecs,
+        renderTemplates.lodMap[0].mapMeta.size
+    )
     const bindSets = await createBindSets(
         runtime,
         layouts,
         uniforms,
         buffers,
         textures,
+        virtualRaster,
+        renderTemplates
+    )
+    const programs = await createPrograms(
+        runtime,
+        codecs,
+        shaders,
+        failureProof,
         virtualRaster
     )
-    const programs = await createPrograms(runtime, codecs, shaders, failureProof, virtualRaster)
-    const pipelines = await createPipelines(
-        runtime,
-        surface,
-        textures,
-        layouts,
-        programs
-    )
+    const pipelines = await createPipelines(runtime, surface, textures, layouts, programs)
     const passes = createPasses(runtime, surface, textures)
     const commands = createCommands(
         runtime,
-        geometry,
         uniforms,
         buffers,
         textures,
         virtualRaster,
+        renderTemplates,
         bindSets,
         pipelines
     )
-    const graph = {
+    const graph: DemGraph = {
         runtime,
         surface,
+        virtualRaster,
         codecs,
         geometry,
         uniforms,
         buffers,
         textures,
+        frontier,
+        feedbackRing,
+        renderTemplates,
         layouts,
         bindSets,
         programs,
         pipelines,
         passes,
         commands,
-        virtualRaster,
     }
     const state = createState(size)
+    const pendingFeedback: PendingFeedback[] = []
     const stableIdentities = Object.freeze(stableIdentitySnapshot(graph))
     const stableIdentityFacts = identityFactSnapshot(graph)
     const stableIdentityHash = stableIdentityFacts.hash
@@ -248,22 +271,25 @@ export async function createDemLayer({
     async function initializeOnce() {
 
         const publication = await virtualRaster.initialize()
-        const builder = runtime.createSubmission({ validation: 'throw' })
-        for (const upload of [
-            uniforms.map.upload,
-            uniforms.static.upload,
-            buffers.positions.upload,
-            buffers.indices.upload,
-            ...publication.update.commands,
-        ]) {
-            builder.upload(upload)
+        const uploadBuilder = runtime.createSubmission({ validation: 'throw' })
+            .upload(uniforms.config.upload)
+            .upload(buffers.positions.upload)
+            .upload(buffers.indices.upload)
+        for (const upload of publication.update.commands) uploadBuilder.upload(upload)
+        const residencySubmitted = uploadBuilder.submit()
+        await Promise.all([
+            observeSubmittedWork(residencySubmitted),
+            virtualRaster.acknowledge(publication, residencySubmitted),
+        ])
+
+        const seed = frontier.stageSeed(publication.publication.snapshot)
+        const seedBuilder = runtime.createSubmission({ validation: 'throw' })
+        for (const command of seed.commands) {
+            if (command.commandKind === 'clear') seedBuilder.clear(command)
+            else seedBuilder.upload(command)
         }
-        const submitted = builder.submit()
-        const acknowledgement = virtualRaster.acknowledge(publication, submitted)
-        const observation = Promise.all([
-            observeSubmittedWork(submitted),
-            acknowledgement,
-        ]).then(([ result ]) => {
+        const submitted = seedBuilder.submit()
+        const observation = observeSubmittedWork(submitted).then(result => {
             state.initialized = true
             state.virtualSnapshotEpoch = publication.snapshotEpoch
             return result
@@ -271,68 +297,83 @@ export async function createDemLayer({
         return Object.freeze({ submitted, observation })
     }
 
-    function renderFrame(camera: DemCameraState) {
+    async function renderFrame(camera: DemCameraState) {
 
         if (!state.initialized) throw new Error('DEM graph must be initialized before rendering')
+        if (state.disposed) throw new Error('DEM graph is disposed')
         assertCamera(camera)
         assertSameIdentities(stableIdentities, stableIdentitySnapshot(graph), 'frame')
         assertPersistentCounts(persistentBaseline, persistentFactSnapshot(runtime), 'frame')
-        const selection = selectTerrainNodes({
-            cameraPos: camera.cameraPos,
-            zoomLevel: camera.zoom,
-            maxLevel: TERRAIN_MAX_LEVEL,
-            maxNodes: MAX_TERRAIN_NODES,
-        })
-        updateFrameData(graph, selection, camera)
-        const streaming = virtualRaster.prepare(selection)
-        const publication = virtualRaster.publish()
 
-        const builder = runtime.createSubmission({ validation: 'throw' })
-            .upload(uniforms.dynamic.upload)
-            .upload(uniforms.tile.upload)
-            .upload(buffers.nodeLevels.upload)
-            .upload(buffers.nodeBoxes.upload)
-            .upload(buffers.canonicalNodes.upload)
-            .upload(buffers.cameraCoordinate.upload)
-            .upload(buffers.lodArguments.upload)
-            .upload(buffers.terrainArguments.upload)
-        for (const upload of publication.update.commands) builder.upload(upload)
-        const submitted = builder
-            .render(passes.lodMap, [ commands.drawLodMap ])
-            .render(passes.terrain, [ commands.drawTerrain ])
-            .submit()
-        const nativeObservation = Promise.all([
-            observeSubmittedWork(submitted),
-            virtualRaster.acknowledge(publication, submitted),
-        ]).then(([ result ]) => result)
+        const noOpPublication = await publishChangedResidency(graph, state)
+        const viewToken = frontier.writeView({
+            clipFromRelativeWorld: camera.clipFromRelativeWorld,
+            cameraHigh: camera.cameraHigh,
+            cameraLow: camera.cameraLow,
+            viewport: camera.viewport,
+            verticalFovRadians: camera.verticalFovRadians,
+            cameraLatitudeRadians: camera.cameraLatitudeRadians,
+            zoomHint: camera.zoomHint,
+            frameEpoch: state.frame + 1,
+            residencySnapshotEpoch: virtualRaster.gpu.facts().snapshotEpoch,
+        })
+        let frame: GpuTileFrontierFrame
+        let submitted: SubmittedWork
+        try {
+            frame = frontier.frame(viewToken)
+            const builder = runtime.createSubmission({ validation: 'throw' })
+            frontier.encode(builder, frame)
+            builder
+                .render(passes.lodMap, [ commands.lodMap[frame.parity] ])
+                .render(passes.terrain, [ commands.terrain[frame.parity] ])
+            feedbackRing.encode(builder, frame)
+            submitted = builder.submit()
+        } finally {
+            viewToken.dispose()
+        }
+        if (noOpPublication !== undefined) {
+            await virtualRaster.acknowledge(noOpPublication, submitted!)
+        }
+
         let provenance: readonly ProvenanceFact[] = Object.freeze([])
         let provenanceFailure: unknown
         try {
-            provenance = provenanceVerifier(submitted, graph, publication)
+            provenance = provenanceVerifier(submitted!, graph, frame!)
         } catch (error) {
             provenanceFailure = error
         }
+        const nativeObservation = observeSubmittedWork(submitted!)
         const observation = provenanceFailure === undefined
             ? nativeObservation
             : nativeObservation.then(() => { throw provenanceFailure })
 
+        pendingFeedback.push(Object.freeze({ frame: frame!, submitted: submitted! }))
+        const feedback = await consumeReadyFeedback(graph, pendingFeedback, state)
+        const reconciliation = feedback === undefined
+            ? undefined
+            : virtualRaster.reconcileFeedback(feedback)
+        if (reconciliation !== undefined) {
+            state.virtualRequestedPageCount += reconciliation.requestedCount
+        }
+
         state.frame++
-        state.selection = selection
-        state.virtualPlan = streaming.plan
-        state.virtualSnapshotEpoch = publication.snapshotEpoch
-        state.virtualRequestedPageCount += streaming.requestedCount
+        state.virtualSnapshotEpoch = virtualRaster.gpu.facts().snapshotEpoch
+        state.stageActivity['frontier-compute']++
         state.stageActivity['lod-map']++
         state.stageActivity.terrain++
+        const needsFollowUp = feedback === undefined ||
+            feedback.facts.convergenceState !== 'converged' ||
+            reconciliation?.requestedCount !== 0
 
         return Object.freeze({
-            submitted,
+            submitted: submitted!,
             observation,
             provenance,
-            selection,
-            virtualPlan: streaming.plan,
-            virtualPublication: publication,
-            residencySettlement: streaming.settlement,
-            requestedPageCount: streaming.requestedCount,
+            feedback,
+            reconciliation,
+            residencySettlement: reconciliation?.settlement ?? Promise.resolve(undefined),
+            requestedPageCount: reconciliation?.requestedCount ?? 0,
+            needsFollowUp,
         })
     }
 
@@ -343,7 +384,7 @@ export async function createDemLayer({
         surface.resize(nextSize)
         await textures.depth.resize(nextSize)
 
-        const staleBindSets = Object.values(bindSets)
+        const staleBindSets = allBindSets(bindSets)
             .filter(bindSet => bindSet.preparationState === 'stale')
         let preparedBindSetCount = 0
         for (const bindSet of staleBindSets) {
@@ -366,11 +407,20 @@ export async function createDemLayer({
         return state.lastResizeFacts
     }
 
+    function dispose() {
+
+        if (state.disposed) return
+        state.disposed = true
+        pendingFeedback.length = 0
+        feedbackRing.dispose()
+        frontier.dispose()
+    }
+
     return Object.freeze({
         initialize,
         renderFrame,
         resize,
-        stopStreaming: virtualRaster.stopStreaming,
+        dispose,
         stableIdentities,
         stableIdentityHash,
         stableIdentityFacts,
@@ -378,7 +428,7 @@ export async function createDemLayer({
         persistentFacts: () => persistentFactSnapshot(runtime),
         contractFacts: () => graphContractSnapshot(graph),
         virtualRasterFacts: virtualRaster.inspect,
-        state: () => stateSnapshot(state),
+        state: () => stateSnapshot(state, pendingFeedback.length, feedbackRing),
     })
 }
 
@@ -392,58 +442,44 @@ function createCodecs() {
     const uniform = (name: string, fields: LayoutFixedFieldDescriptor[]) =>
         layoutCodec({ name, fields }, { usage: [ 'uniform' ] })
     return Object.freeze({
-        map: uniform('DemMapUniform', [
-            { name: 'dimensions', type: 'vec2f' },
-        ]),
-        tile: uniform('DemTileUniform', [
-            { name: 'tileBox', type: 'vec4f' },
-            { name: 'levelRange', type: 'vec2f' },
-            { name: 'sectorRange', type: 'vec2f' },
-            { name: 'sectorSize', type: 'f32' },
+        config: uniform('DemTerrainConfig', [
+            { name: 'sourceMercatorBox', type: 'vec4f' },
+            { name: 'elevationRange', type: 'vec2f' },
+            { name: 'lodMapDimensions', type: 'vec2f' },
+            { name: 'sectorSize', type: 'u32' },
+            { name: 'coordinateBits', type: 'u32' },
             { name: 'exaggeration', type: 'f32' },
-        ]),
-        static: uniform('DemStaticUniform', [
-            { name: 'terrainBox', type: 'vec4f' },
-            { name: 'e', type: 'vec2f' },
-        ]),
-        dynamic: uniform('DemDynamicUniform', [
-            { name: 'far', type: 'f32' },
-            { name: 'near', type: 'f32' },
-            { name: 'cameraLatitude', type: 'f32' },
             { name: 'reserved', type: 'f32' },
-            { name: 'uMatrix', type: 'mat4x4f' },
-            { name: 'centerLow', type: 'vec3f' },
-            { name: 'centerHigh', type: 'vec3f' },
         ]),
     })
 }
 
-async function createUniformResources(runtime: GPURuntime, codecs: Codecs) {
+async function createUniformResources(
+    runtime: GPURuntime,
+    codecs: Codecs,
+    virtualRaster: DemVirtualRaster
+) {
 
-    const identity = Array.from((mat4.identity as (destination?: Float32Array) => Float32Array)())
+    const [ west, south, east, north ] = virtualRaster.manifest.projectedBounds.bounds
+    const sourceMercatorBox = [
+        (west + WEB_MERCATOR_QUAD_HALF_WORLD) / WEB_MERCATOR_QUAD_WORLD_WIDTH,
+        (WEB_MERCATOR_QUAD_HALF_WORLD - north) / WEB_MERCATOR_QUAD_WORLD_WIDTH,
+        (east + WEB_MERCATOR_QUAD_HALF_WORLD) / WEB_MERCATOR_QUAD_WORLD_WIDTH,
+        (WEB_MERCATOR_QUAD_HALF_WORLD - south) / WEB_MERCATOR_QUAD_WORLD_WIDTH,
+    ]
+    const elevationRange = [
+        virtualRaster.manifest.offset,
+        virtualRaster.manifest.offset + virtualRaster.manifest.scale * 255,
+    ]
     return {
-        map: await createUniform(runtime, 'DEM LoD-map dimensions', codecs.map, {
-            dimensions: [ LOD_MAP_SIZE.width, LOD_MAP_SIZE.height ],
-        }),
-        tile: await createUniform(runtime, 'DEM tile state', codecs.tile, {
-            tileBox: [ 0, 0, 0, 0 ],
-            levelRange: [ 0, 0 ],
-            sectorRange: [ 1, 1 ],
+        config: await createUniform(runtime, 'DEM terrain configuration', codecs.config, {
+            sourceMercatorBox,
+            elevationRange,
+            lodMapDimensions: [ LOD_MAP_SIZE.width, LOD_MAP_SIZE.height ],
             sectorSize: TERRAIN_SECTOR_SIZE,
+            coordinateBits: virtualRaster.addressCodec.coordinateBits,
             exaggeration: TERRAIN_EXAGGERATION,
-        }),
-        static: await createUniform(runtime, 'DEM terrain constants', codecs.static, {
-            terrainBox: TERRAIN_BOUNDARY,
-            e: TERRAIN_ELEVATION_RANGE,
-        }),
-        dynamic: await createUniform(runtime, 'DEM camera state', codecs.dynamic, {
-            far: 1,
-            near: 0,
-            cameraLatitude: 0,
             reserved: 0,
-            uMatrix: identity,
-            centerLow: [ 0, 0, 0 ],
-            centerHigh: [ 0, 0, 0 ],
         }),
     }
 }
@@ -468,7 +504,6 @@ async function createUniform(
         buffer,
         region,
         upload: runtime.createUploadCommand({ label: `Upload ${label}`, target: region, data: bytes }),
-        write: (nextValues: LayoutValues) => codec.write(bytes, nextValues),
     })
 }
 
@@ -484,20 +519,7 @@ function createTerrainGeometry() {
     })
 }
 
-async function createBufferResources(
-    runtime: GPURuntime,
-    geometry: TerrainGeometry,
-    virtualRaster: DemVirtualRaster
-) {
-
-    const nodeLevels = new Uint32Array(MAX_TERRAIN_NODES)
-    const nodeBoxes = new Float32Array(MAX_TERRAIN_NODES * 4)
-    const canonicalNodes = new Uint8Array(MAX_TERRAIN_NODES * DEM_CANONICAL_NODE_BYTES)
-    const cameraCoordinate = new Uint8Array(
-        virtualRaster.addressCodec.positionCodec.facts.bytesPerPosition
-    )
-    const lodArguments = new Uint32Array([ 4, 0, 0, 0 ])
-    const terrainArguments = new Uint32Array([ geometry.vertexCount, 0, 0, 0 ])
+async function createBufferResources(runtime: GPURuntime, geometry: TerrainGeometry) {
 
     return {
         positions: await createBufferWithUpload(
@@ -511,42 +533,6 @@ async function createBufferResources(
             'DEM terrain indices',
             geometry.indices,
             bufferUsage.COPY_DST | bufferUsage.STORAGE
-        ),
-        nodeLevels: await createBufferWithUpload(
-            runtime,
-            'DEM selected node levels',
-            nodeLevels,
-            bufferUsage.COPY_DST | bufferUsage.STORAGE
-        ),
-        nodeBoxes: await createBufferWithUpload(
-            runtime,
-            'DEM selected node boxes',
-            nodeBoxes,
-            bufferUsage.COPY_DST | bufferUsage.STORAGE
-        ),
-        canonicalNodes: await createBufferWithUpload(
-            runtime,
-            'DEM canonical node coordinates',
-            canonicalNodes,
-            bufferUsage.COPY_DST | bufferUsage.STORAGE
-        ),
-        cameraCoordinate: await createBufferWithUpload(
-            runtime,
-            'DEM canonical camera coordinate',
-            cameraCoordinate,
-            bufferUsage.COPY_DST | bufferUsage.STORAGE
-        ),
-        lodArguments: await createBufferWithUpload(
-            runtime,
-            'DEM LoD indirect arguments',
-            lodArguments,
-            bufferUsage.COPY_DST | bufferUsage.INDIRECT
-        ),
-        terrainArguments: await createBufferWithUpload(
-            runtime,
-            'DEM terrain indirect arguments',
-            terrainArguments,
-            bufferUsage.COPY_DST | bufferUsage.INDIRECT
         ),
     }
 }
@@ -592,19 +578,86 @@ async function createTextures(runtime: GPURuntime, size: SurfaceSize) {
     }
 }
 
-async function createBindLayouts(runtime: GPURuntime, codecs: Codecs) {
+async function createFrontier(
+    runtime: GPURuntime,
+    virtualRaster: DemVirtualRaster,
+    geometry: TerrainGeometry
+) {
+
+    const minimumMatrixLevel = Number(virtualRaster.manifest.tileMatrixSet.minTileMatrix)
+    const maximumMatrixLevel = Number(virtualRaster.manifest.tileMatrixSet.maxTileMatrix)
+    const rootCount = virtualRaster.safetyCoverPages.length
+    const maxPhysicalPages = virtualRaster.gpu.maxPhysicalPages
+    if (maxPhysicalPages <= rootCount) {
+        throw new Error('DEM GPU frontier requires transition capacity beyond its safety cover')
+    }
+    const transitionReservePages = Math.min(5, maxPhysicalPages - rootCount)
+    const maximumActiveTiles = Math.max(rootCount, Math.min(
+        virtualRaster.coverage.entryCount,
+        maxPhysicalPages - transitionReservePages
+    ))
+    const maximumDemands = Math.max(1, Math.min(
+        maximumActiveTiles * 4,
+        virtualRaster.scheduler.maxRequests
+    ))
+    const elevation = [
+        virtualRaster.manifest.offset * TERRAIN_EXAGGERATION,
+        (virtualRaster.manifest.offset + virtualRaster.manifest.scale * 255) *
+            TERRAIN_EXAGGERATION,
+    ].sort((left, right) => left - right)
+
+    return GpuTileFrontier.create(runtime, {
+        gpuState: virtualRaster.gpu,
+        addressCodec: virtualRaster.addressCodec,
+        policy: gpuTileFrontierPolicy({
+            refineErrorPixels: 2,
+            coarsenErrorPixels: 1,
+            minimumMatrixLevel,
+            maximumMatrixLevel,
+            maximumActiveTiles,
+            maximumDemands,
+            transitionReservePages,
+            invisibleGraceFrames: 2,
+        }),
+        levelMetrics: virtualRaster.manifest.tileMatrixSet.tileMatrixIds.map(matrixId => {
+            const matrix = WebMercatorQuad.matrix(matrixId)
+            return Object.freeze({
+                matrixLevel: Number(matrixId),
+                minimumElevationMeters: elevation[0]!,
+                maximumElevationMeters: elevation[1]!,
+                geometricErrorMeters: matrix.cellSize * matrix.tileWidth /
+                    TERRAIN_SECTOR_SIZE,
+            })
+        }),
+        roots: virtualRaster.safetyCoverPages,
+        drawTemplates: [
+            { id: 'lod-map', vertexCount: 4 },
+            { id: 'terrain', vertexCount: geometry.vertexCount },
+        ],
+    })
+}
+
+function createRenderTemplates(frontier: GpuTileFrontier) {
+
+    return Object.freeze({
+        lodMap: frontier.renderTemplates('lod-map'),
+        terrain: frontier.renderTemplates('terrain'),
+    })
+}
+
+async function createBindLayouts(runtime: GPURuntime, codecs: Codecs, mapMetaBytes: number) {
 
     const uniform = (
         binding: number,
         name: string,
-        codec: LayoutCodec,
+        minBindingSize: number,
         visibility: readonly BindVisibility[]
     ): BindLayoutEntry => ({
         binding,
         name,
         type: 'uniform',
         visibility,
-        minBindingSize: codec.byteLength(),
+        minBindingSize,
     })
     const readStorage = (binding: number, name: string): BindLayoutEntry => ({
         binding,
@@ -614,38 +667,26 @@ async function createBindLayouts(runtime: GPURuntime, codecs: Codecs) {
     })
 
     return {
-        lodUniforms: await runtime.createBindLayout({
-            label: 'DEM LoD uniform layout',
+        scene: await runtime.createBindLayout({
+            label: 'DEM frontier scene layout',
             group: 0,
             entries: [
-                uniform(0, 'mapUniform', codecs.map, [ 'vertex' ]),
-                uniform(1, 'tileUniform', codecs.tile, [ 'vertex' ]),
-                uniform(2, 'staticUniform', codecs.static, [ 'vertex' ]),
+                uniform(0, 'mapMeta', mapMetaBytes, [ 'vertex' ]),
+                uniform(1, 'terrainConfig', codecs.config.byteLength(), [ 'vertex' ]),
             ],
         }),
-        lodStorage: await runtime.createBindLayout({
-            label: 'DEM LoD storage layout',
+        lodInstances: await runtime.createBindLayout({
+            label: 'DEM LoD frontier instances layout',
             group: 1,
-            entries: [ readStorage(0, 'level'), readStorage(1, 'box') ],
+            entries: [ readStorage(0, 'visibleInstances') ],
         }),
-        terrainUniforms: await runtime.createBindLayout({
-            label: 'DEM terrain uniform layout',
-            group: 0,
-            entries: [
-                uniform(0, 'tileUniform', codecs.tile, [ 'vertex' ]),
-                uniform(1, 'dynamicUniform', codecs.dynamic, [ 'vertex' ]),
-            ],
-        }),
-        terrainStorage: await runtime.createBindLayout({
-            label: 'DEM terrain storage layout',
+        terrainData: await runtime.createBindLayout({
+            label: 'DEM terrain frontier data layout',
             group: 1,
             entries: [
                 readStorage(0, 'indices'),
                 readStorage(1, 'gridPositions'),
-                readStorage(2, 'geometryLevels'),
-                readStorage(3, 'geographicBoxes'),
-                readStorage(4, 'canonicalNodes'),
-                readStorage(5, 'cameraCoordinate'),
+                readStorage(2, 'visibleInstances'),
             ],
         }),
         terrainTextures: await runtime.createBindLayout({
@@ -680,31 +721,27 @@ async function createBindSets(
     uniforms: Uniforms,
     buffers: Buffers,
     textures: Textures,
-    virtualRaster: DemVirtualRaster
+    virtualRaster: DemVirtualRaster,
+    templates: RenderTemplates
 ) {
 
     return {
-        lodUniforms: await runtime.createBindSet(layouts.lodUniforms, {
-            mapUniform: uniforms.map.region,
-            tileUniform: uniforms.tile.region,
-            staticUniform: uniforms.static.region,
-        }, { label: 'DEM LoD uniforms' }),
-        lodStorage: await runtime.createBindSet(layouts.lodStorage, {
-            level: buffers.nodeLevels.region,
-            box: buffers.nodeBoxes.region,
-        }, { label: 'DEM LoD selected nodes' }),
-        terrainUniforms: await runtime.createBindSet(layouts.terrainUniforms, {
-            tileUniform: uniforms.tile.region,
-            dynamicUniform: uniforms.dynamic.region,
-        }, { label: 'DEM terrain uniforms' }),
-        terrainStorage: await runtime.createBindSet(layouts.terrainStorage, {
-            indices: buffers.indices.region,
-            gridPositions: buffers.positions.region,
-            geometryLevels: buffers.nodeLevels.region,
-            geographicBoxes: buffers.nodeBoxes.region,
-            canonicalNodes: buffers.canonicalNodes.region,
-            cameraCoordinate: buffers.cameraCoordinate.region,
-        }, { label: 'DEM terrain data' }),
+        scene: await runtime.createBindSet(layouts.scene, {
+            mapMeta: templates.lodMap[0].mapMeta.region(),
+            terrainConfig: uniforms.config.region,
+        }, { label: 'DEM frontier scene' }),
+        lodInstances: await Promise.all(templates.lodMap.map((template, parity) =>
+            runtime.createBindSet(layouts.lodInstances, {
+                visibleInstances: template.visibleInstances.region(),
+            }, { label: `DEM LoD frontier instances ${parity}` })
+        )),
+        terrainData: await Promise.all(templates.terrain.map((template, parity) =>
+            runtime.createBindSet(layouts.terrainData, {
+                indices: buffers.indices.region,
+                gridPositions: buffers.positions.region,
+                visibleInstances: template.visibleInstances.region(),
+            }, { label: `DEM terrain frontier data ${parity}` })
+        )),
         terrainTextures: await runtime.createBindSet(layouts.terrainTextures, {
             demPageTable: virtualRaster.gpu.pageTable.region(),
             demAtlas: virtualRaster.gpu.atlasView,
@@ -721,48 +758,43 @@ async function createPrograms(
     virtualRaster: DemVirtualRaster
 ) {
 
-    const requirement = (
-        group: number,
-        binding: number,
-        codec: LayoutCodec
-    ): ProgramBufferLayoutRequirement => ({
-        group,
-        binding,
+    const renderWgsl = gpuTileFrontierRenderWgslModule()
+    const configRequirement: ProgramBufferLayoutRequirement = {
+        group: 0,
+        binding: 1,
         type: 'uniform',
         hasDynamicOffset: false,
-        layout: codec.artifact,
-    })
+        layout: codecs.config.artifact,
+    }
+    const frontierSource = {
+        code: renderWgsl.code,
+        layoutDependencies: renderWgsl.layoutDependencies,
+    }
     failureProof.beforeTerrainShaderModule(runtime)
     const terrainShader = await runtime.createShaderModule({
         label: 'DEM terrain shader',
         sourceParts: [
-            { code: demVirtualRasterWgslModule(virtualRaster) },
+            frontierSource,
+            { code: demVirtualRasterWgslModule(virtualRaster.model) },
             { code: failureProof.terrainShader(shaders.terrain) },
         ],
     })
     const lodMapShader = await runtime.createShaderModule({
         label: 'DEM LoD-map shader',
-        sourceParts: [ { code: shaders.lodMap } ],
+        sourceParts: [ frontierSource, { code: shaders.lodMap } ],
     })
     return {
         lodMap: runtime.createProgram({
             label: 'DEM LoD-map program',
             vertex: { module: lodMapShader, entryPoint: 'vMain' },
             fragment: { module: lodMapShader, entryPoint: 'fMain' },
-            layoutRequirements: [
-                requirement(0, 0, codecs.map),
-                requirement(0, 1, codecs.tile),
-                requirement(0, 2, codecs.static),
-            ],
+            layoutRequirements: [ configRequirement ],
         }),
         terrain: runtime.createProgram({
             label: 'DEM terrain program',
             vertex: { module: terrainShader, entryPoint: 'vMain' },
             fragment: { module: terrainShader, entryPoint: 'fMain' },
-            layoutRequirements: [
-                requirement(0, 0, codecs.tile),
-                requirement(0, 1, codecs.dynamic),
-            ],
+            layoutRequirements: [ configRequirement ],
         }),
     }
 }
@@ -780,7 +812,7 @@ async function createPipelines(
         program: programs.lodMap,
         layout: {
             mode: 'explicit',
-            bindLayouts: [ layouts.lodUniforms, layouts.lodStorage ],
+            bindLayouts: [ layouts.scene, layouts.lodInstances ],
         },
         targets: [ { format: textures.lodMap.format } ],
         primitive: { topology: 'triangle-strip', cullMode: 'none' },
@@ -790,11 +822,7 @@ async function createPipelines(
         program: programs.terrain,
         layout: {
             mode: 'explicit',
-            bindLayouts: [
-                layouts.terrainUniforms,
-                layouts.terrainStorage,
-                layouts.terrainTextures,
-            ],
+            bindLayouts: [ layouts.scene, layouts.terrainData, layouts.terrainTextures ],
         },
         targets: [ { format: surface.format } ],
         primitive: { topology: 'triangle-list', cullMode: 'none' },
@@ -804,7 +832,6 @@ async function createPipelines(
             depthCompare: 'less',
         },
     })
-
     return { lodMap, terrain }
 }
 
@@ -840,62 +867,60 @@ function createPasses(runtime: GPURuntime, surface: Surface, textures: Textures)
 
 function createCommands(
     runtime: GPURuntime,
-    geometry: TerrainGeometry,
     uniforms: Uniforms,
     buffers: Buffers,
     textures: Textures,
     virtualRaster: DemVirtualRaster,
+    templates: RenderTemplates,
     bindSets: BindSets,
     pipelines: Pipelines
 ) {
 
     return {
-        drawLodMap: runtime.createDrawCommand({
-            label: 'Draw DEM LoD map',
+        lodMap: templates.lodMap.map((template, parity) => runtime.createDrawCommand({
+            label: `Draw DEM LoD map ${parity}`,
             pipeline: pipelines.lodMap,
-            bindSets: [ { set: bindSets.lodUniforms }, { set: bindSets.lodStorage } ],
-            count: { indirect: buffers.lodArguments.region },
+            bindSets: [
+                { set: bindSets.scene },
+                { set: bindSets.lodInstances[parity]! },
+            ],
+            count: { indirect: template.drawArgument.region },
             resources: {
                 read: currentReads([
-                    uniforms.map.buffer,
-                    uniforms.tile.buffer,
-                    uniforms.static.buffer,
-                    buffers.nodeLevels.buffer,
-                    buffers.nodeBoxes.buffer,
-                    buffers.lodArguments.buffer,
+                    template.mapMeta,
+                    uniforms.config.buffer,
+                    template.visibleInstances,
+                    template.drawArgument.resource,
                 ]),
                 write: [],
             },
             whenMissing: 'throw',
-        }),
-        drawTerrain: runtime.createDrawCommand({
-            label: 'Draw DEM terrain',
+        })),
+        terrain: templates.terrain.map((template, parity) => runtime.createDrawCommand({
+            label: `Draw DEM terrain ${parity}`,
             pipeline: pipelines.terrain,
             bindSets: [
-                { set: bindSets.terrainUniforms },
-                { set: bindSets.terrainStorage },
+                { set: bindSets.scene },
+                { set: bindSets.terrainData[parity]! },
                 { set: bindSets.terrainTextures },
             ],
-            count: { indirect: buffers.terrainArguments.region },
+            count: { indirect: template.drawArgument.region },
             resources: {
                 read: currentReads([
-                    uniforms.tile.buffer,
-                    uniforms.dynamic.buffer,
+                    template.mapMeta,
+                    uniforms.config.buffer,
                     buffers.indices.buffer,
                     buffers.positions.buffer,
-                    buffers.nodeLevels.buffer,
-                    buffers.nodeBoxes.buffer,
-                    buffers.canonicalNodes.buffer,
-                    buffers.cameraCoordinate.buffer,
+                    template.visibleInstances,
                     virtualRaster.gpu.pageTable,
                     virtualRaster.gpu.atlas,
                     textures.lodMap,
-                    buffers.terrainArguments.buffer,
+                    template.drawArgument.resource,
                 ]),
                 write: [],
             },
             whenMissing: 'throw',
-        }),
+        })),
     }
 }
 
@@ -904,107 +929,99 @@ function currentReads(resources: readonly ContentResource[]) {
     return resources.map(resource => ({ resource, contentEpoch: 'current-at-step' as const }))
 }
 
-function updateFrameData(
-    graph: DemGraph,
-    selection: TerrainSelection,
-    camera: DemCameraState
-) {
+async function publishChangedResidency(graph: DemGraph, state: DemState) {
 
-    graph.uniforms.dynamic.write({
-        far: camera.far,
-        near: camera.near,
-        cameraLatitude: camera.cameraPos[1],
-        reserved: 0,
-        uMatrix: camera.matrix,
-        centerLow: camera.centerLow,
-        centerHigh: camera.centerHigh,
-    })
-    graph.uniforms.tile.write({
-        tileBox: selection.tileBox,
-        levelRange: selection.levelRange,
-        sectorRange: selection.sectorRange,
-        sectorSize: TERRAIN_SECTOR_SIZE,
-        exaggeration: TERRAIN_EXAGGERATION,
-    })
-    graph.buffers.nodeLevels.data.fill(0)
-    graph.buffers.nodeLevels.data.set(selection.nodeLevels)
-    graph.buffers.nodeBoxes.data.fill(0)
-    graph.buffers.nodeBoxes.data.set(selection.nodeBoxes)
-    writeDemCanonicalNodes(
-        graph.buffers.canonicalNodes.data,
-        selection,
-        graph.virtualRaster.model
-    )
-    graph.buffers.cameraCoordinate.data.set(
-        encodeDemCameraCoordinate(graph.virtualRaster.model, camera.cameraPos)
-    )
-    graph.buffers.lodArguments.data[1] = selection.visibleNodeCount
-    graph.buffers.terrainArguments.data[1] = selection.visibleNodeCount
+    const publication = graph.virtualRaster.publish()
+    if (!publication.changed) return publication
+    const builder = graph.runtime.createSubmission({ validation: 'throw' })
+    for (const upload of publication.update.commands) builder.upload(upload)
+    const submitted = builder.submit()
+    await Promise.all([
+        observeSubmittedWork(submitted),
+        graph.virtualRaster.acknowledge(publication, submitted),
+    ])
+    state.virtualSnapshotEpoch = publication.snapshotEpoch
+    return undefined
+}
+
+async function consumeReadyFeedback(
+    graph: DemGraph,
+    pending: PendingFeedback[],
+    state: DemState
+): Promise<VirtualRasterGpuFeedbackBatch | undefined> {
+
+    if (pending.length < 2) return undefined
+    const ready = pending.shift()!
+    try {
+        const feedback = await graph.feedbackRing.feedback(ready.frame, ready.submitted)
+        state.latestFrontierFacts = feedback.facts
+        state.latestFeedbackDiagnostics = feedback.diagnostics
+        return feedback
+    } catch (error) {
+        const code = error instanceof GeoDiagnosticError ? error.diagnostic.code : undefined
+        if (code !== 'GEO_GPU_TILE_FEEDBACK_STALE') throw error
+        state.staleFeedbackCount++
+        return undefined
+    }
 }
 
 function verifyFrameProvenance(
     submitted: SubmittedWork,
     graph: DemGraph,
-    publication: DemVirtualRasterPublication
+    frame: GpuTileFrontierFrame
 ) {
 
+    const lodCommand = graph.commands.lodMap[frame.parity]
+    const terrainCommand = graph.commands.terrain[frame.parity]
+    const lodTemplate = graph.renderTemplates.lodMap[frame.parity]
+    const terrainTemplate = graph.renderTemplates.terrain[frame.parity]
     const pairs = [
         {
-            name: 'node-level-upload-to-lod-draw',
-            resource: graph.buffers.nodeLevels.buffer,
-            producerCommandId: graph.buffers.nodeLevels.upload.id,
-            consumerCommandId: graph.commands.drawLodMap.id,
+            name: 'frontier-map-meta-to-lod-draw',
+            resource: lodTemplate.mapMeta,
+            consumerCommandId: lodCommand.id,
         },
         {
-            name: 'lod-arguments-upload-to-lod-draw',
-            resource: graph.buffers.lodArguments.buffer,
-            producerCommandId: graph.buffers.lodArguments.upload.id,
-            consumerCommandId: graph.commands.drawLodMap.id,
+            name: 'frontier-visible-to-lod-draw',
+            resource: lodTemplate.visibleInstances,
+            consumerCommandId: lodCommand.id,
         },
         {
-            name: 'node-box-upload-to-terrain-draw',
-            resource: graph.buffers.nodeBoxes.buffer,
-            producerCommandId: graph.buffers.nodeBoxes.upload.id,
-            consumerCommandId: graph.commands.drawTerrain.id,
+            name: 'frontier-indirect-to-lod-draw',
+            resource: lodTemplate.drawArgument.resource,
+            consumerCommandId: lodCommand.id,
         },
         {
-            name: 'terrain-arguments-upload-to-terrain-draw',
-            resource: graph.buffers.terrainArguments.buffer,
-            producerCommandId: graph.buffers.terrainArguments.upload.id,
-            consumerCommandId: graph.commands.drawTerrain.id,
+            name: 'frontier-visible-to-terrain-draw',
+            resource: terrainTemplate.visibleInstances,
+            consumerCommandId: terrainCommand.id,
+        },
+        {
+            name: 'frontier-indirect-to-terrain-draw',
+            resource: terrainTemplate.drawArgument.resource,
+            consumerCommandId: terrainCommand.id,
         },
         {
             name: 'lod-map-pass-to-terrain-draw',
             resource: graph.textures.lodMap,
             producerPassId: graph.passes.lodMap.id,
-            consumerCommandId: graph.commands.drawTerrain.id,
+            consumerCommandId: terrainCommand.id,
         },
-        ...(publication.update.pageTableUpload === undefined ? [] : [ {
-            name: 'virtual-page-table-upload-to-terrain-draw',
-            resource: graph.virtualRaster.gpu.pageTable,
-            producerCommandId: publication.update.pageTableUpload.id,
-            consumerCommandId: graph.commands.drawTerrain.id,
-        } ]),
     ]
 
     return Object.freeze(pairs.map(pair => {
-        const producer = submitted.producerEpochs.find(epoch => (
-            epoch.resourceId === pair.resource.id &&
-            (pair.producerCommandId === undefined ||
-                epoch.producedBy.commandId === pair.producerCommandId) &&
-            (pair.producerPassId === undefined || epoch.producedBy.passId === pair.producerPassId)
-        ))
         const read = submitted.resourceAccesses.find(access => (
             access.resourceId === pair.resource.id &&
             access.commandId === pair.consumerCommandId &&
             access.access === 'read'
         ))
-        if (
-            producer === undefined ||
-            read === undefined ||
-            read.declaredContentEpoch !== 'current-at-step' ||
-            producer.contentEpoch !== read.contentEpochBefore
-        ) {
+        const producer = submitted.producerEpochs.find(epoch => (
+            epoch.resourceId === pair.resource.id &&
+            epoch.contentEpoch === read?.contentEpochBefore &&
+            (pair.producerPassId === undefined || epoch.producedBy.passId === pair.producerPassId)
+        ))
+        if (producer === undefined || read === undefined ||
+            read.declaredContentEpoch !== 'current-at-step') {
             throw new Error(`DEM submission provenance mismatch for ${pair.name}`)
         }
         return Object.freeze({
@@ -1045,26 +1062,53 @@ function identityFactSnapshot(graph: DemGraph) {
 
 function identityObjectsByKind(graph: DemGraph) {
 
+    const templateResources = [
+        ...graph.renderTemplates.lodMap,
+        ...graph.renderTemplates.terrain,
+    ].flatMap(template => [
+        template.mapMeta,
+        template.visibleInstances,
+        template.drawArgument.resource,
+    ])
     return {
-        resources: [
-            ...Object.values(graph.uniforms).map(value => value.buffer),
-            ...Object.values(graph.buffers).map(value => value.buffer),
+        resources: uniqueById([
+            graph.uniforms.config.buffer,
+            graph.buffers.positions.buffer,
+            graph.buffers.indices.buffer,
             graph.virtualRaster.gpu.atlas,
             graph.virtualRaster.gpu.pageTable,
+            graph.virtualRaster.gpu.slotTable,
             graph.textures.lodMap,
             graph.textures.depth,
-        ],
+            ...templateResources,
+        ]),
         uploads: [
-            ...Object.values(graph.uniforms).map(value => value.upload),
-            ...Object.values(graph.buffers).map(value => value.upload),
+            graph.uniforms.config.upload,
+            graph.buffers.positions.upload,
+            graph.buffers.indices.upload,
         ],
         bindLayouts: Object.values(graph.layouts),
-        bindSets: Object.values(graph.bindSets),
+        bindSets: allBindSets(graph.bindSets),
         programs: Object.values(graph.programs),
         pipelines: Object.values(graph.pipelines),
         passes: Object.values(graph.passes),
-        commands: Object.values(graph.commands),
+        commands: [ ...graph.commands.lodMap, ...graph.commands.terrain ],
     }
+}
+
+function allBindSets(bindSets: BindSets) {
+
+    return [
+        bindSets.scene,
+        ...bindSets.lodInstances,
+        ...bindSets.terrainData,
+        bindSets.terrainTextures,
+    ]
+}
+
+function uniqueById<Value extends { id: string }>(values: readonly Value[]): Value[] {
+
+    return [ ...new Map(values.map(value => [ value.id, value ])).values() ]
 }
 
 function persistentFactSnapshot(runtime: GPURuntime): PersistentFacts {
@@ -1083,10 +1127,12 @@ function graphContractSnapshot(graph: DemGraph) {
 
     return Object.freeze({
         stageOrder: DEM_STAGE_ORDER,
-        countPath: 'uploaded-indirect-arguments',
-        maxNodes: MAX_TERRAIN_NODES,
+        countPath: 'gpu-produced-indirect-arguments',
+        selectionPath: 'gpu-resident-active-frontier',
         terrainVertexCount: graph.geometry.vertexCount,
         lodMapSize: LOD_MAP_SIZE,
+        frontier: graph.frontier.facts(),
+        feedback: graph.feedbackRing.facts(),
         virtualRaster: Object.freeze({
             contentVersion: graph.virtualRaster.manifest.contentVersion,
             pageSize: graph.virtualRaster.addressSpace.pageSize,
@@ -1102,8 +1148,8 @@ function graphContractSnapshot(graph: DemGraph) {
             terrain: graph.passes.terrain.id,
         }),
         commandIds: Object.freeze({
-            drawLodMap: graph.commands.drawLodMap.id,
-            drawTerrain: graph.commands.drawTerrain.id,
+            drawLodMap: Object.freeze(graph.commands.lodMap.map(command => command.id)),
+            drawTerrain: Object.freeze(graph.commands.terrain.map(command => command.id)),
         }),
     })
 }
@@ -1112,36 +1158,58 @@ function createState(size: SurfaceSize): DemState {
 
     return {
         initialized: false,
+        disposed: false,
         frame: 0,
         size: { ...size },
         resizeGeneration: 0,
         staleBindSetPreparationCount: 0,
         lastResizeFacts: undefined,
-        selection: undefined,
-        virtualPlan: undefined,
         virtualSnapshotEpoch: 0,
         virtualRequestedPageCount: 0,
-        stageActivity: Object.fromEntries(DEM_STAGE_ORDER.map(name => [ name, 0 ])) as {
-            'lod-map': number
-            terrain: number
+        staleFeedbackCount: 0,
+        latestFrontierFacts: undefined,
+        latestFeedbackDiagnostics: Object.freeze([]),
+        stageActivity: {
+            'frontier-compute': 0,
+            'lod-map': 0,
+            terrain: 0,
         },
     }
 }
 
-function stateSnapshot(state: DemState) {
+function stateSnapshot(
+    state: DemState,
+    pendingFeedbackCount: number,
+    feedbackRing: VirtualRasterGpuFeedbackRing
+) {
 
+    const latest = state.latestFrontierFacts
     return Object.freeze({
         initialized: state.initialized,
+        disposed: state.disposed,
         frame: state.frame,
         size: Object.freeze({ ...state.size }),
         resizeGeneration: state.resizeGeneration,
         staleBindSetPreparationCount: state.staleBindSetPreparationCount,
         lastResizeFacts: state.lastResizeFacts,
-        visibleNodeCount: state.selection?.visibleNodeCount ?? 0,
-        selection: state.selection,
-        virtualPlan: state.virtualPlan,
         virtualSnapshotEpoch: state.virtualSnapshotEpoch,
         virtualRequestedPageCount: state.virtualRequestedPageCount,
+        readbackInFlightCount: pendingFeedbackCount,
+        staleFeedbackCount: state.staleFeedbackCount,
+        frontierCount: latest?.activeFrontierCount ?? 0,
+        visibleNodeCount: latest?.visibleInstanceCount ?? 0,
+        demandCount: latest?.demandCount ?? 0,
+        fallbackCount: latest?.fallbackCount ?? 0,
+        staleGenerationCount: latest?.staleGenerationCount ?? 0,
+        budgetLimitedCount: latest?.budgetLimitedCount ?? 0,
+        levelRange: Object.freeze([
+            latest?.minimumSelectedMatrixLevel,
+            latest?.maximumSelectedMatrixLevel,
+        ]),
+        maximumObservedSse: latest?.maximumObservedSse ?? 0,
+        convergenceState: latest?.convergenceState ?? 'transitioning',
+        latestFeedbackDiagnostics: state.latestFeedbackDiagnostics,
+        feedback: feedbackRing.facts(),
         stageActivity: Object.freeze({ ...state.stageActivity }),
     })
 }
@@ -1189,27 +1257,19 @@ function hashStrings(values: readonly string[]) {
 
 function assertSize(value: SurfaceSize) {
 
-    if (
-        value === undefined ||
-        !Number.isInteger(value.width) ||
-        !Number.isInteger(value.height) ||
-        value.width <= 0 ||
-        value.height <= 0
-    ) {
+    if (value === undefined || !Number.isInteger(value.width) ||
+        !Number.isInteger(value.height) || value.width <= 0 || value.height <= 0) {
         throw new TypeError('DEM size must contain positive integer width and height')
     }
 }
 
 function assertVirtualRaster(value: DemVirtualRaster) {
 
-    if (
-        value === undefined ||
-        value.manifest?.contentVersion === undefined ||
-        value.addressSpace?.dimensions !== 2 ||
-        value.gpu?.atlas === undefined ||
-        value.gpu.pageTable === undefined
-    ) {
-        throw new TypeError('DEM Layer requires a prepared 2D virtual raster runtime')
+    if (value === undefined || value.manifest?.contentVersion === undefined ||
+        value.addressSpace?.dimensions !== 2 || value.gpu?.atlas === undefined ||
+        value.gpu.pageTable === undefined || value.gpu.slotTable === undefined ||
+        typeof value.reconcileFeedback !== 'function') {
+        throw new TypeError('DEM Layer requires a prepared GPU-demand virtual raster runtime')
     }
 }
 
@@ -1222,17 +1282,11 @@ function assertShaders(value: DemShaders) {
 
 function assertCamera(value: DemCameraState) {
 
-    if (
-        value === undefined ||
-        !Number.isFinite(value.far) ||
-        !Number.isFinite(value.near) ||
-        !Number.isFinite(value.zoom) ||
-        value.matrix?.length !== 16 ||
-        value.centerLow?.length !== 3 ||
-        value.centerHigh?.length !== 3 ||
-        value.cameraPos?.length !== 2 ||
-        value.viewport?.length !== 2
-    ) {
+    if (value === undefined || !Number.isFinite(value.far) || !Number.isFinite(value.near) ||
+        !Number.isFinite(value.zoomHint) || value.clipFromRelativeWorld?.length !== 16 ||
+        value.cameraLow?.length !== 3 || value.cameraHigh?.length !== 3 ||
+        value.viewport?.length !== 2 || !Number.isFinite(value.verticalFovRadians) ||
+        !Number.isFinite(value.cameraLatitudeRadians)) {
         throw new TypeError('DEM camera state is incomplete')
     }
 }
