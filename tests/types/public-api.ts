@@ -12,6 +12,7 @@ import {
     WebMercatorQuadAddressCodec,
     WideFixedCodec,
     VirtualRasterGpuState,
+    VirtualRasterGpuFeedbackRing,
     VirtualRasterResidency,
     cellLocalF32Codec,
     coordinateDomain,
@@ -30,6 +31,7 @@ import {
     type CellLocalPosition,
     type CoordinateDomain,
     type GpuTileFrontierDescriptor,
+    type GpuTileFrontierDemand,
     type GpuTileFrontierCoreFacts,
     type GpuTileFrontierDrawArgument,
     type GpuTileFrontierDrawTemplate,
@@ -42,10 +44,15 @@ import {
     type GpuTileFrontierSeed,
     type GpuTileFrontierView,
     type GpuTileFrontierViewToken,
+    type GpuTileFrontierRetirement,
     type PositionPrecisionFacts,
     type WideFixedPosition,
     type WebMercatorQuadPosition,
     type VirtualRasterPageIdentity,
+    type VirtualRasterGpuFeedbackBatch,
+    type VirtualRasterGpuFeedbackCounters,
+    type VirtualRasterGpuFeedbackRingFacts,
+    type VirtualRasterGpuFeedbackSlotFacts,
     type VirtualRasterSample,
 } from 'geoscratch/geo'
 import { plane, sphere } from 'geoscratch/scratch'
@@ -302,6 +309,8 @@ const typedFrontierView: GpuTileFrontierView = {
 }
 declare const typedFrontierRuntime: scr.GPURuntime
 declare const typedGpuFrontier: GpuTileFrontier
+declare const typedFeedbackRing: VirtualRasterGpuFeedbackRing
+declare const typedFrontierSubmittedWork: scr.SubmittedWork
 const typedSubmissionAuthority: scr.SubmissionAuthority =
     typedFrontierRuntime.createSubmissionAuthority({ label: 'typed authority' })
 const typedSubmissionStamp: scr.SubmissionAuthorityStamp = typedSubmissionAuthority.stamp()
@@ -326,6 +335,24 @@ const typedEncodedFrontierSubmission: scr.SubmissionBuilder = typedGpuFrontier.e
     typedRequiredSubmission,
     typedFrontierFrame,
 )
+const typedFeedbackRingCreation: Promise<VirtualRasterGpuFeedbackRing> =
+    VirtualRasterGpuFeedbackRing.create(typedGpuFrontier)
+const typedFeedbackEncodedSubmission: scr.SubmissionBuilder = typedFeedbackRing.encode(
+    typedEncodedFrontierSubmission,
+    typedFrontierFrame,
+)
+const typedFeedbackResult: Promise<VirtualRasterGpuFeedbackBatch> = typedFeedbackRing.feedback(
+    typedFrontierFrame,
+    typedFrontierSubmittedWork,
+)
+declare const typedFeedbackBatch: VirtualRasterGpuFeedbackBatch
+const typedFeedbackDemand: GpuTileFrontierDemand | undefined = typedFeedbackBatch.demands[0]
+const typedFeedbackRetirement: GpuTileFrontierRetirement | undefined =
+    typedFeedbackBatch.retirements[0]
+const typedFeedbackCounters: VirtualRasterGpuFeedbackCounters = typedFeedbackBatch.counters
+const typedFeedbackRingFacts: VirtualRasterGpuFeedbackRingFacts = typedFeedbackRing.facts()
+const typedFeedbackSlotFacts: VirtualRasterGpuFeedbackSlotFacts | undefined =
+    typedFeedbackRingFacts.slots[0]
 const typedFrontierDraw: GpuTileFrontierDrawArgument = typedGpuFrontier.drawArgument(
     typedFrontierFrame,
     'terrain',
@@ -346,10 +373,18 @@ typedFrontierUpload.command
 typedFrontierFrame.commands
 // @ts-expect-error Persistent frontier buffers are not public frame capabilities
 typedFrontierFrame.nextFrontier
-// @ts-expect-error Task 3C owns bounded feedback integration
+// @ts-expect-error Bounded feedback belongs to VirtualRasterGpuFeedbackRing
 typedGpuFrontier.feedback(typedFrontierFrame)
 // @ts-expect-error Task 3C owns bounded capture integration
 typedGpuFrontier.capture(typedFrontierFrame)
+// @ts-expect-error Feedback commands remain private bounded ring slots
+typedFeedbackRing.commands
+// @ts-expect-error Feedback batches never expose mapped or copied bytes
+typedFeedbackBatch.bytes
+// @ts-expect-error Feedback requires exact SubmittedWork provenance
+typedFeedbackRing.feedback(typedFrontierFrame)
+// @ts-expect-error Feedback rings are created asynchronously against an owned frontier
+new VirtualRasterGpuFeedbackRing(typedGpuFrontier)
 // @ts-expect-error Frontier descriptors require an explicit WebMercatorQuad address codec
 const typedFrontierWithoutProjection: GpuTileFrontierDescriptor = {
     gpuState: typedFrontierGpuState,
@@ -372,6 +407,10 @@ const typedFrontierInvalidDraw: GpuTileFrontierDrawTemplate = {
 geoApi.evaluateGpuTileFrontierReference
 // @ts-expect-error Descriptor value validation is package-internal
 geoApi.validateGpuTileFrontierDescriptor
+// @ts-expect-error Mutable feedback resource access is package-internal
+geoApi.gpuTileFrontierFeedbackAccess
+// @ts-expect-error Current acknowledged snapshot identity is package-internal
+geoApi.virtualRasterGpuAcknowledgedSnapshot
 // @ts-expect-error Coordinate dimensions are limited to one, two, or three
 coordinateDomain({ id: 'typed-invalid', intrinsicDimensions: 4, embeddingDimensions: 3, axes: [] })
 // @ts-expect-error Mercator coordinate inputs require two components
@@ -397,6 +436,13 @@ void typedFrontierFeedback
 void typedFrontierFeedbackBufferId
 void typedFrontierFeedbackLayout
 void typedFrontierDemandSection
+void typedFeedbackRingCreation
+void typedFeedbackEncodedSubmission
+void typedFeedbackResult
+void typedFeedbackDemand
+void typedFeedbackRetirement
+void typedFeedbackCounters
+void typedFeedbackSlotFacts
 void typedFrontierWithoutProjection
 void typedFrontierInvalidTuple
 void typedFrontierInvalidDraw

@@ -162,6 +162,7 @@ async function acknowledgePage(fixture, page, contentVersion, generation = 2) {
 function packedFeedback(frame, options = {}) {
 
     const layout = frame.feedbackOutput.layout
+    const decisionFrameEpoch = options.decisionFrameEpoch ?? frame.frameEpoch
     const demands = options.demands ?? []
     const retirements = options.retirements ?? []
     const bytes = new Uint8Array(layout.byteLength)
@@ -198,13 +199,13 @@ function packedFeedback(frame, options = {}) {
     counters[14] = options.visibleOverflow ? 1 : 0
     counters[15] = options.lookupDuplicateCount ?? 0
     counters[16] = options.balanceRejectedCount ?? 0
-    counters[17] = frame.frameEpoch
+    counters[17] = decisionFrameEpoch
     counters[18] = options.residencySnapshotEpoch ?? 0
     counters[19] = options.fallbackCount ?? 0
     counters[20] = options.acceptedRefineCount ?? 0
     counters[21] = options.acceptedCoarsenCount ?? 0
     gpuTileFrontierDiagnosticsCodec.write(bytes, {
-        frameEpoch: frame.frameEpoch,
+        frameEpoch: decisionFrameEpoch,
         residencySnapshotEpoch: options.residencySnapshotEpoch ?? 0,
         activeFrontierCount: counters[0],
         visibleInstanceCount: counters[2],
@@ -530,6 +531,45 @@ describe('Geo Virtual Raster GPU feedback ring', () => {
             'GEO_GPU_TILE_FEEDBACK_STALE'
         )
         expect(ring.facts().slots[0].state).to.equal('idle')
+
+        fixture.frontier.dispose()
+        fixture.gpuState.dispose()
+        fixture.residency.dispose()
+        fixture.runtime.dispose()
+    })
+
+    it('consumes and rejects packed feedback with a stale decision epoch', async() => {
+
+        const fixture = await createFeedbackFixture()
+        const ring = await VirtualRasterGpuFeedbackRing.create(fixture.frontier)
+        const first = issueFeedbackFrame(fixture, ring, 0, { decisionFrameEpoch: 99 })
+        issueFeedbackFrame(fixture, ring, 1)
+
+        await expectFeedbackError(
+            () => ring.feedback(first.frame, first.submitted),
+            'GEO_GPU_TILE_FEEDBACK_STALE'
+        )
+        expect(ring.facts().slots[0].state).to.equal('idle')
+
+        fixture.frontier.dispose()
+        fixture.gpuState.dispose()
+        fixture.residency.dispose()
+        fixture.runtime.dispose()
+    })
+
+    it('rejects a SubmittedWork result from a different frontier frame', async() => {
+
+        const fixture = await createFeedbackFixture()
+        const ring = await VirtualRasterGpuFeedbackRing.create(fixture.frontier)
+        const first = issueFeedbackFrame(fixture, ring, 0)
+        const second = issueFeedbackFrame(fixture, ring, 1)
+
+        await expectFeedbackError(
+            () => ring.feedback(first.frame, second.submitted),
+            'GEO_GPU_TILE_FEEDBACK_FRAME_INVALID'
+        )
+        expect(ring.facts().slots[1].state).to.equal('submitted')
+        await ring.feedback(first.frame, first.submitted)
 
         fixture.frontier.dispose()
         fixture.gpuState.dispose()

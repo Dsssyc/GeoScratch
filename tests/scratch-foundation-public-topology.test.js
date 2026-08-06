@@ -88,6 +88,7 @@ const geoValues = [
     'TileMatrixCoverage',
     'VirtualRasterAccessor',
     'VirtualRasterAddressSpace',
+    'VirtualRasterGpuFeedbackRing',
     'VirtualRasterGpuState',
     'VirtualRasterPublication',
     'VirtualRasterRequestScheduler',
