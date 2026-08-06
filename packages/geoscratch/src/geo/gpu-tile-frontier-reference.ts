@@ -4,6 +4,8 @@ import {
 } from './web-mercator-quad.js'
 import { throwGeoDiagnostic } from './diagnostics.js'
 import {
+    compareGpuTileFrontierPathOrder,
+    gpuTileFrontierPathIsPrefix,
     validateGpuTileFrontierDescriptor,
     type GpuTileFrontierDemand,
     type GpuTileFrontierDescriptor,
@@ -102,11 +104,16 @@ export function evaluateGpuTileFrontierReference(
             resident.physicalSlot !== entry.physicalSlot ||
             resident.contentEpoch !== entry.contentEpoch ||
             resident.residencySnapshotEpoch !== input.view.residencySnapshotEpoch ||
-            entry.residencySnapshotEpoch !== input.view.residencySnapshotEpoch) {
+            entry.residencySnapshotEpoch > input.view.residencySnapshotEpoch) {
             staleGenerationCount++
             continue
         }
-        active.push(entry)
+        active.push(entry.residencySnapshotEpoch === resident.residencySnapshotEpoch
+            ? entry
+            : Object.freeze({
+                ...entry,
+                residencySnapshotEpoch: resident.residencySnapshotEpoch,
+            }))
     }
 
     // Evaluate fixed-input visibility and SSE before any transition or budget decision.
@@ -197,6 +204,7 @@ export function evaluateGpuTileFrontierReference(
         }) ])
     }
     demands.sort((left, right) =>
+        compareGpuTileFrontierPathOrder(left.page, right.page) ||
         left.parentCompactIndex - right.parentCompactIndex ||
         left.childMask - right.childMask
     )
@@ -348,7 +356,22 @@ function validateCurrentFrontier(
         pageKeys.add(entry.page.key)
         compactIndexes.add(entry.compactIndex)
     }
-    return canonicalEntries(input.currentFrontier)
+    const canonical = canonicalEntries(input.currentFrontier)
+    for (let index = 1; index < canonical.length; index++) {
+        if (gpuTileFrontierPathIsPrefix(
+            canonical[index - 1]!.page,
+            canonical[index]!.page
+        )) {
+            invalidReference(
+                'Current frontier tile paths must be prefix-free.',
+                {
+                    prefix: canonical[index - 1]!.page.key,
+                    candidate: canonical[index]!.page.key,
+                }
+            )
+        }
+    }
+    return canonical
 }
 
 function validateEntry(
@@ -543,7 +566,10 @@ function selectRefineBudget(
         () => [] as RefineCandidate[]
     )
     for (const candidate of [ ...candidates ].sort((left, right) =>
-        left.evaluation.entry.compactIndex - right.evaluation.entry.compactIndex
+        compareGpuTileFrontierPathOrder(
+            left.evaluation.entry.page,
+            right.evaluation.entry.page
+        )
     )) {
         buckets[candidate.priority]!.push(candidate)
     }
@@ -605,7 +631,10 @@ function collectCoarsenCandidates(
         }))
     }
     return Object.freeze(candidates.sort((left, right) =>
-        left.siblings[0]!.compactIndex - right.siblings[0]!.compactIndex
+        compareGpuTileFrontierPathOrder(
+            left.siblings[0]!.page,
+            right.siblings[0]!.page
+        )
     ))
 }
 
@@ -882,7 +911,7 @@ function canonicalEntries(
 ): readonly GpuTileFrontierReferenceEntry[] {
 
     return Object.freeze([ ...entries ].sort((left, right) =>
-        left.compactIndex - right.compactIndex
+        compareGpuTileFrontierPathOrder(left.page, right.page)
     ))
 }
 

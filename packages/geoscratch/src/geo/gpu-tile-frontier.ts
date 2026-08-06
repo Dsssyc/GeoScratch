@@ -14,6 +14,7 @@ import {
 } from '../scratch/index.js'
 import { throwGeoDiagnostic } from './diagnostics.js'
 import {
+    compareGpuTileFrontierPathOrder,
     gpuTileFrontierEntryCodec,
     gpuTileFrontierLayouts,
     gpuTileFrontierMapMetaCodec,
@@ -37,6 +38,7 @@ import {
 } from './virtual-raster.js'
 
 const BUFFER_COPY_DST = 0x08
+const BUFFER_COPY_SRC = 0x04
 const BUFFER_UNIFORM = 0x40
 const BUFFER_STORAGE = 0x80
 const BUFFER_INDIRECT = 0x100
@@ -48,10 +50,11 @@ const DECISION_WORDS = 16
 const PREFIX_WORDS = 8
 const COUNTER_WORDS = 32
 const SLOT_TABLE_WORDS = 12
+const WEB_MERCATOR_HALF_WORLD_METERS = 20_037_508.3427892
 
 let nextFrontierId = 1
 
-export type GpuTileFrontierResourceGraph = Readonly<{
+type GpuTileFrontierResourceGraph = Readonly<{
     mapMeta: BufferResource
     policy: BufferResource
     levelMetrics: BufferResource
@@ -65,12 +68,29 @@ export type GpuTileFrontierResourceGraph = Readonly<{
     prefixScanScratch: BufferResource
     visibleInstancesA: BufferResource
     visibleInstancesB: BufferResource
-    demands: BufferResource
-    retirements: BufferResource
-    counters: BufferResource
-    diagnostics: BufferResource
+    feedbackOutput: BufferResource
     drawArgumentsA: BufferResource
     drawArgumentsB: BufferResource
+}>
+
+export type GpuTileFrontierFeedbackSection = Readonly<{
+    bufferId: string
+    offset: number
+    byteLength: number
+    capacity: number
+}>
+
+export type GpuTileFrontierFeedbackLayout = Readonly<{
+    byteLength: number
+    demands: GpuTileFrontierFeedbackSection
+    retirements: GpuTileFrontierFeedbackSection
+    counters: GpuTileFrontierFeedbackSection
+    diagnostics: GpuTileFrontierFeedbackSection
+}>
+
+export type GpuTileFrontierFeedbackOutput = Readonly<{
+    bufferId: string
+    layout: GpuTileFrontierFeedbackLayout
 }>
 
 export type GpuTileFrontierFrame = Readonly<{
@@ -88,6 +108,8 @@ export type GpuTileFrontierFrame = Readonly<{
     nextDispatchArguments: BufferResource
     visibleInstances: BufferResource
     drawArguments: BufferResource
+    feedbackOutput: GpuTileFrontierFeedbackOutput
+    viewUpload: GpuTileFrontierViewUpload
 }>
 
 export type GpuTileFrontierDrawArgument = Readonly<{
@@ -109,11 +131,14 @@ export type GpuTileFrontierSeed = Readonly<{
 }>
 
 export type GpuTileFrontierViewUpload = Readonly<{
+    kind: 'gpu-tile-frontier-view-upload'
+    frontierId: string
     frameEpoch: number
     residencySnapshotEpoch: number
     resource: BufferResource
     command: UploadCommand
-    data: Uint8Array
+    readonly isDisposed: boolean
+    dispose(): void
 }>
 
 export type GpuTileFrontierCoreFacts = Readonly<{
@@ -132,7 +157,6 @@ export type GpuTileFrontierCoreFacts = Readonly<{
         scanBlocks: number
         drawTemplates: number
     }>
-    resources: GpuTileFrontierResourceGraph
     bufferBytes: Readonly<Record<keyof GpuTileFrontierResourceGraph, number>>
     parityTemplates: readonly Readonly<{
         parity: 0 | 1
@@ -156,6 +180,7 @@ type ParityTemplate = Readonly<{
     visibleInstances: BufferResource
     drawArguments: BufferResource
     drawRegions: ReadonlyMap<string, BufferRegion>
+    feedbackOutput: GpuTileFrontierFeedbackOutput
 }>
 
 type CreationState = Readonly<{
@@ -163,8 +188,6 @@ type CreationState = Readonly<{
     pass: ComputePassSpec
     parityTemplates: readonly [ParityTemplate, ParityTemplate]
     owned: readonly Disposable[]
-    mapBytes: Uint8Array
-    mapUpload: UploadCommand
     seedFrontierBytes: Uint8Array
     seedDispatchWords: Uint32Array
     seedCounterWords: Uint32Array
@@ -183,6 +206,14 @@ type FrameRecord = Readonly<{
 
 const frameRecords = new WeakMap<GpuTileFrontierFrame, FrameRecord>()
 
+type ViewUploadRecord = {
+    owner: GpuTileFrontier
+    acknowledgementSerial: number
+    disposed: boolean
+}
+
+const viewUploadRecords = new WeakMap<GpuTileFrontierViewUpload, ViewUploadRecord>()
+
 export class GpuTileFrontier {
 
     readonly runtime: GPURuntime
@@ -192,8 +223,6 @@ export class GpuTileFrontier {
     readonly #pass: ComputePassSpec
     readonly #parityTemplates: readonly [ParityTemplate, ParityTemplate]
     readonly #owned: readonly Disposable[]
-    readonly #mapBytes: Uint8Array
-    readonly #mapUpload: UploadCommand
     readonly #seedFrontierBytes: Uint8Array
     readonly #seedDispatchWords: Uint32Array
     readonly #seedCounterWords: Uint32Array
@@ -218,8 +247,6 @@ export class GpuTileFrontier {
         this.#pass = state.pass
         this.#parityTemplates = state.parityTemplates
         this.#owned = state.owned
-        this.#mapBytes = state.mapBytes
-        this.#mapUpload = state.mapUpload
         this.#seedFrontierBytes = state.seedFrontierBytes
         this.#seedDispatchWords = state.seedDispatchWords
         this.#seedCounterWords = state.seedCounterWords
@@ -234,9 +261,10 @@ export class GpuTileFrontier {
         descriptor: GpuTileFrontierDescriptor
     ): Promise<GpuTileFrontier> {
 
-        const bounds = validateCreation(runtime, descriptor)
+        const stableDescriptor = snapshotDescriptor(descriptor)
+        const bounds = validateCreation(runtime, stableDescriptor)
         const wgsl = createGpuTileFrontierWgsl(
-            descriptor,
+            stableDescriptor,
             bounds.lookupCapacity,
             bounds.scanBlockCount
         )
@@ -247,31 +275,23 @@ export class GpuTileFrontier {
         }
         try {
             const resources = await createResources(runtime, bounds.bufferBytes, own)
-            const mapView = gpuTileFrontierMapMetaCodec.uploadView(mapMetaRecord(zeroView()))
-            const mapBytes = mapView.bytes
-            const mapUpload = own(runtime.createUploadCommand({
-                label: 'Upload GPU tile frontier view',
-                target: resources.mapMeta.region({
-                    layout: gpuTileFrontierLayouts.mapMeta.codec.artifact,
-                }),
-                data: mapView,
-            }))
+            const feedbackOutput = createFeedbackOutput(resources.feedbackOutput, bounds.feedbackLayout)
             const policyUpload = own(runtime.createUploadCommand({
                 label: 'Upload GPU tile frontier policy',
                 target: resources.policy.region({
                     layout: gpuTileFrontierLayouts.policy.codec.artifact,
                 }),
-                data: gpuTileFrontierLayouts.policy.codec.uploadView(descriptor.policy),
+                data: gpuTileFrontierLayouts.policy.codec.uploadView(stableDescriptor.policy),
             }))
             const levelMetricsUpload = own(runtime.createUploadCommand({
                 label: 'Upload GPU tile frontier level metrics',
                 target: resources.levelMetrics.region({
                     layout: gpuTileFrontierLayouts.levelMetric.codec.artifact,
                 }),
-                data: gpuTileFrontierLayouts.levelMetric.codec.uploadView(descriptor.levelMetrics),
+                data: gpuTileFrontierLayouts.levelMetric.codec.uploadView(stableDescriptor.levelMetrics),
             }))
             const seedFrontierBytes = new Uint8Array(
-                descriptor.roots.length * gpuTileFrontierLayouts.frontierEntry.byteSize
+                stableDescriptor.roots.length * gpuTileFrontierLayouts.frontierEntry.byteSize
             )
             const seedFrontierUpload = own(runtime.createUploadCommand({
                 label: 'Upload GPU tile frontier roots',
@@ -290,7 +310,10 @@ export class GpuTileFrontier {
             const seedCounterWords = new Uint32Array(COUNTER_WORDS)
             const seedCountersUpload = own(runtime.createUploadCommand({
                 label: 'Upload GPU tile frontier seed counters',
-                target: resources.counters.region(),
+                target: feedbackSectionRegion(
+                    resources.feedbackOutput,
+                    bounds.feedbackLayout.counters
+                ),
                 data: seedCounterWords,
             }))
             const seedClears = Object.freeze([
@@ -304,10 +327,7 @@ export class GpuTileFrontier {
                 resources.prefixScanScratch,
                 resources.visibleInstancesA,
                 resources.visibleInstancesB,
-                resources.demands,
-                resources.retirements,
-                resources.counters,
-                resources.diagnostics,
+                resources.feedbackOutput,
                 resources.drawArgumentsA,
                 resources.drawArgumentsB,
             ].map((resource, index) => own(runtime.createClearBufferCommand({
@@ -334,18 +354,21 @@ export class GpuTileFrontier {
                 runtime,
                 shader,
                 resources,
-                descriptor.gpuState,
+                stableDescriptor.gpuState,
                 bounds,
                 own
             )
-            const parityTemplates = createParityTemplates(descriptor.drawTemplates, resources, kernels)
-            return new GpuTileFrontier(runtime, descriptor, {
+            const parityTemplates = createParityTemplates(
+                stableDescriptor.drawTemplates,
+                resources,
+                feedbackOutput,
+                kernels
+            )
+            return new GpuTileFrontier(runtime, stableDescriptor, {
                 resources,
                 pass,
                 parityTemplates,
                 owned: Object.freeze([ ...owned ]),
-                mapBytes,
-                mapUpload,
                 seedFrontierBytes,
                 seedDispatchWords,
                 seedCounterWords,
@@ -397,30 +420,60 @@ export class GpuTileFrontier {
 
         this.#assertActive()
         validateView(this, view)
-        gpuTileFrontierMapMetaCodec.write(this.#mapBytes, mapMetaRecord(view))
-        this.#lastViewFrameEpoch = view.frameEpoch
-        return Object.freeze({
+        const authority = this.descriptor.gpuState.facts()
+        const uploadView = gpuTileFrontierMapMetaCodec.uploadView(mapMetaRecord(view))
+        const command = this.runtime.createUploadCommand({
+            label: `Upload GPU tile frontier view ${view.frameEpoch}`,
+            target: this.#resources.mapMeta.region({
+                layout: gpuTileFrontierLayouts.mapMeta.codec.artifact,
+            }),
+            data: uploadView,
+        })
+        const record: ViewUploadRecord = {
+            owner: this,
+            acknowledgementSerial: authority.acknowledgementSerial,
+            disposed: false,
+        }
+        const token = Object.freeze({
+            kind: 'gpu-tile-frontier-view-upload' as const,
+            frontierId: this.id,
             frameEpoch: view.frameEpoch,
             residencySnapshotEpoch: view.residencySnapshotEpoch,
             resource: this.#resources.mapMeta,
-            command: this.#mapUpload,
-            data: this.#mapBytes,
+            command,
+            get isDisposed() { return record.disposed },
+            dispose() {
+                if (record.disposed) return
+                record.disposed = true
+                command.dispose()
+            },
         })
+        viewUploadRecords.set(token, record)
+        this.#lastViewFrameEpoch = view.frameEpoch
+        return token
     }
 
-    frame(frameEpoch: number): GpuTileFrontierFrame {
+    frame(viewUpload: GpuTileFrontierViewUpload): GpuTileFrontierFrame {
 
         this.#assertActive()
-        if (!u32(frameEpoch)) {
-            return invalidFrontier(this, 'GPU tile frontier frame epochs must fit u32.', {
-                frameEpoch: 'u32',
-            }, { frameEpoch })
+        const record = viewUploadRecords.get(viewUpload)
+        const authority = this.descriptor.gpuState.facts()
+        if (record?.owner !== this || record.disposed || viewUpload.command.isDisposed ||
+            viewUpload.frontierId !== this.id ||
+            viewUpload.residencySnapshotEpoch !== authority.snapshotEpoch ||
+            record.acknowledgementSerial !== authority.acknowledgementSerial) {
+            return invalidFrontier(this, 'GPU tile frontier frame requires a live owned view from current residency authority.', {
+                frontierId: this.id,
+                residencySnapshotEpoch: authority.snapshotEpoch,
+                acknowledgementSerial: authority.acknowledgementSerial,
+            }, {
+                frontierId: viewUpload?.frontierId,
+                residencySnapshotEpoch: viewUpload?.residencySnapshotEpoch,
+                acknowledgementSerial: record?.acknowledgementSerial,
+                disposed: record?.disposed ?? viewUpload?.command?.isDisposed,
+            })
         }
-        if (this.#lastViewFrameEpoch !== undefined && this.#lastViewFrameEpoch !== frameEpoch) {
-            return invalidFrontier(this, 'GPU tile frontier frame must match the latest packed view.', {
-                frameEpoch: this.#lastViewFrameEpoch,
-            }, { frameEpoch })
-        }
+        const frameEpoch = viewUpload.frameEpoch
         const template = this.#parityTemplates[frameEpoch & 1]!
         const frame = Object.freeze({
             kind: 'gpu-tile-frontier-frame' as const,
@@ -437,6 +490,8 @@ export class GpuTileFrontier {
             nextDispatchArguments: template.nextDispatchArguments,
             visibleInstances: template.visibleInstances,
             drawArguments: template.drawArguments,
+            feedbackOutput: template.feedbackOutput,
+            viewUpload,
         })
         frameRecords.set(frame, Object.freeze({ owner: this, template }))
         return frame
@@ -480,7 +535,6 @@ export class GpuTileFrontier {
             seededSnapshotEpoch?: number
             lastViewFrameEpoch?: number
             capacities: GpuTileFrontierCoreFacts['capacities']
-            resources: GpuTileFrontierResourceGraph
             bufferBytes: Readonly<Record<keyof GpuTileFrontierResourceGraph, number>>
             parityTemplates: GpuTileFrontierCoreFacts['parityTemplates']
         } = {
@@ -497,7 +551,6 @@ export class GpuTileFrontier {
                 scanBlocks: this.#scanBlockCount,
                 drawTemplates: this.descriptor.drawTemplates.length,
             }),
-            resources: this.#resources,
             bufferBytes: Object.freeze(Object.fromEntries(
                 Object.entries(this.#resources).map(([ name, resource ]) => [ name, resource.size ])
             ) as Record<keyof GpuTileFrontierResourceGraph, number>),
@@ -537,7 +590,43 @@ type CreationBounds = Readonly<{
     lookupCapacity: number
     scanBlockCount: number
     bufferBytes: Readonly<Record<keyof GpuTileFrontierResourceGraph, number>>
+    feedbackLayout: PackedFeedbackLayout
 }>
+
+type PackedFeedbackSection = Readonly<{
+    offset: number
+    byteLength: number
+    capacity: number
+}>
+
+type PackedFeedbackLayout = Readonly<{
+    byteLength: number
+    demands: PackedFeedbackSection
+    retirements: PackedFeedbackSection
+    counters: PackedFeedbackSection
+    diagnostics: PackedFeedbackSection
+}>
+
+function snapshotDescriptor(
+    descriptor: GpuTileFrontierDescriptor
+): GpuTileFrontierDescriptor {
+
+    validateGpuTileFrontierDescriptor(descriptor)
+    return Object.freeze({
+        gpuState: descriptor.gpuState,
+        addressCodec: descriptor.addressCodec,
+        policy: Object.freeze({ ...descriptor.policy }),
+        levelMetrics: Object.freeze(descriptor.levelMetrics.map(metric =>
+            Object.freeze({ ...metric })
+        )),
+        roots: Object.freeze([ ...descriptor.roots ].sort(
+            compareGpuTileFrontierPathOrder
+        )),
+        drawTemplates: Object.freeze(descriptor.drawTemplates.map(template =>
+            Object.freeze({ ...template })
+        )),
+    })
+}
 
 function validateCreation(
     runtime: GPURuntime,
@@ -585,11 +674,18 @@ function validateCreation(
             slotTableBytes: expectedSlotBytes,
         }, { slotTableBytes: descriptor.gpuState.slotTable.size })
     }
+    const maximumStorageBytes = numberLimit(runtime.deviceLimits.maxStorageBufferBindingSize)
+    if (descriptor.gpuState.slotTable.size > maximumStorageBytes) {
+        return capacityInvalid('GPU tile frontier borrowed slot table exceeds the device storage binding limit.', {
+            maxStorageBufferBindingSize: maximumStorageBytes,
+        }, { slotTableBytes: descriptor.gpuState.slotTable.size })
+    }
     const lookupCapacity = nextPowerOfTwo(checkedProduct(active, 2))
     const scanBlockCount = ceilDivide(active, GPU_TILE_FRONTIER_SCAN_BLOCK_SIZE)
     const entryBytes = gpuTileFrontierLayouts.frontierEntry.byteSize
     const visibleBytes = gpuTileFrontierLayouts.visibleInstance.byteSize
     const demandBytes = gpuTileFrontierLayouts.demand.byteSize
+    const feedbackLayout = createPackedFeedbackLayout(runtime, descriptor, entryBytes, demandBytes)
     const bufferBytes: Record<keyof GpuTileFrontierResourceGraph, number> = {
         mapMeta: gpuTileFrontierLayouts.mapMeta.byteSize,
         policy: gpuTileFrontierLayouts.policy.byteSize,
@@ -607,19 +703,73 @@ function validateCreation(
         prefixScanScratch: checkedProduct(active + scanBlockCount, PREFIX_WORDS * 4),
         visibleInstancesA: checkedProduct(active, visibleBytes),
         visibleInstancesB: checkedProduct(active, visibleBytes),
-        demands: checkedProduct(descriptor.policy.maximumDemands, demandBytes),
-        retirements: checkedProduct(active, entryBytes),
-        counters: COUNTER_WORDS * 4,
-        diagnostics: gpuTileFrontierLayouts.diagnostics.byteSize,
+        feedbackOutput: feedbackLayout.byteLength,
         drawArgumentsA: checkedProduct(descriptor.drawTemplates.length, DRAW_ARGUMENT_BYTES),
         drawArgumentsB: checkedProduct(descriptor.drawTemplates.length, DRAW_ARGUMENT_BYTES),
     }
-    validateDeviceBounds(runtime, bufferBytes, lookupCapacity, scanBlockCount, active)
+    validateDeviceBounds(
+        runtime,
+        bufferBytes,
+        feedbackLayout,
+        lookupCapacity,
+        scanBlockCount,
+        active
+    )
     return Object.freeze({
         lookupCapacity,
         scanBlockCount,
         bufferBytes: Object.freeze(bufferBytes),
+        feedbackLayout,
     })
+}
+
+function createPackedFeedbackLayout(
+    runtime: GPURuntime,
+    descriptor: GpuTileFrontierDescriptor,
+    entryBytes: number,
+    demandBytes: number
+): PackedFeedbackLayout {
+
+    const alignment = Math.max(
+        4,
+        numberLimit(runtime.deviceLimits.minStorageBufferOffsetAlignment)
+    )
+    const demands = packedSection(
+        0,
+        checkedProduct(descriptor.policy.maximumDemands, demandBytes),
+        descriptor.policy.maximumDemands
+    )
+    const retirements = packedSection(
+        alignTo(demands.offset + demands.byteLength, alignment),
+        checkedProduct(descriptor.policy.maximumActiveTiles, entryBytes),
+        descriptor.policy.maximumActiveTiles
+    )
+    const counters = packedSection(
+        alignTo(retirements.offset + retirements.byteLength, alignment),
+        COUNTER_WORDS * 4,
+        COUNTER_WORDS
+    )
+    const diagnostics = packedSection(
+        alignTo(counters.offset + counters.byteLength, alignment),
+        gpuTileFrontierLayouts.diagnostics.byteSize,
+        1
+    )
+    return Object.freeze({
+        byteLength: alignTo(diagnostics.offset + diagnostics.byteLength, 4),
+        demands,
+        retirements,
+        counters,
+        diagnostics,
+    })
+}
+
+function packedSection(
+    offset: number,
+    byteLength: number,
+    capacity: number
+): PackedFeedbackSection {
+
+    return Object.freeze({ offset, byteLength, capacity })
 }
 
 function validateCoverageBounds(descriptor: GpuTileFrontierDescriptor): void {
@@ -658,6 +808,7 @@ function validateCoverageBounds(descriptor: GpuTileFrontierDescriptor): void {
 function validateDeviceBounds(
     runtime: GPURuntime,
     bufferBytes: Readonly<Record<keyof GpuTileFrontierResourceGraph, number>>,
+    feedbackLayout: PackedFeedbackLayout,
     lookupCapacity: number,
     scanBlockCount: number,
     active: number
@@ -670,12 +821,21 @@ function validateDeviceBounds(
     for (const [ role, byteLength ] of Object.entries(bufferBytes)) {
         const bindingMaximum = role === 'mapMeta' || role === 'policy'
             ? maximumUniformBytes
-            : maximumStorageBytes
+            : role === 'feedbackOutput'
+                ? maximumBufferBytes
+                : maximumStorageBytes
         if (byteLength <= maximumBufferBytes && byteLength <= bindingMaximum) continue
         return capacityInvalid('GPU tile frontier buffer exceeds a device binding limit.', {
             maximumBufferBytes,
             bindingMaximum,
         }, { role, byteLength })
+    }
+    for (const [ role, section ] of Object.entries(feedbackLayout)) {
+        if (role === 'byteLength' || typeof section === 'number' ||
+            section.byteLength <= maximumStorageBytes) continue
+        return capacityInvalid('GPU tile frontier feedback section exceeds a device storage binding limit.', {
+            maxStorageBufferBindingSize: maximumStorageBytes,
+        }, { role, byteLength: section.byteLength })
     }
     const maximumWorkgroups = numberLimit(limits.maxComputeWorkgroupsPerDimension)
     const directWorkgroups = [
@@ -731,16 +891,21 @@ async function createResources(
         prefixScanScratch: await create('prefixScanScratch', BUFFER_STORAGE),
         visibleInstancesA: await create('visibleInstancesA', BUFFER_STORAGE),
         visibleInstancesB: await create('visibleInstancesB', BUFFER_STORAGE),
-        demands: await create('demands', BUFFER_STORAGE),
-        retirements: await create('retirements', BUFFER_STORAGE),
-        counters: await create('counters', BUFFER_STORAGE),
-        diagnostics: await create('diagnostics', BUFFER_STORAGE),
+        feedbackOutput: await create(
+            'feedbackOutput',
+            BUFFER_STORAGE | BUFFER_COPY_SRC
+        ),
         drawArgumentsA: await create('drawArgumentsA', BUFFER_STORAGE | BUFFER_INDIRECT),
         drawArgumentsB: await create('drawArgumentsB', BUFFER_STORAGE | BUFFER_INDIRECT),
     })
 }
 
-type ResourceRole = keyof GpuTileFrontierResourceGraph | 'slotTable'
+type ResourceRole = keyof GpuTileFrontierResourceGraph |
+    'slotTable' |
+    'demands' |
+    'retirements' |
+    'counters' |
+    'diagnostics'
 type BindingType = 'uniform' | 'read-storage' | 'storage'
 type KernelBinding = Readonly<{
     name: string
@@ -780,7 +945,13 @@ async function createKernels(
                 name: binding.name,
                 type: binding.type,
                 visibility: [ 'compute' ],
-                minBindingSize: resourceForRole(binding.role, 0, resources, gpuState).size,
+                minBindingSize: regionForRole(
+                    binding.role,
+                    0,
+                    resources,
+                    gpuState,
+                    bounds.feedbackLayout
+                ).size,
             })),
         }))
         const program = own(runtime.createProgram({
@@ -800,6 +971,7 @@ async function createKernels(
             0,
             resources,
             gpuState,
+            bounds.feedbackLayout,
             own
         )
         const odd = await createKernelCommand(
@@ -810,6 +982,7 @@ async function createKernels(
             1,
             resources,
             gpuState,
+            bounds.feedbackLayout,
             own
         )
         result.set(definition.entryPoint, Object.freeze({ even, odd }))
@@ -825,12 +998,13 @@ async function createKernelCommand(
     parity: 0 | 1,
     resources: GpuTileFrontierResourceGraph,
     gpuState: VirtualRasterGpuState,
+    feedbackLayout: PackedFeedbackLayout,
     own: <Value extends Disposable>(value: Value) => Value
 ): Promise<DispatchCommand> {
 
     const bound = Object.fromEntries(definition.bindings.map(binding => [
         binding.name,
-        regionForRole(binding.role, parity, resources, gpuState),
+        regionForRole(binding.role, parity, resources, gpuState, feedbackLayout),
     ]))
     const bindSet = own(await runtime.createBindSet(layout, bound, {
         label: `${definition.label} ${parity === 0 ? 'A to B' : 'B to A'} bindings`,
@@ -928,6 +1102,7 @@ function kernelDefinitions(
 function createParityTemplates(
     drawTemplates: readonly GpuTileFrontierDrawTemplate[],
     resources: GpuTileFrontierResourceGraph,
+    feedbackOutput: GpuTileFrontierFeedbackOutput,
     kernels: ReadonlyMap<GpuTileFrontierEntryPoint, KernelPair>
 ): readonly [ParityTemplate, ParityTemplate] {
 
@@ -957,6 +1132,7 @@ function createParityTemplates(
                 ? resources.visibleInstancesB
                 : resources.visibleInstancesA,
             drawArguments,
+            feedbackOutput,
             drawRegions: new Map(drawTemplates.map((template, index) => [
                 template.id,
                 drawArguments.region({ offset: index * DRAW_ARGUMENT_BYTES, size: DRAW_ARGUMENT_BYTES }),
@@ -964,6 +1140,45 @@ function createParityTemplates(
         })
     }
     return Object.freeze([ create(0), create(1) ])
+}
+
+function createFeedbackOutput(
+    resource: BufferResource,
+    packed: PackedFeedbackLayout
+): GpuTileFrontierFeedbackOutput {
+
+    const section = (value: PackedFeedbackSection): GpuTileFrontierFeedbackSection =>
+        Object.freeze({
+            bufferId: resource.id,
+            offset: value.offset,
+            byteLength: value.byteLength,
+            capacity: value.capacity,
+        })
+    return Object.freeze({
+        bufferId: resource.id,
+        layout: Object.freeze({
+            byteLength: packed.byteLength,
+            demands: section(packed.demands),
+            retirements: section(packed.retirements),
+            counters: section(packed.counters),
+            diagnostics: section(packed.diagnostics),
+        }),
+    })
+}
+
+function feedbackSectionRegion(
+    resource: BufferResource,
+    section: PackedFeedbackSection,
+    artifact?: Parameters<BufferRegion['interpretAs']>[0]
+): BufferRegion {
+
+    return artifact === undefined
+        ? resource.region({ offset: section.offset, size: section.byteLength })
+        : resource.region({
+            offset: section.offset,
+            size: section.byteLength,
+            layout: artifact,
+        })
 }
 
 function resourceForRole(
@@ -974,6 +1189,8 @@ function resourceForRole(
 ): BufferResource {
 
     if (role === 'slotTable') return gpuState.slotTable
+    if (role === 'demands' || role === 'retirements' ||
+        role === 'counters' || role === 'diagnostics') return resources.feedbackOutput
     if (role === 'frontierA') return parity === 0 ? resources.frontierA : resources.frontierB
     if (role === 'frontierB') return parity === 0 ? resources.frontierB : resources.frontierA
     if (role === 'dispatchArgumentsA') {
@@ -995,25 +1212,46 @@ function regionForRole(
     role: ResourceRole,
     parity: 0 | 1,
     resources: GpuTileFrontierResourceGraph,
-    gpuState: VirtualRasterGpuState
+    gpuState: VirtualRasterGpuState,
+    feedbackLayout: PackedFeedbackLayout
 ): BufferRegion {
 
     const resource = resourceForRole(role, parity, resources, gpuState)
+    if (role === 'demands') {
+        return feedbackSectionRegion(
+            resource,
+            feedbackLayout.demands,
+            gpuTileFrontierLayouts.demand.codec.artifact
+        )
+    }
+    if (role === 'retirements') {
+        return feedbackSectionRegion(
+            resource,
+            feedbackLayout.retirements,
+            gpuTileFrontierLayouts.frontierEntry.codec.artifact
+        )
+    }
+    if (role === 'counters') {
+        return feedbackSectionRegion(resource, feedbackLayout.counters)
+    }
+    if (role === 'diagnostics') {
+        return feedbackSectionRegion(
+            resource,
+            feedbackLayout.diagnostics,
+            gpuTileFrontierLayouts.diagnostics.codec.artifact
+        )
+    }
     const artifact = role === 'mapMeta'
         ? gpuTileFrontierLayouts.mapMeta.codec.artifact
         : role === 'policy'
             ? gpuTileFrontierLayouts.policy.codec.artifact
             : role === 'levelMetrics'
                 ? gpuTileFrontierLayouts.levelMetric.codec.artifact
-                : role === 'frontierA' || role === 'frontierB' || role === 'retirements'
+                : role === 'frontierA' || role === 'frontierB'
                     ? gpuTileFrontierLayouts.frontierEntry.codec.artifact
                     : role === 'visibleInstancesB'
                         ? gpuTileFrontierLayouts.visibleInstance.codec.artifact
-                        : role === 'demands'
-                            ? gpuTileFrontierLayouts.demand.codec.artifact
-                            : role === 'diagnostics'
-                                ? gpuTileFrontierLayouts.diagnostics.codec.artifact
-                                : undefined
+                    : undefined
     return artifact === undefined ? resource.region() : resource.region({ layout: artifact })
 }
 
@@ -1024,7 +1262,7 @@ function validateSeedSnapshot(
 
     if (!(snapshot instanceof VirtualRasterSnapshot) ||
         snapshot.addressSpace !== frontier.descriptor.gpuState.addressSpace ||
-        frontier.descriptor.gpuState.facts().snapshotEpoch !== snapshot.epoch ||
+        !frontier.descriptor.gpuState.acknowledges(snapshot) ||
         !u32(snapshot.epoch)) {
         return invalidFrontier(frontier, 'GPU tile frontier seed requires the acknowledged GPU snapshot.', {
             addressSpaceId: frontier.descriptor.gpuState.addressSpace.id,
@@ -1080,6 +1318,7 @@ function validateSeedSnapshot(
         return {
             physicalSlot: resolved.physicalSlot,
             expectedGeneration: resolved.generation,
+            expectedContentEpoch: resolved.contentEpoch,
             samplingLevel: root.level,
             matrixLevel,
             tileRow: root.tile.tileRow,
@@ -1123,24 +1362,18 @@ function validateView(frontier: GpuTileFrontier, view: GpuTileFrontierView): voi
     }
 }
 
-function zeroView(): GpuTileFrontierView {
-
-    return {
-        clipFromRelativeWorld: new Float32Array(16),
-        cameraHigh: [ 0, 0, 0 ],
-        cameraLow: [ 0, 0, 0 ],
-        viewport: [ 1, 1 ],
-        verticalFovRadians: 1,
-        cameraLatitudeRadians: 0,
-        zoomHint: 0,
-        frameEpoch: 0,
-        residencySnapshotEpoch: 0,
-    }
-}
-
 function mapMetaRecord(view: GpuTileFrontierView): Record<string, unknown> {
 
     const matrix = view.clipFromRelativeWorld
+    const worldWidth = WEB_MERCATOR_HALF_WORLD_METERS * 2
+    const cameraX = view.cameraHigh[0] + view.cameraLow[0]
+    const cameraY = view.cameraHigh[1] + view.cameraLow[1]
+    const cameraMercatorX = splitF32(
+        (cameraX + WEB_MERCATOR_HALF_WORLD_METERS) / worldWidth
+    )
+    const cameraMercatorY = splitF32(
+        (WEB_MERCATOR_HALF_WORLD_METERS - cameraY) / worldWidth
+    )
     return {
         clipFromRelativeWorld: [
             [ matrix[0], matrix[1], matrix[2], matrix[3] ],
@@ -1150,6 +1383,8 @@ function mapMetaRecord(view: GpuTileFrontierView): Record<string, unknown> {
         ],
         cameraHigh: view.cameraHigh,
         cameraLow: view.cameraLow,
+        cameraMercatorHigh: [ cameraMercatorX[0], cameraMercatorY[0] ],
+        cameraMercatorLow: [ cameraMercatorX[1], cameraMercatorY[1] ],
         viewport: view.viewport,
         verticalFovRadians: view.verticalFovRadians,
         cameraLatitudeRadians: view.cameraLatitudeRadians,
@@ -1157,6 +1392,12 @@ function mapMetaRecord(view: GpuTileFrontierView): Record<string, unknown> {
         frameEpoch: view.frameEpoch,
         residencySnapshotEpoch: view.residencySnapshotEpoch,
     }
+}
+
+function splitF32(value: number): readonly [number, number] {
+
+    const high = Math.fround(value)
+    return Object.freeze([ high, Math.fround(value - high) ])
 }
 
 function layoutUpload(bytes: Uint8Array, artifact: Parameters<BufferRegion['interpretAs']>[0]) {
@@ -1192,6 +1433,24 @@ function checkedProduct(left: number, right: number): number {
         return capacityInvalid('GPU tile frontier byte-size arithmetic exceeded bounded u32 storage.', {
             result: 'positive safe u32',
         }, { left, right, result })
+    }
+    return result
+}
+
+function alignTo(value: number, alignment: number): number {
+
+    if (!Number.isSafeInteger(value) || value < 0 ||
+        !Number.isSafeInteger(alignment) || alignment <= 0) {
+        return capacityInvalid('GPU tile frontier feedback alignment requires bounded integers.', {
+            value: 'non-negative safe integer',
+            alignment: 'positive safe integer',
+        }, { value, alignment })
+    }
+    const result = Math.ceil(value / alignment) * alignment
+    if (!Number.isSafeInteger(result) || result > U32_MAX) {
+        return capacityInvalid('GPU tile frontier feedback alignment exceeded bounded u32 storage.', {
+            result: 'u32',
+        }, { value, alignment, result })
     }
     return result
 }

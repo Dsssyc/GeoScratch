@@ -193,7 +193,9 @@ try {
 }
 ```
 
-Reference fixtures then assert: an off-frustum leaf is not visible; an under-threshold leaf retains; a refine candidate without all covered children keeps its parent and emits canonical child demands; acknowledged children replace parent; an unsafe level-difference transition is rejected; coarsen requires the canonical sibling group; priority bucket ties resolve by compact index; tight capacity preserves a complete parent cover.
+Reference fixtures then assert: an off-frustum leaf is not visible; an under-threshold leaf retains; a refine candidate without all covered children keeps its parent and emits canonical child demands; acknowledged children replace parent; an unsafe level-difference transition is rejected; coarsen requires the canonical sibling group; priority bucket ties resolve by hierarchical path-prefix frontier order; tight capacity preserves a complete parent cover.
+
+Discovered-design correction for Task 3B: numeric `compactIndex` order is address identity, not canonical array order. Canonical frontier/demand/tie order is maximum-level-aligned hierarchical path-prefix order with row bit before column bit (`00, 01, 10, 11`). A valid frontier is prefix-free; stable parent-to-children replacement and complete sibling-to-parent coarsening therefore preserve this order in `O(active)` without global atomics, per-output rank rescans, or radix passes. Mixed-level and subcoverage fixtures must lock this invariant.
 
 - [ ] **Step 2: Run RED**
 
@@ -393,9 +395,9 @@ Requirements encoded in WGSL:
 
 - reconstruct normalized WebMercator tile bounds from `matrixLevel/tileRow/tileCol`;
 - subtract high/low camera origin before clip projection;
-- derive conservative vertical extent from level metrics and latitude-dependent Mercator altitude scale;
+- derive conservative vertical extent from level metrics expressed in meter-space elevation units;
 - use six extracted frustum planes and distance-to-AABB SSE;
-- keep 256 deterministic priority buckets and canonical tie order;
+- keep 256 deterministic priority buckets and hierarchical path-prefix tie order;
 - use an epoch-tagged open-addressed current-frontier lookup with duplicate-key diagnostic;
 - accept only complete covered-child transitions and canonical sibling coarsen transactions;
 - reject transitions that would violate level difference 1;

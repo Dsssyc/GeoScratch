@@ -60,6 +60,8 @@ GeoScratch 已经具备实现 GPU-driven 方案所需的 Scratch 原语：storag
 
 GPU 持久维护的、互不重叠并能为 source root/safety domain 构成无洞 coverage 的有限叶节点集合。它在视锥及有界 guard band 内自适应细化，在不可见区域逐步合并回粗层，因此 camera teleport 后始终存在新的遍历入口。因 `invisibleGraceFrames` 暂留的细化条目仍可属于 Active Frontier，但不得进入本帧 draw list。Active Frontier 不是完整四叉树，也不等于全部 resident pages；每帧只遍历这些当前叶节点。
 
+**Task 3B discovered-design correction:** canonical frontier order 是把每个 tile path 对齐到配置的 maximum level 后得到的 hierarchical Morton/path-prefix order，逐层 child ordinal 固定为 `rowBit * 2 + colBit`，即 `00, 01, 10, 11`。合法 frontier 必须 prefix-free，因此这些 path key 唯一；parent 原位替换为 ordered children，以及完整 sibling block 原位合并为 parent，都能通过稳定 prefix compaction 以 `O(active)` 保持顺序。`compactIndex` 仍是 address identity 和 residency lookup key，不再作为 frontier array order 或同优先级预算 tie order。初始 roots 可以在 seed 时一次性按该 path order 排序。此前把 numeric `compactIndex` sort 当作 canonical order 的文字会要求热路径做全局重排，和稳定 compaction 及 GPU-resident 性能目标冲突，现以本不变量为准。
+
 ### Demand Set
 
 GPU 根据视锥、SSE、预算和当前 residency 产生的缺失页面请求。CPU/worker 异步消费该集合。
@@ -125,6 +127,8 @@ type MapMeta = {
     relativeViewProjection: Float32Array
     cameraHigh: readonly [number, number, number]
     cameraLow: readonly [number, number, number]
+    cameraMercatorHigh: readonly [number, number]
+    cameraMercatorLow: readonly [number, number]
     viewport: readonly [number, number]
     verticalFov: number
     centerZoom: number
@@ -132,7 +136,7 @@ type MapMeta = {
 }
 ```
 
-`relativeViewProjection` 必须在 CPU 的 `f64` 计算域中移除 camera/world origin translation 后再转换为 `f32`；shader 以 tile integer address、page-local coordinate 和 `cameraHigh/cameraLow` 构造相机相对位置，不能把 WebMercator 全局大坐标直接塞入 `f32` matrix。`centerZoom` 只用于兼容、初始化提示和诊断；最终 LoD authority 是投影后的屏幕空间误差。
+`relativeViewProjection` 必须在 CPU 的 `f64` 计算域中移除 camera/world origin translation 后再转换为 `f32`；shader 以 tile integer address、page-local coordinate 和 split camera origin 构造相机相对位置，不能把 WebMercator 全局大坐标直接塞入 `f32` matrix。WebMercator XY 必须先在 normalized world domain 中计算 tile-minus-camera，再乘 split world width 转成米；不得先在 `f32` 中物化接近 world edge 的绝对米坐标。`cameraMercatorHigh/cameraMercatorLow` 是该 normalized origin 的 high/low split，`cameraHigh/cameraLow` 继续承载 meter-space camera facts。`centerZoom` 只用于兼容、初始化提示和诊断；最终 LoD authority 是投影后的屏幕空间误差。
 
 ### SelectionPolicyBuffer
 
@@ -190,7 +194,7 @@ currentDispatchArguments
 nextDispatchArguments
 ```
 
-每个 frontier entry 至少保存 physical slot、expected generation、tile address、previous LoD state、transition state、last-demand epoch 和 child demand mask。读取 slot 前必须验证 generation 和 residency snapshot epoch；不匹配的 entry 是 stale，不得绘制或产生 child demand。
+每个 frontier entry 至少保存 physical slot、expected generation、expected content epoch、entry snapshot epoch、tile address、previous LoD state、transition state、last-demand epoch 和 child demand mask。读取 slot 前必须验证 page/address、physical slot、generation 和 content epoch 与当前 slot 完全一致，当前 slot snapshot epoch 必须等于本帧 acknowledged MapMeta snapshot epoch，且 entry snapshot epoch 不得来自未来。较新的 acknowledged snapshot 若只更新了无关 page，不要求重建或 reseed 未变化 entry；验证通过的旧 entry 在下一 frontier 中传播当前 snapshot epoch。不匹配的 entry 是 stale，不得绘制或产生 child demand。
 
 `frontierLookupBuffer` 是只覆盖当前有限前沿的 GPU membership index，用于按 canonical tile key 查询相邻 cover entry。它可以使用有界 open-addressed hash；并发插入允许改变内部槽位，但 lookup 的 membership 结果、后续 prefix-scan offset 和最终 canonical 输出顺序必须确定。该索引不扩展成完整世界四叉树，也不进入 Virtual Raster 的通用 page-table ABI。
 

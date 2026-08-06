@@ -11,15 +11,15 @@ const viteEntry = resolve(repositoryRoot, 'node_modules/vite/bin/vite.js')
 const timeout = positiveInteger(process.env.GEO_GPU_FRONTIER_TIMEOUT_MS, 60_000)
 const port = await findAvailablePort()
 const baseUrl = `http://127.0.0.1:${port}`
-const scratchUrl = `${baseUrl}/@fs${resolve(
-    repositoryRoot,
-    'packages/geoscratch/dist/scratch/index.js'
-)}`
-const geoUrl = `${baseUrl}/@fs${resolve(
-    repositoryRoot,
-    'packages/geoscratch/dist/geo/index.js'
-)}`
+const moduleUrl = relativePath => `${baseUrl}/@fs${resolve(repositoryRoot, relativePath)}`
+const moduleUrls = {
+    scratchUrl: moduleUrl('packages/geoscratch/dist/scratch/index.js'),
+    geoUrl: moduleUrl('packages/geoscratch/dist/geo/index.js'),
+    referenceUrl: moduleUrl('packages/geoscratch/dist/geo/gpu-tile-frontier-reference.js'),
+    layoutUrl: moduleUrl('packages/geoscratch/dist/geo/gpu-tile-frontier-layout.js'),
+}
 const vite = startVite(port)
+let browserServer
 let browser
 let browserVersion
 let proof
@@ -28,11 +28,12 @@ const cleanupFailures = []
 
 try {
     await waitForVite(vite)
-    browser = await chromium.launch({
+    browserServer = await chromium.launchServer({
         channel: 'chrome',
         headless: process.env.GEO_GPU_FRONTIER_HEADED !== '1',
         args: [ '--enable-unsafe-webgpu' ],
     })
+    browser = await chromium.connect(browserServer.wsEndpoint())
     browserVersion = await browser.version()
     const context = await browser.newContext()
     const page = await context.newPage()
@@ -42,16 +43,16 @@ try {
             waitUntil: 'domcontentloaded',
             timeout,
         })
-        proof = await page.evaluate(runProof, { scratchUrl, geoUrl })
+        proof = await page.evaluate(runProof, moduleUrls)
         proof.events = events
     } finally {
-        await context.close()
+        await withTimeout(context.close(), 10_000, 'Chrome context shutdown')
     }
 } catch (error) {
     fatalError = serializeError(error)
 } finally {
     try {
-        if (browser !== undefined) await withTimeout(browser.close(), 15_000, 'Chrome shutdown')
+        await closeBrowser(browser, browserServer)
     } catch (error) {
         cleanupFailures.push(`Chrome cleanup failed: ${serializeError(error)}`)
     }
@@ -62,13 +63,16 @@ try {
     }
 }
 
+const browserProcess = browserServer?.process()
 const processFacts = {
     browserClosed: browser === undefined || !browser.isConnected(),
+    browserProcessClosed: browserProcess === undefined ||
+        browserProcess.exitCode !== null || browserProcess.signalCode !== null,
     viteClosed: !await canConnect(port),
 }
 const failures = validate({ proof, processFacts, fatalError, cleanupFailures })
 const result = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     status: failures.length === 0 ? 'passed' : 'failed',
     browserVersion,
     headless: process.env.GEO_GPU_FRONTIER_HEADED !== '1',
@@ -79,9 +83,12 @@ const result = {
     cleanupFailures,
     failures,
     processOutput: failures.length === 0 ? undefined : {
-        pid: vite.child.pid,
-        exitCode: vite.child.exitCode,
-        signalCode: vite.child.signalCode,
+        vitePid: vite.child.pid,
+        viteExitCode: vite.child.exitCode,
+        viteSignalCode: vite.child.signalCode,
+        browserPid: browserProcess?.pid,
+        browserExitCode: browserProcess?.exitCode,
+        browserSignalCode: browserProcess?.signalCode,
         stdout: vite.stdout,
         stderr: vite.stderr,
     },
@@ -89,9 +96,9 @@ const result = {
 process.stdout.write(`${JSON.stringify(result, null, 2)}\n`)
 if (failures.length > 0) process.exitCode = 1
 
-async function runProof({ scratchUrl: scratchModuleUrl, geoUrl: geoModuleUrl }) {
+async function runProof({ scratchUrl, geoUrl, referenceUrl, layoutUrl }) {
 
-    const { GPURuntime } = await import(scratchModuleUrl)
+    const { GPURuntime } = await import(scratchUrl)
     const {
         GpuTileFrontier,
         VirtualRasterResidency,
@@ -103,7 +110,18 @@ async function runProof({ scratchUrl: scratchModuleUrl, geoUrl: geoModuleUrl }) 
         virtualRasterPlane,
         virtualRasterTileAddressSpace,
         webMercatorQuadAddressCodec,
-    } = await import(geoModuleUrl)
+    } = await import(geoUrl)
+    const { evaluateGpuTileFrontierReference } = await import(referenceUrl)
+    const {
+        gpuTileFrontierEntryCodec,
+        gpuTileFrontierLayouts,
+        gpuTileFrontierVisibleInstanceCodec,
+    } = await import(layoutUrl)
+
+    const HALF_WORLD = 20_037_508.3427892
+    const BUFFER_COPY_DST = 0x08
+    const BUFFER_COPY_SRC = 0x04
+    const BUFFER_STORAGE = 0x80
     const commandLabels = [
         'Reset GPU tile frontier',
         'Clear GPU tile frontier lookup',
@@ -123,10 +141,7 @@ async function runProof({ scratchUrl: scratchModuleUrl, geoUrl: geoModuleUrl }) 
         'indirect', 'direct', 'direct', 'direct', 'indirect', 'direct',
     ]
     let runtime
-    let residency
-    let gpuState
-    let frontier
-    let validationError
+    let validationScopeOpen = false
     const uncapturedErrors = []
     const result = {
         commandLabels,
@@ -134,157 +149,82 @@ async function runProof({ scratchUrl: scratchModuleUrl, geoUrl: geoModuleUrl }) 
         failure: undefined,
         validationError: undefined,
         uncapturedErrors,
+        scenarios: undefined,
     }
     try {
-        runtime = await GPURuntime.create({ label: 'GPU tile frontier browser smoke' })
+        runtime = await GPURuntime.create({ label: 'GPU tile frontier browser semantic parity' })
         runtime.device.addEventListener('uncapturederror', event => {
             uncapturedErrors.push(serializeBrowserError(event.error))
         })
         runtime.device.pushErrorScope('validation')
-        const coverage = tileMatrixCoverage({
-            tileMatrixSet: WebMercatorQuad,
-            limits: [ {
-                matrixId: '0',
-                minTileRow: 0,
-                maxTileRow: 0,
-                minTileCol: 0,
-                maxTileCol: 0,
-            } ],
-        })
-        const addressSpace = virtualRasterTileAddressSpace({
-            id: 'browser-frontier-smoke',
-            coverage,
-        })
-        const addressCodec = webMercatorQuadAddressCodec({ coverage })
-        const plane = virtualRasterPlane({
-            id: 'browser-frontier-height',
-            addressSpace,
-            kind: 'scalar',
-            channels: 1,
-            sampleType: 'unorm8',
-            gpuFormat: 'r8unorm',
-        })
-        const [ width, height ] = addressSpace.pageSize
-        residency = new VirtualRasterResidency({
-            addressSpace,
-            plane,
-            maxPhysicalPages: 16,
-            maxStagingBytes: width * height,
-        })
-        const root = addressSpace.rootPage()
-        residency.stage(ownedVirtualRasterPagePayload({
-            page: root,
-            width,
-            height,
-            channels: 1,
-            data: new Uint8Array(width * height),
-            contentVersion: 'browser-frontier-root-v1',
-        }), { generation: 1 })
-        const publication = residency.publish()
-        gpuState = await createVirtualRasterGpuState(runtime, {
-            addressSpace,
-            plane,
-            maxPhysicalPages: 16,
-        })
-        const update = gpuState.stage(publication)
-        const residencySubmission = runtime.createSubmission({ validation: 'throw' })
-        for (const command of update.commands) residencySubmission.upload(command)
-        const residencySubmitted = residencySubmission.submit()
-        await gpuState.acknowledge(publication, residencySubmitted)
+        validationScopeOpen = true
 
-        frontier = await GpuTileFrontier.create(runtime, {
-            gpuState,
-            addressCodec,
-            policy: gpuTileFrontierPolicy({
-                refineErrorPixels: 2,
-                coarsenErrorPixels: 1,
-                minimumMatrixLevel: 0,
-                maximumMatrixLevel: 0,
-                maximumActiveTiles: 8,
-                maximumDemands: 8,
-                transitionReservePages: 8,
-                invisibleGraceFrames: 2,
-            }),
-            levelMetrics: [ {
-                matrixLevel: 0,
-                minimumElevationMeters: 0,
-                maximumElevationMeters: 100,
-                geometricErrorMeters: 100,
-            } ],
-            roots: [ root ],
-            drawTemplates: [ { id: 'terrain', vertexCount: 6 } ],
-        })
-        const seed = frontier.stageSeed(publication.snapshot)
-        const outcomes = []
-        const frames = []
-        for (const frameEpoch of [ 0, 1 ]) {
-            const upload = frontier.writeView({
-                clipFromRelativeWorld: new Float32Array([
-                    1 / 20_037_508.3427892, 0, 0, 0,
-                    0, 1 / 20_037_508.3427892, 0, 0,
-                    0, 0, 1 / 1_000_000, 0,
-                    0, 0, 1, 1,
-                ]),
-                cameraHigh: [ 0, 0, 1_000_000 ],
-                cameraLow: [ 0, 0, 0 ],
-                viewport: [ 64, 64 ],
-                verticalFovRadians: Math.PI / 2,
-                cameraLatitudeRadians: 0,
-                zoomHint: 0,
-                frameEpoch,
-                residencySnapshotEpoch: publication.snapshot.epoch,
-            })
-            const frame = frontier.frame(frameEpoch)
-            frames.push(frame)
-            const builder = runtime.createSubmission({ validation: 'throw' })
-            if (frameEpoch === 0) {
-                for (const command of seed.commands) {
-                    if (command.commandKind === 'clear') builder.clear(command)
-                    else builder.upload(command)
-                }
-            }
-            const submitted = builder
-                .upload(upload.command)
-                .compute(frame.pass, frame.commands)
-                .submit()
-            outcomes.push(await submitted.nativeOutcome)
-        }
-        await runtime.device.queue.onSubmittedWorkDone()
-        validationError = await runtime.device.popErrorScope()
-        const facts = frontier.facts()
-        const [ even, odd ] = frames
-        const terrain = frontier.drawArgument(even, 'terrain')
-        result.resourceCount = Object.keys(facts.resources).length
-        result.bufferBytes = facts.bufferBytes
-        result.templateCount = facts.parityTemplates.length
-        result.labels = even.commands.map(command => command.label)
-        result.kinds = even.commands.map(command =>
-            'indirect' in command.count ? 'indirect' : 'direct'
+        const canonicalFirst = await canonicalScenario('canonical-a')
+        const canonicalSecond = await canonicalScenario('canonical-b')
+        assertEqual(
+            canonicalFirst.finalBytes,
+            canonicalSecond.finalBytes,
+            'identical canonical executions must produce byte-identical captured output'
         )
-        result.parity = [
-            { source: even.source, target: even.target },
-            { source: odd.source, target: odd.target },
+        const staleContent = await staleContentScenario()
+        const precision = await precisionScenario()
+        const grace = await visibilityGraceScenario()
+        await runtime.device.queue.onSubmittedWorkDone()
+        const validationError = await runtime.device.popErrorScope()
+        validationScopeOpen = false
+
+        result.resourceCount = canonicalFirst.resourceCount
+        result.bufferBytes = canonicalFirst.bufferBytes
+        result.templateCount = canonicalFirst.templateCount
+        result.labels = canonicalFirst.labels
+        result.kinds = canonicalFirst.kinds
+        result.parity = canonicalFirst.parity
+        result.drawArgument = canonicalFirst.drawArgument
+        result.outcomes = [
+            ...canonicalFirst.outcomes,
+            ...canonicalSecond.outcomes,
+            ...staleContent.outcomes,
+            ...precision.outcomes,
+            ...grace.outcomes,
         ]
-        result.drawArgument = {
-            offset: terrain.offset,
-            size: terrain.size,
-            usage: terrain.resource.usage,
+        result.disposal = {
+            frontierDisposed: [
+                canonicalFirst,
+                canonicalSecond,
+                staleContent,
+                precision,
+                grace,
+            ].every(scenario => scenario.disposal.frontierDisposed),
+            borrowedSlotTableAlive: [
+                canonicalFirst,
+                canonicalSecond,
+                staleContent,
+                precision,
+                grace,
+            ].every(scenario => scenario.disposal.borrowedSlotTableAlive),
+            runtimeAlive: !runtime.isDisposed,
         }
-        result.outcomes = outcomes.map(outcome => outcome.status)
+        result.scenarios = {
+            canonicalTie: {
+                frame0: canonicalFirst.frame0,
+                frame1: canonicalFirst.frame1,
+                deterministicHash: canonicalFirst.finalHash,
+                repeatedHash: canonicalSecond.finalHash,
+                byteIdentical: true,
+            },
+            staleContent,
+            precision,
+            visibilityGrace: grace,
+        }
         result.validationError = validationError === null
             ? undefined
             : serializeBrowserError(validationError)
-        frontier.dispose()
-        result.disposal = {
-            ownedBuffersDisposed: Object.values(facts.resources).every(resource => resource.isDisposed),
-            borrowedSlotTableAlive: !gpuState.slotTable.isDisposed,
-            runtimeAlive: !runtime.isDisposed,
-        }
     } catch (error) {
         result.failure = serializeBrowserError(error)
-        if (runtime !== undefined && validationError === undefined) {
+        if (runtime !== undefined && validationScopeOpen) {
             try {
-                validationError = await runtime.device.popErrorScope()
+                const validationError = await runtime.device.popErrorScope()
+                validationScopeOpen = false
                 result.validationError = validationError === null
                     ? undefined
                     : serializeBrowserError(validationError)
@@ -293,14 +233,967 @@ async function runProof({ scratchUrl: scratchModuleUrl, geoUrl: geoModuleUrl }) 
             }
         }
     } finally {
-        frontier?.dispose()
-        gpuState?.dispose()
-        residency?.dispose()
         runtime?.dispose()
     }
     return result
 
+    async function canonicalScenario(id) {
+
+        const env = await createEnvironment({
+            id,
+            limits: [ fullLimit(1), fullLimit(2) ],
+            maximumMatrixLevel: 2,
+            maximumActiveTiles: 10,
+            maximumDemands: 1,
+            transitionReservePages: 16,
+            refineErrorPixels: 2,
+            coarsenErrorPixels: 0,
+            levelMetrics: [ metric(1, 1_000_000), metric(2, 1_000_000) ],
+            maxPhysicalPages: 32,
+        })
+        let frontier
+        let capture
+        try {
+            const roots = rootPages(env)
+            const root00Children = children(env, page(env, 1, 0, 0))
+            const initialPublication = await publishPages(
+                env,
+                [ ...roots, ...root00Children ],
+                `${id}-initial`
+            )
+            frontier = await createFrontier(env)
+            capture = await createCapture(frontier, `${id}-capture`)
+            const seed = frontier.stageSeed(initialPublication.snapshot)
+            let current = seedEntries(frontier, initialPublication)
+            let residents = [ ...roots, ...root00Children ]
+            const frame0View = allWorldView(0, initialPublication.snapshot.epoch, 50)
+            const frame0 = await executeFrame({
+                env,
+                frontier,
+                capture,
+                seed,
+                view: frame0View,
+                current,
+                residentPages: residents,
+            })
+            const expectedFrame0Keys = [
+                ...root00Children.map(child => child.key),
+                page(env, 1, 0, 1).key,
+                page(env, 1, 1, 0).key,
+                page(env, 1, 1, 1).key,
+            ]
+            assertEqual(frame0.keys, expectedFrame0Keys, 'frame 0 hierarchical refinement order')
+            current = frame0.nextCurrent
+
+            const root01Children = children(env, page(env, 1, 0, 1))
+            const root10Children = children(env, page(env, 1, 1, 0))
+            const nextPublication = await publishPages(
+                env,
+                [ ...root01Children, ...root10Children ],
+                `${id}-next`
+            )
+            residents = [ ...residents, ...root01Children, ...root10Children ]
+            const frame1 = await executeFrame({
+                env,
+                frontier,
+                capture,
+                view: allWorldView(1, nextPublication.snapshot.epoch, 50),
+                current,
+                residentPages: residents,
+            })
+            const expectedFrame1Keys = [
+                ...root00Children.map(child => child.key),
+                ...root01Children.map(child => child.key),
+                page(env, 1, 1, 0).key,
+                page(env, 1, 1, 1).key,
+            ]
+            assertEqual(frame1.keys, expectedFrame1Keys, 'next-frame equal-priority path tie order')
+            const compactIndexes = frame1.frontier.map(entry => entry.compactIndex)
+            assert(
+                compactIndexes.some((value, index) => index > 0 && value < compactIndexes[index - 1]),
+                'hierarchical path order must be observably distinct from numeric compactIndex order'
+            )
+            const facts = frontier.facts()
+            const drawArgument = frontier.drawArgument(frame0.frame, 'terrain')
+            const disposal = disposeScenario(frontier, capture, env)
+            frontier = undefined
+            capture = undefined
+            return {
+                resourceCount: Object.keys(facts.bufferBytes).length,
+                bufferBytes: facts.bufferBytes,
+                templateCount: facts.parityTemplates.length,
+                labels: frame0.frame.commands.map(command => command.label),
+                kinds: frame0.frame.commands.map(command =>
+                    'indirect' in command.count ? 'indirect' : 'direct'
+                ),
+                parity: [
+                    { source: frame0.frame.source, target: frame0.frame.target },
+                    { source: frame1.frame.source, target: frame1.frame.target },
+                ],
+                drawArgument: {
+                    offset: drawArgument.offset,
+                    size: drawArgument.size,
+                    usage: drawArgument.resource.usage,
+                },
+                frame0: summarizeFrame(frame0),
+                frame1: summarizeFrame(frame1),
+                finalBytes: frame1.canonicalBytes,
+                finalHash: frame1.hash,
+                outcomes: [ frame0.outcome, frame1.outcome ],
+                disposal,
+            }
+        } finally {
+            capture?.dispose()
+            frontier?.dispose()
+            env.gpuState?.dispose()
+            env.residency.dispose()
+        }
+    }
+
+    async function staleContentScenario() {
+
+        const env = await createEnvironment({
+            id: 'stale-content',
+            limits: [ fullLimit(0) ],
+            maximumMatrixLevel: 0,
+            maximumActiveTiles: 4,
+            maximumDemands: 4,
+            transitionReservePages: 4,
+            refineErrorPixels: 2,
+            coarsenErrorPixels: 1,
+            levelMetrics: [ metric(0, 100) ],
+            maxPhysicalPages: 8,
+        })
+        let frontier
+        let capture
+        try {
+            const root = page(env, 0, 0, 0)
+            const publication = await publishPages(env, [ root ], 'stale-content-root')
+            frontier = await createFrontier(env)
+            capture = await createCapture(frontier, 'stale-content-capture')
+            const seed = frontier.stageSeed(publication.snapshot)
+            const exact = seedEntries(frontier, publication)[0]
+            const forged = Object.freeze({
+                ...exact,
+                contentEpoch: exact.contentEpoch - 1,
+            })
+            const frameResult = await executeFrame({
+                env,
+                frontier,
+                capture,
+                seed,
+                view: allWorldView(0, publication.snapshot.epoch, 50),
+                current: [ forged ],
+                residentPages: [ root ],
+                createExtraUploads(frame) {
+                    return [ runtime.createUploadCommand({
+                        label: 'Inject stale expected content epoch for browser proof',
+                        target: frame.currentFrontier.region({
+                            size: gpuTileFrontierLayouts.frontierEntry.byteSize,
+                            layout: gpuTileFrontierEntryCodec.artifact,
+                        }),
+                        data: gpuTileFrontierEntryCodec.uploadView(entryRecord(forged)),
+                    }) ]
+                },
+            })
+            assertEqual(frameResult.keys, [], 'stale content authority must remove the entry')
+            assert(
+                forged.generation === exact.generation &&
+                forged.contentEpoch !== exact.contentEpoch &&
+                forged.residencySnapshotEpoch === exact.residencySnapshotEpoch,
+                'stale-content fixture must differ only in expected content epoch'
+            )
+            const disposal = disposeScenario(frontier, capture, env)
+            frontier = undefined
+            capture = undefined
+            return {
+                expectedGeneration: forged.generation,
+                residentGeneration: exact.generation,
+                expectedContentEpoch: forged.contentEpoch,
+                residentContentEpoch: exact.contentEpoch,
+                expectedSnapshotEpoch: forged.residencySnapshotEpoch,
+                residentSnapshotEpoch: exact.residencySnapshotEpoch,
+                activeCount: frameResult.frontier.length,
+                visibleCount: frameResult.visible.length,
+                hash: frameResult.hash,
+                outcomes: [ frameResult.outcome ],
+                disposal,
+            }
+        } finally {
+            capture?.dispose()
+            frontier?.dispose()
+            env.gpuState?.dispose()
+            env.residency.dispose()
+        }
+    }
+
+    async function precisionScenario() {
+
+        const matrixLevel = 24
+        const dimension = 2 ** matrixLevel
+        const row = dimension / 2
+        const firstColumn = dimension - 2
+        const lastColumn = dimension - 1
+        const env = await createEnvironment({
+            id: 'z24-edge',
+            limits: [ {
+                matrixId: String(matrixLevel),
+                minTileRow: row,
+                maxTileRow: row,
+                minTileCol: firstColumn,
+                maxTileCol: lastColumn,
+            } ],
+            minimumMatrixLevel: matrixLevel,
+            maximumMatrixLevel: matrixLevel,
+            maximumActiveTiles: 2,
+            maximumDemands: 2,
+            transitionReservePages: 2,
+            refineErrorPixels: 2,
+            coarsenErrorPixels: 1,
+            levelMetrics: [ metric(matrixLevel, 100) ],
+            maxPhysicalPages: 4,
+        })
+        let frontier
+        let capture
+        try {
+            const roots = rootPages(env)
+            const publication = await publishPages(env, roots, 'z24-edge-roots')
+            frontier = await createFrontier(env)
+            capture = await createCapture(frontier, 'z24-edge-capture')
+            const tileExtent = 2 * HALF_WORLD / dimension
+            const cameraX = HALF_WORLD - tileExtent
+            const cameraY = -tileExtent / 2
+            const view = orthographicView({
+                frameEpoch: 0,
+                snapshotEpoch: publication.snapshot.epoch,
+                camera: [ cameraX, cameraY, 50 ],
+                xHalfExtent: tileExtent * 0.75,
+                yHalfExtent: tileExtent * 0.75,
+                zScale: 0.01,
+                zTranslate: 0.5,
+                zoomHint: matrixLevel,
+            })
+            const frameResult = await executeFrame({
+                env,
+                frontier,
+                capture,
+                seed: frontier.stageSeed(publication.snapshot),
+                view,
+                current: seedEntries(frontier, publication),
+                residentPages: roots,
+            })
+            assertEqual(
+                frameResult.keys,
+                roots.map(root => root.key),
+                'z24 edge tiles must retain stable visible extents'
+            )
+            assert(frameResult.visible.length === 2, 'both z24 edge tiles must be visible')
+            const disposal = disposeScenario(frontier, capture, env)
+            frontier = undefined
+            capture = undefined
+            return {
+                matrixLevel,
+                tileExtentMeters: tileExtent,
+                cameraHigh: view.cameraHigh,
+                cameraLow: view.cameraLow,
+                keys: frameResult.keys,
+                visibleCount: frameResult.visible.length,
+                hash: frameResult.hash,
+                outcomes: [ frameResult.outcome ],
+                disposal,
+            }
+        } finally {
+            capture?.dispose()
+            frontier?.dispose()
+            env.gpuState?.dispose()
+            env.residency.dispose()
+        }
+    }
+
+    async function visibilityGraceScenario() {
+
+        const env = await createEnvironment({
+            id: 'visibility-grace',
+            limits: [
+                {
+                    matrixId: '1',
+                    minTileRow: 0,
+                    maxTileRow: 0,
+                    minTileCol: 0,
+                    maxTileCol: 0,
+                },
+                {
+                    matrixId: '2',
+                    minTileRow: 0,
+                    maxTileRow: 1,
+                    minTileCol: 0,
+                    maxTileCol: 1,
+                },
+            ],
+            minimumMatrixLevel: 1,
+            maximumMatrixLevel: 2,
+            maximumActiveTiles: 4,
+            maximumDemands: 4,
+            transitionReservePages: 4,
+            refineErrorPixels: 2,
+            coarsenErrorPixels: 1,
+            invisibleGraceFrames: 2,
+            levelMetrics: [ metric(1, 1_000), metric(2, 1_000) ],
+            maxPhysicalPages: 8,
+        })
+        let frontier
+        let capture
+        try {
+            const root = page(env, 1, 0, 0)
+            const childPages = children(env, root)
+            const publication = await publishPages(
+                env,
+                [ root, ...childPages ],
+                'visibility-grace-pages'
+            )
+            frontier = await createFrontier(env)
+            capture = await createCapture(frontier, 'visibility-grace-capture')
+            let current = seedEntries(frontier, publication)
+            const refine = await executeFrame({
+                env,
+                frontier,
+                capture,
+                seed: frontier.stageSeed(publication.snapshot),
+                view: allWorldView(0, publication.snapshot.epoch, 50),
+                current,
+                residentPages: [ root, ...childPages ],
+            })
+            assertEqual(refine.keys, childPages.map(child => child.key), 'grace setup refinement')
+            current = refine.nextCurrent
+            const coarsenView = orthographicView({
+                frameEpoch: 1,
+                snapshotEpoch: publication.snapshot.epoch,
+                camera: [ 0, 0, 2_000_000 ],
+                xHalfExtent: HALF_WORLD,
+                yHalfExtent: HALF_WORLD,
+                zScale: 1 / 4_000_000,
+                zTranslate: 0.75,
+                zoomHint: 1,
+            })
+            const coarsen = await executeFrame({
+                env,
+                frontier,
+                capture,
+                view: coarsenView,
+                current,
+                residentPages: [ root, ...childPages ],
+            })
+            assertEqual(coarsen.keys, [ root.key ], 'complete visible siblings must coarsen once')
+            assert(
+                coarsen.frontier[0].transitionState === 1,
+                'coarsened parent must carry the current visible frame for grace'
+            )
+            const disposal = disposeScenario(frontier, capture, env)
+            frontier = undefined
+            capture = undefined
+            return {
+                refinedKeys: refine.keys,
+                coarsenedKeys: coarsen.keys,
+                parentLastVisibleFrame: coarsen.frontier[0].transitionState,
+                decisionFrameEpoch: 1,
+                hash: coarsen.hash,
+                outcomes: [ refine.outcome, coarsen.outcome ],
+                disposal,
+            }
+        } finally {
+            capture?.dispose()
+            frontier?.dispose()
+            env.gpuState?.dispose()
+            env.residency.dispose()
+        }
+    }
+
+    async function createEnvironment(options) {
+
+        const coverage = tileMatrixCoverage({
+            tileMatrixSet: WebMercatorQuad,
+            limits: options.limits,
+        })
+        const addressSpace = virtualRasterTileAddressSpace({
+            id: `browser-frontier-${options.id}`,
+            coverage,
+        })
+        const addressCodec = webMercatorQuadAddressCodec({ coverage })
+        const plane = virtualRasterPlane({
+            id: `browser-frontier-height-${options.id}`,
+            addressSpace,
+            kind: 'scalar',
+            channels: 1,
+            sampleType: 'unorm8',
+            gpuFormat: 'r8unorm',
+        })
+        const [ width, height ] = addressSpace.pageSize
+        const residency = new VirtualRasterResidency({
+            addressSpace,
+            plane,
+            maxPhysicalPages: options.maxPhysicalPages,
+            maxStagingBytes: width * height * options.maxPhysicalPages,
+        })
+        const gpuState = await createVirtualRasterGpuState(runtime, {
+            addressSpace,
+            plane,
+            maxPhysicalPages: options.maxPhysicalPages,
+        })
+        const minimumMatrixLevel = options.minimumMatrixLevel ??
+            Number(options.limits[0].matrixId)
+        return {
+            ...options,
+            coverage,
+            addressSpace,
+            addressCodec,
+            plane,
+            residency,
+            gpuState,
+            width,
+            height,
+            minimumMatrixLevel,
+            invisibleGraceFrames: options.invisibleGraceFrames ?? 2,
+        }
+    }
+
+    async function createFrontier(env) {
+
+        return await GpuTileFrontier.create(runtime, {
+            gpuState: env.gpuState,
+            addressCodec: env.addressCodec,
+            policy: gpuTileFrontierPolicy({
+                refineErrorPixels: env.refineErrorPixels,
+                coarsenErrorPixels: env.coarsenErrorPixels,
+                minimumMatrixLevel: env.minimumMatrixLevel,
+                maximumMatrixLevel: env.maximumMatrixLevel,
+                maximumActiveTiles: env.maximumActiveTiles,
+                maximumDemands: env.maximumDemands,
+                transitionReservePages: env.transitionReservePages,
+                invisibleGraceFrames: env.invisibleGraceFrames,
+            }),
+            levelMetrics: env.levelMetrics,
+            roots: rootPages(env).reverse(),
+            drawTemplates: [ { id: 'terrain', vertexCount: 6 } ],
+        })
+    }
+
+    async function publishPages(env, pages, versionPrefix) {
+
+        pages.forEach((residentPage, index) => {
+            const outcome = env.residency.stage(ownedVirtualRasterPagePayload({
+                page: residentPage,
+                width: env.width,
+                height: env.height,
+                channels: 1,
+                data: new Uint8Array(env.width * env.height),
+                contentVersion: `${versionPrefix}-${index}`,
+            }), { generation: 1 })
+            assert(
+                outcome.status === 'staged' || outcome.status === 'resident',
+                `page ${residentPage.key} failed to stage: ${outcome.status}`
+            )
+        })
+        const publication = env.residency.publish()
+        const update = env.gpuState.stage(publication)
+        const builder = runtime.createSubmission({ validation: 'throw' })
+        for (const command of update.commands) builder.upload(command)
+        const submitted = builder.submit()
+        await env.gpuState.acknowledge(publication, submitted)
+        const outcome = await submitted.nativeOutcome
+        assert(outcome.status === 'observed-succeeded', 'residency publication failed')
+        return publication
+    }
+
+    async function executeFrame(input) {
+
+        const upload = input.frontier.writeView(input.view)
+        const frame = input.frontier.frame(upload)
+        const extras = input.createExtraUploads?.(frame) ?? []
+        const oracle = evaluateGpuTileFrontierReference({
+            descriptor: input.frontier.descriptor,
+            view: input.view,
+            currentFrontier: input.current,
+            residentPages: residentRecords(input.env, input.residentPages),
+        })
+        assert(
+            oracle.nextFrontier.length === oracle.visible.length,
+            'browser capture scenarios require every active output to be visible'
+        )
+        const captureCommand = await input.capture.commandFor(frame)
+        const builder = runtime.createSubmission({ validation: 'throw' })
+        if (input.seed !== undefined) appendSeed(builder, input.seed)
+        input.capture.prepare(builder)
+        for (const extra of extras) builder.upload(extra)
+        const submitted = builder
+            .upload(upload.command)
+            .compute(frame.pass, frame.commands)
+            .compute(input.capture.pass, [ captureCommand ])
+            .readback(input.capture.readback)
+            .submit()
+        const bytes = (await input.capture.readback.result({ after: submitted }).toBytes()).slice()
+        const nativeOutcome = await submitted.nativeOutcome
+        assert(nativeOutcome.status === 'observed-succeeded', 'frontier submission failed')
+        const decoded = decodeCapture(input.frontier, bytes, oracle.nextFrontier.length)
+        assertEqual(
+            decoded.frontier,
+            oracle.nextFrontier.map(normalizeReferenceEntry),
+            `GPU frontier bytes differ from oracle at frame ${input.view.frameEpoch}`
+        )
+        assertEqual(
+            decoded.visible,
+            oracle.visible.map(normalizeReferenceVisible),
+            `GPU visible bytes differ from oracle at frame ${input.view.frameEpoch}`
+        )
+        assertEqual(decoded.drawWords, [ 6, oracle.visible.length, 0, 0 ], 'indirect draw words')
+        extras.forEach(command => command.dispose())
+        upload.dispose()
+        return {
+            frame,
+            frontier: decoded.frontier,
+            visible: decoded.visible,
+            keys: oracle.nextFrontier.map(entry => entry.page.key),
+            nextCurrent: oracle.nextFrontier,
+            canonicalBytes: decoded.canonicalBytes,
+            hash: byteHash(decoded.canonicalBytes),
+            outcome: nativeOutcome.status,
+        }
+    }
+
+    async function createCapture(frontier, label) {
+
+        const capacity = frontier.descriptor.policy.maximumActiveTiles
+        const frontierWords = capacity * gpuTileFrontierLayouts.frontierEntry.byteSize / 4
+        const visibleWords = capacity * gpuTileFrontierLayouts.visibleInstance.byteSize / 4
+        const captureWords = 4 + frontierWords + visibleWords
+        const buffer = await runtime.createBuffer({
+            label,
+            size: captureWords * 4,
+            usage: BUFFER_COPY_SRC | BUFFER_COPY_DST | BUFFER_STORAGE,
+        })
+        const layout = await runtime.createBindLayout({
+            label: `${label} layout`,
+            group: 0,
+            entries: [
+                storageBinding(0, 'frontierSource', 'read-storage', capacity *
+                    gpuTileFrontierLayouts.frontierEntry.byteSize),
+                storageBinding(1, 'visibleSource', 'read-storage', capacity *
+                    gpuTileFrontierLayouts.visibleInstance.byteSize),
+                storageBinding(2, 'drawSource', 'read-storage', 16),
+                storageBinding(3, 'captureOutput', 'storage', captureWords * 4),
+            ],
+        })
+        const shader = await runtime.createShaderModule({
+            label: `${label} shader`,
+            sourceParts: [ {
+                label: `${label} raw storage copier`,
+                code: `
+const FRONTIER_WORDS: u32 = ${frontierWords}u;
+const VISIBLE_WORDS: u32 = ${visibleWords}u;
+const CAPTURE_WORDS: u32 = ${captureWords}u;
+@group(0) @binding(0) var<storage, read> frontierSource: array<u32>;
+@group(0) @binding(1) var<storage, read> visibleSource: array<u32>;
+@group(0) @binding(2) var<storage, read> drawSource: array<u32>;
+@group(0) @binding(3) var<storage, read_write> captureOutput: array<u32>;
+@compute @workgroup_size(64)
+fn capture(@builtin(global_invocation_id) id: vec3u) {
+    let index = id.x;
+    if (index >= CAPTURE_WORDS) { return; }
+    if (index < 4u) {
+        captureOutput[index] = drawSource[index];
+    } else if (index < 4u + FRONTIER_WORDS) {
+        captureOutput[index] = frontierSource[index - 4u];
+    } else {
+        captureOutput[index] = visibleSource[index - 4u - FRONTIER_WORDS];
+    }
+}`,
+            } ],
+        })
+        const program = runtime.createProgram({
+            label: `${label} program`,
+            compute: { module: shader, entryPoint: 'capture' },
+        })
+        const pipeline = await runtime.createComputePipeline({
+            label: `${label} pipeline`,
+            program,
+            layout: { mode: 'explicit', bindLayouts: [ layout ] },
+        })
+        const pass = runtime.createComputePass({ label: `${label} pass` })
+        const initialize = runtime.createClearBufferCommand({
+            label: `${label} initialize`,
+            target: buffer.region(),
+        })
+        const readback = await runtime.createReadbackCommand({
+            label: `${label} readback`,
+            source: { region: buffer.region(), contentEpoch: 'current-at-step' },
+            whenMissing: 'throw',
+        })
+        const commands = new Map()
+        let initialized = false
+        return {
+            pass,
+            readback,
+            prepare(builder) {
+                if (initialized) return
+                builder.clear(initialize)
+                initialized = true
+            },
+            async commandFor(frame) {
+                const existing = commands.get(frame.parity)
+                if (existing !== undefined) return existing.command
+                const draw = frontier.drawArgument(frame, 'terrain')
+                const bindSet = await runtime.createBindSet(layout, {
+                    frontierSource: frame.nextFrontier.region(),
+                    visibleSource: frame.visibleInstances.region(),
+                    drawSource: draw.region,
+                    captureOutput: buffer.region(),
+                }, { label: `${label} parity ${frame.parity} set` })
+                const command = runtime.createDispatchCommand({
+                    label: `${label} parity ${frame.parity} dispatch`,
+                    pipeline,
+                    bindSets: [ { set: bindSet } ],
+                    count: { workgroups: [ Math.ceil(captureWords / 64), 1, 1 ] },
+                    resources: {
+                        read: [
+                            currentRead(frame.nextFrontier),
+                            currentRead(frame.visibleInstances),
+                            currentRead(draw.resource),
+                            currentRead(buffer),
+                        ],
+                        write: [ buffer ],
+                    },
+                    whenMissing: 'throw',
+                })
+                commands.set(frame.parity, { command, bindSet })
+                return command
+            },
+            dispose() {
+                for (const value of commands.values()) {
+                    value.command.dispose()
+                    value.bindSet.dispose()
+                }
+                initialize.dispose()
+                readback.dispose()
+                pass.dispose()
+                pipeline.dispose()
+                program.dispose()
+                shader.dispose()
+                layout.dispose()
+                buffer.dispose()
+            },
+        }
+    }
+
+    function decodeCapture(frontier, bytes, expectedActiveCount) {
+
+        const capacity = frontier.descriptor.policy.maximumActiveTiles
+        const frontierByteLength = capacity * gpuTileFrontierLayouts.frontierEntry.byteSize
+        const visibleByteLength = capacity * gpuTileFrontierLayouts.visibleInstance.byteSize
+        const drawBytes = bytes.subarray(0, 16)
+        const drawWords = Array.from(new Uint32Array(
+            drawBytes.buffer,
+            drawBytes.byteOffset,
+            4
+        ))
+        const visibleCount = drawWords[1]
+        assert(visibleCount <= capacity, 'GPU draw count exceeds capture capacity')
+        assert(expectedActiveCount <= capacity, 'oracle active count exceeds capture capacity')
+        const frontierStart = 16
+        const visibleStart = frontierStart + frontierByteLength
+        const frontierBytes = bytes.subarray(frontierStart, visibleStart)
+        const visibleBytes = bytes.subarray(visibleStart, visibleStart + visibleByteLength)
+        const frontierEntries = gpuTileFrontierEntryCodec.createReadbackView(frontierBytes)
+            .toArray().slice(0, expectedActiveCount)
+        const visible = gpuTileFrontierVisibleInstanceCodec.createReadbackView(visibleBytes)
+            .toArray().slice(0, visibleCount)
+        const canonicalBytes = new Uint8Array(
+            16 + expectedActiveCount * gpuTileFrontierLayouts.frontierEntry.byteSize +
+                visibleCount * gpuTileFrontierLayouts.visibleInstance.byteSize
+        )
+        canonicalBytes.set(drawBytes, 0)
+        canonicalBytes.set(
+            frontierBytes.subarray(
+                0,
+                expectedActiveCount * gpuTileFrontierLayouts.frontierEntry.byteSize
+            ),
+            16
+        )
+        canonicalBytes.set(
+            visibleBytes.subarray(0, visibleCount * gpuTileFrontierLayouts.visibleInstance.byteSize),
+            16 + expectedActiveCount * gpuTileFrontierLayouts.frontierEntry.byteSize
+        )
+        return {
+            drawWords,
+            frontier: frontierEntries,
+            visible,
+            canonicalBytes: Array.from(canonicalBytes),
+        }
+    }
+
+    function seedEntries(frontier, publication) {
+
+        return frontier.descriptor.roots.map(root => residentEntry(
+            frontier.descriptor,
+            publication,
+            root,
+            'retain',
+            0
+        ))
+    }
+
+    function residentRecords(env, pages) {
+
+        const snapshot = env.gpuState.facts().snapshotEpoch
+        const unique = new Map(pages.map(residentPage => [ residentPage.key, residentPage ]))
+        return [ ...unique.values() ].map(residentPage => {
+            const resolved = env.residency.currentSnapshot.resolve(residentPage)
+            assert(
+                resolved.status === 'resident' && resolved.resolvedPage?.key === residentPage.key,
+                `resident record ${residentPage.key} did not resolve exactly`
+            )
+            return Object.freeze({
+                page: residentPage,
+                compactIndex: env.coverage.index(residentPage.tile),
+                physicalSlot: resolved.physicalSlot,
+                generation: resolved.generation,
+                contentEpoch: resolved.contentEpoch,
+                residencySnapshotEpoch: snapshot,
+            })
+        })
+    }
+
+    function residentEntry(descriptor, publication, residentPage, state, frameEpoch) {
+
+        const resolved = publication.snapshot.resolve(residentPage)
+        assert(
+            resolved.status === 'resident' && resolved.resolvedPage?.key === residentPage.key,
+            `seed page ${residentPage.key} did not resolve exactly`
+        )
+        return Object.freeze({
+            page: residentPage,
+            compactIndex: descriptor.addressCodec.coverage.index(residentPage.tile),
+            physicalSlot: resolved.physicalSlot,
+            generation: resolved.generation,
+            contentEpoch: resolved.contentEpoch,
+            residencySnapshotEpoch: publication.snapshot.epoch,
+            previousLodState: state,
+            lastVisibleFrame: frameEpoch,
+            lastDemandFrame: 0,
+            childDemandMask: 0,
+        })
+    }
+
+    function entryRecord(entry) {
+
+        return {
+            physicalSlot: entry.physicalSlot,
+            expectedGeneration: entry.generation,
+            expectedContentEpoch: entry.contentEpoch,
+            samplingLevel: entry.page.level,
+            matrixLevel: Number(entry.page.tile.matrixId),
+            tileRow: entry.page.tile.tileRow,
+            tileCol: entry.page.tile.tileCol,
+            compactIndex: entry.compactIndex,
+            previousLodState: lodState(entry.previousLodState),
+            transitionState: entry.lastVisibleFrame,
+            lastDemandEpoch: entry.lastDemandFrame,
+            childDemandMask: entry.childDemandMask,
+            residencySnapshotEpoch: entry.residencySnapshotEpoch,
+        }
+    }
+
+    function normalizeReferenceEntry(entry) {
+
+        return entryRecord(entry)
+    }
+
+    function normalizeReferenceVisible(entry) {
+
+        return {
+            physicalSlot: entry.physicalSlot,
+            expectedGeneration: entry.generation,
+            samplingLevel: entry.page.level,
+            matrixLevel: Number(entry.page.tile.matrixId),
+            tileRow: entry.page.tile.tileRow,
+            tileCol: entry.page.tile.tileCol,
+            compactIndex: entry.compactIndex,
+            contentEpoch: entry.contentEpoch,
+        }
+    }
+
+    function rootPages(env) {
+
+        const limit = env.coverage.limit(String(env.minimumMatrixLevel))
+        const roots = []
+        for (let row = limit.minTileRow; row <= limit.maxTileRow; row++) {
+            for (let col = limit.minTileCol; col <= limit.maxTileCol; col++) {
+                roots.push(page(env, env.minimumMatrixLevel, row, col))
+            }
+        }
+        return roots
+    }
+
+    function children(env, parent) {
+
+        const level = Number(parent.tile.matrixId) + 1
+        return [
+            page(env, level, parent.tile.tileRow * 2, parent.tile.tileCol * 2),
+            page(env, level, parent.tile.tileRow * 2, parent.tile.tileCol * 2 + 1),
+            page(env, level, parent.tile.tileRow * 2 + 1, parent.tile.tileCol * 2),
+            page(env, level, parent.tile.tileRow * 2 + 1, parent.tile.tileCol * 2 + 1),
+        ].filter(candidate => env.coverage.contains(candidate.tile))
+    }
+
+    function page(env, level, row, col) {
+
+        return env.addressSpace.pageFromTile({
+            matrixId: String(level),
+            tileRow: row,
+            tileCol: col,
+        })
+    }
+
+    function allWorldView(frameEpoch, snapshotEpoch, cameraZ) {
+
+        return orthographicView({
+            frameEpoch,
+            snapshotEpoch,
+            camera: [ 0, 0, cameraZ ],
+            xHalfExtent: HALF_WORLD,
+            yHalfExtent: HALF_WORLD,
+            zScale: 0.01,
+            zTranslate: 0.5,
+            zoomHint: 1,
+        })
+    }
+
+    function orthographicView(options) {
+
+        const [ cameraHigh, cameraLow ] = splitVector(options.camera)
+        return {
+            clipFromRelativeWorld: new Float32Array([
+                1 / options.xHalfExtent, 0, 0, 0,
+                0, 1 / options.yHalfExtent, 0, 0,
+                0, 0, options.zScale, 0,
+                0, 0, options.zTranslate, 1,
+            ]),
+            cameraHigh,
+            cameraLow,
+            viewport: [ 1024, 1024 ],
+            verticalFovRadians: Math.PI / 2,
+            cameraLatitudeRadians: 0,
+            zoomHint: options.zoomHint,
+            frameEpoch: options.frameEpoch,
+            residencySnapshotEpoch: options.snapshotEpoch,
+        }
+    }
+
+    function splitVector(values) {
+
+        const high = values.map(value => Math.fround(value))
+        const low = values.map((value, index) => Math.fround(value - high[index]))
+        return [ high, low ]
+    }
+
+    function fullLimit(level) {
+
+        return {
+            matrixId: String(level),
+            minTileRow: 0,
+            maxTileRow: 2 ** level - 1,
+            minTileCol: 0,
+            maxTileCol: 2 ** level - 1,
+        }
+    }
+
+    function metric(matrixLevel, geometricErrorMeters) {
+
+        return {
+            matrixLevel,
+            minimumElevationMeters: 0,
+            maximumElevationMeters: 100,
+            geometricErrorMeters,
+        }
+    }
+
+    function storageBinding(binding, name, type, minBindingSize) {
+
+        return {
+            binding,
+            name,
+            type,
+            visibility: [ 'compute' ],
+            hasDynamicOffset: false,
+            minBindingSize,
+        }
+    }
+
+    function currentRead(resource) {
+
+        return { resource, contentEpoch: 'current-at-step' }
+    }
+
+    function appendSeed(builder, seed) {
+
+        for (const command of seed.commands) {
+            if (command.commandKind === 'clear') builder.clear(command)
+            else builder.upload(command)
+        }
+    }
+
+    function disposeScenario(frontier, capture, env) {
+
+        capture.dispose()
+        frontier.dispose()
+        const disposal = {
+            frontierDisposed: frontier.facts().disposed,
+            borrowedSlotTableAlive: !env.gpuState.slotTable.isDisposed,
+        }
+        env.gpuState.dispose()
+        env.residency.dispose()
+        return disposal
+    }
+
+    function summarizeFrame(frameResult) {
+
+        return {
+            keys: frameResult.keys,
+            compactIndexes: frameResult.frontier.map(entry => entry.compactIndex),
+            visibleCount: frameResult.visible.length,
+            hash: frameResult.hash,
+        }
+    }
+
+    function lodState(value) {
+
+        return value === 'refine' ? 1 : value === 'coarsen' ? 2 : 0
+    }
+
+    function byteHash(bytes) {
+
+        let hash = 0x811c9dc5
+        for (const value of bytes) {
+            hash ^= value
+            hash = Math.imul(hash, 0x01000193) >>> 0
+        }
+        return hash.toString(16).padStart(8, '0')
+    }
+
+    function assert(condition, message) {
+
+        if (!condition) throw new Error(message)
+    }
+
+    function assertEqual(actual, expected, message) {
+
+        const actualJson = JSON.stringify(actual)
+        const expectedJson = JSON.stringify(expected)
+        if (actualJson !== expectedJson) {
+            throw new Error(`${message}: expected ${expectedJson}, received ${actualJson}`)
+        }
+    }
+
     function serializeBrowserError(error) {
+
         return {
             name: error?.constructor?.name ?? error?.name ?? 'unknown',
             message: error?.message ?? String(error),
@@ -314,7 +1207,8 @@ function validate(value) {
     const failures = []
     if (value.fatalError !== undefined) failures.push(`browser proof failed: ${value.fatalError}`)
     failures.push(...value.cleanupFailures)
-    if (!value.processFacts.browserClosed || !value.processFacts.viteClosed) {
+    if (!value.processFacts.browserClosed || !value.processFacts.browserProcessClosed ||
+        !value.processFacts.viteClosed) {
         failures.push('managed Chrome or Vite remained reachable')
     }
     if (value.proof === undefined) {
@@ -322,14 +1216,16 @@ function validate(value) {
         return failures
     }
     const proof = value.proof
-    if (proof.failure !== undefined) failures.push(`frontier creation/submission failed: ${JSON.stringify(proof.failure)}`)
+    if (proof.failure !== undefined) {
+        failures.push(`frontier semantic proof failed: ${JSON.stringify(proof.failure)}`)
+    }
     if (proof.validationError !== undefined || proof.uncapturedErrors?.length !== 0) {
         failures.push('WebGPU validation or uncaptured errors were emitted')
     }
-    if (proof.resourceCount !== 19 || proof.templateCount !== 2 ||
+    if (proof.resourceCount !== 16 || proof.templateCount !== 2 ||
         JSON.stringify(proof.labels) !== JSON.stringify(proof.commandLabels) ||
         JSON.stringify(proof.kinds) !== JSON.stringify(proof.expectedKinds)) {
-        failures.push('persistent resource or command graph facts drifted')
+        failures.push('persistent resource or 12-command graph facts drifted')
     }
     if (JSON.stringify(proof.parity) !== JSON.stringify([
         { source: 'A', target: 'B' },
@@ -338,10 +1234,19 @@ function validate(value) {
         (proof.drawArgument?.usage & 0x180) !== 0x180) {
         failures.push('parity or indirect draw resource facts drifted')
     }
-    if (proof.outcomes?.length !== 2 || proof.outcomes.some(status => status !== 'observed-succeeded')) {
-        failures.push('one or more parity submissions did not complete successfully')
+    if (proof.outcomes?.length !== 8 ||
+        proof.outcomes.some(status => status !== 'observed-succeeded')) {
+        failures.push('one or more semantic submissions did not complete successfully')
     }
-    if (!proof.disposal?.ownedBuffersDisposed || !proof.disposal?.borrowedSlotTableAlive ||
+    if (!proof.scenarios?.canonicalTie?.byteIdentical ||
+        proof.scenarios.canonicalTie.deterministicHash !==
+            proof.scenarios.canonicalTie.repeatedHash ||
+        proof.scenarios.staleContent?.activeCount !== 0 ||
+        proof.scenarios.precision?.visibleCount !== 2 ||
+        proof.scenarios.visibilityGrace?.parentLastVisibleFrame !== 1) {
+        failures.push('decoded GPU semantic evidence is incomplete')
+    }
+    if (!proof.disposal?.frontierDisposed || !proof.disposal?.borrowedSlotTableAlive ||
         !proof.disposal?.runtimeAlive) {
         failures.push('owned or borrowed disposal boundaries drifted')
     }
@@ -373,7 +1278,9 @@ function observePage(page) {
         `${request.method()} ${request.url()}: ${request.failure()?.errorText ?? 'unknown'}`
     ))
     page.on('response', response => {
-        if (response.status() >= 400) pushBounded(events.httpFailures, `${response.status()} ${response.url()}`)
+        if (response.status() >= 400) {
+            pushBounded(events.httpFailures, `${response.status()} ${response.url()}`)
+        }
     })
     return events
 }
@@ -419,6 +1326,32 @@ async function waitForVite(state) {
         await delay(100)
     }
     throw new Error(`Timed out waiting for Vite at ${baseUrl}`)
+}
+
+async function closeBrowser(activeBrowser, server) {
+
+    if (activeBrowser === undefined && server === undefined) return
+    try {
+        if (activeBrowser !== undefined && activeBrowser.isConnected()) {
+            await withTimeout(activeBrowser.close(), 15_000, 'Chrome shutdown')
+        }
+        const child = server?.process()
+        if (server !== undefined && child !== undefined &&
+            child.exitCode === null && child.signalCode === null) {
+            await withTimeout(server.close(), 5_000, 'Chrome server shutdown')
+        }
+    } catch (closeError) {
+        try {
+            if (server !== undefined) {
+                await withTimeout(server.kill(), 5_000, 'Chrome forced termination')
+            }
+        } catch (killError) {
+            throw new Error(
+                `${serializeError(closeError)}; forced termination failed: ${serializeError(killError)}`
+            )
+        }
+        throw closeError
+    }
 }
 
 async function stopVite(state) {
@@ -481,12 +1414,21 @@ async function canConnect(selectedPort) {
 
 function withTimeout(promise, milliseconds, label) {
 
-    return Promise.race([
-        promise,
-        new Promise((_, rejectPromise) => {
-            setTimeout(() => rejectPromise(new Error(`${label} timed out`)), milliseconds)
-        }),
-    ])
+    return new Promise((resolvePromise, rejectPromise) => {
+        const timer = setTimeout(() => {
+            rejectPromise(new Error(`${label} timed out`))
+        }, milliseconds)
+        Promise.resolve(promise).then(
+            value => {
+                clearTimeout(timer)
+                resolvePromise(value)
+            },
+            error => {
+                clearTimeout(timer)
+                rejectPromise(error)
+            }
+        )
+    })
 }
 
 function positiveInteger(value, fallback) {

@@ -33,6 +33,7 @@ export type VirtualRasterGpuUpdate = Readonly<{
 
 export type VirtualRasterGpuFacts = Readonly<{
     snapshotEpoch: number
+    acknowledgementSerial: number
     stagedSnapshotEpoch?: number
     maxPhysicalPages: number
     atlasWidth: number
@@ -72,6 +73,8 @@ export class VirtualRasterGpuState {
     readonly #slotTableUpload: UploadCommand
     #disposed = false
     #acknowledgedSnapshotEpoch = -1
+    #acknowledgementSerial = 0
+    #acknowledgedSnapshot: VirtualRasterSnapshot | undefined
     #stagedSnapshotEpoch: number | undefined
     #stagedSlotGenerations = new Map<number, number>()
     #uploadedSlotGenerations = new Map<number, number>()
@@ -370,6 +373,8 @@ export class VirtualRasterGpuState {
             }
         }
         this.#acknowledgedSnapshotEpoch = snapshot.epoch
+        this.#acknowledgedSnapshot = snapshot
+        this.#acknowledgementSerial++
         this.#uploadedSlotGenerations = new Map(this.#stagedSlotGenerations)
         this.#stagedSnapshotEpoch = undefined
         this.#stagedPublication = undefined
@@ -404,6 +409,7 @@ export class VirtualRasterGpuState {
 
         const facts: {
             snapshotEpoch: number
+            acknowledgementSerial: number
             stagedSnapshotEpoch?: number
             maxPhysicalPages: number
             atlasWidth: number
@@ -415,6 +421,7 @@ export class VirtualRasterGpuState {
             slotTableBytes: number
         } = {
             snapshotEpoch: this.#acknowledgedSnapshotEpoch,
+            acknowledgementSerial: this.#acknowledgementSerial,
             maxPhysicalPages: this.maxPhysicalPages,
             atlasWidth: this.atlasWidth,
             atlasHeight: this.atlasHeight,
@@ -430,6 +437,12 @@ export class VirtualRasterGpuState {
         return Object.freeze(facts)
     }
 
+    acknowledges(snapshot: VirtualRasterSnapshot): boolean {
+
+        this.#assertActive()
+        return this.#acknowledgedSnapshot === snapshot
+    }
+
     dispose(): void {
 
         if (this.#disposed) return
@@ -443,6 +456,7 @@ export class VirtualRasterGpuState {
         this.#uploadedSlotGenerations.clear()
         this.#stagedCommandIds.clear()
         this.#stagedPublication = undefined
+        this.#acknowledgedSnapshot = undefined
         this.#releaseStagedAtlasUploads()
     }
 

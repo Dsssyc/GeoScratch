@@ -33,10 +33,12 @@ import {
     type GpuTileFrontierCoreFacts,
     type GpuTileFrontierDrawArgument,
     type GpuTileFrontierDrawTemplate,
+    type GpuTileFrontierFeedbackLayout,
+    type GpuTileFrontierFeedbackOutput,
+    type GpuTileFrontierFeedbackSection,
     type GpuTileFrontierFrame,
     type GpuTileFrontierLevelMetric,
     type GpuTileFrontierPolicy,
-    type GpuTileFrontierResourceGraph,
     type GpuTileFrontierSeed,
     type GpuTileFrontierView,
     type GpuTileFrontierViewUpload,
@@ -310,13 +312,21 @@ const typedFrontierSeed: GpuTileFrontierSeed = typedGpuFrontier.stageSeed(
 const typedFrontierUpload: GpuTileFrontierViewUpload = typedGpuFrontier.writeView(
     typedFrontierView,
 )
-const typedFrontierFrame: GpuTileFrontierFrame = typedGpuFrontier.frame(1)
+const typedFrontierFrame: GpuTileFrontierFrame = typedGpuFrontier.frame(typedFrontierUpload)
 const typedFrontierDraw: GpuTileFrontierDrawArgument = typedGpuFrontier.drawArgument(
     typedFrontierFrame,
     'terrain',
 )
 const typedFrontierFacts: GpuTileFrontierCoreFacts = typedGpuFrontier.facts()
-const typedFrontierResources: GpuTileFrontierResourceGraph = typedFrontierFacts.resources
+const typedFrontierFeedback: GpuTileFrontierFeedbackOutput = typedFrontierFrame.feedbackOutput
+const typedFrontierFeedbackBufferId: string = typedFrontierFeedback.bufferId
+const typedFrontierFeedbackLayout: GpuTileFrontierFeedbackLayout = typedFrontierFeedback.layout
+const typedFrontierDemandSection: GpuTileFrontierFeedbackSection =
+    typedFrontierFeedbackLayout.demands
+// @ts-expect-error Mutable frontier resources are not public facts
+typedFrontierFacts.resources
+// @ts-expect-error Packed feedback does not expose its write-capable BufferRegion
+typedFrontierFeedback.region
 // @ts-expect-error Task 3C owns bounded feedback integration
 typedGpuFrontier.feedback(typedFrontierFrame)
 // @ts-expect-error Task 3C owns bounded capture integration
@@ -364,7 +374,10 @@ void typedFrontierUpload
 void typedFrontierFrame
 void typedFrontierDraw
 void typedFrontierFacts
-void typedFrontierResources
+void typedFrontierFeedback
+void typedFrontierFeedbackBufferId
+void typedFrontierFeedbackLayout
+void typedFrontierDemandSection
 void typedFrontierWithoutProjection
 void typedFrontierInvalidTuple
 void typedFrontierInvalidDraw

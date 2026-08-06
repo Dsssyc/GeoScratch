@@ -87,6 +87,45 @@ export type GpuTileFrontierFacts = Readonly<{
     convergenceState: GpuTileFrontierConvergenceState
 }>
 
+export function compareGpuTileFrontierPathOrder(
+    left: Pick<VirtualRasterPageIdentity, 'tile'>,
+    right: Pick<VirtualRasterPageIdentity, 'tile'>
+): number {
+
+    const leftTile = frontierPathTile(left)
+    const rightTile = frontierPathTile(right)
+    const commonDepth = Math.min(leftTile.matrixLevel, rightTile.matrixLevel)
+    for (let depth = 0; depth < commonDepth; depth++) {
+        const leftShift = leftTile.matrixLevel - depth - 1
+        const rightShift = rightTile.matrixLevel - depth - 1
+        const leftChild = pathChildOrdinal(
+            leftTile.tileRow,
+            leftTile.tileCol,
+            leftShift
+        )
+        const rightChild = pathChildOrdinal(
+            rightTile.tileRow,
+            rightTile.tileCol,
+            rightShift
+        )
+        if (leftChild !== rightChild) return leftChild - rightChild
+    }
+    return leftTile.matrixLevel - rightTile.matrixLevel
+}
+
+export function gpuTileFrontierPathIsPrefix(
+    prefix: Pick<VirtualRasterPageIdentity, 'tile'>,
+    candidate: Pick<VirtualRasterPageIdentity, 'tile'>
+): boolean {
+
+    const prefixTile = frontierPathTile(prefix)
+    const candidateTile = frontierPathTile(candidate)
+    if (prefixTile.matrixLevel > candidateTile.matrixLevel) return false
+    const shift = candidateTile.matrixLevel - prefixTile.matrixLevel
+    return Math.floor(candidateTile.tileRow / 2 ** shift) === prefixTile.tileRow &&
+        Math.floor(candidateTile.tileCol / 2 ** shift) === prefixTile.tileCol
+}
+
 type FrontierLayout = Readonly<{
     codec: LayoutCodec
     byteSize: number
@@ -101,6 +140,8 @@ export const gpuTileFrontierMapMetaCodec = layoutCodec({
         { name: 'clipFromRelativeWorld', type: 'mat4x4f' },
         { name: 'cameraHigh', type: 'vec3f' },
         { name: 'cameraLow', type: 'vec3f' },
+        { name: 'cameraMercatorHigh', type: 'vec2f' },
+        { name: 'cameraMercatorLow', type: 'vec2f' },
         { name: 'viewport', type: 'vec2f' },
         { name: 'verticalFovRadians', type: 'f32' },
         { name: 'cameraLatitudeRadians', type: 'f32' },
@@ -139,6 +180,7 @@ export const gpuTileFrontierEntryCodec = layoutCodec({
     fields: [
         { name: 'physicalSlot', type: 'u32' },
         { name: 'expectedGeneration', type: 'u32' },
+        { name: 'expectedContentEpoch', type: 'u32' },
         { name: 'samplingLevel', type: 'u32' },
         { name: 'matrixLevel', type: 'u32' },
         { name: 'tileRow', type: 'u32' },
@@ -386,22 +428,67 @@ function validateRoots(descriptor: GpuTileFrontierDescriptor): void {
             { maximumActiveTiles: descriptor.policy.maximumActiveTiles, expectedRootCount }
         )
     }
-    for (let index = 0; index < descriptor.roots.length; index++) {
-        const root = descriptor.roots[index]!
-        const expectedRoot = descriptor.gpuState.addressSpace.pageFromTile({
-            matrixId,
-            tileRow: minimumLimit.minTileRow + Math.floor(index / width),
-            tileCol: minimumLimit.minTileCol + index % width,
-        })
-        descriptor.gpuState.addressSpace.assertPage(root)
-        if (root.key !== expectedRoot.key) {
+    const expectedRootKeys = new Set<string>()
+    for (let row = minimumLimit.minTileRow; row <= minimumLimit.maxTileRow; row++) {
+        for (let col = minimumLimit.minTileCol; col <= minimumLimit.maxTileCol; col++) {
+            expectedRootKeys.add(descriptor.gpuState.addressSpace.pageFromTile({
+                matrixId,
+                tileRow: row,
+                tileCol: col,
+            }).key)
+        }
+    }
+    for (const root of descriptor.roots) {
+        try {
+            descriptor.gpuState.addressSpace.assertPage(root)
+        } catch {
             return invalidFrontier(
-                'GPU tile frontier roots must follow canonical minimum-level coverage order.',
-                { index, root: expectedRoot.key },
-                { index, root: root.key }
+                'GPU tile frontier roots must belong to the descriptor address space.',
+                { addressSpaceId: descriptor.gpuState.addressSpace.id },
+                root
+            )
+        }
+        if (!expectedRootKeys.delete(root.key)) {
+            return invalidFrontier(
+                'GPU tile frontier roots must be a unique complete minimum-level set.',
+                { matrixId, limit: minimumLimit },
+                { root: root.key }
             )
         }
     }
+}
+
+function frontierPathTile(
+    page: Pick<VirtualRasterPageIdentity, 'tile'>
+): Readonly<{ matrixLevel: number, tileRow: number, tileCol: number }> {
+
+    const tile = page.tile
+    if (tile === undefined) {
+        return invalidFrontier(
+            'GPU tile frontier path ordering requires tile-backed pages.',
+            { tile: 'WebMercatorQuad tile' },
+            page
+        )
+    }
+    const matrixLevel = Number(tile.matrixId)
+    const tileRow = tile.tileRow
+    const tileCol = tile.tileCol
+    if (!u32(matrixLevel) || !u32(tileRow) || !u32(tileCol)) {
+        return invalidFrontier(
+            'GPU tile frontier path ordering requires u32 tile coordinates.',
+            { matrixLevel: 'u32', tileRow: 'u32', tileCol: 'u32' },
+            tile
+        )
+    }
+    return { matrixLevel, tileRow, tileCol }
+}
+
+function pathChildOrdinal(tileRow: number, tileCol: number, shift: number): number {
+
+    const scale = 2 ** shift
+    const rowBit = Math.floor(tileRow / scale) % 2
+    const colBit = Math.floor(tileCol / scale) % 2
+    return rowBit * 2 + colBit
 }
 
 function validateDrawTemplates(templates: readonly GpuTileFrontierDrawTemplate[]): void {

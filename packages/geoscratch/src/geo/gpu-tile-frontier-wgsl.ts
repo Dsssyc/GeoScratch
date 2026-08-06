@@ -12,6 +12,7 @@ import {
 
 export const GPU_TILE_FRONTIER_WORKGROUP_SIZE = 64
 export const GPU_TILE_FRONTIER_SCAN_BLOCK_SIZE = 64
+const WEB_MERCATOR_HALF_WORLD_METERS = 20_037_508.3427892
 
 export const gpuTileFrontierEntryPoints = Object.freeze([
     'resetFrontier',
@@ -78,6 +79,9 @@ export function createGpuTileFrontierWgsl(
 ): GpuTileFrontierWgslModule {
 
     const levels = descriptor.levelMetrics.map(metric => metric.matrixLevel)
+    const worldWidth = WEB_MERCATOR_HALF_WORLD_METERS * 2
+    const worldWidthHigh = Math.fround(worldWidth)
+    const worldWidthLow = Math.fround(worldWidth - worldWidthHigh)
     const limits = levels.map(matrixLevel => {
         const limit = descriptor.addressCodec.coverage.limit(String(matrixLevel))
         if (limit === undefined) throw new TypeError('GPU tile frontier WGSL coverage is incomplete.')
@@ -116,8 +120,9 @@ const FRONTIER_SCAN_BLOCK_COUNT: u32 = ${scanBlockCount}u;
 const FRONTIER_LEVEL_COUNT: u32 = ${levels.length}u;
 const FRONTIER_DRAW_TEMPLATE_COUNT: u32 = ${drawTemplates.length}u;
 const FRONTIER_INVALID_U32: u32 = 0xffffffffu;
-const FRONTIER_HALF_WORLD_METERS: f32 = 20037508.3427892;
 const FRONTIER_PI: f32 = 3.141592653589793;
+const FRONTIER_WORLD_WIDTH_HIGH: f32 = ${f32Literal(worldWidthHigh)};
+const FRONTIER_WORLD_WIDTH_LOW: f32 = ${f32Literal(worldWidthLow)};
 
 const FRONTIER_COVERAGE_OFFSETS: array<u32, ${levels.length}> = array<u32, ${levels.length}>(${u32List(limits.map(limit => limit.offset))});
 const FRONTIER_COVERAGE_MIN_ROWS: array<u32, ${levels.length}> = array<u32, ${levels.length}>(${u32List(limits.map(limit => limit.minimumRow))});
@@ -298,6 +303,7 @@ fn currentEntryValid(entry: GpuTileFrontierEntry) -> bool {
     return residentSlots[base + SLOT_VALID] == 1u &&
         residentSlots[base + SLOT_PHYSICAL_SLOT] == entry.physicalSlot &&
         residentSlots[base + SLOT_GENERATION] == entry.expectedGeneration &&
+        residentSlots[base + SLOT_CONTENT_EPOCH] == entry.expectedContentEpoch &&
         residentSlots[base + SLOT_SAMPLING_LEVEL] == entry.samplingLevel &&
         residentSlots[base + SLOT_MATRIX_LEVEL] == entry.matrixLevel &&
         residentSlots[base + SLOT_TILE_ROW] == entry.tileRow &&
@@ -330,17 +336,58 @@ fn metricFor(matrixLevel: u32) -> GpuTileFrontierLevelMetric {
     return levelMetrics[coverageLevelIndex(matrixLevel)];
 }
 
+fn subtractExpansions(
+    leftHigh: f32,
+    leftLow: f32,
+    rightHigh: f32,
+    rightLow: f32
+) -> f32 {
+    let difference = leftHigh - rightHigh;
+    let bridge = difference - leftHigh;
+    let roundoff = (leftHigh - (difference - bridge)) - (rightHigh + bridge);
+    return difference + (roundoff + leftLow - rightLow);
+}
+
+fn normalizedWorldMeters(relative: f32) -> f32 {
+    let high = relative * FRONTIER_WORLD_WIDTH_HIGH;
+    let low = fma(relative, FRONTIER_WORLD_WIDTH_HIGH, -high) +
+        relative * FRONTIER_WORLD_WIDTH_LOW;
+    return high + low;
+}
+
 fn boundsFor(matrixLevel: u32, row: u32, column: u32) -> FrontierBounds {
     let metric = metricFor(matrixLevel);
     let dimension = exp2(f32(matrixLevel));
-    let minimumX = (2.0 * f32(column) / dimension - 1.0) * FRONTIER_HALF_WORLD_METERS;
-    let maximumX = (2.0 * f32(column + 1u) / dimension - 1.0) * FRONTIER_HALF_WORLD_METERS;
-    let maximumY = (1.0 - 2.0 * f32(row) / dimension) * FRONTIER_HALF_WORLD_METERS;
-    let minimumY = (1.0 - 2.0 * f32(row + 1u) / dimension) * FRONTIER_HALF_WORLD_METERS;
-    let mercatorAltitudeScale = 1.0 / max(abs(cos(mapMeta.cameraLatitudeRadians)), 0.01);
+    let normalizedWest = f32(column) / dimension;
+    let normalizedNorth = f32(row) / dimension;
+    let tileExtent = normalizedWorldMeters(1.0 / dimension);
+    let minimumX = normalizedWorldMeters(subtractExpansions(
+        normalizedWest,
+        0.0,
+        mapMeta.cameraMercatorHigh.x,
+        mapMeta.cameraMercatorLow.x
+    ));
+    let maximumY = normalizedWorldMeters(subtractExpansions(
+        mapMeta.cameraMercatorHigh.y,
+        mapMeta.cameraMercatorLow.y,
+        normalizedNorth,
+        0.0
+    ));
+    let minimumZ = subtractExpansions(
+        metric.minimumElevationMeters,
+        0.0,
+        mapMeta.cameraHigh.z,
+        mapMeta.cameraLow.z
+    );
+    let maximumZ = subtractExpansions(
+        metric.maximumElevationMeters,
+        0.0,
+        mapMeta.cameraHigh.z,
+        mapMeta.cameraLow.z
+    );
     return FrontierBounds(
-        vec3f(minimumX, minimumY, metric.minimumElevationMeters * mercatorAltitudeScale) - mapMeta.cameraHigh - mapMeta.cameraLow,
-        vec3f(maximumX, maximumY, metric.maximumElevationMeters * mercatorAltitudeScale) - mapMeta.cameraHigh - mapMeta.cameraLow
+        vec3f(minimumX, maximumY - tileExtent, minimumZ),
+        vec3f(minimumX + tileExtent, maximumY, maximumZ)
     );
 }
 
@@ -396,8 +443,8 @@ fn distanceToAabb(bounds: FrontierBounds) -> f32 {
 }
 
 fn screenSpaceError(matrixLevel: u32, bounds: FrontierBounds) -> f32 {
-    let distance = max(distanceToAabb(bounds), 1e-3);
-    let denominator = 2.0 * max(tan(mapMeta.verticalFovRadians * 0.5), 1e-4) * distance;
+    let distance = max(distanceToAabb(bounds), 1e-6);
+    let denominator = 2.0 * tan(mapMeta.verticalFovRadians * 0.5) * distance;
     return metricFor(matrixLevel).geometricErrorMeters * mapMeta.viewport.y / denominator;
 }
 
@@ -531,6 +578,7 @@ fn makeEntry(matrixLevel: u32, row: u32, column: u32, slot: u32, previousLodStat
     return GpuTileFrontierEntry(
         slot,
         residentSlots[base + SLOT_GENERATION],
+        residentSlots[base + SLOT_CONTENT_EPOCH],
         samplingLevelFor(matrixLevel),
         matrixLevel,
         row,
@@ -549,7 +597,6 @@ fn outputVisible(entry: GpuTileFrontierEntry) -> bool {
 }
 
 fn writeVisible(index: u32, entry: GpuTileFrontierEntry) {
-    let base = slotBase(entry.physicalSlot);
     visibleOutput[index] = GpuTileFrontierVisibleInstance(
         entry.physicalSlot,
         entry.expectedGeneration,
@@ -558,7 +605,7 @@ fn writeVisible(index: u32, entry: GpuTileFrontierEntry) {
         entry.tileRow,
         entry.tileCol,
         entry.compactIndex,
-        residentSlots[base + SLOT_CONTENT_EPOCH]
+        entry.expectedContentEpoch
     );
 }
 
@@ -611,13 +658,22 @@ fn buildLookup(@builtin(global_invocation_id) globalId: vec3u) {
     var slot = lookupHash(key);
     for (var probe = 0u; probe < FRONTIER_LOOKUP_CAPACITY; probe += 1u) {
         let base = slot * LOOKUP_STRIDE;
-        let claim = atomicCompareExchangeWeak(&frontierLookupWrite[base + LOOKUP_KEY], FRONTIER_INVALID_U32, key);
-        if (claim.exchanged) {
-            atomicStore(&frontierLookupWrite[base + LOOKUP_INDEX], index);
-            atomicStore(&frontierLookupWrite[base + LOOKUP_EPOCH], mapMeta.frameEpoch);
-            return;
+        var observed = FRONTIER_INVALID_U32;
+        loop {
+            let claim = atomicCompareExchangeWeak(
+                &frontierLookupWrite[base + LOOKUP_KEY],
+                FRONTIER_INVALID_U32,
+                key
+            );
+            observed = claim.old_value;
+            if (claim.exchanged) {
+                atomicStore(&frontierLookupWrite[base + LOOKUP_INDEX], index);
+                atomicStore(&frontierLookupWrite[base + LOOKUP_EPOCH], mapMeta.frameEpoch);
+                return;
+            }
+            if (observed != FRONTIER_INVALID_U32) { break; }
         }
-        if (claim.old_value == key) {
+        if (observed == key) {
             atomicAdd(&countersWrite[COUNTER_LOOKUP_DUPLICATE], 1u);
             return;
         }
@@ -816,7 +872,12 @@ fn siblingLastVisible(entry: GpuTileFrontierEntry) -> u32 {
         let sibling = currentFrontier[index];
         if (sibling.matrixLevel == entry.matrixLevel &&
             sibling.tileRow / 2u == parentRow && sibling.tileCol / 2u == parentColumn) {
-            lastVisible = max(lastVisible, sibling.transitionState);
+            let siblingVisibleEpoch = select(
+                sibling.transitionState,
+                mapMeta.frameEpoch,
+                atomicLoad(&decisionWrite[decisionOffset(index, DECISION_VISIBLE_FLAG)]) == 1u
+            );
+            lastVisible = max(lastVisible, siblingVisibleEpoch);
         }
     }
     return lastVisible;
@@ -1075,6 +1136,7 @@ fn updatedRetainEntry(
     return GpuTileFrontierEntry(
         entry.physicalSlot,
         entry.expectedGeneration,
+        entry.expectedContentEpoch,
         entry.samplingLevel,
         entry.matrixLevel,
         entry.tileRow,
@@ -1276,4 +1338,10 @@ fn finalizeArguments(@builtin(global_invocation_id) globalId: vec3u) {
 function u32List(values: readonly number[]): string {
 
     return values.map(value => `${value}u`).join(', ')
+}
+
+function f32Literal(value: number): string {
+
+    const text = Math.fround(value).toString()
+    return /[.e]/i.test(text) ? text : `${text}.0`
 }

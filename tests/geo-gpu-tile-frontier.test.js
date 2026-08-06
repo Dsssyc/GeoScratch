@@ -3,6 +3,7 @@ import { GPURuntime } from 'geoscratch/scratch'
 import {
     GeoDiagnosticError,
     GpuTileFrontier,
+    VirtualRasterSnapshot,
     VirtualRasterResidency,
     WebMercatorQuad,
     createVirtualRasterGpuState,
@@ -20,6 +21,9 @@ import {
     gpuTileFrontierLayouts,
 } from '../packages/geoscratch/dist/geo/gpu-tile-frontier-layout.js'
 import {
+    physicalPagesForSnapshot,
+} from '../packages/geoscratch/dist/geo/virtual-raster.js'
+import {
     createGpuTileFrontierWgsl,
     gpuTileFrontierEntryPoints,
 } from '../packages/geoscratch/dist/geo/gpu-tile-frontier-wgsl.js'
@@ -34,6 +38,8 @@ const SNAPSHOT_EPOCH = 7
 const U32_LIMIT = 0x1_0000_0000
 const GPU_BUFFER_USAGE_STORAGE = 0x80
 const GPU_BUFFER_USAGE_INDIRECT = 0x100
+const GPU_BUFFER_USAGE_COPY_SRC = 0x04
+const GPU_BUFFER_USAGE_COPY_DST = 0x08
 
 const FRONTIER_COMMAND_LABELS = [
     'Reset GPU tile frontier',
@@ -75,7 +81,7 @@ function createFixture(options = {}) {
     )
     const coverage = tileMatrixCoverage({
         tileMatrixSet: WebMercatorQuad,
-        limits: coverageLevels.map(matrixLevel => ({
+        limits: coverageLevels.map(matrixLevel => options.coverageLimits?.[matrixLevel] ?? ({
             matrixId: String(matrixLevel),
             minTileRow: 0,
             maxTileRow: 2 ** matrixLevel - 1,
@@ -223,6 +229,9 @@ async function createGpuResourceGraphFixture(options = {}) {
         coverageMatrixLevels: options.coverageMatrixLevels,
     })
     const fake = createFakeGpu()
+    if (options.maxStorageBufferBindingSize !== undefined) {
+        fake.device.limits.maxStorageBufferBindingSize = options.maxStorageBufferBindingSize
+    }
     const runtime = await GPURuntime.create({ gpu: fake.gpu })
     const addressSpace = logical.descriptor.gpuState.addressSpace
     const plane = virtualRasterPlane({
@@ -277,6 +286,25 @@ async function createGpuResourceGraphFixture(options = {}) {
             gpuState,
         },
     }
+}
+
+async function acknowledgePage(fixture, page, contentVersion, generation = 1) {
+
+    const [ width, height ] = fixture.gpuState.addressSpace.pageSize
+    fixture.residency.stage(ownedVirtualRasterPagePayload({
+        page,
+        width,
+        height,
+        channels: 1,
+        data: new Uint8Array(width * height),
+        contentVersion,
+    }), { generation })
+    const publication = fixture.residency.publish()
+    const update = fixture.gpuState.stage(publication)
+    const builder = fixture.runtime.createSubmission({ validation: 'throw' })
+    for (const command of update.commands) builder.upload(command)
+    await fixture.gpuState.acknowledge(publication, builder.submit())
+    return publication
 }
 
 function appendSeed(builder, seed) {
@@ -346,10 +374,204 @@ async function expectGpuFrontierDiagnostic(action, expectedCode) {
 
 describe('Geo GPU tile frontier contracts and reference oracle', () => {
 
-    it('creates the persistent bounded GPU resource graph and two parity templates', async() => {
+    it('carries expected content epoch in the LayoutCodec frontier authority ABI', () => {
+
+        expect(gpuTileFrontierLayouts.frontierEntry.fieldOffsets).to.deep.include({
+            physicalSlot: 0,
+            expectedGeneration: 4,
+            expectedContentEpoch: 8,
+            samplingLevel: 12,
+            residencySnapshotEpoch: 48,
+        })
+        expect(gpuTileFrontierLayouts.frontierEntry.byteSize).to.equal(52)
+    })
+
+    it('reports one persistent packed COPY_SRC feedback layout without exposing its region', async() => {
 
         const fixture = await createGpuResourceGraphFixture()
         const frontier = await GpuTileFrontier.create(fixture.runtime, fixture.descriptor)
+        const view = frontier.writeView(fixture.view)
+        const frame = frontier.frame(view)
+        const output = frame.feedbackOutput
+        const sections = [
+            output.layout.demands,
+            output.layout.retirements,
+            output.layout.counters,
+            output.layout.diagnostics,
+        ]
+        const feedbackBuffer = fixture.calls.buffers.find(buffer =>
+            buffer.descriptor.label.includes('GPU tile frontier feedbackOutput')
+        )
+
+        expect(output).not.to.have.property('region')
+        expect(feedbackBuffer.descriptor.usage & GPU_BUFFER_USAGE_COPY_SRC).to.not.equal(0)
+        expect(feedbackBuffer.descriptor.usage & GPU_BUFFER_USAGE_STORAGE).to.not.equal(0)
+        expect(feedbackBuffer.descriptor.usage & GPU_BUFFER_USAGE_COPY_DST).to.not.equal(0)
+        expect(sections.map(section => section.offset)).to.deep.equal(
+            [ ...sections ].map(section => section.offset).sort((left, right) => left - right)
+        )
+        expect(sections.every(section =>
+            section.offset % fixture.runtime.deviceLimits.minStorageBufferOffsetAlignment === 0
+        )).to.equal(true)
+        expect(new Set(sections.map(section => section.bufferId))).to.deep.equal(
+            new Set([ output.bufferId ])
+        )
+        expect(fixture.calls.buffers.filter(buffer =>
+            buffer.descriptor.label.includes('GPU tile frontier feedbackOutput')
+        )).to.have.length(1)
+        expect(frontier.facts()).not.to.have.property('resources')
+
+        view.dispose()
+        frontier.dispose()
+        fixture.gpuState.dispose()
+        fixture.residency.dispose()
+        fixture.runtime.dispose()
+    })
+
+    it('rejects a self-consistent same-epoch snapshot that GPU state did not acknowledge', async() => {
+
+        const fixture = await createGpuResourceGraphFixture()
+        const frontier = await GpuTileFrontier.create(fixture.runtime, fixture.descriptor)
+        const acknowledged = fixture.publication.snapshot
+        const forged = new VirtualRasterSnapshot(
+            acknowledged.addressSpace,
+            acknowledged.epoch,
+            acknowledged.pageTable,
+            physicalPagesForSnapshot(acknowledged)
+        )
+
+        expect(forged).not.to.equal(acknowledged)
+        expect(forged.resolve(fixture.descriptor.roots[0])).to.deep.equal(
+            acknowledged.resolve(fixture.descriptor.roots[0])
+        )
+        expect(() => frontier.stageSeed(forged)).to.throw(GeoDiagnosticError)
+        expect(frontier.stageSeed(acknowledged).snapshot).to.equal(acknowledged)
+
+        frontier.dispose()
+        fixture.gpuState.dispose()
+        fixture.residency.dispose()
+        fixture.runtime.dispose()
+    })
+
+    it('binds views to immutable upload tokens and current acknowledged snapshot authority', async() => {
+
+        const fixture = await createGpuResourceGraphFixture({ maximumMatrixLevel: 1 })
+        const frontier = await GpuTileFrontier.create(fixture.runtime, fixture.descriptor)
+        const oldView = frontier.writeView(fixture.view)
+        const oldBytes = new Uint8Array(
+            oldView.command.data.buffer,
+            oldView.command.data.byteOffset,
+            oldView.command.data.byteLength
+        ).slice()
+        const child = fixture.gpuState.addressSpace.pageFromTile({
+            matrixId: '1',
+            tileRow: 0,
+            tileCol: 0,
+        })
+        const publication = await acknowledgePage(
+            fixture,
+            child,
+            'frontier-temporal-child-v1'
+        )
+
+        expect(() => frontier.frame(oldView)).to.throw(GeoDiagnosticError)
+        const currentView = frontier.writeView({
+            ...fixture.view,
+            frameEpoch: 1,
+            residencySnapshotEpoch: publication.snapshot.epoch,
+        })
+        const frame = frontier.frame(currentView)
+        expect(frame).to.deep.include({ frameEpoch: 1, parity: 1 })
+        expect(currentView.command).not.to.equal(oldView.command)
+        expect(Array.from(new Uint8Array(
+            oldView.command.data.buffer,
+            oldView.command.data.byteOffset,
+            oldView.command.data.byteLength
+        ))).to.deep.equal(Array.from(oldBytes))
+
+        oldView.dispose()
+        oldView.dispose()
+        expect(oldView.isDisposed).to.equal(true)
+        expect(oldView.command.isDisposed).to.equal(true)
+        expect(() => frontier.frame(oldView)).to.throw(GeoDiagnosticError)
+
+        currentView.dispose()
+        frontier.dispose()
+        fixture.gpuState.dispose()
+        fixture.residency.dispose()
+        fixture.runtime.dispose()
+    })
+
+    it('snapshots the complete descriptor before the first asynchronous allocation', async() => {
+
+        const fixture = await createGpuResourceGraphFixture()
+        const descriptor = {
+            gpuState: fixture.gpuState,
+            addressCodec: fixture.descriptor.addressCodec,
+            policy: { ...fixture.descriptor.policy },
+            levelMetrics: fixture.descriptor.levelMetrics.map(metric => ({ ...metric })),
+            roots: [ ...fixture.descriptor.roots ],
+            drawTemplates: fixture.descriptor.drawTemplates.map(template => ({ ...template })),
+        }
+        const expected = {
+            refineErrorPixels: descriptor.policy.refineErrorPixels,
+            geometricErrorMeters: descriptor.levelMetrics[0].geometricErrorMeters,
+            root: descriptor.roots[0],
+            drawTemplateId: descriptor.drawTemplates[0].id,
+        }
+        const creating = GpuTileFrontier.create(fixture.runtime, descriptor)
+        descriptor.policy.refineErrorPixels = 999
+        descriptor.levelMetrics[0].geometricErrorMeters = 999
+        descriptor.roots.length = 0
+        descriptor.drawTemplates[0].id = 'mutated-after-create'
+        const frontier = await creating
+
+        expect(frontier.descriptor.gpuState).to.equal(fixture.gpuState)
+        expect(frontier.descriptor.addressCodec).to.equal(fixture.descriptor.addressCodec)
+        expect(frontier.descriptor.policy.refineErrorPixels).to.equal(expected.refineErrorPixels)
+        expect(frontier.descriptor.levelMetrics[0].geometricErrorMeters)
+            .to.equal(expected.geometricErrorMeters)
+        expect(frontier.descriptor.roots).to.deep.equal([ expected.root ])
+        expect(frontier.descriptor.drawTemplates[0].id).to.equal(expected.drawTemplateId)
+        expect([
+            frontier.descriptor,
+            frontier.descriptor.policy,
+            frontier.descriptor.levelMetrics,
+            frontier.descriptor.levelMetrics[0],
+            frontier.descriptor.roots,
+            frontier.descriptor.drawTemplates,
+            frontier.descriptor.drawTemplates[0],
+        ].every(Object.isFrozen)).to.equal(true)
+
+        frontier.dispose()
+        fixture.gpuState.dispose()
+        fixture.residency.dispose()
+        fixture.runtime.dispose()
+    })
+
+    it('rejects a borrowed slot table above maxStorageBufferBindingSize before allocation', async() => {
+
+        const fixture = await createGpuResourceGraphFixture({
+            maxStorageBufferBindingSize: 1024,
+        })
+        const bufferCount = fixture.calls.buffers.length
+        await expectGpuFrontierDiagnostic(
+            () => GpuTileFrontier.create(fixture.runtime, fixture.descriptor),
+            'GEO_GPU_TILE_FRONTIER_CAPACITY_EXCEEDED'
+        )
+        expect(fixture.calls.buffers).to.have.length(bufferCount)
+
+        fixture.gpuState.dispose()
+        fixture.residency.dispose()
+        fixture.runtime.dispose()
+    })
+
+    it('creates the persistent bounded GPU resource graph and two parity templates', async() => {
+
+        const fixture = await createGpuResourceGraphFixture()
+        const bufferStart = fixture.calls.buffers.length
+        const frontier = await GpuTileFrontier.create(fixture.runtime, fixture.descriptor)
+        const frontierNativeBuffers = fixture.calls.buffers.slice(bufferStart)
         const nativeCounts = {
             buffers: fixture.calls.buffers.length,
             bindLayouts: fixture.calls.bindGroupLayouts.length,
@@ -357,13 +579,16 @@ describe('Geo GPU tile frontier contracts and reference oracle', () => {
             pipelines: fixture.calls.computePipelines.length,
         }
 
-        const even = frontier.frame(0)
-        const odd = frontier.frame(1)
-        const evenAgain = frontier.frame(2)
+        const evenView = frontier.writeView(fixture.view)
+        const oddView = frontier.writeView({ ...fixture.view, frameEpoch: 1 })
+        const evenAgainView = frontier.writeView({ ...fixture.view, frameEpoch: 2 })
+        const even = frontier.frame(evenView)
+        const odd = frontier.frame(oddView)
+        const evenAgain = frontier.frame(evenAgainView)
         const facts = frontier.facts()
         const terrain = frontier.drawArgument(even, 'terrain')
 
-        expect(Object.keys(facts.resources)).to.have.length(19)
+        expect(frontierNativeBuffers).to.have.length(16)
         expect(fixture.calls.computePipelines).to.have.length(12)
         expect(fixture.calls.bindGroupLayouts).to.have.length(12)
         expect(fixture.calls.bindGroups).to.have.length(24)
@@ -379,26 +604,24 @@ describe('Geo GPU tile frontier contracts and reference oracle', () => {
             .to.deep.equal(FRONTIER_COMMAND_COUNTS)
         expect(even).to.deep.include({ source: 'A', target: 'B', parity: 0 })
         expect(odd).to.deep.include({ source: 'B', target: 'A', parity: 1 })
-        expect(even.currentFrontier).to.equal(facts.resources.frontierA)
-        expect(even.nextFrontier).to.equal(facts.resources.frontierB)
-        expect(odd.currentFrontier).to.equal(facts.resources.frontierB)
-        expect(odd.nextFrontier).to.equal(facts.resources.frontierA)
+        expect(even.currentFrontier).to.equal(odd.nextFrontier)
+        expect(even.nextFrontier).to.equal(odd.currentFrontier)
         expect(evenAgain.commands.map(command => command.id))
             .to.deep.equal(even.commands.map(command => command.id))
         expect(evenAgain.currentFrontier).to.equal(even.currentFrontier)
         expect(evenAgain.nextFrontier).to.equal(even.nextFrontier)
         for (const resource of [
-            facts.resources.dispatchArgumentsA,
-            facts.resources.dispatchArgumentsB,
-            facts.resources.drawArgumentsA,
-            facts.resources.drawArgumentsB,
+            even.currentDispatchArguments,
+            even.nextDispatchArguments,
+            even.drawArguments,
+            odd.drawArguments,
             terrain.resource,
         ]) {
             expect(resource.usage & GPU_BUFFER_USAGE_STORAGE).to.not.equal(0)
             expect(resource.usage & GPU_BUFFER_USAGE_INDIRECT).to.not.equal(0)
         }
         expect(terrain).to.deep.include({ templateId: 'terrain', offset: 0, size: 16 })
-        expect(terrain.resource).to.equal(facts.resources.drawArgumentsB)
+        expect(terrain.resource).to.equal(even.drawArguments)
         expect(fixture.calls.maps).to.deep.equal([])
         expect({
             buffers: fixture.calls.buffers.length,
@@ -407,9 +630,12 @@ describe('Geo GPU tile frontier contracts and reference oracle', () => {
             pipelines: fixture.calls.computePipelines.length,
         }).to.deep.equal(nativeCounts)
 
+        evenView.dispose()
+        oddView.dispose()
+        evenAgainView.dispose()
         frontier.dispose()
         frontier.dispose()
-        expect(Object.values(facts.resources).every(resource => resource.isDisposed)).to.equal(true)
+        expect(frontierNativeBuffers.every(buffer => buffer.destroyed)).to.equal(true)
         expect(fixture.gpuState.slotTable.isDisposed).to.equal(false)
         fixture.gpuState.dispose()
         fixture.residency.dispose()
@@ -434,19 +660,25 @@ describe('Geo GPU tile frontier contracts and reference oracle', () => {
         expect(seed).to.equal(sameSeed)
         expect(seed.snapshotEpoch).to.equal(fixture.publication.snapshot.epoch)
         expect(fixture.calls.queueWrites).to.have.length(queueWritesBeforeSeed)
-        expect(Array.from(rootWords.slice(0, 7))).to.deep.equal([
+        expect(Array.from(rootWords.slice(0, 8))).to.deep.equal([
             resolvedRoot.physicalSlot,
             resolvedRoot.generation,
+            resolvedRoot.contentEpoch,
             fixture.descriptor.roots[0].level,
             0,
             0,
             0,
             0,
         ])
-        expect(rootWords[11]).to.equal(fixture.publication.snapshot.epoch)
+        expect(rootWords[12]).to.equal(fixture.publication.snapshot.epoch)
 
         const firstView = frontier.writeView(fixture.view)
-        const firstFrame = frontier.frame(0)
+        const firstBytes = new Uint8Array(
+            firstView.command.data.buffer,
+            firstView.command.data.byteOffset,
+            firstView.command.data.byteLength
+        ).slice()
+        const firstFrame = frontier.frame(firstView)
         const firstDraw = await createDrawConsumer(fixture, frontier, firstFrame)
         const firstBuilder = appendSeed(
             fixture.runtime.createSubmission({ validation: 'throw' }),
@@ -466,7 +698,7 @@ describe('Geo GPU tile frontier contracts and reference oracle', () => {
         }
         const queueWritesBeforeSecondFrame = fixture.calls.queueWrites.length
         const secondView = frontier.writeView({ ...fixture.view, frameEpoch: 1 })
-        const secondFrame = frontier.frame(1)
+        const secondFrame = frontier.frame(secondView)
         const secondDraw = await createDrawConsumer(fixture, frontier, secondFrame)
         const secondSubmitted = fixture.runtime.createSubmission({ validation: 'throw' })
             .upload(secondView.command)
@@ -474,8 +706,12 @@ describe('Geo GPU tile frontier contracts and reference oracle', () => {
             .render(secondDraw.pass, [ secondDraw.draw ])
             .submit()
 
-        expect(secondView.command).to.equal(firstView.command)
-        expect(secondView.data).to.equal(firstView.data)
+        expect(secondView.command).not.to.equal(firstView.command)
+        expect(Array.from(new Uint8Array(
+            firstView.command.data.buffer,
+            firstView.command.data.byteOffset,
+            firstView.command.data.byteLength
+        ))).to.deep.equal(Array.from(firstBytes))
         expect(fixture.calls.queueWrites).to.have.length(queueWritesBeforeSecondFrame + 1)
         expect(fixture.calls.maps).to.deep.equal([])
         expect({
@@ -495,6 +731,8 @@ describe('Geo GPU tile frontier contracts and reference oracle', () => {
         secondDraw.pipeline.dispose()
         secondDraw.program.dispose()
         secondDraw.target.dispose()
+        firstView.dispose()
+        secondView.dispose()
         frontier.dispose()
         fixture.gpuState.dispose()
         fixture.residency.dispose()
@@ -507,7 +745,7 @@ describe('Geo GPU tile frontier contracts and reference oracle', () => {
         const frontier = await GpuTileFrontier.create(fixture.runtime, fixture.descriptor)
         const seed = frontier.stageSeed(fixture.publication.snapshot)
         const view = frontier.writeView(fixture.view)
-        const frame = frontier.frame(0)
+        const frame = frontier.frame(view)
         const drawFixture = await createDrawConsumer(fixture, frontier, frame)
         const submitted = appendSeed(
             fixture.runtime.createSubmission({ validation: 'throw' }),
@@ -561,75 +799,54 @@ describe('Geo GPU tile frontier contracts and reference oracle', () => {
         drawFixture.pipeline.dispose()
         drawFixture.program.dispose()
         drawFixture.target.dispose()
+        view.dispose()
         frontier.dispose()
         fixture.gpuState.dispose()
         fixture.residency.dispose()
         fixture.runtime.dispose()
     })
 
-    it('publishes output producer epochs for zero-work and overflow count inputs', async() => {
+    it('publishes bounded output producer epochs without mutable resource facts', async() => {
 
-        for (const input of [ 'zero', 'overflow' ]) {
-            const fixture = await createGpuResourceGraphFixture()
-            const frontier = await GpuTileFrontier.create(fixture.runtime, fixture.descriptor)
-            const seed = frontier.stageSeed(fixture.publication.snapshot)
-            const view = frontier.writeView(fixture.view)
-            const frame = frontier.frame(0)
-            const facts = frontier.facts()
-            const counters = new Uint32Array(32)
-            counters[0] = input === 'zero' ? 0 : facts.capacities.activeTiles + 1
-            const dispatch = new Uint32Array([
-                Math.ceil(counters[0] / 64),
-                1,
-                1,
-            ])
-            const counterUpload = fixture.runtime.createUploadCommand({
-                label: `Set ${input} GPU tile frontier counter input`,
-                target: facts.resources.counters.region(),
-                data: counters,
-            })
-            const dispatchUpload = fixture.runtime.createUploadCommand({
-                label: `Set ${input} GPU tile frontier dispatch input`,
-                target: facts.resources.dispatchArgumentsA.region(),
-                data: dispatch,
-            })
-            const submitted = appendSeed(
-                fixture.runtime.createSubmission({ validation: 'throw' }),
-                seed
-            )
-                .upload(counterUpload)
-                .upload(dispatchUpload)
-                .upload(view.command)
-                .compute(frame.pass, frame.commands)
-                .submit()
-            const finalizer = frame.commands.at(-1)
-            const expectedProducerIds = [
-                frame.nextDispatchArguments.id,
-                frame.drawArguments.id,
-                frame.visibleInstances.id,
-                facts.resources.diagnostics.id,
-            ]
+        const fixture = await createGpuResourceGraphFixture()
+        const frontier = await GpuTileFrontier.create(fixture.runtime, fixture.descriptor)
+        const seed = frontier.stageSeed(fixture.publication.snapshot)
+        const view = frontier.writeView(fixture.view)
+        const frame = frontier.frame(view)
+        const submitted = appendSeed(
+            fixture.runtime.createSubmission({ validation: 'throw' }),
+            seed
+        )
+            .upload(view.command)
+            .compute(frame.pass, frame.commands)
+            .submit()
+        const finalizer = frame.commands.at(-1)
+        const expectedProducerIds = [
+            frame.nextDispatchArguments.id,
+            frame.drawArguments.id,
+            frame.visibleInstances.id,
+            frame.feedbackOutput.bufferId,
+        ]
 
-            for (const resourceId of expectedProducerIds) {
-                expect(submitted.producerEpochs.some(epoch =>
-                    epoch.resourceId === resourceId
-                ), `${input} producer ${resourceId}`).to.equal(true)
-            }
-            expect(submitted.resourceAccesses.some(access =>
-                access.commandId === finalizer.id &&
-                access.resourceId === frame.nextDispatchArguments.id &&
-                access.access === 'write'
-            )).to.equal(true)
-            expect(fixture.calls.maps).to.deep.equal([])
-            expect(await submitted.nativeOutcome).to.deep.include({ status: 'observed-succeeded' })
-
-            counterUpload.dispose()
-            dispatchUpload.dispose()
-            frontier.dispose()
-            fixture.gpuState.dispose()
-            fixture.residency.dispose()
-            fixture.runtime.dispose()
+        for (const resourceId of expectedProducerIds) {
+            expect(submitted.producerEpochs.some(epoch =>
+                epoch.resourceId === resourceId
+            ), `producer ${resourceId}`).to.equal(true)
         }
+        expect(submitted.resourceAccesses.some(access =>
+            access.commandId === finalizer.id &&
+            access.resourceId === frame.nextDispatchArguments.id &&
+            access.access === 'write'
+        )).to.equal(true)
+        expect(frontier.facts()).not.to.have.property('resources')
+        expect(fixture.calls.maps).to.deep.equal([])
+        expect(await submitted.nativeOutcome).to.deep.include({ status: 'observed-succeeded' })
+
+        view.dispose()
+        frontier.dispose()
+        fixture.gpuState.dispose()
+        fixture.residency.dispose()
+        fixture.runtime.dispose()
     })
 
     it('accepts newer acknowledged residency epochs without rebuilding or reseeding', async() => {
@@ -672,6 +889,7 @@ describe('Geo GPU tile frontier contracts and reference oracle', () => {
             command.label === 'Upload GPU tile frontier roots'
         ).id).to.equal(rootUploadId)
 
+        upload.dispose()
         frontier.dispose()
         fixture.gpuState.dispose()
         fixture.residency.dispose()
@@ -702,7 +920,8 @@ describe('Geo GPU tile frontier contracts and reference oracle', () => {
         expect(incomplete.calls.buffers).to.have.length(incompleteBuffers)
 
         const frontier = await GpuTileFrontier.create(fixture.runtime, fixture.descriptor)
-        const frame = frontier.frame(0)
+        const view = frontier.writeView(fixture.view)
+        const frame = frontier.frame(view)
         expect(() => frontier.drawArgument({ ...frame }, 'terrain')).to.throw(GeoDiagnosticError)
         expect(() => frontier.drawArgument(frame, 'missing')).to.throw(GeoDiagnosticError)
 
@@ -721,9 +940,10 @@ describe('Geo GPU tile frontier contracts and reference oracle', () => {
         expect(() => frontier.stageSeed(unacknowledged)).to.throw(GeoDiagnosticError)
 
         frontier.dispose()
-        expect(() => frontier.frame(0)).to.throw(GeoDiagnosticError)
+        expect(() => frontier.frame(view)).to.throw(GeoDiagnosticError)
         expect(() => frontier.writeView(fixture.view)).to.throw(GeoDiagnosticError)
         expect(() => frontier.drawArgument(frame, 'terrain')).to.throw(GeoDiagnosticError)
+        view.dispose()
         otherRuntime.dispose()
         incomplete.gpuState.dispose()
         incomplete.residency.dispose()
@@ -818,17 +1038,19 @@ describe('Geo GPU tile frontier contracts and reference oracle', () => {
     it('exposes one LayoutCodec-derived source of byte sizes and offsets', () => {
 
         expect(gpuTileFrontierLayouts.mapMeta).to.deep.include({
-            byteSize: 128,
+            byteSize: 144,
             fieldOffsets: {
                 clipFromRelativeWorld: 0,
                 cameraHigh: 64,
                 cameraLow: 80,
-                viewport: 96,
-                verticalFovRadians: 104,
-                cameraLatitudeRadians: 108,
-                zoomHint: 112,
-                frameEpoch: 116,
-                residencySnapshotEpoch: 120,
+                cameraMercatorHigh: 96,
+                cameraMercatorLow: 104,
+                viewport: 112,
+                verticalFovRadians: 120,
+                cameraLatitudeRadians: 124,
+                zoomHint: 128,
+                frameEpoch: 132,
+                residencySnapshotEpoch: 136,
             },
         })
         expect(gpuTileFrontierLayouts.policy).to.deep.include({
@@ -845,7 +1067,7 @@ describe('Geo GPU tile frontier contracts and reference oracle', () => {
             },
         })
         expect(gpuTileFrontierLayouts.levelMetric.byteSize).to.equal(16)
-        expect(gpuTileFrontierLayouts.frontierEntry.byteSize).to.equal(48)
+        expect(gpuTileFrontierLayouts.frontierEntry.byteSize).to.equal(52)
         expect(gpuTileFrontierLayouts.visibleInstance.byteSize).to.equal(32)
         expect(gpuTileFrontierLayouts.demand.byteSize).to.equal(48)
         expect(gpuTileFrontierLayouts.diagnostics.byteSize).to.equal(80)
@@ -887,7 +1109,7 @@ describe('Geo GPU tile frontier contracts and reference oracle', () => {
         }
     })
 
-    it('requires ordered metrics, complete canonical roots, and u32-packed values', () => {
+    it('requires ordered metrics, a complete root set, and u32-packed values', () => {
 
         const fixture = createFixture()
         expectFrontierInvalid(() => evaluateGpuTileFrontierReference({
@@ -911,6 +1133,46 @@ describe('Geo GPU tile frontier contracts and reference oracle', () => {
             currentFrontier: [],
             residentPages: [],
         }))
+
+        const subcoverage = createFixture({
+            minimumMatrixLevel: 2,
+            maximumMatrixLevel: 2,
+            coverageLimits: {
+                2: {
+                    matrixId: '2',
+                    minTileRow: 0,
+                    maxTileRow: 1,
+                    minTileCol: 1,
+                    maxTileCol: 2,
+                },
+            },
+        })
+        const reversedRoots = [ ...subcoverage.descriptor.roots ].reverse()
+        const accepted = evaluateGpuTileFrontierReference({
+            descriptor: {
+                ...subcoverage.descriptor,
+                roots: reversedRoots,
+            },
+            view: subcoverage.view,
+            currentFrontier: reversedRoots.map((root, index) => subcoverage.entry(
+                Number(root.tile.matrixId),
+                root.tile.tileRow,
+                root.tile.tileCol,
+                { physicalSlot: index }
+            )),
+            residentPages: reversedRoots.map((root, index) => subcoverage.resident(
+                Number(root.tile.matrixId),
+                root.tile.tileRow,
+                root.tile.tileCol,
+                { physicalSlot: index }
+            )),
+        })
+        expect(keys(accepted.nextFrontier)).to.deep.equal([
+            subcoverage.page(2, 0, 1).key,
+            subcoverage.page(2, 1, 1).key,
+            subcoverage.page(2, 0, 2).key,
+            subcoverage.page(2, 1, 2).key,
+        ])
 
         expectFrontierInvalid(() => gpuTileFrontierPolicy({
             ...fixture.descriptor.policy,
@@ -1016,6 +1278,18 @@ describe('Geo GPU tile frontier contracts and reference oracle', () => {
         expectFrontierInvalid(() => fixture.evaluate([ second, first ], residents))
     })
 
+    it('rejects a current frontier whose tile paths are not prefix-free', () => {
+
+        const fixture = createFixture()
+        const parent = fixture.entry(1, 0, 0)
+        const descendant = fixture.entry(2, 0, 1)
+
+        expectFrontierInvalid(() => fixture.evaluate(
+            [ descendant, parent ],
+            [ fixture.resident(1, 0, 0), fixture.resident(2, 0, 1) ]
+        ))
+    })
+
     it('rejects noncanonical resident indexes and physical-slot ownership', () => {
 
         const fixture = createFixture()
@@ -1054,6 +1328,22 @@ describe('Geo GPU tile frontier contracts and reference oracle', () => {
             staleGenerationCount: 1,
             visibleInstanceCount: 0,
         })
+    })
+
+    it('keeps unchanged older entries while rejecting frontier authority from the future', () => {
+
+        const fixture = createFixture({ errorByLevel: [ 0.1, 0.1, 0.1, 0.1 ] })
+        const unchanged = fixture.entry(3, 3, 3, { residencySnapshotEpoch: 6 })
+        const resident = fixture.resident(3, 3, 3, { residencySnapshotEpoch: 7 })
+        const retained = fixture.evaluate([ unchanged ], [ resident ])
+        const future = fixture.entry(3, 3, 3, { residencySnapshotEpoch: 8 })
+        const rejected = fixture.evaluate([ future ], [ resident ])
+
+        expect(keys(retained.nextFrontier)).to.deep.equal([ unchanged.page.key ])
+        expect(retained.nextFrontier[0].residencySnapshotEpoch).to.equal(7)
+        expect(retained.facts.staleGenerationCount).to.equal(0)
+        expect(rejected.nextFrontier).to.deep.equal([])
+        expect(rejected.facts.staleGenerationCount).to.equal(1)
     })
 
     it('does not draw an off-frustum leaf', () => {
@@ -1167,6 +1457,29 @@ describe('Geo GPU tile frontier contracts and reference oracle', () => {
         expect(expiredResult.facts.coarsenCandidateCount).to.equal(1)
     })
 
+    it('propagates current visibility into a coarsened parent grace epoch', () => {
+
+        const fixture = createFixture({ errorByLevel: [ 0.1, 0.1, 0.1, 0.1 ] })
+        const siblings = [
+            fixture.entry(2, 0, 0, { lastVisibleFrame: 1 }),
+            fixture.entry(2, 0, 1, { lastVisibleFrame: 1 }),
+            fixture.entry(2, 1, 0, { lastVisibleFrame: 1 }),
+            fixture.entry(2, 1, 1, { lastVisibleFrame: 1 }),
+        ]
+        const residents = [
+            fixture.resident(1, 0, 0),
+            ...siblings.map(sibling => fixture.resident(
+                2,
+                sibling.page.tile.tileRow,
+                sibling.page.tile.tileCol
+            )),
+        ]
+        const result = fixture.evaluate(siblings, residents)
+
+        expect(keys(result.nextFrontier)).to.deep.equal([ fixture.page(1, 0, 0).key ])
+        expect(result.nextFrontier[0].lastVisibleFrame).to.equal(fixture.view.frameEpoch)
+    })
+
     it('keeps a parent and emits canonical covered-child demands until all children exist', () => {
 
         const fixture = createFixture({ errorByLevel: [ 100, 100_000, 100, 100 ] })
@@ -1210,6 +1523,47 @@ describe('Geo GPU tile frontier contracts and reference oracle', () => {
         expect(result.demands).to.deep.equal([])
     })
 
+    it('preserves hierarchical path-prefix order across mixed-level refinement', () => {
+
+        const fixture = createFixture({ errorByLevel: [ 100, 100_000, 100, 100 ] })
+        const parents = [ fixture.entry(1, 0, 0), fixture.entry(1, 0, 1) ]
+        const residentChildren = [
+            [ 2, 0, 0 ], [ 2, 0, 1 ], [ 2, 1, 0 ], [ 2, 1, 1 ],
+            [ 2, 0, 2 ], [ 2, 0, 3 ], [ 2, 1, 2 ], [ 2, 1, 3 ],
+        ]
+        const result = fixture.evaluate(
+            [ parents[1], parents[0] ],
+            [
+                ...parents.map(parent => fixture.resident(
+                    1,
+                    parent.page.tile.tileRow,
+                    parent.page.tile.tileCol
+                )),
+                ...residentChildren.map(([ level, row, col ]) =>
+                    fixture.resident(level, row, col)),
+            ]
+        )
+
+        expect(keys(result.nextFrontier)).to.deep.equal(
+            residentChildren.map(([ level, row, col ]) => fixture.page(level, row, col).key)
+        )
+
+        const mixed = fixture.evaluate(
+            [ parents[1], parents[0] ],
+            [
+                fixture.resident(1, 0, 0),
+                fixture.resident(1, 0, 1),
+                ...residentChildren.slice(0, 4).map(([ level, row, col ]) =>
+                    fixture.resident(level, row, col)),
+            ]
+        )
+        expect(keys(mixed.nextFrontier)).to.deep.equal([
+            ...residentChildren.slice(0, 4).map(([ level, row, col ]) =>
+                fixture.page(level, row, col).key),
+            parents[1].page.key,
+        ])
+    })
+
     it('compacts demands by canonical parent and child order after priority selection', () => {
 
         const fixture = createFixture({ errorByLevel: [ 100, 100_000, 100, 100 ] })
@@ -1228,12 +1582,6 @@ describe('Geo GPU tile frontier contracts and reference oracle', () => {
         ].map(([ level, row, col ]) => fixture.page(level, row, col).key)
 
         expect(result.demands.map(demand => demand.page.key)).to.deep.equal(expectedDemands)
-        expect(result.demands.slice(0, 4).every(demand =>
-            demand.parent.key === lowerPriorityFirst.page.key
-        )).to.equal(true)
-        expect(result.demands.slice(4).every(demand =>
-            demand.parent.key === higherPrioritySecond.page.key
-        )).to.equal(true)
     })
 
     it('refines only the balancing neighbor when its children are already resident', () => {
@@ -1364,7 +1712,7 @@ describe('Geo GPU tile frontier contracts and reference oracle', () => {
         expect(incomplete.facts.coarsenCandidateCount).to.equal(0)
     })
 
-    it('uses compact-index tie order and preserves complete cover under tight capacity', () => {
+    it('uses hierarchical path tie order and preserves complete cover under tight capacity', () => {
 
         const fixture = createFixture({
             maximumActiveTiles: 5,

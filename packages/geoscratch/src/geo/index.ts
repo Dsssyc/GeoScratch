@@ -26,8 +26,10 @@ export { GpuTileFrontier } from './gpu-tile-frontier.js'
 export type {
     GpuTileFrontierCoreFacts,
     GpuTileFrontierDrawArgument,
+    GpuTileFrontierFeedbackLayout,
+    GpuTileFrontierFeedbackOutput,
+    GpuTileFrontierFeedbackSection,
     GpuTileFrontierFrame,
-    GpuTileFrontierResourceGraph,
     GpuTileFrontierSeed,
     GpuTileFrontierViewUpload,
 } from './gpu-tile-frontier.js'
