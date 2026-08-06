@@ -1,6 +1,7 @@
 import type {
     BufferResource,
     GPURuntime,
+    SubmissionAuthorityStamp,
     SubmittedWork,
     TextureResource,
     TextureUploadCommand,
@@ -53,6 +54,11 @@ const PAGE_TABLE_WORDS = 8
 const SLOT_TABLE_WORDS = 12
 const SLOT_INVALID = 0xffff_ffff
 
+const residencySubmissionAuthorities = new WeakMap<
+    VirtualRasterGpuState,
+    ReturnType<GPURuntime['createSubmissionAuthority']>
+>()
+
 export class VirtualRasterGpuState {
 
     readonly runtime: GPURuntime
@@ -81,6 +87,7 @@ export class VirtualRasterGpuState {
     #stagedAtlasUploads: TextureUploadCommand[] = []
     #stagedCommandIds = new Set<string>()
     #stagedPublication: VirtualRasterPublication | undefined
+    #settlingPublication: VirtualRasterPublication | undefined
 
     private constructor(
         runtime: GPURuntime,
@@ -112,6 +119,9 @@ export class VirtualRasterGpuState {
         this.atlasRows = atlasRows
         this.atlasWidth = descriptor.addressSpace.pageSize[0]! * atlasColumns
         this.atlasHeight = descriptor.addressSpace.pageSize[1]! * atlasRows
+        residencySubmissionAuthorities.set(this, runtime.createSubmissionAuthority({
+            label: `${descriptor.addressSpace.id} residency publication`,
+        }))
     }
 
     static async create(
@@ -317,6 +327,9 @@ export class VirtualRasterGpuState {
     async acknowledge(publication: VirtualRasterPublication, submitted: SubmittedWork): Promise<void> {
 
         this.#assertActive()
+        if (this.#settlingPublication !== undefined) {
+            return this.#publicationPending(publication)
+        }
         const snapshot = publication.snapshot
         if (snapshot.addressSpace !== this.addressSpace ||
             this.#stagedPublication !== publication ||
@@ -337,56 +350,83 @@ export class VirtualRasterGpuState {
                 },
             })
         }
-        const submittedCommandIds = new Set(
-            submitted.resourceAccesses
-                .filter(access => access.stepKind === 'upload')
-                .map(access => access.commandId)
-                .filter((id): id is string => id !== undefined)
-        )
-        const missingCommandIds = [ ...this.#stagedCommandIds ]
-            .filter(commandId => !submittedCommandIds.has(commandId))
-        if (missingCommandIds.length > 0) {
-            return throwGeoDiagnostic({
-                code: 'GEO_VIRTUAL_RASTER_UPLOAD_NOT_SUBMITTED',
-                phase: 'residency',
-                subject: { kind: 'virtual-raster-publication', id: String(snapshot.epoch) },
-                message: 'Publication acknowledgement requires SubmittedWork containing every staged upload.',
-                expected: { commandIds: Object.freeze([ ...this.#stagedCommandIds ]) },
-                actual: { missingCommandIds: Object.freeze(missingCommandIds) },
-            })
-        }
-        if (this.#stagedCommandIds.size > 0) {
-            const nativeOutcome = await submitted.nativeOutcome
-            if (nativeOutcome.status !== 'observed-succeeded') {
+        this.#settlingPublication = publication
+        let settlementAttempted = false
+        try {
+            const submittedCommandIds = new Set(
+                submitted.resourceAccesses
+                    .filter(access => access.stepKind === 'upload')
+                    .map(access => access.commandId)
+                    .filter((id): id is string => id !== undefined)
+            )
+            const missingCommandIds = [ ...this.#stagedCommandIds ]
+                .filter(commandId => !submittedCommandIds.has(commandId))
+            if (missingCommandIds.length > 0) {
                 return throwGeoDiagnostic({
-                    code: 'GEO_VIRTUAL_RASTER_GPU_PUBLICATION_NATIVE_OUTCOME_FAILED',
+                    code: 'GEO_VIRTUAL_RASTER_UPLOAD_NOT_SUBMITTED',
                     phase: 'residency',
                     subject: { kind: 'virtual-raster-publication', id: String(snapshot.epoch) },
-                    message: 'Publication acknowledgement requires a successful native outcome for its staged work.',
-                    expected: { nativeOutcome: 'observed-succeeded' },
-                    actual: {
-                        submissionId: submitted.id,
-                        snapshotEpoch: snapshot.epoch,
-                        nativeOutcome: nativeOutcome.status,
-                    },
+                    message: 'Publication acknowledgement requires SubmittedWork containing every staged upload.',
+                    expected: { commandIds: Object.freeze([ ...this.#stagedCommandIds ]) },
+                    actual: { missingCommandIds: Object.freeze(missingCommandIds) },
                 })
             }
+            if (this.#stagedCommandIds.size > 0) {
+                const nativeOutcome = await submitted.nativeOutcome
+                this.#assertStagedPublication(publication)
+                if (nativeOutcome.status !== 'observed-succeeded') {
+                    return throwGeoDiagnostic({
+                        code: 'GEO_VIRTUAL_RASTER_GPU_PUBLICATION_NATIVE_OUTCOME_FAILED',
+                        phase: 'residency',
+                        subject: { kind: 'virtual-raster-publication', id: String(snapshot.epoch) },
+                        message: 'Publication acknowledgement requires a successful native outcome for its staged work.',
+                        expected: { nativeOutcome: 'observed-succeeded' },
+                        actual: {
+                            submissionId: submitted.id,
+                            snapshotEpoch: snapshot.epoch,
+                            nativeOutcome: nativeOutcome.status,
+                        },
+                    })
+                }
+            }
+            this.#assertStagedPublication(publication)
+            settlementAttempted = true
+            await publication.acknowledge()
+            this.#assertStagedPublication(publication)
+            if (publication.inspect().state !== 'acknowledged') {
+                return throwGeoDiagnostic({
+                    code: 'GEO_VIRTUAL_RASTER_PUBLICATION_INVALID',
+                    phase: 'residency',
+                    subject: { kind: 'virtual-raster-publication', id: String(snapshot.epoch) },
+                    message: 'GPU publication authority requires an acknowledged residency settlement.',
+                    expected: { state: 'acknowledged' },
+                    actual: publication.inspect(),
+                })
+            }
+            this.#acknowledgedSnapshotEpoch = snapshot.epoch
+            this.#acknowledgedSnapshot = snapshot
+            this.#acknowledgementSerial++
+            this.#uploadedSlotGenerations = new Map(this.#stagedSlotGenerations)
+            residencySubmissionAuthorityFor(this).advance()
+            this.#clearStagedPublication()
+        } catch (error) {
+            if (settlementAttempted && this.#stagedPublication === publication) {
+                this.#clearStagedPublication()
+            }
+            throw error
+        } finally {
+            if (this.#settlingPublication === publication) {
+                this.#settlingPublication = undefined
+            }
         }
-        this.#acknowledgedSnapshotEpoch = snapshot.epoch
-        this.#acknowledgedSnapshot = snapshot
-        this.#acknowledgementSerial++
-        this.#uploadedSlotGenerations = new Map(this.#stagedSlotGenerations)
-        this.#stagedSnapshotEpoch = undefined
-        this.#stagedPublication = undefined
-        this.#stagedSlotGenerations.clear()
-        this.#stagedCommandIds.clear()
-        this.#releaseStagedAtlasUploads()
-        await publication.acknowledge()
     }
 
     async abandon(publication: VirtualRasterPublication): Promise<void> {
 
         this.#assertActive()
+        if (this.#settlingPublication !== undefined) {
+            return this.#publicationPending(publication)
+        }
         if (this.#stagedPublication !== publication) {
             return throwGeoDiagnostic({
                 code: 'GEO_VIRTUAL_RASTER_SNAPSHOT_MISMATCH',
@@ -397,11 +437,7 @@ export class VirtualRasterGpuState {
                 actual: { snapshotEpoch: publication.snapshot.epoch },
             })
         }
-        this.#stagedSnapshotEpoch = undefined
-        this.#stagedPublication = undefined
-        this.#stagedSlotGenerations.clear()
-        this.#stagedCommandIds.clear()
-        this.#releaseStagedAtlasUploads()
+        this.#clearStagedPublication()
         await publication.abandon()
     }
 
@@ -455,9 +491,11 @@ export class VirtualRasterGpuState {
         this.#stagedSlotGenerations.clear()
         this.#uploadedSlotGenerations.clear()
         this.#stagedCommandIds.clear()
+        this.#settlingPublication = undefined
         this.#stagedPublication = undefined
         this.#acknowledgedSnapshot = undefined
         this.#releaseStagedAtlasUploads()
+        residencySubmissionAuthorityFor(this).dispose()
     }
 
     #encodePageTable(snapshot: VirtualRasterSnapshot): void {
@@ -503,11 +541,68 @@ export class VirtualRasterGpuState {
         }
     }
 
+    #assertStagedPublication(publication: VirtualRasterPublication): void {
+
+        this.#assertActive()
+        if (this.#stagedPublication === publication &&
+            this.#settlingPublication === publication &&
+            this.#stagedSnapshotEpoch === publication.snapshot.epoch) return
+        return throwGeoDiagnostic({
+            code: 'GEO_VIRTUAL_RASTER_SNAPSHOT_MISMATCH',
+            phase: 'residency',
+            subject: { kind: 'virtual-raster-gpu-state', id: this.addressSpace.id },
+            message: 'Staged GPU publication identity changed before acknowledgement commit.',
+            expected: { snapshotEpoch: publication.snapshot.epoch },
+            actual: {
+                stagedSnapshotEpoch: this.#stagedSnapshotEpoch,
+                settling: this.#settlingPublication === publication,
+            },
+        })
+    }
+
+    #publicationPending(publication: VirtualRasterPublication): never {
+
+        return throwGeoDiagnostic({
+            code: 'GEO_VIRTUAL_RASTER_GPU_PUBLICATION_PENDING',
+            phase: 'residency',
+            subject: { kind: 'virtual-raster-gpu-state', id: this.addressSpace.id },
+            message: 'GPU publication acknowledgement is already settling.',
+            expected: { settlingSnapshotEpoch: this.#settlingPublication?.snapshot.epoch },
+            actual: { snapshotEpoch: publication.snapshot.epoch },
+        })
+    }
+
+    #clearStagedPublication(): void {
+
+        this.#stagedSnapshotEpoch = undefined
+        this.#stagedPublication = undefined
+        this.#stagedSlotGenerations.clear()
+        this.#stagedCommandIds.clear()
+        this.#releaseStagedAtlasUploads()
+    }
+
     #releaseStagedAtlasUploads(): void {
 
         for (const upload of this.#stagedAtlasUploads) upload.dispose()
         this.#stagedAtlasUploads.length = 0
     }
+}
+
+/** @internal */
+export function virtualRasterResidencySubmissionStamp(
+    gpuState: VirtualRasterGpuState
+): SubmissionAuthorityStamp {
+
+    return residencySubmissionAuthorityFor(gpuState).stamp()
+}
+
+function residencySubmissionAuthorityFor(
+    gpuState: VirtualRasterGpuState
+): ReturnType<GPURuntime['createSubmissionAuthority']> {
+
+    const authority = residencySubmissionAuthorities.get(gpuState)
+    if (authority === undefined) throw new TypeError('Virtual Raster residency authority is unavailable.')
+    return authority
 }
 
 function encodeSlotTable(

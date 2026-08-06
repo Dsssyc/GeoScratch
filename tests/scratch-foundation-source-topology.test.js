@@ -47,6 +47,7 @@ const gpuBasenames = [
     'shader-inspection.ts',
     'shader-module-ownership.ts',
     'shader-module.ts',
+    'submission-authority.ts',
     'submission-native-observation.ts',
     'submission.ts',
     'supporting-object-creation.ts',

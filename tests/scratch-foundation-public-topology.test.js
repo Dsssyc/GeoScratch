@@ -41,6 +41,7 @@ const scratchValues = [
     'SamplerResource',
     'ScratchDiagnosticError',
     'ShaderModule',
+    'SubmissionAuthority',
     'SubmissionBuilder',
     'SubmittedWork',
     'Surface',

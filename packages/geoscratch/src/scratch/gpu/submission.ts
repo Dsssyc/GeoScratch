@@ -73,6 +73,7 @@ import {
     beginSubmissionNativeObservation,
     compareSubmissionNativeStages,
 } from './submission-native-observation.js'
+import { assertSubmissionAuthorityStamp } from './submission-authority.js'
 import {
     prepareSurfaceAttachment,
     preparedSurfaceAttachmentFacts,
@@ -106,6 +107,7 @@ import type {
     SubmissionNativeObservation,
     SubmissionNativeSettlement,
 } from './submission-native-observation.js'
+import type { SubmissionAuthorityStamp } from './submission-authority.js'
 import type {
     GPUNativeErrorCategory,
     GPUIncidentReport,
@@ -567,6 +569,11 @@ export interface SubmissionBuilder {
     isSubmitted: boolean
 }
 
+const submissionAuthorityRequirements = new WeakMap<
+    SubmissionBuilder,
+    SubmissionAuthorityStamp[]
+>()
+
 export class SubmissionBuilder {
 
     constructor(runtime: GPURuntime, options: SubmissionBuilderOptions = {}) {
@@ -578,6 +585,7 @@ export class SubmissionBuilder {
         this.validation = options.validation ?? 'throw'
         this.steps = []
         this.isSubmitted = false
+        submissionAuthorityRequirements.set(this, [])
     }
 
     render(passSpec: RenderPassSpec, commands: RenderCommand[] = []) {
@@ -667,6 +675,12 @@ export class SubmissionBuilder {
         return this
     }
 
+    require(stamp: SubmissionAuthorityStamp) {
+
+        submissionAuthorityRequirements.get(this)!.push(stamp)
+        return this
+    }
+
     submit() {
 
         assertGPURuntimeActive(this.runtime)
@@ -680,6 +694,8 @@ export class SubmissionBuilder {
                 message: 'SubmissionBuilder has already submitted work.',
             })
         }
+
+        assertSubmissionAuthorityRequirements(this)
 
         const resolvedPlan = resolveSubmissionBeforeEncoding(this)
         applySubmissionValidationDisposition(this, resolvedPlan.report)
@@ -732,6 +748,7 @@ export class SubmissionBuilder {
                     stepIndex, contentEpoch: step.sourceContentEpoch, allocationVersion: step.sourceAllocationVersion,
                 }))
             }
+            assertSubmissionAuthorityRequirements(this)
         } catch (cause) {
             releaseUnsubmittedReadbackClaims(readbackClaims.values())
             throw cause
@@ -5711,6 +5728,13 @@ function releaseUnsubmittedReadbackClaims(claims: Iterable<ReadbackCommandClaim>
 
     for (const claim of claims) {
         releaseReadbackCommandClaim(claim, { unmap: false, gpuUseComplete: true })
+    }
+}
+
+function assertSubmissionAuthorityRequirements(builder: SubmissionBuilder): void {
+
+    for (const stamp of submissionAuthorityRequirements.get(builder) ?? []) {
+        assertSubmissionAuthorityStamp(builder.runtime, stamp)
     }
 }
 

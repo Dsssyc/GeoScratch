@@ -31,7 +31,7 @@ export type {
     GpuTileFrontierFeedbackSection,
     GpuTileFrontierFrame,
     GpuTileFrontierSeed,
-    GpuTileFrontierViewUpload,
+    GpuTileFrontierViewToken,
 } from './gpu-tile-frontier.js'
 export {
     coordinateDomain,

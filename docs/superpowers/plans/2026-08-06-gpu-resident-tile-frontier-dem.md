@@ -296,8 +296,10 @@ Expected: policy/reference/type tests PASS and no Scratch source changes exist.
 
 **Interfaces:**
 - Consumes: Task 1 `slotTable`, Task 2 codecs/policy, Scratch compute/render/readback/SubmissionBuilder primitives；first closes the generic ordered-readback gap proven by RED without adding any Geo semantics to Scratch。
-- Produces `GpuTileFrontier.create(runtime, descriptor)`, `stageSeed(snapshot)`, `writeView(view)`, `frame(frameEpoch)`, `drawArgument(frame, id)`, `feedback(frame, submitted)`, `capture(frame, submitted)`, `facts()`, `dispose()`；`VirtualRasterGpuFeedbackRing` owns the three bounded readback slots and decodes demands, generation-safe retirements, counters and diagnostics。
-- `frame()` returns stable `viewUpload`, one compute pass, ordered dispatch commands, A/B-matched visible/draw arguments, and one command selected from a fixed three-slot bounded readback ring; caller owns submission ordering and render commands。
+- Produces `GpuTileFrontier.create(runtime, descriptor)`, `stageSeed(snapshot)`, `writeView(view)`, `frame(viewToken)`, `encode(builder, frame)`, `drawArgument(frame, id)`, `facts()`, and `dispose()`。`writeView()` returns an immutable, explicitly disposable token; `encode()` adds the token's private MapMeta upload and the selected private 12-command template while attaching residency/view submission requirements。
+- `frame()` exposes only the A/B-matched visible-instance source, immutable ids/facts, and draw-argument capability. Task 3C separately adds `VirtualRasterGpuFeedbackRing`, owns the three bounded readback slots, and decodes demands, generation-safe retirements, counters, and diagnostics。
+
+Discovered API correction: a frame assembled before either residency acknowledgement or a newer `writeView()` must fail at submission, so raw `viewUpload`, compute pass, command arrays, working buffers, and feedback write regions are not Geo frame capabilities. Scratch command/resource descriptors remain an intentional expert escape hatch for direct GPU composition, not a same-realm security boundary。
 
 - [ ] **Step 1: Prove the generic ordered-readback gap with RED**
 
@@ -341,11 +343,13 @@ Create a fake-GPU fixture and assert:
 
 ```js
 const frontier = await GpuTileFrontier.create(runtime, descriptor)
-const evenFrame = frontier.frame(0)
+const evenView = frontier.writeView(view0)
+const evenFrame = frontier.frame(evenView)
 const terrainArguments = frontier.drawArgument(evenFrame, 'terrain')
 expect(terrainArguments.resource.usage & GPU_BUFFER_USAGE_STORAGE).to.not.equal(0)
 expect(terrainArguments.resource.usage & GPU_BUFFER_USAGE_INDIRECT).to.not.equal(0)
-expect(evenFrame.commands.map(command => command.label)).to.deep.equal([
+const access = gpuTileFrontierTestFrameAccess(frontier, evenFrame)
+expect(access.commands.map(command => command.label)).to.deep.equal([
     'Reset GPU tile frontier',
     'Clear GPU tile frontier lookup',
     'Build GPU tile frontier lookup',
@@ -359,9 +363,11 @@ expect(evenFrame.commands.map(command => command.label)).to.deep.equal([
     'Compact GPU tile frontier outputs',
     'Finalize GPU tile frontier arguments',
 ])
+const submitted = frontier.encode(runtime.createSubmission(), evenFrame).submit()
+evenView.dispose()
 ```
 
-Assert `frame(0)` reads A/writes B, `frame(1)` reads B/writes A, object ids remain stable, and no `mapAsync` or direct native buffer read occurs.
+Assert frame epoch 0 reads A/writes B, frame epoch 1 reads B/writes A, object ids remain stable, stale view/residency stamps fail at submission, and no `mapAsync` or direct native buffer read occurs.
 
 - [ ] **Step 5: Run frontier unit RED**
 
@@ -406,7 +412,7 @@ Requirements encoded in WGSL:
 
 - [ ] **Step 7: Implement persistent resources and A/B templates**
 
-`GpuTileFrontier.create()` allocates all buffers once. `stageSeed(snapshot)` resolves configured roots against the acknowledged snapshot and initializes frontier A plus dispatch A. `writeView()` is the sole per-frame CPU pack. `frame()` chooses one of two precreated compute/render resource templates by `frameEpoch & 1` and one of three precreated readback slots by `frameEpoch % 3`; it never inspects GPU counts. Reusing a readback slot before its prior `ReadbackOperation` reaches a terminal state produces a bounded backpressure fact and skips only that frame's readback, never render submission.
+`GpuTileFrontier.create()` allocates all buffers once. `stageSeed(snapshot)` resolves configured roots against the acknowledged snapshot and initializes frontier A plus dispatch A. `writeView()` is the sole per-frame CPU pack and advances the bounded view submission authority once. `frame(viewToken)` chooses one of two precreated compute/render resource templates by `viewToken.frameEpoch & 1`; it never inspects GPU counts. `encode(builder, frame)` validates ownership/liveness, adds the captured residency/view stamp requirements, then appends the private immutable MapMeta upload and exact private compute template. The caller disposes the view token after submission. Task 3C owns readback-slot selection and backpressure.
 
 Each A/B draw-argument buffer contains one 16-byte region per `GpuTileFrontierDrawTemplate`. `finalizeArguments` writes static `vertexCount/firstVertex/firstInstance` plus GPU visible count into the region matched to the frame's visible buffer. Each `VirtualRasterGpuFeedbackRing` command copies one fixed packed demand/retire/diagnostic/counter region with `retain: 'consume-on-read'`; `feedback(frame, submitted)` obtains the operation through `command.result({ after: submitted })`, consumes it once, validates decision/residency epochs and releases the ring claim in `finally`. Frontier disposal disposes all three commands after in-flight operations settle or are cancelled.
 
@@ -572,8 +578,8 @@ Replace old CPU-selection snapshots with source/contract assertions:
 
 ```js
 expect(layerSource).to.include('GpuTileFrontier.create(')
-expect(layerSource).to.include('.compute(frame.computePass, frame.commands)')
-expect(layerSource).to.include('.readback(frame.demandReadback)')
+expect(layerSource).to.include('frontier.encode(builder, frame)')
+expect(layerSource).to.include('feedbackRing.encode(builder, frame)')
 expect(layerSource).to.not.match(/selectTerrainNodes|nodeLevels|nodeBoxes|canonicalNodes/)
 expect(layerSource).to.not.match(/lodArguments\.upload|terrainArguments\.upload/)
 expect(contract.countPath).to.equal('gpu-produced-indirect-arguments')
@@ -601,14 +607,20 @@ Use manifest elevation range and `TERRAIN_EXAGGERATION` for conservative vertica
 `renderFrame(camera)` performs no selection. It stages current residency publication, writes MapMeta once, gets the A/B frontier frame, and submits residency uploads before compute when and only when publication changed:
 
 ```ts
-const submitted = builder
-    .upload(frame.viewUpload)
-    .upload(...residency.commands)
-    .compute(frame.computePass, frame.commands)
-    .render(passes.lodMap, [ commands.drawLodMap ])
-    .render(passes.terrain, [ commands.drawTerrain ])
-    .readback(frame.demandReadback)
-    .submit()
+const viewToken = frontier.writeView(camera)
+const frame = frontier.frame(viewToken)
+try {
+    for (const upload of residency.commands) builder.upload(upload)
+    frontier.encode(builder, frame)
+    builder
+        .render(passes.lodMap, [ commands.drawLodMap ])
+        .render(passes.terrain, [ commands.drawTerrain ])
+    feedbackRing.encode(builder, frame)
+    const submitted = builder.submit()
+    // Acknowledgement and feedback decode remain asynchronous from submitted.
+} finally {
+    viewToken.dispose()
+}
 ```
 
 After submission, publication acknowledgement and feedback decode run asynchronously. Decoded demands/retirements call `virtualRaster.reconcileFeedback`; request settlement schedules another frame. While frontier facts are `seeding`, `refining`, `coarsening` or `waiting-residency`, `main.ts` schedules bounded follow-up frames even if MapLibre camera is static.

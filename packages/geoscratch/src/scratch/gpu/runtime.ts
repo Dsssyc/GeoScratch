@@ -71,6 +71,10 @@ import { createSamplerResource, SamplerResource } from './sampler.js'
 import { createShaderModule as createScratchShaderModule, ShaderModule } from './shader-module.js'
 import { runtimeShaderModuleSnapshot } from './shader-module-ownership.js'
 import { SubmissionBuilder } from './submission.js'
+import {
+    createSubmissionAuthority as createScratchSubmissionAuthority,
+    SubmissionAuthority,
+} from './submission-authority.js'
 import { Surface } from './surface.js'
 import { createExternalTextureBinding, ExternalTextureBinding } from './temporal-texture.js'
 import { createTextureResource, TextureResource } from './texture.js'
@@ -112,6 +116,7 @@ import type {
 import type { SamplerResourceDescriptor } from './sampler.js'
 import type { ShaderModuleDescriptor } from './shader-module.js'
 import type { SubmissionBuilderOptions } from './submission.js'
+import type { SubmissionAuthorityDescriptor } from './submission-authority.js'
 import type { SurfaceOptions } from './surface.js'
 import type { ExternalTextureBindingDescriptor } from './temporal-texture.js'
 import type { TextureResourceDescriptor } from './texture.js'
@@ -722,6 +727,21 @@ export class GPURuntime {
     submission(options: SubmissionBuilderOptions = {}) {
 
         return this.createSubmission(options)
+    }
+
+    createSubmissionAuthority(
+        descriptor: SubmissionAuthorityDescriptor = {}
+    ): SubmissionAuthority {
+
+        assertGPURuntimeActive(this)
+        return createScratchSubmissionAuthority(this, descriptor)
+    }
+
+    submissionAuthority(
+        descriptor: SubmissionAuthorityDescriptor = {}
+    ): SubmissionAuthority {
+
+        return this.createSubmissionAuthority(descriptor)
     }
 
     dispose() {

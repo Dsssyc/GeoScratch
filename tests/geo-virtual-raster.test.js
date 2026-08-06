@@ -498,6 +498,102 @@ describe('Geo virtual raster', () => {
         runtime.dispose()
     })
 
+    it('commits GPU acknowledgement authority only after publication settlement wins', async() => {
+
+        const fakeOptions = { deferErrorScopePops: false }
+        const fake = createFakeGpu(fakeOptions)
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
+        const { addressSpace, plane, residency, pages } = fixture({ maxPhysicalPages: 1 })
+        stage(residency, pages.get('0/0/0'))
+        const publication = residency.publish()
+        const gpuState = await createVirtualRasterGpuState(runtime, {
+            addressSpace,
+            plane,
+            maxPhysicalPages: 1,
+        })
+        const update = gpuState.stage(publication)
+        fakeOptions.deferErrorScopePops = true
+        const work = submitUpdate(runtime, update)
+        const acknowledgement = gpuState.acknowledge(publication, work)
+        await Promise.resolve()
+
+        expect(gpuState.facts()).to.deep.include({
+            snapshotEpoch: -1,
+            acknowledgementSerial: 0,
+            stagedSnapshotEpoch: publication.snapshot.epoch,
+        })
+        await expectGeoDiagnostic(() => gpuState.abandon(publication), {
+            code: 'GEO_VIRTUAL_RASTER_GPU_PUBLICATION_PENDING',
+            phase: 'residency',
+        })
+        for (let index = 0; index < fake.errors.pendingPops.length; index++) {
+            fake.errors.settlePop(index)
+        }
+        await acknowledgement
+
+        expect(publication.inspect().state).to.equal('acknowledged')
+        expect(gpuState.facts()).to.deep.include({
+            snapshotEpoch: publication.snapshot.epoch,
+            acknowledgementSerial: 1,
+        })
+        expect(gpuState.facts()).not.to.have.property('stagedSnapshotEpoch')
+
+        gpuState.dispose()
+        residency.dispose()
+        runtime.dispose()
+    })
+
+    it('cleans staged GPU authority when an acknowledgement loses the publication race', async() => {
+
+        const fakeOptions = { deferErrorScopePops: false }
+        const fake = createFakeGpu(fakeOptions)
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
+        const { addressSpace, plane, residency, pages } = fixture({ maxPhysicalPages: 1 })
+        stage(residency, pages.get('0/0/0'))
+        const publication = residency.publish()
+        const gpuState = await createVirtualRasterGpuState(runtime, {
+            addressSpace,
+            plane,
+            maxPhysicalPages: 1,
+        })
+        const update = gpuState.stage(publication)
+        fakeOptions.deferErrorScopePops = true
+        const work = submitUpdate(runtime, update)
+        const acknowledgement = gpuState.acknowledge(publication, work).then(
+            () => ({ status: 'fulfilled' }),
+            error => ({ status: 'rejected', error })
+        )
+        await Promise.resolve()
+        await publication.abandon()
+        for (let index = 0; index < fake.errors.pendingPops.length; index++) {
+            fake.errors.settlePop(index)
+        }
+        const result = await acknowledgement
+
+        expect(result.status).to.equal('rejected')
+        expect(result.error).to.be.instanceOf(GeoDiagnosticError)
+        expect(gpuState.facts()).to.deep.include({
+            snapshotEpoch: -1,
+            acknowledgementSerial: 0,
+        })
+        expect(gpuState.facts()).not.to.have.property('stagedSnapshotEpoch')
+        expect(update.atlasUploads.every(upload => upload.isDisposed)).to.equal(true)
+
+        fakeOptions.deferErrorScopePops = false
+        const recovery = residency.publish()
+        const recoveryUpdate = gpuState.stage(recovery)
+        const recoveryWork = submitUpdate(runtime, recoveryUpdate)
+        await gpuState.acknowledge(recovery, recoveryWork)
+        expect(gpuState.facts()).to.deep.include({
+            snapshotEpoch: recovery.snapshot.epoch,
+            acknowledgementSerial: 1,
+        })
+
+        gpuState.dispose()
+        residency.dispose()
+        runtime.dispose()
+    })
+
     it('keeps terminal failures GPU-distinct without sampling an atlas slot', async() => {
 
         const fake = createFakeGpu()

@@ -10,6 +10,9 @@ import {
     type GPURuntime,
     type Program,
     type ShaderModule,
+    type SubmissionAuthority,
+    type SubmissionAuthorityStamp,
+    type SubmissionBuilder,
     type UploadCommand,
 } from '../scratch/index.js'
 import { throwGeoDiagnostic } from './diagnostics.js'
@@ -31,7 +34,10 @@ import {
     GPU_TILE_FRONTIER_WORKGROUP_SIZE,
     type GpuTileFrontierEntryPoint,
 } from './gpu-tile-frontier-wgsl.js'
-import { VirtualRasterGpuState } from './virtual-raster-gpu.js'
+import {
+    VirtualRasterGpuState,
+    virtualRasterResidencySubmissionStamp,
+} from './virtual-raster-gpu.js'
 import {
     VirtualRasterSnapshot,
     physicalPagesForSnapshot,
@@ -100,16 +106,8 @@ export type GpuTileFrontierFrame = Readonly<{
     parity: 0 | 1
     source: 'A' | 'B'
     target: 'A' | 'B'
-    pass: ComputePassSpec
-    commands: readonly DispatchCommand[]
-    currentFrontier: BufferResource
-    nextFrontier: BufferResource
-    currentDispatchArguments: BufferResource
-    nextDispatchArguments: BufferResource
     visibleInstances: BufferResource
-    drawArguments: BufferResource
     feedbackOutput: GpuTileFrontierFeedbackOutput
-    viewUpload: GpuTileFrontierViewUpload
 }>
 
 export type GpuTileFrontierDrawArgument = Readonly<{
@@ -130,13 +128,11 @@ export type GpuTileFrontierSeed = Readonly<{
     commands: readonly (ClearBufferCommand | UploadCommand)[]
 }>
 
-export type GpuTileFrontierViewUpload = Readonly<{
-    kind: 'gpu-tile-frontier-view-upload'
+export type GpuTileFrontierViewToken = Readonly<{
+    kind: 'gpu-tile-frontier-view-token'
     frontierId: string
     frameEpoch: number
     residencySnapshotEpoch: number
-    resource: BufferResource
-    command: UploadCommand
     readonly isDisposed: boolean
     dispose(): void
 }>
@@ -158,6 +154,7 @@ export type GpuTileFrontierCoreFacts = Readonly<{
         drawTemplates: number
     }>
     bufferBytes: Readonly<Record<keyof GpuTileFrontierResourceGraph, number>>
+    feedbackOutput: GpuTileFrontierFeedbackOutput
     parityTemplates: readonly Readonly<{
         parity: 0 | 1
         source: 'A' | 'B'
@@ -179,6 +176,7 @@ type ParityTemplate = Readonly<{
     nextDispatchArguments: BufferResource
     visibleInstances: BufferResource
     drawArguments: BufferResource
+    feedbackResource: BufferResource
     drawRegions: ReadonlyMap<string, BufferRegion>
     feedbackOutput: GpuTileFrontierFeedbackOutput
 }>
@@ -202,23 +200,28 @@ type CreationState = Readonly<{
 type FrameRecord = Readonly<{
     owner: GpuTileFrontier
     template: ParityTemplate
+    view: ViewTokenRecord
+    pass: ComputePassSpec
 }>
 
 const frameRecords = new WeakMap<GpuTileFrontierFrame, FrameRecord>()
 
-type ViewUploadRecord = {
+type ViewTokenRecord = {
     owner: GpuTileFrontier
     acknowledgementSerial: number
+    command: UploadCommand
+    viewStamp: SubmissionAuthorityStamp
+    residencyStamp: SubmissionAuthorityStamp
     disposed: boolean
 }
 
-const viewUploadRecords = new WeakMap<GpuTileFrontierViewUpload, ViewUploadRecord>()
+const viewTokenRecords = new WeakMap<GpuTileFrontierViewToken, ViewTokenRecord>()
 
 export class GpuTileFrontier {
 
     readonly runtime: GPURuntime
     readonly id: string
-    readonly descriptor: GpuTileFrontierDescriptor
+    readonly #descriptor: GpuTileFrontierDescriptor
     readonly #resources: GpuTileFrontierResourceGraph
     readonly #pass: ComputePassSpec
     readonly #parityTemplates: readonly [ParityTemplate, ParityTemplate]
@@ -230,6 +233,7 @@ export class GpuTileFrontier {
     readonly #seedUploads: readonly UploadCommand[]
     readonly #lookupCapacity: number
     readonly #scanBlockCount: number
+    readonly #viewAuthority: SubmissionAuthority
     #disposed = false
     #seed: GpuTileFrontierSeed | undefined
     #lastViewFrameEpoch: number | undefined
@@ -242,7 +246,7 @@ export class GpuTileFrontier {
 
         this.runtime = runtime
         this.id = `geo-gpu-tile-frontier-${nextFrontierId++}`
-        this.descriptor = descriptor
+        this.#descriptor = descriptor
         this.#resources = state.resources
         this.#pass = state.pass
         this.#parityTemplates = state.parityTemplates
@@ -254,6 +258,15 @@ export class GpuTileFrontier {
         this.#seedUploads = state.seedUploads
         this.#lookupCapacity = state.capacities.lookupEntries
         this.#scanBlockCount = state.capacities.scanBlocks
+        this.#viewAuthority = runtime.createSubmissionAuthority({
+            label: `${this.id} view`,
+        })
+        Object.preventExtensions(this)
+    }
+
+    get descriptor(): GpuTileFrontierDescriptor {
+
+        return this.#descriptor
     }
 
     static async create(
@@ -416,7 +429,7 @@ export class GpuTileFrontier {
         return this.#seed
     }
 
-    writeView(view: GpuTileFrontierView): GpuTileFrontierViewUpload {
+    writeView(view: GpuTileFrontierView): GpuTileFrontierViewToken {
 
         this.#assertActive()
         validateView(this, view)
@@ -429,18 +442,28 @@ export class GpuTileFrontier {
             }),
             data: uploadView,
         })
-        const record: ViewUploadRecord = {
+        let viewStamp: SubmissionAuthorityStamp
+        let residencyStamp: SubmissionAuthorityStamp
+        try {
+            residencyStamp = virtualRasterResidencySubmissionStamp(this.descriptor.gpuState)
+            viewStamp = this.#viewAuthority.advance()
+        } catch (error) {
+            command.dispose()
+            throw error
+        }
+        const record: ViewTokenRecord = {
             owner: this,
             acknowledgementSerial: authority.acknowledgementSerial,
+            command,
+            viewStamp,
+            residencyStamp,
             disposed: false,
         }
         const token = Object.freeze({
-            kind: 'gpu-tile-frontier-view-upload' as const,
+            kind: 'gpu-tile-frontier-view-token' as const,
             frontierId: this.id,
             frameEpoch: view.frameEpoch,
             residencySnapshotEpoch: view.residencySnapshotEpoch,
-            resource: this.#resources.mapMeta,
-            command,
             get isDisposed() { return record.disposed },
             dispose() {
                 if (record.disposed) return
@@ -448,32 +471,35 @@ export class GpuTileFrontier {
                 command.dispose()
             },
         })
-        viewUploadRecords.set(token, record)
+        viewTokenRecords.set(token, record)
         this.#lastViewFrameEpoch = view.frameEpoch
         return token
     }
 
-    frame(viewUpload: GpuTileFrontierViewUpload): GpuTileFrontierFrame {
+    frame(viewToken: GpuTileFrontierViewToken): GpuTileFrontierFrame {
 
         this.#assertActive()
-        const record = viewUploadRecords.get(viewUpload)
+        const record = viewTokenRecords.get(viewToken)
         const authority = this.descriptor.gpuState.facts()
-        if (record?.owner !== this || record.disposed || viewUpload.command.isDisposed ||
-            viewUpload.frontierId !== this.id ||
-            viewUpload.residencySnapshotEpoch !== authority.snapshotEpoch ||
-            record.acknowledgementSerial !== authority.acknowledgementSerial) {
+        if (record?.owner !== this || record.disposed || record.command.isDisposed ||
+            viewToken.frontierId !== this.id ||
+            viewToken.residencySnapshotEpoch !== authority.snapshotEpoch ||
+            record.acknowledgementSerial !== authority.acknowledgementSerial ||
+            record.viewStamp.revision !== this.#viewAuthority.revision) {
             return invalidFrontier(this, 'GPU tile frontier frame requires a live owned view from current residency authority.', {
                 frontierId: this.id,
                 residencySnapshotEpoch: authority.snapshotEpoch,
                 acknowledgementSerial: authority.acknowledgementSerial,
             }, {
-                frontierId: viewUpload?.frontierId,
-                residencySnapshotEpoch: viewUpload?.residencySnapshotEpoch,
+                frontierId: viewToken?.frontierId,
+                residencySnapshotEpoch: viewToken?.residencySnapshotEpoch,
                 acknowledgementSerial: record?.acknowledgementSerial,
-                disposed: record?.disposed ?? viewUpload?.command?.isDisposed,
+                viewRevision: record?.viewStamp.revision,
+                currentViewRevision: this.#viewAuthority.revision,
+                disposed: record?.disposed ?? record?.command?.isDisposed,
             })
         }
-        const frameEpoch = viewUpload.frameEpoch
+        const frameEpoch = viewToken.frameEpoch
         const template = this.#parityTemplates[frameEpoch & 1]!
         const frame = Object.freeze({
             kind: 'gpu-tile-frontier-frame' as const,
@@ -482,19 +508,46 @@ export class GpuTileFrontier {
             parity: template.parity,
             source: template.source,
             target: template.target,
-            pass: this.#pass,
-            commands: template.commands,
-            currentFrontier: template.currentFrontier,
-            nextFrontier: template.nextFrontier,
-            currentDispatchArguments: template.currentDispatchArguments,
-            nextDispatchArguments: template.nextDispatchArguments,
             visibleInstances: template.visibleInstances,
-            drawArguments: template.drawArguments,
             feedbackOutput: template.feedbackOutput,
-            viewUpload,
         })
-        frameRecords.set(frame, Object.freeze({ owner: this, template }))
+        frameRecords.set(frame, Object.freeze({
+            owner: this,
+            template,
+            view: record,
+            pass: this.#pass,
+        }))
         return frame
+    }
+
+    encode(builder: SubmissionBuilder, frame: GpuTileFrontierFrame): SubmissionBuilder {
+
+        this.#assertActive()
+        const record = frameRecords.get(frame)
+        const authority = this.descriptor.gpuState.facts()
+        if (builder?.runtime !== this.runtime || record?.owner !== this ||
+            frame.frontierId !== this.id || record.view.disposed ||
+            record.view.command.isDisposed ||
+            record.view.acknowledgementSerial !== authority.acknowledgementSerial ||
+            record.view.viewStamp.revision !== this.#viewAuthority.revision) {
+            return invalidFrontier(this, 'GPU tile frontier encoding requires a current owned frame and builder.', {
+                frontierId: this.id,
+                runtimeId: this.runtime.id,
+                acknowledgementSerial: authority.acknowledgementSerial,
+                viewRevision: this.#viewAuthority.revision,
+            }, {
+                frontierId: frame?.frontierId,
+                runtimeId: builder?.runtime?.id,
+                acknowledgementSerial: record?.view.acknowledgementSerial,
+                viewRevision: record?.view.viewStamp.revision,
+                disposed: record?.view.disposed ?? record?.view.command.isDisposed,
+            })
+        }
+        return builder
+            .require(record.view.residencyStamp)
+            .require(record.view.viewStamp)
+            .upload(record.view.command)
+            .compute(this.#pass, [ ...record.template.commands ])
     }
 
     drawArgument(frame: GpuTileFrontierFrame, id: string): GpuTileFrontierDrawArgument {
@@ -536,6 +589,7 @@ export class GpuTileFrontier {
             lastViewFrameEpoch?: number
             capacities: GpuTileFrontierCoreFacts['capacities']
             bufferBytes: Readonly<Record<keyof GpuTileFrontierResourceGraph, number>>
+            feedbackOutput: GpuTileFrontierFeedbackOutput
             parityTemplates: GpuTileFrontierCoreFacts['parityTemplates']
         } = {
             id: this.id,
@@ -554,6 +608,7 @@ export class GpuTileFrontier {
             bufferBytes: Object.freeze(Object.fromEntries(
                 Object.entries(this.#resources).map(([ name, resource ]) => [ name, resource.size ])
             ) as Record<keyof GpuTileFrontierResourceGraph, number>),
+            feedbackOutput: this.#parityTemplates[0].feedbackOutput,
             parityTemplates: Object.freeze(this.#parityTemplates.map(template => Object.freeze({
                 parity: template.parity,
                 source: template.source,
@@ -570,6 +625,7 @@ export class GpuTileFrontier {
 
         if (this.#disposed) return
         this.#disposed = true
+        this.#viewAuthority.dispose()
         disposeReverse(this.#owned)
     }
 
@@ -584,6 +640,50 @@ export class GpuTileFrontier {
             })
         }
     }
+}
+
+Object.freeze(GpuTileFrontier.prototype)
+
+export type GpuTileFrontierTestFrameAccess = Readonly<{
+    pass: ComputePassSpec
+    commands: readonly DispatchCommand[]
+    viewCommand: UploadCommand
+    mapMeta: BufferResource
+    currentFrontier: BufferResource
+    nextFrontier: BufferResource
+    currentDispatchArguments: BufferResource
+    nextDispatchArguments: BufferResource
+    visibleInstances: BufferResource
+    feedbackOutput: BufferResource
+    drawArguments: BufferResource
+}>
+
+/** @internal Test-only explicit Scratch capability recovery; not exported by geo/index. */
+export function gpuTileFrontierTestFrameAccess(
+    frontier: GpuTileFrontier,
+    frame: GpuTileFrontierFrame
+): GpuTileFrontierTestFrameAccess {
+
+    const record = frameRecords.get(frame)
+    if (record?.owner !== frontier || frame.frontierId !== frontier.id) {
+        return invalidFrontier(frontier, 'GPU tile frontier test access requires an owned frame.', {
+            frontierId: frontier.id,
+        }, { frontierId: frame?.frontierId })
+    }
+    const template = record.template
+    return Object.freeze({
+        pass: record.pass,
+        commands: template.commands,
+        viewCommand: record.view.command,
+        mapMeta: record.view.command.target.buffer,
+        currentFrontier: template.currentFrontier,
+        nextFrontier: template.nextFrontier,
+        currentDispatchArguments: template.currentDispatchArguments,
+        nextDispatchArguments: template.nextDispatchArguments,
+        visibleInstances: template.visibleInstances,
+        feedbackOutput: template.feedbackResource,
+        drawArguments: template.drawArguments,
+    })
 }
 
 type CreationBounds = Readonly<{
@@ -1132,6 +1232,7 @@ function createParityTemplates(
                 ? resources.visibleInstancesB
                 : resources.visibleInstancesA,
             drawArguments,
+            feedbackResource: resources.feedbackOutput,
             feedbackOutput,
             drawRegions: new Map(drawTemplates.map((template, index) => [
                 template.id,

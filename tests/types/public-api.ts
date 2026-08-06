@@ -41,7 +41,7 @@ import {
     type GpuTileFrontierPolicy,
     type GpuTileFrontierSeed,
     type GpuTileFrontierView,
-    type GpuTileFrontierViewUpload,
+    type GpuTileFrontierViewToken,
     type PositionPrecisionFacts,
     type WideFixedPosition,
     type WebMercatorQuadPosition,
@@ -302,6 +302,12 @@ const typedFrontierView: GpuTileFrontierView = {
 }
 declare const typedFrontierRuntime: scr.GPURuntime
 declare const typedGpuFrontier: GpuTileFrontier
+const typedSubmissionAuthority: scr.SubmissionAuthority =
+    typedFrontierRuntime.createSubmissionAuthority({ label: 'typed authority' })
+const typedSubmissionStamp: scr.SubmissionAuthorityStamp = typedSubmissionAuthority.stamp()
+const typedRequiredSubmission: scr.SubmissionBuilder = typedFrontierRuntime
+    .createSubmission()
+    .require(typedSubmissionStamp)
 const typedFrontierCreation: Promise<GpuTileFrontier> = GpuTileFrontier.create(
     typedFrontierRuntime,
     typedFrontierDescriptor,
@@ -309,10 +315,14 @@ const typedFrontierCreation: Promise<GpuTileFrontier> = GpuTileFrontier.create(
 const typedFrontierSeed: GpuTileFrontierSeed = typedGpuFrontier.stageSeed(
     typedRasterResidency.currentSnapshot,
 )
-const typedFrontierUpload: GpuTileFrontierViewUpload = typedGpuFrontier.writeView(
+const typedFrontierUpload: GpuTileFrontierViewToken = typedGpuFrontier.writeView(
     typedFrontierView,
 )
 const typedFrontierFrame: GpuTileFrontierFrame = typedGpuFrontier.frame(typedFrontierUpload)
+const typedEncodedFrontierSubmission: scr.SubmissionBuilder = typedGpuFrontier.encode(
+    typedRequiredSubmission,
+    typedFrontierFrame,
+)
 const typedFrontierDraw: GpuTileFrontierDrawArgument = typedGpuFrontier.drawArgument(
     typedFrontierFrame,
     'terrain',
@@ -327,6 +337,12 @@ const typedFrontierDemandSection: GpuTileFrontierFeedbackSection =
 typedFrontierFacts.resources
 // @ts-expect-error Packed feedback does not expose its write-capable BufferRegion
 typedFrontierFeedback.region
+// @ts-expect-error View upload command/data remain private to frontier.encode()
+typedFrontierUpload.command
+// @ts-expect-error Persistent compute commands remain private to frontier.encode()
+typedFrontierFrame.commands
+// @ts-expect-error Persistent frontier buffers are not public frame capabilities
+typedFrontierFrame.nextFrontier
 // @ts-expect-error Task 3C owns bounded feedback integration
 typedGpuFrontier.feedback(typedFrontierFrame)
 // @ts-expect-error Task 3C owns bounded capture integration

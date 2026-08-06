@@ -213,6 +213,36 @@ Submission responsibilities:
 - submit command buffers
 - return `SubmittedWork`
 
+### Submission Revision Authority
+
+Persistent GPU systems may require a submission to remain tied to an external current
+revision even when their buffers, pipelines, bind sets, and commands are reused.
+`runtime.createSubmissionAuthority()` creates a generic Runtime-associated authority.
+`stamp()` captures its current immutable branded revision, `advance()` advances it, and
+`dispose()` invalidates it. A builder records a requirement explicitly:
+
+```ts
+const authority = runtime.createSubmissionAuthority({ label: 'residency' })
+const stamp = authority.stamp()
+const builder = runtime.createSubmission().require(stamp)
+```
+
+Submission validates every required stamp at submit entry and again after all
+caller-owned materialization, Surface preparation, and readback claims, immediately
+before native observation, encoder creation, or queue effects. The primitive executes
+no callback and owns no lock, wait queue, retry, preparation state, or history.
+Forged stamps, wrong-Runtime stamps, stale revisions, and disposed authorities fail with
+`SCRATCH_SUBMISSION_AUTHORITY_INVALID`,
+`SCRATCH_SUBMISSION_AUTHORITY_WRONG_RUNTIME`,
+`SCRATCH_SUBMISSION_AUTHORITY_STALE`, and
+`SCRATCH_SUBMISSION_AUTHORITY_DISPOSED`, respectively.
+
+This is a consistency boundary for supported composition, not a same-realm security
+boundary. Scratch keeps resource, region, command, bind-set, and declared-access
+descriptors inspectable so expert callers can construct explicit low-level GPU work.
+Higher-level modules may expose fewer capabilities, but direct Scratch descriptor
+recovery remains an intentional escape hatch whose caller owns temporal correctness.
+
 ### Bundle Execution And Debug Scope
 
 A render step may contain ordinary Draws, query brackets, DebugCommands, and

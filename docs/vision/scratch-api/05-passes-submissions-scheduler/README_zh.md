@@ -206,6 +206,36 @@ Submission 职责:
 - 提交 command buffers
 - 返回 `SubmittedWork`
 
+### Submission Revision Authority
+
+持久 GPU 系统即使复用 buffer、pipeline、bind set 与 command，也可能要求一次
+submission 仍绑定某个外部 current revision。
+`runtime.createSubmissionAuthority()` 创建与 Runtime 关联的通用 authority；
+`stamp()` 捕获当前不可变 branded revision，`advance()` 推进 revision，`dispose()`
+使其失效。Builder 显式记录 requirement:
+
+```ts
+const authority = runtime.createSubmissionAuthority({ label: 'residency' })
+const stamp = authority.stamp()
+const builder = runtime.createSubmission().require(stamp)
+```
+
+Submission 会在 submit 入口校验所有 required stamp，并在全部 caller-owned
+materialization、Surface preparation 与 readback claim 完成后、紧邻 native
+observation、encoder creation 或 queue effect 之前再次校验。该 primitive 不执行
+callback，也不拥有 lock、wait queue、retry、preparation state 或 history。
+伪造 stamp、错误 Runtime、过期 revision 与已 disposed authority 分别以
+`SCRATCH_SUBMISSION_AUTHORITY_INVALID`、
+`SCRATCH_SUBMISSION_AUTHORITY_WRONG_RUNTIME`、
+`SCRATCH_SUBMISSION_AUTHORITY_STALE` 与
+`SCRATCH_SUBMISSION_AUTHORITY_DISPOSED` 失败。
+
+这是 supported composition 的一致性边界，不是 same-realm security boundary。
+Scratch 继续允许检查 resource、region、command、bind-set 与 declared-access
+descriptor，使 expert caller 能显式构造底层 GPU 工作。上层 module 可以缩窄自己
+暴露的 capability，但从 Scratch descriptor 直接恢复资源仍是有意保留的 escape
+hatch，其 temporal correctness 由调用方负责。
+
 ### Bundle 执行与 Debug Scope
 
 Render step 可以包含普通 Draw、query bracket、DebugCommand 与

@@ -342,6 +342,10 @@ fn subtractExpansions(
     rightHigh: f32,
     rightLow: f32
 ) -> f32 {
+    let lowDifference = leftLow - rightLow;
+    if (leftHigh == rightHigh) {
+        return lowDifference;
+    }
     let difference = leftHigh - rightHigh;
     let bridge = difference - leftHigh;
     let roundoff = (leftHigh - (difference - bridge)) - (rightHigh + bridge);
@@ -359,10 +363,17 @@ fn boundsFor(matrixLevel: u32, row: u32, column: u32) -> FrontierBounds {
     let metric = metricFor(matrixLevel);
     let dimension = exp2(f32(matrixLevel));
     let normalizedWest = f32(column) / dimension;
+    let normalizedEast = f32(column + 1u) / dimension;
     let normalizedNorth = f32(row) / dimension;
-    let tileExtent = normalizedWorldMeters(1.0 / dimension);
+    let normalizedSouth = f32(row + 1u) / dimension;
     let minimumX = normalizedWorldMeters(subtractExpansions(
         normalizedWest,
+        0.0,
+        mapMeta.cameraMercatorHigh.x,
+        mapMeta.cameraMercatorLow.x
+    ));
+    let maximumX = normalizedWorldMeters(subtractExpansions(
+        normalizedEast,
         0.0,
         mapMeta.cameraMercatorHigh.x,
         mapMeta.cameraMercatorLow.x
@@ -371,6 +382,12 @@ fn boundsFor(matrixLevel: u32, row: u32, column: u32) -> FrontierBounds {
         mapMeta.cameraMercatorHigh.y,
         mapMeta.cameraMercatorLow.y,
         normalizedNorth,
+        0.0
+    ));
+    let minimumY = normalizedWorldMeters(subtractExpansions(
+        mapMeta.cameraMercatorHigh.y,
+        mapMeta.cameraMercatorLow.y,
+        normalizedSouth,
         0.0
     ));
     let minimumZ = subtractExpansions(
@@ -386,8 +403,8 @@ fn boundsFor(matrixLevel: u32, row: u32, column: u32) -> FrontierBounds {
         mapMeta.cameraLow.z
     );
     return FrontierBounds(
-        vec3f(minimumX, maximumY - tileExtent, minimumZ),
-        vec3f(minimumX + tileExtent, maximumY, maximumZ)
+        vec3f(minimumX, minimumY, minimumZ),
+        vec3f(maximumX, maximumY, maximumZ)
     );
 }
 

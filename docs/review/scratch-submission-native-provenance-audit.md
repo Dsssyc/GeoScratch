@@ -82,15 +82,15 @@ native method:
 | N43 | `packages/geoscratch/src/scratch/gpu/render-bundle.ts:623` | `executeBundles()` | ExecuteRenderBundles pass-command location. | Observed submission |
 | N44 | `packages/geoscratch/src/scratch/gpu/render-bundle.ts:965` | `createRenderBundleEncoder()` | Persistent creation or selected attempt-local realization. | Acknowledged or observed |
 | N45 | `packages/geoscratch/src/scratch/gpu/render-bundle.ts:987` | bundle `finish()` | Same bundle realization owner. | Acknowledged or observed |
-| N46 | `packages/geoscratch/src/scratch/gpu/submission.ts:787` | `createCommandEncoder()` | Encoder-segment `encoder-create`. | Observed submission |
-| N47 | `packages/geoscratch/src/scratch/gpu/submission.ts:823` | `finish()` | Encoder-segment `encoder-finish`. | Observed submission |
-| N48 | `packages/geoscratch/src/scratch/gpu/submission.ts:993` | `beginComputePass()` | Compute pass `pass-begin`. | Observed submission |
-| N49 | `packages/geoscratch/src/scratch/gpu/submission.ts:1042` | compute pass `end()` | Compute pass `pass-end`. | Observed submission |
-| N50 | `packages/geoscratch/src/scratch/gpu/submission.ts:1078` | `beginRenderPass()` | Render pass `pass-begin`. | Observed submission |
-| N51 | `packages/geoscratch/src/scratch/gpu/submission.ts:1226` | render pass `end()` | Render pass `pass-end`. | Observed submission |
-| N52 | `packages/geoscratch/src/scratch/gpu/submission.ts:1256` | `queue.submit()` | Command-buffer queue action. | Observed submission |
-| N53 | `packages/geoscratch/src/scratch/gpu/submission.ts:1789` | detailed `pushDebugGroup()` | Finite per-location diagnostic scope. | Detailed observation only |
-| N54 | `packages/geoscratch/src/scratch/gpu/submission.ts:1794` | detailed `popDebugGroup()` | Balanced in `finally` for the same location. | Detailed observation only |
+| N46 | `packages/geoscratch/src/scratch/gpu/submission.ts:804` | `createCommandEncoder()` | Encoder-segment `encoder-create`. | Observed submission |
+| N47 | `packages/geoscratch/src/scratch/gpu/submission.ts:840` | `finish()` | Encoder-segment `encoder-finish`. | Observed submission |
+| N48 | `packages/geoscratch/src/scratch/gpu/submission.ts:1010` | `beginComputePass()` | Compute pass `pass-begin`. | Observed submission |
+| N49 | `packages/geoscratch/src/scratch/gpu/submission.ts:1059` | compute pass `end()` | Compute pass `pass-end`. | Observed submission |
+| N50 | `packages/geoscratch/src/scratch/gpu/submission.ts:1095` | `beginRenderPass()` | Render pass `pass-begin`. | Observed submission |
+| N51 | `packages/geoscratch/src/scratch/gpu/submission.ts:1243` | render pass `end()` | Render pass `pass-end`. | Observed submission |
+| N52 | `packages/geoscratch/src/scratch/gpu/submission.ts:1273` | `queue.submit()` | Command-buffer queue action. | Observed submission |
+| N53 | `packages/geoscratch/src/scratch/gpu/submission.ts:1806` | detailed `pushDebugGroup()` | Finite per-location diagnostic scope. | Detailed observation only |
+| N54 | `packages/geoscratch/src/scratch/gpu/submission.ts:1811` | detailed `popDebugGroup()` | Balanced in `finally` for the same location. | Detailed observation only |
 | N55 | `packages/geoscratch/src/scratch/gpu/surface.ts:884` | `getConfiguration()` | Surface configuration commit and managed preflight. | Deterministic transaction/preflight |
 | N56 | `packages/geoscratch/src/scratch/gpu/temporal-texture.ts:495` | `importExternalTexture()` | Selected attempt authority command. | Observed command |
 | N57 | `packages/geoscratch/src/scratch/gpu/temporal-texture.ts:619` | `getCurrentTexture()` | Shared selected Surface attempt. | Observed attachment or command |

@@ -447,6 +447,11 @@ export type {
     TextureReadbackSourceDescriptor,
 } from './gpu/texture-readback.js'
 export { SubmissionBuilder, SubmittedWork } from './gpu/submission.js'
+export { SubmissionAuthority } from './gpu/submission-authority.js'
+export type {
+    SubmissionAuthorityDescriptor,
+    SubmissionAuthorityStamp,
+} from './gpu/submission-authority.js'
 export type {
     ComputeCommand,
     RenderCommand,

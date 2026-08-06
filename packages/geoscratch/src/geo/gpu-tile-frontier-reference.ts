@@ -515,6 +515,7 @@ function createRefinePressure(
     for (const candidate of liveCandidates) {
         for (const blocker of blockersByCandidate.get(candidate.evaluation.entry.page.key)!) {
             candidateKeys.add(blocker.page.key)
+            if (blockedKeys.has(blocker.page.key)) continue
             const evaluation = evaluationsByKey.get(blocker.page.key)!
             const pressureCandidate = createRefineCandidate(input, evaluation, residents)
             const existing = candidateByKey.get(blocker.page.key)

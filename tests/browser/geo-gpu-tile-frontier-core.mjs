@@ -13,10 +13,11 @@ const port = await findAvailablePort()
 const baseUrl = `http://127.0.0.1:${port}`
 const moduleUrl = relativePath => `${baseUrl}/@fs${resolve(repositoryRoot, relativePath)}`
 const moduleUrls = {
-    scratchUrl: moduleUrl('packages/geoscratch/dist/scratch/index.js'),
-    geoUrl: moduleUrl('packages/geoscratch/dist/geo/index.js'),
-    referenceUrl: moduleUrl('packages/geoscratch/dist/geo/gpu-tile-frontier-reference.js'),
-    layoutUrl: moduleUrl('packages/geoscratch/dist/geo/gpu-tile-frontier-layout.js'),
+    scratchUrl: moduleUrl('packages/geoscratch/src/scratch/index.ts'),
+    geoUrl: moduleUrl('packages/geoscratch/src/geo/index.ts'),
+    referenceUrl: moduleUrl('packages/geoscratch/src/geo/gpu-tile-frontier-reference.ts'),
+    layoutUrl: moduleUrl('packages/geoscratch/src/geo/gpu-tile-frontier-layout.ts'),
+    testAccessUrl: moduleUrl('packages/geoscratch/src/geo/gpu-tile-frontier-test-access.ts'),
 }
 const vite = startVite(port)
 let browserServer
@@ -43,7 +44,11 @@ try {
             waitUntil: 'domcontentloaded',
             timeout,
         })
-        proof = await page.evaluate(runProof, moduleUrls)
+        proof = await withTimeout(
+            page.evaluate(runProof, moduleUrls),
+            timeout,
+            'GPU tile frontier semantic proof'
+        )
         proof.events = events
     } finally {
         await withTimeout(context.close(), 10_000, 'Chrome context shutdown')
@@ -96,7 +101,7 @@ const result = {
 process.stdout.write(`${JSON.stringify(result, null, 2)}\n`)
 if (failures.length > 0) process.exitCode = 1
 
-async function runProof({ scratchUrl, geoUrl, referenceUrl, layoutUrl }) {
+async function runProof({ scratchUrl, geoUrl, referenceUrl, layoutUrl, testAccessUrl }) {
 
     const { GPURuntime } = await import(scratchUrl)
     const {
@@ -113,15 +118,20 @@ async function runProof({ scratchUrl, geoUrl, referenceUrl, layoutUrl }) {
     } = await import(geoUrl)
     const { evaluateGpuTileFrontierReference } = await import(referenceUrl)
     const {
+        gpuTileFrontierDemandCodec,
+        gpuTileFrontierDiagnosticsCodec,
         gpuTileFrontierEntryCodec,
         gpuTileFrontierLayouts,
+        gpuTileFrontierMapMetaCodec,
         gpuTileFrontierVisibleInstanceCodec,
     } = await import(layoutUrl)
+    const { gpuTileFrontierTestFrameAccess } = await import(testAccessUrl)
 
     const HALF_WORLD = 20_037_508.3427892
     const BUFFER_COPY_DST = 0x08
     const BUFFER_COPY_SRC = 0x04
     const BUFFER_STORAGE = 0x80
+    const BUFFER_UNIFORM = 0x40
     const commandLabels = [
         'Reset GPU tile frontier',
         'Clear GPU tile frontier lookup',
@@ -167,6 +177,8 @@ async function runProof({ scratchUrl, geoUrl, referenceUrl, layoutUrl }) {
             'identical canonical executions must produce byte-identical captured output'
         )
         const staleContent = await staleContentScenario()
+        const eastEdgePrecision = await eastEdgePrecisionScenario()
+        const balancePressure = await balancePressureScenario()
         const precision = await precisionScenario()
         const grace = await visibilityGraceScenario()
         await runtime.device.queue.onSubmittedWorkDone()
@@ -184,6 +196,8 @@ async function runProof({ scratchUrl, geoUrl, referenceUrl, layoutUrl }) {
             ...canonicalFirst.outcomes,
             ...canonicalSecond.outcomes,
             ...staleContent.outcomes,
+            ...eastEdgePrecision.outcomes,
+            ...balancePressure.outcomes,
             ...precision.outcomes,
             ...grace.outcomes,
         ]
@@ -192,6 +206,8 @@ async function runProof({ scratchUrl, geoUrl, referenceUrl, layoutUrl }) {
                 canonicalFirst,
                 canonicalSecond,
                 staleContent,
+                eastEdgePrecision,
+                balancePressure,
                 precision,
                 grace,
             ].every(scenario => scenario.disposal.frontierDisposed),
@@ -199,6 +215,8 @@ async function runProof({ scratchUrl, geoUrl, referenceUrl, layoutUrl }) {
                 canonicalFirst,
                 canonicalSecond,
                 staleContent,
+                eastEdgePrecision,
+                balancePressure,
                 precision,
                 grace,
             ].every(scenario => scenario.disposal.borrowedSlotTableAlive),
@@ -213,6 +231,8 @@ async function runProof({ scratchUrl, geoUrl, referenceUrl, layoutUrl }) {
                 byteIdentical: true,
             },
             staleContent,
+            eastEdgePrecision,
+            balancePressure,
             precision,
             visibilityGrace: grace,
         }
@@ -315,6 +335,7 @@ async function runProof({ scratchUrl, geoUrl, referenceUrl, layoutUrl }) {
             )
             const facts = frontier.facts()
             const drawArgument = frontier.drawArgument(frame0.frame, 'terrain')
+            const frameAccess = gpuTileFrontierTestFrameAccess(frontier, frame0.frame)
             const disposal = disposeScenario(frontier, capture, env)
             frontier = undefined
             capture = undefined
@@ -322,8 +343,8 @@ async function runProof({ scratchUrl, geoUrl, referenceUrl, layoutUrl }) {
                 resourceCount: Object.keys(facts.bufferBytes).length,
                 bufferBytes: facts.bufferBytes,
                 templateCount: facts.parityTemplates.length,
-                labels: frame0.frame.commands.map(command => command.label),
-                kinds: frame0.frame.commands.map(command =>
+                labels: frameAccess.commands.map(command => command.label),
+                kinds: frameAccess.commands.map(command =>
                     'indirect' in command.count ? 'indirect' : 'direct'
                 ),
                 parity: [
@@ -385,10 +406,11 @@ async function runProof({ scratchUrl, geoUrl, referenceUrl, layoutUrl }) {
                 view: allWorldView(0, publication.snapshot.epoch, 50),
                 current: [ forged ],
                 residentPages: [ root ],
-                createExtraUploads(frame) {
+                createExtraUploads(frame, access) {
+                    void frame
                     return [ runtime.createUploadCommand({
                         label: 'Inject stale expected content epoch for browser proof',
-                        target: frame.currentFrontier.region({
+                        target: access.currentFrontier.region({
                             size: gpuTileFrontierLayouts.frontierEntry.byteSize,
                             layout: gpuTileFrontierEntryCodec.artifact,
                         }),
@@ -415,9 +437,14 @@ async function runProof({ scratchUrl, geoUrl, referenceUrl, layoutUrl }) {
                 residentSnapshotEpoch: exact.residencySnapshotEpoch,
                 activeCount: frameResult.frontier.length,
                 visibleCount: frameResult.visible.length,
-                hash: frameResult.hash,
-                outcomes: [ frameResult.outcome ],
-                disposal,
+                demandCount: frameResult.demands.length,
+                retirementCount: frameResult.retirements.length,
+                facts: frameResult.facts,
+            nextDispatchWords: frameResult.nextDispatchWords,
+            precisionProbe: frameResult.precisionProbe,
+            hash: frameResult.hash,
+            outcomes: [ frameResult.outcome ],
+            disposal,
             }
         } finally {
             capture?.dispose()
@@ -498,6 +525,216 @@ async function runProof({ scratchUrl, geoUrl, referenceUrl, layoutUrl }) {
                 cameraLow: view.cameraLow,
                 keys: frameResult.keys,
                 visibleCount: frameResult.visible.length,
+                facts: frameResult.facts,
+                nextDispatchWords: frameResult.nextDispatchWords,
+                hash: frameResult.hash,
+                outcomes: [ frameResult.outcome ],
+                disposal,
+            }
+        } finally {
+            capture?.dispose()
+            frontier?.dispose()
+            env.gpuState?.dispose()
+            env.residency.dispose()
+        }
+    }
+
+    async function balancePressureScenario() {
+
+        const env = await createEnvironment({
+            id: 'balance-pressure-chain',
+            limits: [ fullLimit(1), fullLimit(2), fullLimit(3), fullLimit(4) ],
+            minimumMatrixLevel: 1,
+            maximumMatrixLevel: 4,
+            maximumActiveTiles: 6,
+            maximumDemands: 6,
+            transitionReservePages: 6,
+            refineErrorPixels: 2,
+            coarsenErrorPixels: 1,
+            levelMetrics: [
+                metric(1, 100_000),
+                metric(2, 100_000),
+                metric(3, 100_000),
+                metric(4, 100_000),
+            ],
+            maxPhysicalPages: 16,
+        })
+        let frontier
+        let capture
+        try {
+            const fine = page(env, 3, 0, 1)
+            const middle = page(env, 2, 0, 1)
+            const coarse = page(env, 1, 0, 1)
+            const coarseChildren = children(env, coarse)
+            const residentPages = [ ...new Map([
+                ...rootPages(env),
+                fine,
+                middle,
+                ...coarseChildren,
+            ].map(residentPage => [ residentPage.key, residentPage ])).values() ]
+            const publication = await publishPages(
+                env,
+                residentPages,
+                'balance-pressure-pages'
+            )
+            frontier = await createFrontier(env)
+            capture = await createCapture(frontier, 'balance-pressure-capture')
+            const current = [ fine, middle, coarse ].map(residentPage => residentEntry(
+                frontier.descriptor,
+                publication,
+                residentPage,
+                'retain',
+                0
+            ))
+            const frameResult = await executeFrame({
+                env,
+                frontier,
+                capture,
+                seed: frontier.stageSeed(publication.snapshot),
+                view: allWorldView(0, publication.snapshot.epoch, 50),
+                current,
+                residentPages,
+                createExtraUploads(frame, access) {
+                    const counters = new Uint32Array(32)
+                    counters[0] = current.length
+                    const counterSection = frame.feedbackOutput.layout.counters
+                    return [
+                        runtime.createUploadCommand({
+                            label: 'Inject balance pressure frontier',
+                            target: access.currentFrontier.region({
+                                size: current.length * gpuTileFrontierLayouts.frontierEntry.byteSize,
+                                layout: gpuTileFrontierEntryCodec.artifact,
+                            }),
+                            data: gpuTileFrontierEntryCodec.uploadView(
+                                current.map(entryRecord)
+                            ),
+                        }),
+                        runtime.createUploadCommand({
+                            label: 'Inject balance pressure dispatch arguments',
+                            target: access.currentDispatchArguments.region(),
+                            data: new Uint32Array([ 1, 1, 1 ]),
+                        }),
+                        runtime.createUploadCommand({
+                            label: 'Inject balance pressure counters',
+                            target: access.feedbackOutput.region({
+                                offset: counterSection.offset,
+                                size: counterSection.byteLength,
+                            }),
+                            data: counters,
+                        }),
+                    ]
+                },
+            })
+            assertEqual(frameResult.keys, [
+                fine.key,
+                middle.key,
+                ...coarseChildren.map(child => child.key),
+            ], 'three-level pressure chain output')
+            assertEqual({
+                refineCandidateCount: frameResult.facts.refineCandidateCount,
+                budgetLimitedCount: frameResult.facts.budgetLimitedCount,
+                fallbackCount: frameResult.facts.fallbackCount,
+            }, {
+                refineCandidateCount: 3,
+                budgetLimitedCount: 0,
+                fallbackCount: 2,
+            }, 'three-level pressure chain facts')
+            const disposal = disposeScenario(frontier, capture, env)
+            frontier = undefined
+            capture = undefined
+            return {
+                keys: frameResult.keys,
+                facts: frameResult.facts,
+                diagnostics: frameResult.diagnostics,
+                nextDispatchWords: frameResult.nextDispatchWords,
+                hash: frameResult.hash,
+                outcomes: [ frameResult.outcome ],
+                disposal,
+            }
+        } finally {
+            capture?.dispose()
+            frontier?.dispose()
+            env.gpuState?.dispose()
+            env.residency.dispose()
+        }
+    }
+
+    async function eastEdgePrecisionScenario() {
+
+        const env = await createEnvironment({
+            id: 'z1-east-edge-sse',
+            limits: [
+                {
+                    matrixId: '1',
+                    minTileRow: 0,
+                    maxTileRow: 0,
+                    minTileCol: 0,
+                    maxTileCol: 0,
+                },
+                {
+                    matrixId: '2',
+                    minTileRow: 0,
+                    maxTileRow: 1,
+                    minTileCol: 0,
+                    maxTileCol: 1,
+                },
+            ],
+            minimumMatrixLevel: 1,
+            maximumMatrixLevel: 2,
+            maximumActiveTiles: 4,
+            maximumDemands: 4,
+            transitionReservePages: 4,
+            refineErrorPixels: 10_000,
+            coarsenErrorPixels: 1,
+            levelMetrics: [ metric(1, 1), metric(2, 1) ],
+            maxPhysicalPages: 8,
+        })
+        let frontier
+        let capture
+        try {
+            const root = page(env, 1, 0, 0)
+            const childPages = children(env, root)
+            const publication = await publishPages(
+                env,
+                [ root, ...childPages ],
+                'z1-east-edge-pages'
+            )
+            frontier = await createFrontier(env)
+            capture = await createCapture(frontier, 'z1-east-edge-capture')
+            const cameraX = 0.1
+            const view = orthographicView({
+                frameEpoch: 0,
+                snapshotEpoch: publication.snapshot.epoch,
+                camera: [ cameraX, HALF_WORLD / 2, 50 ],
+                xHalfExtent: HALF_WORLD,
+                yHalfExtent: HALF_WORLD,
+                zScale: 0.01,
+                zTranslate: 0.5,
+                zoomHint: 1,
+            })
+            const frameResult = await executeFrame({
+                env,
+                frontier,
+                capture,
+                seed: frontier.stageSeed(publication.snapshot),
+                view,
+                current: seedEntries(frontier, publication),
+                residentPages: [ root, ...childPages ],
+            })
+            assertEqual(
+                frameResult.keys,
+                [ root.key ],
+                'z1 east-edge SSE must use the independently reconstructed -0.1m edge'
+            )
+            const disposal = disposeScenario(frontier, capture, env)
+            frontier = undefined
+            capture = undefined
+            return {
+                cameraX,
+                refineErrorPixels: env.refineErrorPixels,
+                retainedKeys: frameResult.keys,
+                facts: frameResult.facts,
+                nextDispatchWords: frameResult.nextDispatchWords,
                 hash: frameResult.hash,
                 outcomes: [ frameResult.outcome ],
                 disposal,
@@ -596,6 +833,8 @@ async function runProof({ scratchUrl, geoUrl, referenceUrl, layoutUrl }) {
                 coarsenedKeys: coarsen.keys,
                 parentLastVisibleFrame: coarsen.frontier[0].transitionState,
                 decisionFrameEpoch: 1,
+                facts: coarsen.facts,
+                nextDispatchWords: coarsen.nextDispatchWords,
                 hash: coarsen.hash,
                 outcomes: [ refine.outcome, coarsen.outcome ],
                 disposal,
@@ -706,14 +945,23 @@ async function runProof({ scratchUrl, geoUrl, referenceUrl, layoutUrl }) {
 
     async function executeFrame(input) {
 
-        const upload = input.frontier.writeView(input.view)
-        const frame = input.frontier.frame(upload)
-        const extras = input.createExtraUploads?.(frame) ?? []
+        const viewToken = input.frontier.writeView(input.view)
+        const frame = input.frontier.frame(viewToken)
+        const frameAccess = gpuTileFrontierTestFrameAccess(input.frontier, frame)
+        const packedMapMeta = gpuTileFrontierMapMetaCodec.createReadbackView(
+            new Uint8Array(
+                frameAccess.viewCommand.data.buffer,
+                frameAccess.viewCommand.data.byteOffset,
+                frameAccess.viewCommand.data.byteLength
+            )
+        ).toArray()[0]
+        const extras = input.createExtraUploads?.(frame, frameAccess) ?? []
+        const residentPages = residentRecords(input.env, input.residentPages)
         const oracle = evaluateGpuTileFrontierReference({
             descriptor: input.frontier.descriptor,
             view: input.view,
             currentFrontier: input.current,
-            residentPages: residentRecords(input.env, input.residentPages),
+            residentPages,
         })
         assert(
             oracle.nextFrontier.length === oracle.visible.length,
@@ -724,16 +972,21 @@ async function runProof({ scratchUrl, geoUrl, referenceUrl, layoutUrl }) {
         if (input.seed !== undefined) appendSeed(builder, input.seed)
         input.capture.prepare(builder)
         for (const extra of extras) builder.upload(extra)
-        const submitted = builder
-            .upload(upload.command)
-            .compute(frame.pass, frame.commands)
+        const submitted = input.frontier.encode(builder, frame)
             .compute(input.capture.pass, [ captureCommand ])
             .readback(input.capture.readback)
             .submit()
         const bytes = (await input.capture.readback.result({ after: submitted }).toBytes()).slice()
         const nativeOutcome = await submitted.nativeOutcome
         assert(nativeOutcome.status === 'observed-succeeded', 'frontier submission failed')
-        const decoded = decodeCapture(input.frontier, bytes, oracle.nextFrontier.length)
+        const decoded = decodeCapture(input.frontier, bytes, oracle)
+        assertFacts(
+            decoded.facts,
+            oracle.facts,
+            input.view.frameEpoch,
+            packedMapMeta,
+            decoded.precisionProbe
+        )
         assertEqual(
             decoded.frontier,
             oracle.nextFrontier.map(normalizeReferenceEntry),
@@ -744,13 +997,37 @@ async function runProof({ scratchUrl, geoUrl, referenceUrl, layoutUrl }) {
             oracle.visible.map(normalizeReferenceVisible),
             `GPU visible bytes differ from oracle at frame ${input.view.frameEpoch}`
         )
+        assertEqual(
+            decoded.demands,
+            oracle.demands.map(demand => normalizeReferenceDemand(input.frontier, demand)),
+            `GPU demands differ from oracle at frame ${input.view.frameEpoch}`
+        )
+        const retirements = expectedRetirements(input.current, oracle, residentPages)
+        assertEqual(
+            decoded.retirements,
+            retirements.map(normalizeReferenceEntry),
+            `GPU retirements differ from oracle at frame ${input.view.frameEpoch}`
+        )
+        assertCounters(decoded.counters, oracle.facts, retirements.length)
+        assertEqual(
+            decoded.nextDispatchWords,
+            [ Math.ceil(oracle.nextFrontier.length / 64), 1, 1 ],
+            'next indirect dispatch words'
+        )
         assertEqual(decoded.drawWords, [ 6, oracle.visible.length, 0, 0 ], 'indirect draw words')
         extras.forEach(command => command.dispose())
-        upload.dispose()
+        viewToken.dispose()
         return {
             frame,
             frontier: decoded.frontier,
             visible: decoded.visible,
+            demands: decoded.demands,
+            retirements: decoded.retirements,
+            counters: decoded.counters,
+            diagnostics: decoded.diagnostics,
+            facts: decoded.facts,
+            nextDispatchWords: decoded.nextDispatchWords,
+            precisionProbe: decoded.precisionProbe,
             keys: oracle.nextFrontier.map(entry => entry.page.key),
             nextCurrent: oracle.nextFrontier,
             canonicalBytes: decoded.canonicalBytes,
@@ -762,13 +1039,26 @@ async function runProof({ scratchUrl, geoUrl, referenceUrl, layoutUrl }) {
     async function createCapture(frontier, label) {
 
         const capacity = frontier.descriptor.policy.maximumActiveTiles
+        const feedbackLayout = frontier.facts().feedbackOutput.layout
         const frontierWords = capacity * gpuTileFrontierLayouts.frontierEntry.byteSize / 4
         const visibleWords = capacity * gpuTileFrontierLayouts.visibleInstance.byteSize / 4
-        const captureWords = 4 + frontierWords + visibleWords
+        const feedbackWords = feedbackLayout.byteLength / 4
+        const drawOffset = 0
+        const dispatchOffset = drawOffset + 4
+        const probeOffset = dispatchOffset + 3
+        const feedbackOffset = probeOffset + 8
+        const frontierOffset = feedbackOffset + feedbackWords
+        const visibleOffset = frontierOffset + frontierWords
+        const captureWords = visibleOffset + visibleWords
         const buffer = await runtime.createBuffer({
             label,
             size: captureWords * 4,
             usage: BUFFER_COPY_SRC | BUFFER_COPY_DST | BUFFER_STORAGE,
+        })
+        const probeInput = await runtime.createBuffer({
+            label: `${label} precision probe input`,
+            size: 16,
+            usage: BUFFER_COPY_DST | BUFFER_UNIFORM,
         })
         const layout = await runtime.createBindLayout({
             label: `${label} layout`,
@@ -779,7 +1069,25 @@ async function runProof({ scratchUrl, geoUrl, referenceUrl, layoutUrl }) {
                 storageBinding(1, 'visibleSource', 'read-storage', capacity *
                     gpuTileFrontierLayouts.visibleInstance.byteSize),
                 storageBinding(2, 'drawSource', 'read-storage', 16),
-                storageBinding(3, 'captureOutput', 'storage', captureWords * 4),
+                storageBinding(3, 'dispatchSource', 'read-storage', 12),
+                storageBinding(4, 'feedbackSource', 'read-storage', feedbackLayout.byteLength),
+                {
+                    binding: 5,
+                    name: 'mapMeta',
+                    type: 'uniform',
+                    visibility: [ 'compute' ],
+                    hasDynamicOffset: false,
+                    minBindingSize: gpuTileFrontierLayouts.mapMeta.byteSize,
+                },
+                storageBinding(6, 'captureOutput', 'storage', captureWords * 4),
+                {
+                    binding: 7,
+                    name: 'probeInput',
+                    type: 'uniform',
+                    visibility: [ 'compute' ],
+                    hasDynamicOffset: false,
+                    minBindingSize: 16,
+                },
             ],
         })
         const shader = await runtime.createShaderModule({
@@ -789,21 +1097,100 @@ async function runProof({ scratchUrl, geoUrl, referenceUrl, layoutUrl }) {
                 code: `
 const FRONTIER_WORDS: u32 = ${frontierWords}u;
 const VISIBLE_WORDS: u32 = ${visibleWords}u;
+const FEEDBACK_WORDS: u32 = ${feedbackWords}u;
 const CAPTURE_WORDS: u32 = ${captureWords}u;
+const WORLD_WIDTH_HIGH: f32 = 40075016.0;
+const WORLD_WIDTH_LOW: f32 = 0.6855784058570862;
+struct CaptureMapMeta {
+    clipFromRelativeWorld: mat4x4f,
+    cameraHigh: vec3f,
+    cameraLow: vec3f,
+    cameraMercatorHigh: vec2f,
+    cameraMercatorLow: vec2f,
+    viewport: vec2f,
+    verticalFovRadians: f32,
+    cameraLatitudeRadians: f32,
+    zoomHint: f32,
+    frameEpoch: u32,
+    residencySnapshotEpoch: u32,
+}
+struct CaptureProbeInput {
+    leftHigh: f32,
+    leftLow: f32,
+    rightHigh: f32,
+    rightLow: f32,
+}
 @group(0) @binding(0) var<storage, read> frontierSource: array<u32>;
 @group(0) @binding(1) var<storage, read> visibleSource: array<u32>;
 @group(0) @binding(2) var<storage, read> drawSource: array<u32>;
-@group(0) @binding(3) var<storage, read_write> captureOutput: array<u32>;
+@group(0) @binding(3) var<storage, read> dispatchSource: array<u32>;
+@group(0) @binding(4) var<storage, read> feedbackSource: array<u32>;
+@group(0) @binding(5) var<uniform> mapMeta: CaptureMapMeta;
+@group(0) @binding(6) var<storage, read_write> captureOutput: array<u32>;
+@group(0) @binding(7) var<uniform> probeInput: CaptureProbeInput;
+fn captureSubtract(leftHigh: f32, leftLow: f32, rightHigh: f32, rightLow: f32) -> f32 {
+    let lowDifference = leftLow - rightLow;
+    if (leftHigh == rightHigh) {
+        return lowDifference;
+    }
+    let difference = leftHigh - rightHigh;
+    let bridge = difference - leftHigh;
+    let roundoff = (leftHigh - (difference - bridge)) - (rightHigh + bridge);
+    return difference + (roundoff + leftLow - rightLow);
+}
+fn captureMeters(relative: f32) -> f32 {
+    let high = relative * WORLD_WIDTH_HIGH;
+    let low = fma(relative, WORLD_WIDTH_HIGH, -high) + relative * WORLD_WIDTH_LOW;
+    return high + low;
+}
 @compute @workgroup_size(64)
 fn capture(@builtin(global_invocation_id) id: vec3u) {
     let index = id.x;
     if (index >= CAPTURE_WORDS) { return; }
-    if (index < 4u) {
+    if (index < ${dispatchOffset}u) {
         captureOutput[index] = drawSource[index];
-    } else if (index < 4u + FRONTIER_WORDS) {
-        captureOutput[index] = frontierSource[index - 4u];
+    } else if (index < ${probeOffset}u) {
+        captureOutput[index] = dispatchSource[index - ${dispatchOffset}u];
+    } else if (index < ${feedbackOffset}u) {
+        let relative = captureSubtract(
+            0.5,
+            0.0,
+            mapMeta.cameraMercatorHigh.x,
+            mapMeta.cameraMercatorLow.x
+        );
+        let unequalLeftHigh = probeInput.leftHigh;
+        let unequalLeftLow = probeInput.leftLow;
+        let unequalRightHigh = probeInput.rightHigh;
+        let unequalRightLow = probeInput.rightLow;
+        let unequalLowDifference = unequalLeftLow - unequalRightLow;
+        if (index == ${probeOffset}u) {
+            captureOutput[index] = bitcast<u32>(mapMeta.cameraMercatorHigh.x);
+        } else if (index == ${probeOffset + 1}u) {
+            captureOutput[index] = bitcast<u32>(mapMeta.cameraMercatorLow.x);
+        } else if (index == ${probeOffset + 2}u) {
+            captureOutput[index] = bitcast<u32>(relative);
+        } else if (index == ${probeOffset + 3}u) {
+            captureOutput[index] = bitcast<u32>(captureMeters(relative));
+        } else if (index == ${probeOffset + 4}u) {
+            captureOutput[index] = bitcast<u32>(unequalLeftHigh);
+        } else if (index == ${probeOffset + 5}u) {
+            captureOutput[index] = bitcast<u32>(unequalRightHigh);
+        } else if (index == ${probeOffset + 6}u) {
+            captureOutput[index] = bitcast<u32>(unequalLowDifference);
+        } else {
+            captureOutput[index] = bitcast<u32>(captureSubtract(
+                unequalLeftHigh,
+                unequalLeftLow,
+                unequalRightHigh,
+                unequalRightLow
+            ));
+        }
+    } else if (index < ${frontierOffset}u) {
+        captureOutput[index] = feedbackSource[index - ${feedbackOffset}u];
+    } else if (index < ${visibleOffset}u) {
+        captureOutput[index] = frontierSource[index - ${frontierOffset}u];
     } else {
-        captureOutput[index] = visibleSource[index - 4u - FRONTIER_WORDS];
+        captureOutput[index] = visibleSource[index - ${visibleOffset}u];
     }
 }`,
             } ],
@@ -822,6 +1209,16 @@ fn capture(@builtin(global_invocation_id) id: vec3u) {
             label: `${label} initialize`,
             target: buffer.region(),
         })
+        const initializeProbe = runtime.createUploadCommand({
+            label: `${label} precision probe input upload`,
+            target: probeInput.region(),
+            data: new Float32Array([
+                0.05653253570199013,
+                -8.8444181756131e-8,
+                0.46139150857925415,
+                9.211208151782557e-8,
+            ]),
+        })
         const readback = await runtime.createReadbackCommand({
             label: `${label} readback`,
             source: { region: buffer.region(), contentEpoch: 'current-at-step' },
@@ -835,17 +1232,23 @@ fn capture(@builtin(global_invocation_id) id: vec3u) {
             prepare(builder) {
                 if (initialized) return
                 builder.clear(initialize)
+                builder.upload(initializeProbe)
                 initialized = true
             },
             async commandFor(frame) {
                 const existing = commands.get(frame.parity)
                 if (existing !== undefined) return existing.command
+                const access = gpuTileFrontierTestFrameAccess(frontier, frame)
                 const draw = frontier.drawArgument(frame, 'terrain')
                 const bindSet = await runtime.createBindSet(layout, {
-                    frontierSource: frame.nextFrontier.region(),
+                    frontierSource: access.nextFrontier.region(),
                     visibleSource: frame.visibleInstances.region(),
                     drawSource: draw.region,
+                    dispatchSource: access.nextDispatchArguments.region(),
+                    feedbackSource: access.feedbackOutput.region(),
+                    mapMeta: access.mapMeta.region(),
                     captureOutput: buffer.region(),
+                    probeInput: probeInput.region(),
                 }, { label: `${label} parity ${frame.parity} set` })
                 const command = runtime.createDispatchCommand({
                     label: `${label} parity ${frame.parity} dispatch`,
@@ -854,10 +1257,14 @@ fn capture(@builtin(global_invocation_id) id: vec3u) {
                     count: { workgroups: [ Math.ceil(captureWords / 64), 1, 1 ] },
                     resources: {
                         read: [
-                            currentRead(frame.nextFrontier),
+                            currentRead(access.nextFrontier),
                             currentRead(frame.visibleInstances),
                             currentRead(draw.resource),
+                            currentRead(access.nextDispatchArguments),
+                            currentRead(access.feedbackOutput),
+                            currentRead(access.mapMeta),
                             currentRead(buffer),
+                            currentRead(probeInput),
                         ],
                         write: [ buffer ],
                     },
@@ -872,59 +1279,106 @@ fn capture(@builtin(global_invocation_id) id: vec3u) {
                     value.bindSet.dispose()
                 }
                 initialize.dispose()
+                initializeProbe.dispose()
                 readback.dispose()
                 pass.dispose()
                 pipeline.dispose()
                 program.dispose()
                 shader.dispose()
                 layout.dispose()
+                probeInput.dispose()
                 buffer.dispose()
             },
         }
     }
 
-    function decodeCapture(frontier, bytes, expectedActiveCount) {
+    function decodeCapture(frontier, bytes, oracle) {
 
         const capacity = frontier.descriptor.policy.maximumActiveTiles
+        const feedbackLayout = frontier.facts().feedbackOutput.layout
         const frontierByteLength = capacity * gpuTileFrontierLayouts.frontierEntry.byteSize
         const visibleByteLength = capacity * gpuTileFrontierLayouts.visibleInstance.byteSize
+        const drawStart = 0
+        const dispatchStart = drawStart + 16
+        const probeStart = dispatchStart + 12
+        const feedbackStart = probeStart + 32
+        const frontierStart = feedbackStart + feedbackLayout.byteLength
+        const visibleStart = frontierStart + frontierByteLength
         const drawBytes = bytes.subarray(0, 16)
         const drawWords = Array.from(new Uint32Array(
             drawBytes.buffer,
             drawBytes.byteOffset,
             4
         ))
+        const dispatchBytes = bytes.subarray(dispatchStart, feedbackStart)
+        const nextDispatchWords = Array.from(new Uint32Array(
+            dispatchBytes.buffer,
+            dispatchBytes.byteOffset,
+            3
+        ))
+        const precisionProbe = Array.from(new Float32Array(
+            bytes.buffer,
+            bytes.byteOffset + probeStart,
+            8
+        ))
+        const feedbackBytes = bytes.subarray(feedbackStart, frontierStart)
+        const countersBytes = feedbackSectionBytes(feedbackBytes, feedbackLayout.counters)
+        const counters = Array.from(new Uint32Array(
+            countersBytes.buffer,
+            countersBytes.byteOffset,
+            countersBytes.byteLength / 4
+        ))
+        const diagnosticsBytes = feedbackSectionBytes(feedbackBytes, feedbackLayout.diagnostics)
+        const diagnostics = gpuTileFrontierDiagnosticsCodec
+            .createReadbackView(diagnosticsBytes).toArray()[0]
+        const demandCount = counters[5]
+        const retirementCount = counters[6]
+        assert(demandCount <= feedbackLayout.demands.capacity, 'GPU demand count exceeds capacity')
+        assert(retirementCount <= feedbackLayout.retirements.capacity,
+            'GPU retirement count exceeds capacity')
+        const demandBytes = feedbackSectionBytes(feedbackBytes, feedbackLayout.demands)
+        const retirementBytes = feedbackSectionBytes(feedbackBytes, feedbackLayout.retirements)
+        const demands = gpuTileFrontierDemandCodec.createReadbackView(demandBytes)
+            .toArray().slice(0, demandCount)
+        const retirements = gpuTileFrontierEntryCodec.createReadbackView(retirementBytes)
+            .toArray().slice(0, retirementCount)
         const visibleCount = drawWords[1]
         assert(visibleCount <= capacity, 'GPU draw count exceeds capture capacity')
-        assert(expectedActiveCount <= capacity, 'oracle active count exceeds capture capacity')
-        const frontierStart = 16
-        const visibleStart = frontierStart + frontierByteLength
+        assert(oracle.nextFrontier.length <= capacity, 'oracle active count exceeds capture capacity')
         const frontierBytes = bytes.subarray(frontierStart, visibleStart)
         const visibleBytes = bytes.subarray(visibleStart, visibleStart + visibleByteLength)
         const frontierEntries = gpuTileFrontierEntryCodec.createReadbackView(frontierBytes)
-            .toArray().slice(0, expectedActiveCount)
+            .toArray().slice(0, oracle.nextFrontier.length)
         const visible = gpuTileFrontierVisibleInstanceCodec.createReadbackView(visibleBytes)
             .toArray().slice(0, visibleCount)
-        const canonicalBytes = new Uint8Array(
-            16 + expectedActiveCount * gpuTileFrontierLayouts.frontierEntry.byteSize +
-                visibleCount * gpuTileFrontierLayouts.visibleInstance.byteSize
-        )
-        canonicalBytes.set(drawBytes, 0)
-        canonicalBytes.set(
+        const canonicalBytes = concatenateBytes([
+            drawBytes,
+            dispatchBytes,
+            bytes.subarray(probeStart, feedbackStart),
+            demandBytes.subarray(0, demandCount * gpuTileFrontierLayouts.demand.byteSize),
+            retirementBytes.subarray(
+                0,
+                retirementCount * gpuTileFrontierLayouts.frontierEntry.byteSize
+            ),
+            countersBytes,
+            diagnosticsBytes,
             frontierBytes.subarray(
                 0,
-                expectedActiveCount * gpuTileFrontierLayouts.frontierEntry.byteSize
+                oracle.nextFrontier.length * gpuTileFrontierLayouts.frontierEntry.byteSize
             ),
-            16
-        )
-        canonicalBytes.set(
             visibleBytes.subarray(0, visibleCount * gpuTileFrontierLayouts.visibleInstance.byteSize),
-            16 + expectedActiveCount * gpuTileFrontierLayouts.frontierEntry.byteSize
-        )
+        ])
         return {
             drawWords,
+            nextDispatchWords,
+            precisionProbe,
             frontier: frontierEntries,
             visible,
+            demands,
+            retirements,
+            counters,
+            diagnostics,
+            facts: diagnosticsFacts(diagnostics),
             canonicalBytes: Array.from(canonicalBytes),
         }
     }
@@ -1018,6 +1472,161 @@ fn capture(@builtin(global_invocation_id) id: vec3u) {
             compactIndex: entry.compactIndex,
             contentEpoch: entry.contentEpoch,
         }
+    }
+
+    function normalizeReferenceDemand(frontier, demand) {
+
+        const tile = demand.page.tile
+        return {
+            samplingLevel: demand.page.level,
+            matrixLevel: Number(tile.matrixId),
+            tileRow: tile.tileRow,
+            tileCol: tile.tileCol,
+            compactIndex: frontier.descriptor.addressCodec.coverage.index(tile),
+            parentCompactIndex: demand.parentCompactIndex,
+            parentPhysicalSlot: demand.parentPhysicalSlot,
+            parentGeneration: demand.parentGeneration,
+            priority: demand.priority,
+            decisionFrameEpoch: demand.decisionFrameEpoch,
+            residencySnapshotEpoch: demand.residencySnapshotEpoch,
+            childMask: demand.childMask,
+        }
+    }
+
+    function expectedRetirements(current, oracle, residentPages) {
+
+        const nextKeys = new Set(oracle.nextFrontier.map(entry => entry.page.key))
+        const residents = new Map(residentPages.map(resident => [ resident.page.key, resident ]))
+        return current.filter(entry => {
+            if (nextKeys.has(entry.page.key)) return false
+            const resident = residents.get(entry.page.key)
+            return resident !== undefined &&
+                resident.compactIndex === entry.compactIndex &&
+                resident.physicalSlot === entry.physicalSlot &&
+                resident.generation === entry.generation &&
+                resident.contentEpoch === entry.contentEpoch &&
+                resident.residencySnapshotEpoch === oracle.facts.residencySnapshotEpoch &&
+                entry.residencySnapshotEpoch <= oracle.facts.residencySnapshotEpoch
+        })
+    }
+
+    function diagnosticsFacts(diagnostics) {
+
+        const convergenceStates = [ 'converged', 'transitioning', 'budget-limited' ]
+        const facts = {
+            frameEpoch: diagnostics.frameEpoch,
+            residencySnapshotEpoch: diagnostics.residencySnapshotEpoch,
+            activeFrontierCount: diagnostics.activeFrontierCount,
+            visibleInstanceCount: diagnostics.visibleInstanceCount,
+            refineCandidateCount: diagnostics.refineCandidateCount,
+            coarsenCandidateCount: diagnostics.coarsenCandidateCount,
+            demandCount: diagnostics.demandCount,
+            fallbackCount: diagnostics.fallbackCount,
+            staleGenerationCount: diagnostics.staleGenerationCount,
+            budgetLimitedCount: diagnostics.budgetLimitedCount,
+            maximumObservedSse: diagnostics.maximumObservedSse,
+        }
+        if (diagnostics.minimumSelectedMatrixLevel !== 0xffff_ffff) {
+            facts.minimumSelectedMatrixLevel = diagnostics.minimumSelectedMatrixLevel
+            facts.maximumSelectedMatrixLevel = diagnostics.maximumSelectedMatrixLevel
+        }
+        facts.frontierOverflow = diagnostics.frontierOverflow !== 0
+        facts.demandOverflow = diagnostics.demandOverflow !== 0
+        facts.visibleOverflow = diagnostics.visibleOverflow !== 0
+        facts.convergenceState = convergenceStates[diagnostics.convergenceState]
+        return facts
+    }
+
+    function assertFacts(actual, expected, frameEpoch, packedMapMeta, precisionProbe) {
+
+        const tolerance = Math.max(1e-4, Math.abs(expected.maximumObservedSse) * 1e-3)
+        assert(
+            Math.abs(actual.maximumObservedSse - expected.maximumObservedSse) <= tolerance,
+            `GPU maximum SSE differs from oracle at frame ${frameEpoch}: ` +
+                `${actual.maximumObservedSse} vs ${expected.maximumObservedSse}; ` +
+                `cameraMercator=${JSON.stringify({
+                    high: packedMapMeta.cameraMercatorHigh,
+                    low: packedMapMeta.cameraMercatorLow,
+                })}; precisionProbe=${JSON.stringify(precisionProbe)}`
+        )
+        assertEqual(
+            { ...actual, maximumObservedSse: 0 },
+            { ...expected, maximumObservedSse: 0 },
+            `GPU diagnostics facts differ from oracle at frame ${frameEpoch}`
+        )
+        assertEqual(
+            precisionProbe.slice(4),
+            [
+                0.05653253570199013,
+                0.46139150857925415,
+                -1.8055627037938393e-7,
+                -0.40485915541648865,
+            ],
+            `GPU unequal-high compensated two-diff evidence differs at frame ${frameEpoch}`
+        )
+        assert(
+            precisionProbe[7] !== Math.fround(precisionProbe[4] - precisionProbe[5]),
+            `GPU unequal-high subtraction dropped the low correction at frame ${frameEpoch}`
+        )
+    }
+
+    function assertCounters(counters, facts, retirementCount) {
+
+        const minimumLevel = facts.minimumSelectedMatrixLevel ?? 0xffff_ffff
+        const maximumLevel = facts.maximumSelectedMatrixLevel ?? 0
+        assertEqual({
+            currentCount: counters[0],
+            nextCount: counters[1],
+            visibleCount: counters[2],
+            refineCount: counters[3],
+            coarsenCount: counters[4],
+            demandCount: counters[5],
+            retirementCount: counters[6],
+            staleCount: counters[7],
+            budgetLimitedCount: counters[8],
+            minimumLevel: counters[10],
+            maximumLevel: counters[11],
+            frontierOverflow: counters[12],
+            demandOverflow: counters[13],
+            visibleOverflow: counters[14],
+            frameEpoch: counters[17],
+            residencySnapshotEpoch: counters[18],
+            fallbackCount: counters[19],
+        }, {
+            currentCount: facts.activeFrontierCount,
+            nextCount: facts.activeFrontierCount,
+            visibleCount: facts.visibleInstanceCount,
+            refineCount: facts.refineCandidateCount,
+            coarsenCount: facts.coarsenCandidateCount,
+            demandCount: facts.demandCount,
+            retirementCount,
+            staleCount: facts.staleGenerationCount,
+            budgetLimitedCount: facts.budgetLimitedCount,
+            minimumLevel,
+            maximumLevel,
+            frontierOverflow: Number(facts.frontierOverflow),
+            demandOverflow: Number(facts.demandOverflow),
+            visibleOverflow: Number(facts.visibleOverflow),
+            frameEpoch: facts.frameEpoch,
+            residencySnapshotEpoch: facts.residencySnapshotEpoch,
+            fallbackCount: facts.fallbackCount,
+        }, 'GPU packed counters differ from oracle facts')
+    }
+
+    function feedbackSectionBytes(bytes, section) {
+
+        return bytes.subarray(section.offset, section.offset + section.byteLength)
+    }
+
+    function concatenateBytes(parts) {
+
+        const result = new Uint8Array(parts.reduce((sum, part) => sum + part.byteLength, 0))
+        let offset = 0
+        for (const part of parts) {
+            result.set(part, offset)
+            offset += part.byteLength
+        }
+        return result
     }
 
     function rootPages(env) {
@@ -1159,6 +1768,10 @@ fn capture(@builtin(global_invocation_id) id: vec3u) {
             keys: frameResult.keys,
             compactIndexes: frameResult.frontier.map(entry => entry.compactIndex),
             visibleCount: frameResult.visible.length,
+            demandCount: frameResult.demands.length,
+            retirementCount: frameResult.retirements.length,
+            facts: frameResult.facts,
+            nextDispatchWords: frameResult.nextDispatchWords,
             hash: frameResult.hash,
         }
     }
@@ -1234,7 +1847,7 @@ function validate(value) {
         (proof.drawArgument?.usage & 0x180) !== 0x180) {
         failures.push('parity or indirect draw resource facts drifted')
     }
-    if (proof.outcomes?.length !== 8 ||
+    if (proof.outcomes?.length !== 10 ||
         proof.outcomes.some(status => status !== 'observed-succeeded')) {
         failures.push('one or more semantic submissions did not complete successfully')
     }
@@ -1242,6 +1855,9 @@ function validate(value) {
         proof.scenarios.canonicalTie.deterministicHash !==
             proof.scenarios.canonicalTie.repeatedHash ||
         proof.scenarios.staleContent?.activeCount !== 0 ||
+        proof.scenarios.eastEdgePrecision?.retainedKeys?.length !== 1 ||
+        proof.scenarios.balancePressure?.facts?.fallbackCount !== 2 ||
+        proof.scenarios.balancePressure?.facts?.budgetLimitedCount !== 0 ||
         proof.scenarios.precision?.visibleCount !== 2 ||
         proof.scenarios.visibilityGrace?.parentLastVisibleFrame !== 1) {
         failures.push('decoded GPU semantic evidence is incomplete')
