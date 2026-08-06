@@ -107,6 +107,7 @@ async function runProof({ scratchUrl, geoUrl, referenceUrl, layoutUrl, testAcces
     const { GPURuntime } = await import(scratchUrl)
     const {
         GpuTileFrontier,
+        VirtualRasterGpuFeedbackRing,
         VirtualRasterResidency,
         WebMercatorQuad,
         createVirtualRasterGpuState,
@@ -180,6 +181,7 @@ async function runProof({ scratchUrl, geoUrl, referenceUrl, layoutUrl, testAcces
         const staleContent = await staleContentScenario()
         const staleGeneration = await staleGenerationScenario()
         const demand = await demandScenario()
+        const feedbackRing = await feedbackRingScenario()
         const eastEdgePrecision = await eastEdgePrecisionScenario()
         const eastEdgeCounterexample = await eastEdgeCounterexampleScenario()
         const balancePressure = await balancePressureScenario()
@@ -204,6 +206,7 @@ async function runProof({ scratchUrl, geoUrl, referenceUrl, layoutUrl, testAcces
             ...staleContent.outcomes,
             ...staleGeneration.outcomes,
             ...demand.outcomes,
+            ...feedbackRing.outcomes,
             ...eastEdgePrecision.outcomes,
             ...eastEdgeCounterexample.outcomes,
             ...balancePressure.outcomes,
@@ -219,6 +222,7 @@ async function runProof({ scratchUrl, geoUrl, referenceUrl, layoutUrl, testAcces
                 staleContent,
                 staleGeneration,
                 demand,
+                feedbackRing,
                 eastEdgePrecision,
                 eastEdgeCounterexample,
                 balancePressure,
@@ -233,6 +237,7 @@ async function runProof({ scratchUrl, geoUrl, referenceUrl, layoutUrl, testAcces
                 staleContent,
                 staleGeneration,
                 demand,
+                feedbackRing,
                 eastEdgePrecision,
                 eastEdgeCounterexample,
                 balancePressure,
@@ -240,6 +245,7 @@ async function runProof({ scratchUrl, geoUrl, referenceUrl, layoutUrl, testAcces
                 grace,
                 offAxis,
             ].every(scenario => scenario.disposal.borrowedSlotTableAlive),
+            feedbackRingDisposed: feedbackRing.disposal.feedbackRingDisposed,
             runtimeAlive: !runtime.isDisposed,
         }
         result.scenarios = {
@@ -254,6 +260,7 @@ async function runProof({ scratchUrl, geoUrl, referenceUrl, layoutUrl, testAcces
             staleContent,
             staleGeneration,
             demand,
+            feedbackRing,
             eastEdgePrecision,
             eastEdgeCounterexample,
             balancePressure,
@@ -722,6 +729,131 @@ async function runProof({ scratchUrl, geoUrl, referenceUrl, layoutUrl, testAcces
             }
         } finally {
             capture?.dispose()
+            frontier?.dispose()
+            env.gpuState?.dispose()
+            env.residency.dispose()
+        }
+    }
+
+    async function feedbackRingScenario() {
+
+        const env = await createEnvironment({
+            id: 'bounded-feedback-ring',
+            limits: [
+                {
+                    matrixId: '1',
+                    minTileRow: 0,
+                    maxTileRow: 0,
+                    minTileCol: 0,
+                    maxTileCol: 0,
+                },
+                {
+                    matrixId: '2',
+                    minTileRow: 0,
+                    maxTileRow: 1,
+                    minTileCol: 0,
+                    maxTileCol: 1,
+                },
+            ],
+            minimumMatrixLevel: 1,
+            maximumMatrixLevel: 2,
+            maximumActiveTiles: 4,
+            maximumDemands: 4,
+            transitionReservePages: 4,
+            refineErrorPixels: 2,
+            coarsenErrorPixels: 1,
+            levelMetrics: [ metric(1, 100_000), metric(2, 100) ],
+            maxPhysicalPages: 8,
+        })
+        let frontier
+        let ring
+        try {
+            const root = page(env, 1, 0, 0)
+            const demandedChildren = children(env, root)
+            const publication = await publishPages(env, [ root ], 'bounded-feedback-root')
+            frontier = await createFrontier(env)
+            ring = await VirtualRasterGpuFeedbackRing.create(frontier)
+            const seed = frontier.stageSeed(publication.snapshot)
+
+            const issue = async(frameEpoch, initialSeed) => {
+                const viewToken = frontier.writeView(
+                    allWorldView(frameEpoch, publication.snapshot.epoch, 50)
+                )
+                try {
+                    const frame = frontier.frame(viewToken)
+                    const builder = runtime.createSubmission({ validation: 'throw' })
+                    if (initialSeed !== undefined) appendSeed(builder, initialSeed)
+                    const submitted = ring.encode(
+                        frontier.encode(builder, frame),
+                        frame
+                    ).submit()
+                    const outcome = await submitted.nativeOutcome
+                    assert(
+                        outcome.status === 'observed-succeeded',
+                        `feedback ring frame ${frameEpoch} submission failed`
+                    )
+                    return { frame, submitted, outcome: outcome.status }
+                } finally {
+                    viewToken.dispose()
+                }
+            }
+
+            const first = await issue(0, seed)
+            let tooRecentCode
+            try {
+                await ring.feedback(first.frame, first.submitted)
+            } catch (error) {
+                tooRecentCode = error?.diagnostic?.code
+            }
+            assert(
+                tooRecentCode === 'GEO_GPU_TILE_FEEDBACK_TOO_RECENT',
+                'same-issue feedback must be rejected before consuming its slot'
+            )
+            const second = await issue(1)
+            const feedback = await ring.feedback(first.frame, first.submitted)
+            const demandKeys = feedback.demands.map(demand => demand.page.key)
+            assertEqual(
+                demandKeys,
+                demandedChildren.map(child => child.key),
+                'public feedback ring must decode canonical child demand order'
+            )
+            assert(
+                feedback.demands.length === 4 && feedback.facts.demandCount === 4,
+                'public feedback ring must decode a nonzero four-child GPU demand batch'
+            )
+            assert(
+                !('bytes' in feedback),
+                'public feedback batches must not expose mapped or copied bytes'
+            )
+            const ringFacts = ring.facts()
+            assert(
+                ringFacts.slotCount === 3 && ringFacts.issuedCount === 2,
+                'public feedback ring must remain fixed at three slots and record two issues'
+            )
+
+            frontier.dispose()
+            const disposal = {
+                frontierDisposed: frontier.facts().disposed,
+                feedbackRingDisposed: ring.facts().disposed,
+                borrowedSlotTableAlive: !env.gpuState.slotTable.isDisposed,
+            }
+            frontier = undefined
+            ring = undefined
+            env.gpuState.dispose()
+            env.residency.dispose()
+            return {
+                frameEpoch: feedback.frameEpoch,
+                residencySnapshotEpoch: feedback.residencySnapshotEpoch,
+                demandKeys,
+                demandCount: feedback.demands.length,
+                rawBytesExposed: 'bytes' in feedback,
+                tooRecentCode,
+                ringFacts,
+                outcomes: [ first.outcome, second.outcome ],
+                disposal,
+            }
+        } finally {
+            ring?.dispose()
             frontier?.dispose()
             env.gpuState?.dispose()
             env.residency.dispose()
@@ -2248,7 +2380,7 @@ function validate(value) {
         (proof.drawArgument?.usage & 0x180) !== 0x180) {
         failures.push('parity or indirect draw resource facts drifted')
     }
-    if (proof.outcomes?.length !== 15 ||
+    if (proof.outcomes?.length !== 17 ||
         proof.outcomes.some(status => status !== 'observed-succeeded')) {
         failures.push('one or more semantic submissions did not complete successfully')
     }
@@ -2264,6 +2396,12 @@ function validate(value) {
         proof.scenarios.staleGeneration?.facts?.staleGenerationCount !== 1 ||
         proof.scenarios.demand?.demandCount !== 4 ||
         proof.scenarios.demand?.packedByteLength !== 192 ||
+        proof.scenarios.feedbackRing?.frameEpoch !== 0 ||
+        proof.scenarios.feedbackRing?.demandCount !== 4 ||
+        proof.scenarios.feedbackRing?.rawBytesExposed !== false ||
+        proof.scenarios.feedbackRing?.tooRecentCode !== 'GEO_GPU_TILE_FEEDBACK_TOO_RECENT' ||
+        proof.scenarios.feedbackRing?.ringFacts?.slotCount !== 3 ||
+        proof.scenarios.feedbackRing?.ringFacts?.issuedCount !== 2 ||
         proof.scenarios.eastEdgePrecision?.retainedKeys?.length !== 1 ||
         proof.scenarios.eastEdgeCounterexample?.refinedKeys?.length !== 4 ||
         !(proof.scenarios.eastEdgeCounterexample?.maximumObservedSse > 300) ||
@@ -2276,7 +2414,8 @@ function validate(value) {
         !(proof.scenarios.offAxis?.facts?.coarsenCandidateCount >= 1)) {
         failures.push('decoded GPU semantic evidence is incomplete')
     }
-    if (!proof.disposal?.frontierDisposed || !proof.disposal?.borrowedSlotTableAlive ||
+    if (!proof.disposal?.frontierDisposed || !proof.disposal?.feedbackRingDisposed ||
+        !proof.disposal?.borrowedSlotTableAlive ||
         !proof.disposal?.runtimeAlive) {
         failures.push('owned or borrowed disposal boundaries drifted')
     }
