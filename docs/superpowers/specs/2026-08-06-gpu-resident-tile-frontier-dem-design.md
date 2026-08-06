@@ -392,9 +392,9 @@ bounded GPU demand readback
     -> SubmittedWork acknowledgement
 ```
 
-readback 使用固定三槽 staging ring。每个槽是持久 `ReadbackCommand`，结果采用 `consume-on-read`；ring 只在同一 open submission 已包含精确 frontier upload/compute graph 后追加一个 readback。三个槽都忙时产生结构化 backpressure，调用方仍可不带 feedback 地提交本帧 frontier/render graph，GPU 不因 host readback 延迟阻塞当前 render。
+readback 使用固定三槽 staging ring。每个槽是持久 `ReadbackCommand`，结果采用 `consume-on-read`；ring 只在同一 open submission 持有该 frame 的 package-private `GpuTileFrontier.encode()` 凭证且只包含一份精确 frontier upload/compute graph 后追加一个 readback。三个已提交槽都忙时产生结构化 backpressure，调用方仍可不带 feedback 地提交本帧 frontier/render graph，GPU 不因 host readback 延迟阻塞当前 render。尚未提交的多个 builder 是同一 revision 的互斥候选，不提前 reservation 槽位；只有一个能跨越同步 issue authority，失败候选不产生 queue effect，也不需要额外 cancel 状态机。
 
-CPU 只消费按实际成功 issue sequence 计算的 N-1 或更早结果，而不把业务 `frameEpoch` 当作执行序号。消费要求精确 `SubmittedWork` provenance，并同时校验 packed decision epoch、当前 acknowledged residency snapshot、demand parent slot/generation，以及 retirement 的 slot/generation/content epoch。Demand 以 canonical page path 排序并按最高 priority 去重；stale retirement 被丢弃并计入 bounded diagnostic；任何固定容量 overflow 都 fail closed。公开 batch 只包含 immutable demands、retirements、counters、facts 和有限 diagnostics，不暴露 mapped/raw bytes，也不保留逐帧历史。Frontier 拥有 ring 生命周期并在 dispose 时级联清理三个槽。
+CPU 只消费按实际成功 issue sequence 计算的 N-1 或更早结果，而不把业务 `frameEpoch` 当作执行序号。消费要求精确 `SubmittedWork` provenance，并同时校验 packed decision epoch、当前 acknowledged residency snapshot、demand parent slot/generation，以及 retirement 的 slot/generation/content epoch。Demand parent 和 retirement page 必须是 snapshot 中同页 exact `resident`，ancestor fallback 不能成为可执行 authority。Demand 以 canonical page path 排序并按最高 priority 去重；stale retirement 被丢弃并计入 bounded diagnostic；所有 frontier/candidate/transition counters 受 fixed active capacity 约束，任何越界或 overflow 都 fail closed。公开 batch 只包含 immutable demands、retirements、counters、facts 和有限 diagnostics，不暴露 mapped/raw bytes，也不保留逐帧历史。Frontier 拥有 ring 生命周期并在 dispose 时级联清理三个槽。
 
 CPU 不直接编辑 active frontier。新 children 通过 page table/slot metadata publication 被 GPU parent transition 自动发现。
 

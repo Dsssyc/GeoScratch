@@ -409,6 +409,8 @@ geoApi.evaluateGpuTileFrontierReference
 geoApi.validateGpuTileFrontierDescriptor
 // @ts-expect-error Mutable feedback resource access is package-internal
 geoApi.gpuTileFrontierFeedbackAccess
+// @ts-expect-error Frontier builder provenance is package-internal
+geoApi.gpuTileFrontierFeedbackEncodingMatches
 // @ts-expect-error Current acknowledged snapshot identity is package-internal
 geoApi.virtualRasterGpuAcknowledgedSnapshot
 // @ts-expect-error Coordinate dimensions are limited to one, two, or three

@@ -205,6 +205,10 @@ type FrameRecord = Readonly<{
 }>
 
 const frameRecords = new WeakMap<GpuTileFrontierFrame, FrameRecord>()
+const encodedBuilderRecords = new WeakMap<SubmissionBuilder, Readonly<{
+    owner: GpuTileFrontier
+    frame: GpuTileFrontierFrame
+}>>()
 
 type ViewTokenRecord = {
     owner: GpuTileFrontier
@@ -561,7 +565,8 @@ export class GpuTileFrontier {
         this.#assertActive()
         const record = frameRecords.get(frame)
         const authority = this.descriptor.gpuState.facts()
-        if (builder?.runtime !== this.runtime || record?.owner !== this ||
+        if (builder?.runtime !== this.runtime || builder.isSubmitted ||
+            encodedBuilderRecords.has(builder) || record?.owner !== this ||
             frame.frontierId !== this.id || record.view.disposed ||
             record.view.command.isDisposed ||
             record.view.acknowledgementSerial !== authority.acknowledgementSerial ||
@@ -580,14 +585,20 @@ export class GpuTileFrontier {
                 viewRevision: record?.view.viewStamp.revision,
                 sequenceRevision: record?.view.sequenceStamp.revision,
                 disposed: record?.view.disposed ?? record?.view.command.isDisposed,
+                submitted: builder?.isSubmitted,
+                alreadyEncoded: builder === undefined
+                    ? false
+                    : encodedBuilderRecords.has(builder),
             })
         }
-        return builder
+        const encoded = builder
             .require(record.view.residencyStamp)
             .require(record.view.viewStamp)
             .upload(record.view.command)
             .compute(this.#pass, [ ...record.template.commands ])
             .consume(record.view.sequenceStamp)
+        encodedBuilderRecords.set(encoded, Object.freeze({ owner: this, frame }))
+        return encoded
     }
 
     drawArgument(frame: GpuTileFrontierFrame, id: string): GpuTileFrontierDrawArgument {
@@ -747,6 +758,17 @@ export function gpuTileFrontierFeedbackFrameAccess(
         sequenceRevision: record.view.sequenceStamp.revision,
         residencySnapshotEpoch: record.residencySnapshotEpoch,
     })
+}
+
+/** @internal Reports whether the exact frontier frame encoded this builder once. */
+export function gpuTileFrontierFeedbackEncodingMatches(
+    frontier: GpuTileFrontier,
+    builder: SubmissionBuilder,
+    frame: GpuTileFrontierFrame
+): boolean {
+
+    const record = encodedBuilderRecords.get(builder)
+    return record?.owner === frontier && record.frame === frame
 }
 
 /** @internal Registers a bounded frontier-owned feedback lifecycle. */

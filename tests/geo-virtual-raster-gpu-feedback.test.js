@@ -1,5 +1,5 @@
 import { expect } from 'chai'
-import { GPURuntime } from 'geoscratch/scratch'
+import { GPURuntime, ScratchDiagnosticError } from 'geoscratch/scratch'
 import {
     GeoDiagnosticError,
     GpuTileFrontier,
@@ -26,11 +26,12 @@ import { createFakeGpu } from './scratch-test-utils.js'
 
 const HALF_WORLD = 20_037_508.3427892
 
-async function createFeedbackFixture() {
+async function createFeedbackFixture(options = {}) {
 
+    const maximumMatrixLevel = options.maximumMatrixLevel ?? 1
     const coverage = tileMatrixCoverage({
         tileMatrixSet: WebMercatorQuad,
-        limits: [ 0, 1 ].map(matrixLevel => ({
+        limits: Array.from({ length: maximumMatrixLevel + 1 }, (_, matrixLevel) => ({
             matrixId: String(matrixLevel),
             minTileRow: 0,
             maxTileRow: 2 ** matrixLevel - 1,
@@ -85,13 +86,13 @@ async function createFeedbackFixture() {
             refineErrorPixels: 2,
             coarsenErrorPixels: 1,
             minimumMatrixLevel: 0,
-            maximumMatrixLevel: 1,
+            maximumMatrixLevel,
             maximumActiveTiles: 4,
             maximumDemands: 4,
             transitionReservePages: 4,
             invisibleGraceFrames: 2,
         }),
-        levelMetrics: [ 0, 1 ].map(matrixLevel => ({
+        levelMetrics: Array.from({ length: maximumMatrixLevel + 1 }, (_, matrixLevel) => ({
             matrixLevel,
             minimumElevationMeters: 0,
             maximumElevationMeters: 100,
@@ -182,7 +183,7 @@ function packedFeedback(frame, options = {}) {
         layout.counters.byteLength / 4
     )
     counters[0] = options.activeFrontierCount ?? 1
-    counters[1] = options.activeFrontierCount ?? 1
+    counters[1] = options.nextFrontierCount ?? options.activeFrontierCount ?? 1
     counters[2] = options.visibleInstanceCount ?? 1
     counters[3] = options.refineCandidateCount ?? 0
     counters[4] = options.coarsenCandidateCount ?? 0
@@ -307,6 +308,78 @@ describe('Geo Virtual Raster GPU feedback ring', () => {
         fixture.runtime.dispose()
     })
 
+    it('rejects direct construction and locks its public ownership identity', async() => {
+
+        const fixture = await createFeedbackFixture()
+        const ring = await VirtualRasterGpuFeedbackRing.create(fixture.frontier)
+
+        expect(() => Reflect.construct(
+            VirtualRasterGpuFeedbackRing,
+            [ fixture.frontier, [] ]
+        )).to.throw(TypeError)
+        expect(Object.isFrozen(ring)).to.equal(true)
+        expect(() => {
+            ring.id = 'forged-feedback-ring'
+        }).to.throw(TypeError)
+        expect(() => {
+            ring.frontier = undefined
+        }).to.throw(TypeError)
+        expect(ring.frontier).to.equal(fixture.frontier)
+
+        fixture.frontier.dispose()
+        fixture.gpuState.dispose()
+        fixture.residency.dispose()
+        fixture.runtime.dispose()
+    })
+
+    it('requires exactly one frontier-owned encoding before mutating a builder', async() => {
+
+        const fixture = await createFeedbackFixture()
+        const ring = await VirtualRasterGpuFeedbackRing.create(fixture.frontier)
+        const token = fixture.frontier.writeView(fixture.view(0))
+        const frame = fixture.frontier.frame(token)
+        const access = gpuTileFrontierTestFrameAccess(fixture.frontier, frame)
+        const unownedBuilder = fixture.runtime.createSubmission({ validation: 'throw' })
+            .upload(access.viewCommand)
+            .compute(access.pass, [ ...access.commands ])
+        const unownedStepCount = unownedBuilder.steps.length
+
+        await expectFeedbackError(
+            () => ring.encode(unownedBuilder, frame),
+            'GEO_GPU_TILE_FEEDBACK_FRAME_INVALID'
+        )
+        expect(unownedBuilder.steps).to.have.length(unownedStepCount)
+
+        const duplicateBuilder = fixture.frontier.encode(
+            fixture.runtime.createSubmission({ validation: 'throw' }),
+            frame
+        )
+        const encodedStepCount = duplicateBuilder.steps.length
+        let duplicateEncodeFailure
+        try {
+            fixture.frontier.encode(duplicateBuilder, frame)
+        } catch (error) {
+            duplicateEncodeFailure = error
+        }
+        expect(duplicateEncodeFailure).to.be.instanceOf(GeoDiagnosticError)
+        expect(duplicateEncodeFailure.diagnostic.code).to.equal('GEO_GPU_TILE_FRONTIER_INVALID')
+        expect(duplicateBuilder.steps).to.have.length(encodedStepCount)
+
+        duplicateBuilder.compute(access.pass, [ ...access.commands ])
+        const duplicateStepCount = duplicateBuilder.steps.length
+        await expectFeedbackError(
+            () => ring.encode(duplicateBuilder, frame),
+            'GEO_GPU_TILE_FEEDBACK_FRAME_INVALID'
+        )
+        expect(duplicateBuilder.steps).to.have.length(duplicateStepCount)
+
+        token.dispose()
+        fixture.frontier.dispose()
+        fixture.gpuState.dispose()
+        fixture.residency.dispose()
+        fixture.runtime.dispose()
+    })
+
     it('applies three-slot backpressure without blocking frontier submission', async() => {
 
         const fixture = await createFeedbackFixture()
@@ -358,6 +431,49 @@ describe('Geo Virtual Raster GPU feedback ring', () => {
         token.dispose()
         expect(submittedWithoutFeedback.readbacks).to.deep.equal([])
 
+        fixture.frontier.dispose()
+        fixture.gpuState.dispose()
+        fixture.residency.dispose()
+        fixture.runtime.dispose()
+    })
+
+    it('arbitrates speculative open builders at issue time without reserving slots', async() => {
+
+        const fixture = await createFeedbackFixture()
+        const ring = await VirtualRasterGpuFeedbackRing.create(fixture.frontier)
+        const token = fixture.frontier.writeView(fixture.view(0))
+        const frame = fixture.frontier.frame(token)
+        const builders = Array.from({ length: 4 }, () => {
+            const builder = fixture.frontier.encode(
+                fixture.runtime.createSubmission({ validation: 'throw' }),
+                frame
+            )
+            ring.encode(builder, frame)
+            return builder
+        })
+
+        expect(ring.facts().slots.map(slot => slot.state)).to.deep.equal([
+            'idle',
+            'idle',
+            'idle',
+        ])
+        builders[0].submit()
+        const issuedQueueSubmissions = fixture.calls.queueSubmissions.length
+        for (const builder of builders.slice(1)) {
+            let failure
+            try {
+                builder.submit()
+            } catch (error) {
+                failure = error
+            }
+            expect(failure).to.be.instanceOf(ScratchDiagnosticError)
+            expect(failure.diagnostic.code).to.equal('SCRATCH_SUBMISSION_AUTHORITY_STALE')
+        }
+        expect(fixture.calls.queueSubmissions).to.have.length(issuedQueueSubmissions)
+        expect(ring.facts().issuedCount).to.equal(1)
+        expect(ring.facts().slots.filter(slot => slot.state === 'submitted')).to.have.length(1)
+
+        token.dispose()
         fixture.frontier.dispose()
         fixture.gpuState.dispose()
         fixture.residency.dispose()
@@ -451,11 +567,21 @@ describe('Geo Virtual Raster GPU feedback ring', () => {
             childDemandMask: 0,
             residencySnapshotEpoch: snapshotEpoch,
         }
+        const fallbackRetirement = {
+            ...retirement,
+            samplingLevel: child.level,
+            matrixLevel: 1,
+            tileRow: 0,
+            tileCol: 0,
+            compactIndex: fixture.coverage.index(child.tile),
+        }
+        expect(fixture.publication.snapshot.resolve(child).status).to.equal('fallback')
         const first = issueFeedbackFrame(fixture, ring, 0, {
             demands: [ demand(3), demand(11) ],
             retirements: [
                 retirement,
                 { ...retirement, expectedGeneration: retirement.expectedGeneration + 1 },
+                fallbackRetirement,
             ],
         })
         issueFeedbackFrame(fixture, ring, 1)
@@ -480,13 +606,60 @@ describe('Geo Virtual Raster GPU feedback ring', () => {
         })
         expect(feedback.counters).to.deep.include({
             demandCount: 2,
-            retirementCount: 2,
-            discardedStaleRetirementCount: 1,
+            retirementCount: 3,
+            discardedStaleRetirementCount: 2,
         })
         expect(feedback.diagnostics.map(diagnostic => diagnostic.code))
             .to.include('GEO_GPU_TILE_FEEDBACK_STALE_RETIREMENT')
         expect(Object.isFrozen(feedback.demands)).to.equal(true)
         expect(Object.isFrozen(feedback.retirements)).to.equal(true)
+
+        fixture.frontier.dispose()
+        fixture.gpuState.dispose()
+        fixture.residency.dispose()
+        fixture.runtime.dispose()
+    })
+
+    it('rejects a demand whose parent resolves only through an ancestor fallback', async() => {
+
+        const fixture = await createFeedbackFixture({ maximumMatrixLevel: 2 })
+        const ring = await VirtualRasterGpuFeedbackRing.create(fixture.frontier)
+        const parent = fixture.addressSpace.pageFromTile({
+            matrixId: '1',
+            tileRow: 0,
+            tileCol: 0,
+        })
+        const child = fixture.addressSpace.pageFromTile({
+            matrixId: '2',
+            tileRow: 0,
+            tileCol: 0,
+        })
+        const parentEntry = fixture.publication.snapshot.resolve(parent)
+        expect(parentEntry.status).to.equal('fallback')
+        expect(parentEntry.resolvedPage).to.equal(fixture.root)
+        const first = issueFeedbackFrame(fixture, ring, 0, {
+            demands: [ {
+                samplingLevel: child.level,
+                matrixLevel: 2,
+                tileRow: 0,
+                tileCol: 0,
+                compactIndex: fixture.coverage.index(child.tile),
+                parentCompactIndex: fixture.coverage.index(parent.tile),
+                parentPhysicalSlot: parentEntry.physicalSlot,
+                parentGeneration: parentEntry.generation,
+                priority: 1,
+                decisionFrameEpoch: 0,
+                residencySnapshotEpoch: fixture.publication.snapshot.epoch,
+                childMask: 1,
+            } ],
+        })
+        issueFeedbackFrame(fixture, ring, 1)
+
+        await expectFeedbackError(
+            () => ring.feedback(first.frame, first.submitted),
+            'GEO_GPU_TILE_FEEDBACK_STALE'
+        )
+        expect(ring.facts().slots[0].state).to.equal('idle')
 
         fixture.frontier.dispose()
         fixture.gpuState.dispose()
@@ -511,6 +684,44 @@ describe('Geo Virtual Raster GPU feedback ring', () => {
         fixture.gpuState.dispose()
         fixture.residency.dispose()
         fixture.runtime.dispose()
+    })
+
+    it('rejects every fixed frontier counter above active capacity', async() => {
+
+        const fields = [
+            'activeFrontierCount',
+            'nextFrontierCount',
+            'visibleInstanceCount',
+            'refineCandidateCount',
+            'coarsenCandidateCount',
+            'retirementCount',
+            'staleGenerationCount',
+            'budgetLimitedCount',
+            'lookupDuplicateCount',
+            'balanceRejectedCount',
+            'fallbackCount',
+            'acceptedRefineCount',
+            'acceptedCoarsenCount',
+        ]
+        for (const field of fields) {
+            const fixture = await createFeedbackFixture()
+            const ring = await VirtualRasterGpuFeedbackRing.create(fixture.frontier)
+            try {
+                const first = issueFeedbackFrame(fixture, ring, 0, { [field]: 5 })
+                issueFeedbackFrame(fixture, ring, 1)
+                const diagnostic = await expectFeedbackError(
+                    () => ring.feedback(first.frame, first.submitted),
+                    'GEO_GPU_TILE_FRONTIER_CAPACITY_EXCEEDED'
+                )
+                expect(diagnostic.actual).to.have.property(field, 5)
+                expect(ring.facts().slots[0].state).to.equal('idle')
+            } finally {
+                fixture.frontier.dispose()
+                fixture.gpuState.dispose()
+                fixture.residency.dispose()
+                fixture.runtime.dispose()
+            }
+        }
     })
 
     it('consumes and rejects feedback after residency authority advances', async() => {

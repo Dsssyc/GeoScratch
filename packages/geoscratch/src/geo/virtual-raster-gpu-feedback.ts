@@ -17,6 +17,7 @@ import {
 import {
     GpuTileFrontier,
     gpuTileFrontierFeedbackAccess,
+    gpuTileFrontierFeedbackEncodingMatches,
     gpuTileFrontierFeedbackFrameAccess,
     registerGpuTileFrontierFeedbackOwner,
     unregisterGpuTileFrontierFeedbackOwner,
@@ -30,6 +31,7 @@ import type {
 } from './virtual-raster.js'
 
 const FEEDBACK_SLOT_COUNT = 3
+const feedbackRingToken = Symbol('VirtualRasterGpuFeedbackRing')
 
 let nextFeedbackRingId = 1
 
@@ -102,18 +104,29 @@ export class VirtualRasterGpuFeedbackRing {
     #disposed = false
 
     private constructor(
+        token: symbol,
         frontier: GpuTileFrontier,
         commands: readonly [ReadbackCommand, ReadbackCommand, ReadbackCommand]
     ) {
 
+        if (token !== feedbackRingToken || new.target !== VirtualRasterGpuFeedbackRing) {
+            throw new TypeError(
+                'VirtualRasterGpuFeedbackRing must be created by VirtualRasterGpuFeedbackRing.create().'
+            )
+        }
         this.id = `geo-virtual-raster-feedback-ring-${nextFeedbackRingId++}`
         this.frontier = frontier
         this.#commands = commands
         this.#authority = frontier.runtime.createSubmissionAuthority({
             label: `${this.id} issue`,
         })
-        registerGpuTileFrontierFeedbackOwner(frontier, this)
-        Object.preventExtensions(this)
+        try {
+            registerGpuTileFrontierFeedbackOwner(frontier, this)
+        } catch (error) {
+            this.#authority.dispose()
+            throw error
+        }
+        Object.freeze(this)
     }
 
     static async create(
@@ -144,11 +157,15 @@ export class VirtualRasterGpuFeedbackRing {
                     whenMissing: 'throw',
                 }))
             }
-            return new VirtualRasterGpuFeedbackRing(frontier, commands as [
-                ReadbackCommand,
-                ReadbackCommand,
-                ReadbackCommand,
-            ])
+            return new VirtualRasterGpuFeedbackRing(
+                feedbackRingToken,
+                frontier,
+                commands as [
+                    ReadbackCommand,
+                    ReadbackCommand,
+                    ReadbackCommand,
+                ]
+            )
         } catch (error) {
             for (let index = commands.length - 1; index >= 0; index--) {
                 commands[index]!.dispose()
@@ -181,22 +198,35 @@ export class VirtualRasterGpuFeedbackRing {
 
         this.#assertActive()
         const access = gpuTileFrontierFeedbackFrameAccess(this.frontier, frame)
+        const encodedByFrame = gpuTileFrontierFeedbackEncodingMatches(
+            this.frontier,
+            builder,
+            frame
+        )
         const steps = builder?.steps
-        const uploadIndex = Array.isArray(steps)
-            ? steps.findIndex(step =>
+        const uploadIndexes = Array.isArray(steps)
+            ? steps.flatMap((step, index) =>
                 step.kind === 'upload' && step.command === access.viewCommand
+                    ? [ index ]
+                    : []
             )
-            : -1
-        const computeIndex = Array.isArray(steps)
-            ? steps.findIndex(step =>
+            : []
+        const computeIndexes = Array.isArray(steps)
+            ? steps.flatMap((step, index) =>
                 step.kind === 'compute' &&
                 step.passSpec === access.pass &&
                 step.commands.length === access.commands.length &&
                 step.commands.every((command, index) => command === access.commands[index])
+                    ? [ index ]
+                    : []
             )
-            : -1
+            : []
+        const uploadIndex = uploadIndexes[0] ?? -1
+        const computeIndex = computeIndexes[0] ?? -1
         if (builder?.runtime !== this.frontier.runtime || builder.isSubmitted ||
-            uploadIndex < 0 || computeIndex <= uploadIndex ||
+            !encodedByFrame ||
+            uploadIndexes.length !== 1 || computeIndexes.length !== 1 ||
+            computeIndex <= uploadIndex ||
             this.#encodedBuilders.has(builder)) {
             return throwGeoDiagnostic({
                 code: 'GEO_GPU_TILE_FEEDBACK_FRAME_INVALID',
@@ -214,6 +244,9 @@ export class VirtualRasterGpuFeedbackRing {
                     submitted: builder?.isSubmitted,
                     uploadIndex,
                     computeIndex,
+                    uploadCount: uploadIndexes.length,
+                    computeCount: computeIndexes.length,
+                    encodedByFrame,
                     encoded: builder === undefined
                         ? false
                         : this.#encodedBuilders.has(builder),
@@ -335,7 +368,8 @@ export class VirtualRasterGpuFeedbackRing {
             bytes,
             frontierAccess.output,
             frame,
-            snapshot
+            snapshot,
+            this.frontier.descriptor.policy.maximumActiveTiles
         )
         return Object.freeze({
             kind: 'virtual-raster-gpu-feedback-batch',
@@ -387,7 +421,8 @@ function decodeFeedback(
     bytes: Uint8Array,
     output: ReturnType<typeof gpuTileFrontierFeedbackAccess>['output'],
     frame: GpuTileFrontierFrame,
-    snapshot: VirtualRasterSnapshot
+    snapshot: VirtualRasterSnapshot,
+    maximumActiveTiles: number
 ): DecodedFeedback {
 
     const layout = output.layout
@@ -454,6 +489,34 @@ function decodeFeedback(
                 demandOverflow: counters[13],
                 visibleOverflow: counters[14],
             },
+        })
+    }
+    const boundedCounts = {
+        activeFrontierCount: counters[0]!,
+        nextFrontierCount: counters[1]!,
+        visibleInstanceCount: counters[2]!,
+        refineCandidateCount: counters[3]!,
+        coarsenCandidateCount: counters[4]!,
+        retirementCount: counters[6]!,
+        staleGenerationCount: counters[7]!,
+        budgetLimitedCount: counters[8]!,
+        lookupDuplicateCount: counters[15]!,
+        balanceRejectedCount: counters[16]!,
+        fallbackCount: counters[19]!,
+        acceptedRefineCount: counters[20]!,
+        acceptedCoarsenCount: counters[21]!,
+    }
+    const exceededCounts = Object.fromEntries(
+        Object.entries(boundedCounts).filter(([, value ]) => value > maximumActiveTiles)
+    )
+    if (Object.keys(exceededCounts).length > 0) {
+        return throwGeoDiagnostic({
+            code: 'GEO_GPU_TILE_FRONTIER_CAPACITY_EXCEEDED',
+            phase: 'selection',
+            subject: { kind: 'gpu-tile-frontier-frame', id: String(frame.frameEpoch) },
+            message: 'GPU tile frontier feedback contains counts above fixed active capacity.',
+            expected: { maximumActiveTiles },
+            actual: exceededCounts,
         })
     }
     if (demandOverflow || counters[5]! > layout.demands.capacity) {
@@ -644,7 +707,8 @@ function decodeDemands(
                 childMask: expectedChildMask,
             }, { parentCompactIndex, childMask, page: page.key })
         }
-        if (decisionFrameEpoch !== frameEpoch ||
+        if (!isExactResident(parentEntry, parent) ||
+            decisionFrameEpoch !== frameEpoch ||
             residencySnapshotEpoch !== snapshot.epoch ||
             parentEntry.physicalSlot !== parentPhysicalSlot ||
             parentEntry.generation !== parentGeneration) {
@@ -658,12 +722,16 @@ function decodeDemands(
                     residencySnapshotEpoch: snapshot.epoch,
                     parentPhysicalSlot: parentEntry.physicalSlot,
                     parentGeneration: parentEntry.generation,
+                    parentStatus: 'resident',
+                    resolvedParent: parent.key,
                 },
                 actual: {
                     decisionFrameEpoch,
                     residencySnapshotEpoch,
                     parentPhysicalSlot,
                     parentGeneration,
+                    parentStatus: parentEntry.status,
+                    resolvedParent: parentEntry.resolvedPage?.key,
                 },
             })
         }
@@ -710,7 +778,8 @@ function decodeRetirements(
         const contentEpoch = u32Field(record, 'expectedContentEpoch')
         const residencySnapshotEpoch = u32Field(record, 'residencySnapshotEpoch')
         const resolved = snapshot.resolve(page)
-        if (residencySnapshotEpoch !== snapshot.epoch ||
+        if (!isExactResident(resolved, page) ||
+            residencySnapshotEpoch !== snapshot.epoch ||
             resolved.physicalSlot !== physicalSlot ||
             resolved.generation !== generation ||
             resolved.contentEpoch !== contentEpoch) {
@@ -735,6 +804,14 @@ function decodeRetirements(
         ),
         discarded,
     })
+}
+
+function isExactResident(
+    entry: ReturnType<VirtualRasterSnapshot['resolve']>,
+    page: VirtualRasterPageIdentity
+): boolean {
+
+    return entry.status === 'resident' && entry.resolvedPage?.key === page.key
 }
 
 function pageFromFeedbackRecord(
