@@ -790,7 +790,7 @@ Expected: search results are limited to historical design/plan/audit discussion 
 - Consumes: all implementation commits and generated browser JSON/screenshots。
 - Produces: one bounded final audit classifying the result as `confirmed-clean` or `completed-with-findings`。
 
-- [ ] **Step 1: Run static and package gates**
+- [x] **Step 1: Run static and package gates**
 
 ```bash
 npm run typecheck
@@ -801,7 +801,7 @@ git diff --check
 
 Expected: all PASS.
 
-- [ ] **Step 2: Run required real-browser gates**
+- [x] **Step 2: Run required real-browser gates**
 
 ```bash
 node tests/browser/geo-gpu-tile-frontier-core.mjs
@@ -814,11 +814,11 @@ node tests/browser/geo-virtual-raster-dynamic-flow.mjs
 
 Expected: all emit `status: "passed"`, no managed process remains, and no console/WebGPU/unhandled-rejection failures occur.
 
-- [ ] **Step 3: Inspect desktop/mobile/high-pitch captures**
+- [x] **Step 3: Inspect desktop/mobile/high-pitch captures**
 
 Use Playwright output PNGs plus `view_image`/pixel checks. Record viewport, pitch, bearing, camera, frontier counts, min/max levels and screenshot SHA-256. Reject blank canvas, inverted DEM, cross-page seam, mesh crack, upper-screen coarse slab, text/UI overlap or stale-slot flash.
 
-- [ ] **Step 4: Audit hot-path and ownership facts**
+- [x] **Step 4: Audit hot-path and ownership facts**
 
 Run:
 
@@ -833,11 +833,11 @@ submission-authority prerequisite, contain no Geo/DEM policy or imports, no lega
 production symbol remains, and every other changed file stays inside the approved
 Geo/DEM/test/docs boundary.
 
-- [ ] **Step 5: Write the final audit**
+- [x] **Step 5: Write the final audit**
 
 The audit records commit ids, exact commands/results, browser/adapter facts, screenshot paths/hashes, current bounded diagnostic facts, CPU/GPU oracle comparison, clean-cut scan, and any real residual issue. Do not convert a finding into a new implementation scope during this goal.
 
-- [ ] **Step 6: Commit the audit and report terminal classification**
+- [x] **Step 6: Commit the audit and report terminal classification**
 
 ```bash
 git add docs/review/gpu-resident-tile-frontier-dem-final-audit.md
