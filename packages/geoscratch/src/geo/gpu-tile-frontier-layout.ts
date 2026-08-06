@@ -93,6 +93,8 @@ type FrontierLayout = Readonly<{
     fieldOffsets: Readonly<Record<string, number>>
 }>
 
+const U32_MAX = 0xffff_ffff
+
 export const gpuTileFrontierMapMetaCodec = layoutCodec({
     name: 'GpuTileFrontierMapMeta',
     fields: [
@@ -246,7 +248,7 @@ export function gpuTileFrontierPolicy(
         input.invisibleGraceFrames,
     ]
     if (finiteFields.some(value => !Number.isFinite(value)) ||
-        integerFields.some(value => !Number.isSafeInteger(value)) ||
+        integerFields.some(value => !u32(value)) ||
         input.coarsenErrorPixels < 0 ||
         input.refineErrorPixels <= input.coarsenErrorPixels ||
         input.minimumMatrixLevel < 0 ||
@@ -261,8 +263,8 @@ export function gpuTileFrontierPolicy(
             {
                 finiteNumbers: true,
                 coarsenErrorPixels: '[0, refineErrorPixels)',
-                matrixLevels: 'non-negative ordered integers',
-                capacities: 'positive integers',
+                matrixLevels: 'ordered u32 values',
+                capacities: 'positive u32 values',
                 maximumDemands: '<= maximumActiveTiles * 4',
                 invisibleGraceFrames: 'non-negative integer',
             },
@@ -319,7 +321,6 @@ function validateLevelMetrics(descriptor: GpuTileFrontierDescriptor): void {
 
     const expectedLevels = descriptor.policy.maximumMatrixLevel -
         descriptor.policy.minimumMatrixLevel + 1
-    const seen = new Set<number>()
     if (!Array.isArray(descriptor.levelMetrics) ||
         descriptor.levelMetrics.length !== expectedLevels) {
         return invalidFrontier(
@@ -328,11 +329,11 @@ function validateLevelMetrics(descriptor: GpuTileFrontierDescriptor): void {
             { levelMetricCount: descriptor.levelMetrics?.length }
         )
     }
-    for (const metric of descriptor.levelMetrics) {
-        if (!Number.isSafeInteger(metric.matrixLevel) ||
-            metric.matrixLevel < descriptor.policy.minimumMatrixLevel ||
-            metric.matrixLevel > descriptor.policy.maximumMatrixLevel ||
-            seen.has(metric.matrixLevel) ||
+    for (let index = 0; index < descriptor.levelMetrics.length; index++) {
+        const metric = descriptor.levelMetrics[index]!
+        const expectedMatrixLevel = descriptor.policy.minimumMatrixLevel + index
+        if (!u32(metric.matrixLevel) ||
+            metric.matrixLevel !== expectedMatrixLevel ||
             !Number.isFinite(metric.minimumElevationMeters) ||
             !Number.isFinite(metric.maximumElevationMeters) ||
             !Number.isFinite(metric.geometricErrorMeters) ||
@@ -340,38 +341,52 @@ function validateLevelMetrics(descriptor: GpuTileFrontierDescriptor): void {
             metric.geometricErrorMeters < 0) {
             return invalidFrontier(
                 'GPU tile frontier level metrics must be unique, finite, and ordered by valid matrix level.',
-                { matrixLevels: [
-                    descriptor.policy.minimumMatrixLevel,
-                    descriptor.policy.maximumMatrixLevel,
-                ] },
+                { matrixLevel: expectedMatrixLevel, index },
                 metric
             )
         }
-        seen.add(metric.matrixLevel)
     }
 }
 
 function validateRoots(descriptor: GpuTileFrontierDescriptor): void {
 
-    if (!Array.isArray(descriptor.roots) || descriptor.roots.length === 0) {
-        return invalidFrontier('GPU tile frontier requires at least one root page.', {
-            roots: 'non-empty VirtualRasterPageIdentity[]',
-        }, descriptor.roots)
+    const matrixId = String(descriptor.policy.minimumMatrixLevel)
+    const minimumLimit = descriptor.addressCodec.coverage.limit(matrixId)
+    if (minimumLimit === undefined) {
+        return invalidFrontier(
+            'GPU tile frontier minimum matrix level must exist in its finite coverage.',
+            { matrixId },
+            { limits: descriptor.addressCodec.coverage.limits }
+        )
     }
-    const seen = new Set<string>()
-    for (const root of descriptor.roots) {
+    const width = minimumLimit.maxTileCol - minimumLimit.minTileCol + 1
+    const expectedRootCount = width *
+        (minimumLimit.maxTileRow - minimumLimit.minTileRow + 1)
+    if (!Array.isArray(descriptor.roots) ||
+        descriptor.roots.length !== expectedRootCount) {
+        return invalidFrontier(
+            'GPU tile frontier roots must exactly cover the complete minimum matrix level.',
+            { rootCount: expectedRootCount, limit: minimumLimit },
+            { rootCount: Array.isArray(descriptor.roots)
+                ? descriptor.roots.length
+                : undefined }
+        )
+    }
+    for (let index = 0; index < descriptor.roots.length; index++) {
+        const root = descriptor.roots[index]!
+        const expectedRoot = descriptor.gpuState.addressSpace.pageFromTile({
+            matrixId,
+            tileRow: minimumLimit.minTileRow + Math.floor(index / width),
+            tileCol: minimumLimit.minTileCol + index % width,
+        })
         descriptor.gpuState.addressSpace.assertPage(root)
-        const matrixLevel = Number(root.tile?.matrixId)
-        if (root.tile === undefined ||
-            matrixLevel !== descriptor.policy.minimumMatrixLevel ||
-            seen.has(root.key)) {
+        if (root.key !== expectedRoot.key) {
             return invalidFrontier(
-                'GPU tile frontier roots must be unique WebMercatorQuad pages at the minimum matrix level.',
-                { matrixLevel: descriptor.policy.minimumMatrixLevel, unique: true },
-                root
+                'GPU tile frontier roots must follow canonical minimum-level coverage order.',
+                { index, root: expectedRoot.key },
+                { index, root: root.key }
             )
         }
-        seen.add(root.key)
     }
 }
 
@@ -401,12 +416,17 @@ function validateDrawTemplates(templates: readonly GpuTileFrontierDrawTemplate[]
 
 function positiveInteger(value: number): boolean {
 
-    return Number.isSafeInteger(value) && value > 0
+    return u32(value) && value > 0
 }
 
 function optionalNonNegativeInteger(value: number | undefined): boolean {
 
-    return value === undefined || Number.isSafeInteger(value) && value >= 0
+    return value === undefined || u32(value)
+}
+
+function u32(value: number): boolean {
+
+    return Number.isSafeInteger(value) && value >= 0 && value <= U32_MAX
 }
 
 function invalidFrontier(message: string, expected: unknown, actual: unknown): never {

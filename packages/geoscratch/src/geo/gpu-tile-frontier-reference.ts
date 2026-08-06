@@ -66,12 +66,19 @@ type RefineCandidate = Readonly<{
     priority: number
 }>
 
+type RefinePressure = Readonly<{
+    candidates: readonly RefineCandidate[]
+    blockedKeys: ReadonlySet<string>
+    candidateCount: number
+}>
+
 type CoarsenCandidate = Readonly<{
     parent: VirtualRasterPageIdentity
     siblings: readonly GpuTileFrontierReferenceEntry[]
 }>
 
 const PRIORITY_BUCKET_COUNT = 256
+const U32_MAX = 0xffff_ffff
 
 export function evaluateGpuTileFrontierReference(
     input: GpuTileFrontierReferenceInput
@@ -103,41 +110,72 @@ export function evaluateGpuTileFrontierReference(
 
     // Evaluate fixed-input visibility and SSE before any transition or budget decision.
     const evaluations = active.map(entry => evaluateEntry(entry, input.view, metrics))
-    const evaluationsByKey = new Map(evaluations.map(evaluation => [
-        evaluation.entry.page.key,
-        evaluation,
-    ]))
-    const refineCandidates = evaluations
+    const evaluatedActive = Object.freeze(evaluations.map(evaluation => evaluation.entry))
+    if (!frontierIsBalanced(evaluatedActive)) {
+        invalidReference('The current frontier must satisfy the level-difference-one invariant.', {
+            pages: evaluatedActive.map(entry => entry.page.key),
+        })
+    }
+    const liveRefineCandidates = evaluations
         .filter(evaluation => evaluation.visible &&
             evaluation.matrixLevel < input.descriptor.policy.maximumMatrixLevel &&
             evaluation.sse > input.descriptor.policy.refineErrorPixels)
         .map(evaluation => createRefineCandidate(input, evaluation, residents))
+    const refinePressure = createRefinePressure(
+        input,
+        evaluations,
+        evaluatedActive,
+        liveRefineCandidates,
+        residents
+    )
 
     // Select whole refine transactions through 256 priority buckets and canonical tie order.
-    const selectedRefines = selectRefineBudget(input, active.length, refineCandidates)
+    const selectedRefines = selectRefineBudget(
+        input,
+        evaluatedActive.length,
+        refinePressure.candidates
+    )
     const selectedRefineKeys = new Set(selectedRefines.selected.map(candidate =>
         candidate.evaluation.entry.page.key
     ))
     const refineOutputs = new Map<string, readonly GpuTileFrontierReferenceEntry[]>()
+    const acceptedRefineKeys = new Set<string>()
     const demands: GpuTileFrontierDemand[] = []
-    let fallbackCount = 0
+    let fallbackCount = refinePressure.blockedKeys.size
     let acceptedRefineCount = 0
     for (const candidate of selectedRefines.selected) {
         const parent = candidate.evaluation.entry
-        if (!refineKeepsBalance(parent, active)) continue
+        if (!refineKeepsBalance(parent, evaluatedActive)) {
+            fallbackCount++
+            continue
+        }
         if (candidate.missingChildren.length === 0) {
             const children = candidate.children.map(page => entryFromResident(
                 residents.get(page.key)!,
                 input.view.frameEpoch,
                 'refine'
             ))
+            const candidateOutputs = new Map(refineOutputs)
+            candidateOutputs.set(parent.page.key, children)
+            if (!frontierIsBalanced(compactCanonical(
+                evaluatedActive,
+                candidateOutputs,
+                new Map()
+            ))) {
+                fallbackCount++
+                continue
+            }
             refineOutputs.set(parent.page.key, children)
+            acceptedRefineKeys.add(parent.page.key)
             acceptedRefineCount++
             continue
         }
         fallbackCount++
         const childIndexes = new Map(candidate.children.map((page, index) => [ page.key, index ]))
+        let childDemandMask = 0
         for (const child of candidate.missingChildren) {
+            const childMask = 1 << childIndexes.get(child.key)!
+            childDemandMask |= childMask
             demands.push(Object.freeze({
                 page: child,
                 parent: parent.page,
@@ -147,10 +185,20 @@ export function evaluateGpuTileFrontierReference(
                 priority: candidate.priority,
                 decisionFrameEpoch: input.view.frameEpoch,
                 residencySnapshotEpoch: input.view.residencySnapshotEpoch,
-                childMask: 1 << childIndexes.get(child.key)!,
+                childMask,
             }))
         }
+        refineOutputs.set(parent.page.key, [ Object.freeze({
+            ...parent,
+            previousLodState: 'refine',
+            lastDemandFrame: input.view.frameEpoch,
+            childDemandMask,
+        }) ])
     }
+    demands.sort((left, right) =>
+        left.parentCompactIndex - right.parentCompactIndex ||
+        left.childMask - right.childMask
+    )
 
     // Coarsen only complete canonical sibling groups after refine acceptance is known.
     const coarsenCandidates = collectCoarsenCandidates(
@@ -164,29 +212,34 @@ export function evaluateGpuTileFrontierReference(
     for (const candidate of coarsenCandidates) {
         const parentResident = residents.get(candidate.parent.key)
         if (parentResident === undefined ||
-            !coarsenKeepsBalance(candidate, active, refineOutputs)) continue
+            !coarsenKeepsBalance(candidate, evaluatedActive, acceptedRefineKeys)) continue
+        const lastVisibleFrame = Math.max(...candidate.siblings.map(sibling =>
+            sibling.lastVisibleFrame
+        ))
         const parentEntry = entryFromResident(
             parentResident,
-            input.view.frameEpoch,
+            lastVisibleFrame,
             'coarsen'
         )
-        coarsenOutputs.set(candidate.siblings[0]!.page.key, [ parentEntry ])
+        const candidateOutputs = new Map(coarsenOutputs)
+        candidateOutputs.set(candidate.siblings[0]!.page.key, [ parentEntry ])
         for (const sibling of candidate.siblings.slice(1)) {
-            coarsenOutputs.set(sibling.page.key, [])
+            candidateOutputs.set(sibling.page.key, [])
         }
+        if (!frontierIsBalanced(compactCanonical(
+            evaluatedActive,
+            refineOutputs,
+            candidateOutputs
+        ))) {
+            fallbackCount++
+            continue
+        }
+        coarsenOutputs.clear()
+        for (const [ key, output ] of candidateOutputs) coarsenOutputs.set(key, output)
         acceptedCoarsenCount++
     }
 
-    const proposed = compactCanonical(active, refineOutputs, coarsenOutputs)
-    const nextFrontier = Object.freeze(
-        frontierIsBalanced(proposed) ? proposed : canonicalEntries(active)
-    )
-    const transitionRejected = nextFrontier !== proposed
-    if (transitionRejected) {
-        demands.length = 0
-        acceptedRefineCount = 0
-        acceptedCoarsenCount = 0
-    }
+    const nextFrontier = compactCanonical(evaluatedActive, refineOutputs, coarsenOutputs)
 
     // Visible output is a stable prefix compaction over the accepted next frontier.
     const visible = Object.freeze(nextFrontier.filter(entry =>
@@ -203,7 +256,7 @@ export function evaluateGpuTileFrontierReference(
         residencySnapshotEpoch: input.view.residencySnapshotEpoch,
         activeFrontierCount: nextFrontier.length,
         visibleInstanceCount: visible.length,
-        refineCandidateCount: refineCandidates.length,
+        refineCandidateCount: refinePressure.candidateCount,
         coarsenCandidateCount: coarsenCandidates.length,
         demandCount: demands.length,
         fallbackCount,
@@ -219,7 +272,8 @@ export function evaluateGpuTileFrontierReference(
         visibleOverflow: false,
         convergenceState: budgetLimitedCount > 0
             ? 'budget-limited'
-            : demands.length > 0 || acceptedRefineCount > 0 || acceptedCoarsenCount > 0
+            : demands.length > 0 || fallbackCount > 0 ||
+                acceptedRefineCount > 0 || acceptedCoarsenCount > 0
                 ? 'transitioning'
                 : 'converged',
     })
@@ -240,11 +294,11 @@ function residentMap(
     for (const resident of input.residentPages) {
         input.descriptor.gpuState.addressSpace.assertPage(resident.page)
         if (result.has(resident.page.key) ||
-            !nonNegativeInteger(resident.compactIndex) ||
-            !nonNegativeInteger(resident.physicalSlot) ||
-            !nonNegativeInteger(resident.generation) ||
-            !nonNegativeInteger(resident.contentEpoch) ||
-            !nonNegativeInteger(resident.residencySnapshotEpoch)) {
+            !u32(resident.compactIndex) ||
+            !u32(resident.physicalSlot) ||
+            !u32(resident.generation) ||
+            !u32(resident.contentEpoch) ||
+            !u32(resident.residencySnapshotEpoch)) {
             invalidReference('Resident frontier pages must be unique bounded GPU records.', resident)
         }
         result.set(resident.page.key, resident)
@@ -258,14 +312,14 @@ function validateEntry(
 ): void {
 
     descriptor.gpuState.addressSpace.assertPage(entry.page)
-    if (!nonNegativeInteger(entry.compactIndex) ||
-        !nonNegativeInteger(entry.physicalSlot) ||
-        !nonNegativeInteger(entry.generation) ||
-        !nonNegativeInteger(entry.contentEpoch) ||
-        !nonNegativeInteger(entry.residencySnapshotEpoch) ||
-        !nonNegativeInteger(entry.lastVisibleFrame) ||
-        !nonNegativeInteger(entry.lastDemandFrame) ||
-        !nonNegativeInteger(entry.childDemandMask) ||
+    if (!u32(entry.compactIndex) ||
+        !u32(entry.physicalSlot) ||
+        !u32(entry.generation) ||
+        !u32(entry.contentEpoch) ||
+        !u32(entry.residencySnapshotEpoch) ||
+        !u32(entry.lastVisibleFrame) ||
+        !u32(entry.lastDemandFrame) ||
+        !u32(entry.childDemandMask) ||
         ![ 'retain', 'refine', 'coarsen' ].includes(entry.previousLodState)) {
         invalidReference('Frontier entries must contain bounded canonical GPU facts.', entry)
     }
@@ -293,8 +347,8 @@ function validateView(view: GpuTileFrontierView): void {
         view.viewport.some(value => value <= 0) ||
         view.verticalFovRadians <= 0 ||
         view.verticalFovRadians >= Math.PI ||
-        !nonNegativeInteger(view.frameEpoch) ||
-        !nonNegativeInteger(view.residencySnapshotEpoch)) {
+        !u32(view.frameEpoch) ||
+        !u32(view.residencySnapshotEpoch)) {
         invalidReference('GPU tile frontier view facts must be finite and dimensionally exact.', view)
     }
 }
@@ -316,15 +370,70 @@ function evaluateEntry(
     const bounds = WebMercatorQuad.tileBounds(entry.page.tile!)
     const corners = clipCorners(bounds, metric, view)
     const visible = !outsideClip(corners)
+    const evaluatedEntry = visible && entry.lastVisibleFrame !== view.frameEpoch
+        ? Object.freeze({ ...entry, lastVisibleFrame: view.frameEpoch })
+        : entry
     const distance = distanceToBounds(bounds, metric, view)
     const sse = metric.geometricErrorMeters * view.viewport[1] /
         (2 * Math.tan(view.verticalFovRadians / 2) * Math.max(distance, 1e-6))
     return Object.freeze({
-        entry,
+        entry: evaluatedEntry,
         matrixLevel,
         visible,
         sse,
         projectedArea: visible ? projectedArea(corners) : 0,
+    })
+}
+
+function createRefinePressure(
+    input: GpuTileFrontierReferenceInput,
+    evaluations: readonly EntryEvaluation[],
+    active: readonly GpuTileFrontierReferenceEntry[],
+    liveCandidates: readonly RefineCandidate[],
+    residents: ReadonlyMap<string, GpuTileFrontierReferenceResidentPage>
+): RefinePressure {
+
+    const evaluationsByKey = new Map(evaluations.map(evaluation => [
+        evaluation.entry.page.key,
+        evaluation,
+    ]))
+    const candidateByKey = new Map<string, RefineCandidate>()
+    const candidateKeys = new Set<string>()
+    const blockedKeys = new Set<string>()
+    const blockersByCandidate = new Map<string, GpuTileFrontierReferenceEntry[]>()
+    for (const candidate of liveCandidates) {
+        const parent = candidate.evaluation.entry
+        candidateKeys.add(parent.page.key)
+        const parentLevel = candidate.evaluation.matrixLevel
+        const blockers = active.filter(neighbor =>
+            neighbor.page.key !== parent.page.key &&
+            areNeighbors(parent, neighbor) &&
+            matrixLevelOf(neighbor) < parentLevel
+        )
+        blockersByCandidate.set(parent.page.key, blockers)
+        if (blockers.length === 0) candidateByKey.set(parent.page.key, candidate)
+        else blockedKeys.add(parent.page.key)
+    }
+    for (const candidate of liveCandidates) {
+        for (const blocker of blockersByCandidate.get(candidate.evaluation.entry.page.key)!) {
+            candidateKeys.add(blocker.page.key)
+            const evaluation = evaluationsByKey.get(blocker.page.key)!
+            const pressureCandidate = createRefineCandidate(input, evaluation, residents)
+            const existing = candidateByKey.get(blocker.page.key)
+            candidateByKey.set(blocker.page.key, Object.freeze({
+                ...pressureCandidate,
+                priority: Math.max(
+                    existing?.priority ?? 0,
+                    candidate.priority,
+                    pressureCandidate.priority
+                ),
+            }))
+        }
+    }
+    return Object.freeze({
+        candidates: Object.freeze([ ...candidateByKey.values() ]),
+        blockedKeys,
+        candidateCount: candidateKeys.size,
     })
 }
 
@@ -394,7 +503,10 @@ function collectCoarsenCandidates(
 
     const eligible = evaluations.filter(evaluation =>
         evaluation.matrixLevel > input.descriptor.policy.minimumMatrixLevel &&
-        evaluation.sse < input.descriptor.policy.coarsenErrorPixels &&
+        (evaluation.visible
+            ? evaluation.sse < input.descriptor.policy.coarsenErrorPixels
+            : Math.max(0, input.view.frameEpoch - evaluation.entry.lastVisibleFrame) >
+                input.descriptor.policy.invisibleGraceFrames) &&
         !selectedRefineKeys.has(evaluation.entry.page.key)
     )
     const eligibleByKey = new Map(eligible.map(evaluation => [
@@ -463,7 +575,7 @@ function childPages(
 
 function entryFromResident(
     resident: GpuTileFrontierReferenceResidentPage,
-    frameEpoch: number,
+    lastVisibleFrame: number,
     state: GpuTileFrontierReferenceLodState
 ): GpuTileFrontierReferenceEntry {
 
@@ -475,7 +587,7 @@ function entryFromResident(
         contentEpoch: resident.contentEpoch,
         residencySnapshotEpoch: resident.residencySnapshotEpoch,
         previousLodState: state,
-        lastVisibleFrame: frameEpoch,
+        lastVisibleFrame,
         lastDemandFrame: 0,
         childDemandMask: 0,
     })
@@ -497,7 +609,7 @@ function refineKeepsBalance(
 function coarsenKeepsBalance(
     candidate: CoarsenCandidate,
     active: readonly GpuTileFrontierReferenceEntry[],
-    refineOutputs: ReadonlyMap<string, readonly GpuTileFrontierReferenceEntry[]>
+    acceptedRefineKeys: ReadonlySet<string>
 ): boolean {
 
     const siblingKeys = new Set(candidate.siblings.map(sibling => sibling.page.key))
@@ -506,7 +618,7 @@ function coarsenKeepsBalance(
     const parentBoundsEntry = Object.freeze({ ...parentEntry, page: candidate.parent })
     for (const entry of active) {
         if (siblingKeys.has(entry.page.key) || !areNeighbors(parentBoundsEntry, entry)) continue
-        if (matrixLevelOf(entry) > childLevel || refineOutputs.has(entry.page.key)) return false
+        if (matrixLevelOf(entry) > childLevel || acceptedRefineKeys.has(entry.page.key)) return false
     }
     return true
 }
@@ -635,7 +747,7 @@ function outsideClip(corners: readonly (readonly [number, number, number, number
         (corner: readonly number[]) => corner[0]! > corner[3]!,
         (corner: readonly number[]) => corner[1]! < -corner[3]!,
         (corner: readonly number[]) => corner[1]! > corner[3]!,
-        (corner: readonly number[]) => corner[2]! < -corner[3]!,
+        (corner: readonly number[]) => corner[2]! < 0,
         (corner: readonly number[]) => corner[2]! > corner[3]!,
     ].some(outside => corners.every(outside))
 }
@@ -715,9 +827,9 @@ function equal(left: number, right: number): boolean {
     return Math.abs(left - right) <= 1e-12
 }
 
-function nonNegativeInteger(value: number): boolean {
+function u32(value: number): boolean {
 
-    return Number.isSafeInteger(value) && value >= 0
+    return Number.isSafeInteger(value) && value >= 0 && value <= U32_MAX
 }
 
 function invalidReference(message: string, actual: unknown): never {

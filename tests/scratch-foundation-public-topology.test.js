@@ -105,6 +105,7 @@ const geoValues = [
     'createVirtualRasterGpuState',
     'discardOwnedVirtualRasterPagePayload',
     'discardVirtualRasterPageTransfer',
+    'gpuTileFrontierPolicy',
     'isGeoDiagnosticError',
     'localVector',
     'ownedVirtualRasterPagePayload',
