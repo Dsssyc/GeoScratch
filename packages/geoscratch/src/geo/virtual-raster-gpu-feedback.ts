@@ -7,7 +7,10 @@ import type {
 } from '../scratch/index.js'
 import { createGeoDiagnostic, throwGeoDiagnostic, type GeoDiagnostic } from './diagnostics.js'
 import {
+    compareGpuTileFrontierPathOrder,
+    gpuTileFrontierDemandCodec,
     gpuTileFrontierDiagnosticsCodec,
+    gpuTileFrontierEntryCodec,
     type GpuTileFrontierDemand,
     type GpuTileFrontierFacts,
 } from './gpu-tile-frontier-layout.js'
@@ -19,6 +22,12 @@ import {
     unregisterGpuTileFrontierFeedbackOwner,
     type GpuTileFrontierFrame,
 } from './gpu-tile-frontier.js'
+import { virtualRasterGpuAcknowledgedSnapshot } from './virtual-raster-gpu.js'
+import type {
+    VirtualRasterAddressSpace,
+    VirtualRasterPageIdentity,
+    VirtualRasterSnapshot,
+} from './virtual-raster.js'
 
 const FEEDBACK_SLOT_COUNT = 3
 
@@ -43,7 +52,7 @@ export type VirtualRasterGpuFeedbackRingFacts = Readonly<{
 }>
 
 export type GpuTileFrontierRetirement = Readonly<{
-    pageKey: string
+    page: VirtualRasterPageIdentity
     physicalSlot: number
     generation: number
     contentEpoch: number
@@ -311,23 +320,23 @@ export class VirtualRasterGpuFeedbackRing {
             })
         }
         const bytes = await operation.toBytes()
-        const currentSnapshotEpoch = frontierAccess.gpuState.facts().snapshotEpoch
-        const decoded = decodeEmptyFeedback(
-            bytes,
-            frontierAccess.output,
-            frame,
-            frameAccess.residencySnapshotEpoch
-        )
-        if (currentSnapshotEpoch !== frameAccess.residencySnapshotEpoch) {
+        const snapshot = virtualRasterGpuAcknowledgedSnapshot(frontierAccess.gpuState)
+        if (snapshot?.epoch !== frameAccess.residencySnapshotEpoch) {
             return throwGeoDiagnostic({
                 code: 'GEO_GPU_TILE_FEEDBACK_STALE',
                 phase: 'selection',
                 subject: { kind: 'gpu-tile-frontier-frame', id: String(frame.frameEpoch) },
                 message: 'GPU feedback belongs to an older acknowledged residency snapshot.',
-                expected: { residencySnapshotEpoch: currentSnapshotEpoch },
+                expected: { residencySnapshotEpoch: snapshot?.epoch },
                 actual: { residencySnapshotEpoch: frameAccess.residencySnapshotEpoch },
             })
         }
+        const decoded = decodeFeedback(
+            bytes,
+            frontierAccess.output,
+            frame,
+            snapshot
+        )
         return Object.freeze({
             kind: 'virtual-raster-gpu-feedback-batch',
             ringId: this.id,
@@ -335,8 +344,8 @@ export class VirtualRasterGpuFeedbackRing {
             submissionId: submitted.id,
             frameEpoch: frame.frameEpoch,
             residencySnapshotEpoch: frameAccess.residencySnapshotEpoch,
-            demands: Object.freeze([]),
-            retirements: Object.freeze([]),
+            demands: decoded.demands,
+            retirements: decoded.retirements,
             facts: decoded.facts,
             counters: decoded.counters,
             diagnostics: decoded.diagnostics,
@@ -366,18 +375,20 @@ export class VirtualRasterGpuFeedbackRing {
 
 Object.freeze(VirtualRasterGpuFeedbackRing.prototype)
 
-type EmptyDecodedFeedback = Readonly<{
+type DecodedFeedback = Readonly<{
+    demands: readonly GpuTileFrontierDemand[]
+    retirements: readonly GpuTileFrontierRetirement[]
     facts: GpuTileFrontierFacts
     counters: VirtualRasterGpuFeedbackCounters
     diagnostics: readonly GeoDiagnostic[]
 }>
 
-function decodeEmptyFeedback(
+function decodeFeedback(
     bytes: Uint8Array,
     output: ReturnType<typeof gpuTileFrontierFeedbackAccess>['output'],
     frame: GpuTileFrontierFrame,
-    residencySnapshotEpoch: number
-): EmptyDecodedFeedback {
+    snapshot: VirtualRasterSnapshot
+): DecodedFeedback {
 
     const layout = output.layout
     if (bytes.byteLength !== layout.byteLength) {
@@ -397,29 +408,80 @@ function decodeEmptyFeedback(
     const record = gpuTileFrontierDiagnosticsCodec
         .createReadbackView(diagnosticBytes)
         .toObject()
-    if (counters[5] !== 0 || counters[6] !== 0) {
-        return invalidFeedback('GPU feedback contains records without a decoder.', {
-            demandCount: 0,
-            retirementCount: 0,
-        }, { demandCount: counters[5], retirementCount: counters[6] })
-    }
     const recordFrameEpoch = numberField(record, 'frameEpoch')
     const recordSnapshotEpoch = numberField(record, 'residencySnapshotEpoch')
     if (recordFrameEpoch !== frame.frameEpoch ||
-        recordSnapshotEpoch !== residencySnapshotEpoch ||
+        recordSnapshotEpoch !== snapshot.epoch ||
         counters[17] !== frame.frameEpoch ||
-        counters[18] !== residencySnapshotEpoch) {
+        counters[18] !== snapshot.epoch) {
         return throwGeoDiagnostic({
             code: 'GEO_GPU_TILE_FEEDBACK_STALE',
             phase: 'selection',
             subject: { kind: 'gpu-tile-frontier-frame', id: String(frame.frameEpoch) },
             message: 'Packed GPU feedback decision epochs do not match the requested frame.',
-            expected: { frameEpoch: frame.frameEpoch, residencySnapshotEpoch },
+            expected: { frameEpoch: frame.frameEpoch, residencySnapshotEpoch: snapshot.epoch },
             actual: {
                 frameEpoch: recordFrameEpoch,
                 residencySnapshotEpoch: recordSnapshotEpoch,
                 counterFrameEpoch: counters[17],
                 counterSnapshotEpoch: counters[18],
+            },
+        })
+    }
+    assertCounterMatches(record, 'activeFrontierCount', counters[0]!)
+    assertCounterMatches(record, 'visibleInstanceCount', counters[2]!)
+    assertCounterMatches(record, 'refineCandidateCount', counters[3]!)
+    assertCounterMatches(record, 'coarsenCandidateCount', counters[4]!)
+    assertCounterMatches(record, 'demandCount', counters[5]!)
+    assertCounterMatches(record, 'staleGenerationCount', counters[7]!)
+    assertCounterMatches(record, 'budgetLimitedCount', counters[8]!)
+    assertCounterMatches(record, 'fallbackCount', counters[19]!)
+    assertCounterMatches(record, 'reserved0', counters[15]!)
+    assertCounterMatches(record, 'reserved1', counters[16]!)
+    assertCounterMatches(record, 'reserved2', counters[6]!)
+    const frontierOverflow = booleanField(record, 'frontierOverflow')
+    const demandOverflow = booleanField(record, 'demandOverflow')
+    const visibleOverflow = booleanField(record, 'visibleOverflow')
+    if (frontierOverflow !== counterBoolean(counters[12]!, 'frontierOverflow') ||
+        demandOverflow !== counterBoolean(counters[13]!, 'demandOverflow') ||
+        visibleOverflow !== counterBoolean(counters[14]!, 'visibleOverflow')) {
+        return invalidFeedback('GPU feedback overflow facts disagree with packed counters.', {
+            overflowFacts: 'matching diagnostics and counters',
+        }, {
+            diagnostics: { frontierOverflow, demandOverflow, visibleOverflow },
+            counters: {
+                frontierOverflow: counters[12],
+                demandOverflow: counters[13],
+                visibleOverflow: counters[14],
+            },
+        })
+    }
+    if (demandOverflow || counters[5]! > layout.demands.capacity) {
+        return throwGeoDiagnostic({
+            code: 'GEO_GPU_TILE_DEMAND_CAPACITY_EXCEEDED',
+            phase: 'selection',
+            subject: { kind: 'gpu-tile-frontier-frame', id: String(frame.frameEpoch) },
+            message: 'GPU tile demand feedback exceeded its fixed capacity.',
+            expected: { maximumDemands: layout.demands.capacity, overflow: false },
+            actual: { demandCount: counters[5], overflow: demandOverflow },
+        })
+    }
+    if (frontierOverflow || visibleOverflow ||
+        counters[6]! > layout.retirements.capacity) {
+        return throwGeoDiagnostic({
+            code: 'GEO_GPU_TILE_FRONTIER_CAPACITY_EXCEEDED',
+            phase: 'selection',
+            subject: { kind: 'gpu-tile-frontier-frame', id: String(frame.frameEpoch) },
+            message: 'GPU tile frontier feedback exceeded a fixed output capacity.',
+            expected: {
+                maximumRetirements: layout.retirements.capacity,
+                frontierOverflow: false,
+                visibleOverflow: false,
+            },
+            actual: {
+                retirementCount: counters[6],
+                frontierOverflow,
+                visibleOverflow,
             },
         })
     }
@@ -454,15 +516,33 @@ function decodeEmptyFeedback(
         staleGenerationCount: numberField(record, 'staleGenerationCount'),
         budgetLimitedCount: numberField(record, 'budgetLimitedCount'),
         maximumObservedSse: numberField(record, 'maximumObservedSse'),
-        frontierOverflow: booleanField(record, 'frontierOverflow'),
-        demandOverflow: booleanField(record, 'demandOverflow'),
-        visibleOverflow: booleanField(record, 'visibleOverflow'),
+        frontierOverflow,
+        demandOverflow,
+        visibleOverflow,
         convergenceState,
     }
     const minimumLevel = numberField(record, 'minimumSelectedMatrixLevel')
     const maximumLevel = numberField(record, 'maximumSelectedMatrixLevel')
     if (minimumLevel !== U32_MAX) facts.minimumSelectedMatrixLevel = minimumLevel
     if (maximumLevel !== U32_MAX) facts.maximumSelectedMatrixLevel = maximumLevel
+    const demands = decodeDemands(
+        bytes.subarray(
+            layout.demands.offset,
+            layout.demands.offset + layout.demands.byteLength
+        ),
+        counters[5]!,
+        snapshot,
+        frame.frameEpoch
+    )
+    const decodedRetirements = decodeRetirements(
+        bytes.subarray(
+            layout.retirements.offset,
+            layout.retirements.offset + layout.retirements.byteLength
+        ),
+        counters[6]!,
+        snapshot,
+        frame.frameEpoch
+    )
     const decodedCounters = Object.freeze({
         currentFrontierCount: counters[0]!,
         nextFrontierCount: counters[1]!,
@@ -478,23 +558,228 @@ function decodeEmptyFeedback(
         fallbackCount: counters[19]!,
         acceptedRefineCount: counters[20]!,
         acceptedCoarsenCount: counters[21]!,
-        discardedStaleRetirementCount: 0,
+        discardedStaleRetirementCount: decodedRetirements.discarded,
     })
-    const diagnostics = decodedCounters.lookupDuplicateCount === 0
-        ? Object.freeze([])
-        : Object.freeze([ createGeoDiagnostic({
+    const diagnostics: GeoDiagnostic[] = []
+    if (decodedCounters.lookupDuplicateCount > 0) {
+        diagnostics.push(createGeoDiagnostic({
             code: 'GEO_GPU_TILE_FRONTIER_LOOKUP_DUPLICATE',
             severity: 'error',
             phase: 'selection',
             subject: { kind: 'gpu-tile-frontier-frame', id: String(frame.frameEpoch) },
             message: 'GPU tile frontier reported duplicate lookup identities.',
             actual: { count: decodedCounters.lookupDuplicateCount },
-        }) ])
+        }))
+    }
+    if (decodedCounters.balanceRejectedCount > 0) {
+        diagnostics.push(createGeoDiagnostic({
+            code: 'GEO_GPU_TILE_FRONTIER_BALANCE_REJECTED',
+            severity: 'warn',
+            phase: 'selection',
+            subject: { kind: 'gpu-tile-frontier-frame', id: String(frame.frameEpoch) },
+            message: 'GPU tile frontier rejected neighbor balance transitions.',
+            actual: { count: decodedCounters.balanceRejectedCount },
+        }))
+    }
+    if (decodedCounters.staleGenerationCount > 0) {
+        diagnostics.push(createGeoDiagnostic({
+            code: 'GEO_GPU_TILE_FRONTIER_STALE_GENERATION',
+            severity: 'warn',
+            phase: 'selection',
+            subject: { kind: 'gpu-tile-frontier-frame', id: String(frame.frameEpoch) },
+            message: 'GPU tile frontier discarded stale slot generations.',
+            actual: { count: decodedCounters.staleGenerationCount },
+        }))
+    }
+    if (decodedRetirements.discarded > 0) {
+        diagnostics.push(createGeoDiagnostic({
+            code: 'GEO_GPU_TILE_FEEDBACK_STALE_RETIREMENT',
+            severity: 'warn',
+            phase: 'selection',
+            subject: { kind: 'gpu-tile-frontier-frame', id: String(frame.frameEpoch) },
+            message: 'Generation-stale GPU retirement records were discarded.',
+            actual: { count: decodedRetirements.discarded },
+        }))
+    }
     return Object.freeze({
+        demands,
+        retirements: decodedRetirements.retirements,
         facts: Object.freeze(facts),
         counters: decodedCounters,
-        diagnostics,
+        diagnostics: Object.freeze(diagnostics),
     })
+}
+
+function decodeDemands(
+    bytes: Uint8Array,
+    count: number,
+    snapshot: VirtualRasterSnapshot,
+    frameEpoch: number
+): readonly GpuTileFrontierDemand[] {
+
+    const records = gpuTileFrontierDemandCodec.createReadbackView(bytes).toArray()
+    const canonical = new Map<string, GpuTileFrontierDemand>()
+    for (const record of records.slice(0, count)) {
+        const page = pageFromFeedbackRecord(snapshot.addressSpace, record)
+        const parent = snapshot.addressSpace.parent(page)
+        if (parent === undefined) {
+            return invalidFeedback('GPU demand page has no covered parent.', {
+                page: 'non-root virtual raster page',
+            }, { page: page.key })
+        }
+        const parentCompactIndex = u32Field(record, 'parentCompactIndex')
+        const parentPhysicalSlot = u32Field(record, 'parentPhysicalSlot')
+        const parentGeneration = u32Field(record, 'parentGeneration')
+        const priority = u32Field(record, 'priority')
+        const decisionFrameEpoch = u32Field(record, 'decisionFrameEpoch')
+        const residencySnapshotEpoch = u32Field(record, 'residencySnapshotEpoch')
+        const childMask = u32Field(record, 'childMask')
+        const tile = page.tile!
+        const expectedChildMask = 1 << ((tile.tileRow % 2) * 2 + tile.tileCol % 2)
+        const parentEntry = snapshot.resolve(parent)
+        if (parentCompactIndex !== snapshot.addressSpace.tableIndex(parent) ||
+            childMask !== expectedChildMask) {
+            return invalidFeedback('GPU demand parent identity or child mask is inconsistent.', {
+                parentCompactIndex: snapshot.addressSpace.tableIndex(parent),
+                childMask: expectedChildMask,
+            }, { parentCompactIndex, childMask, page: page.key })
+        }
+        if (decisionFrameEpoch !== frameEpoch ||
+            residencySnapshotEpoch !== snapshot.epoch ||
+            parentEntry.physicalSlot !== parentPhysicalSlot ||
+            parentEntry.generation !== parentGeneration) {
+            return throwGeoDiagnostic({
+                code: 'GEO_GPU_TILE_FEEDBACK_STALE',
+                phase: 'selection',
+                subject: { kind: 'virtual-raster-page', id: page.key },
+                message: 'GPU demand parent authority no longer matches the acknowledged snapshot.',
+                expected: {
+                    decisionFrameEpoch: frameEpoch,
+                    residencySnapshotEpoch: snapshot.epoch,
+                    parentPhysicalSlot: parentEntry.physicalSlot,
+                    parentGeneration: parentEntry.generation,
+                },
+                actual: {
+                    decisionFrameEpoch,
+                    residencySnapshotEpoch,
+                    parentPhysicalSlot,
+                    parentGeneration,
+                },
+            })
+        }
+        const demand = Object.freeze({
+            page,
+            parent,
+            parentCompactIndex,
+            parentPhysicalSlot,
+            parentGeneration,
+            priority,
+            decisionFrameEpoch,
+            residencySnapshotEpoch,
+            childMask,
+        })
+        const previous = canonical.get(page.key)
+        if (previous === undefined || demand.priority > previous.priority) {
+            canonical.set(page.key, demand)
+        }
+    }
+    return Object.freeze([ ...canonical.values() ].sort((left, right) =>
+        compareGpuTileFrontierPathOrder(left.page, right.page)
+    ))
+}
+
+type DecodedRetirements = Readonly<{
+    retirements: readonly GpuTileFrontierRetirement[]
+    discarded: number
+}>
+
+function decodeRetirements(
+    bytes: Uint8Array,
+    count: number,
+    snapshot: VirtualRasterSnapshot,
+    frameEpoch: number
+): DecodedRetirements {
+
+    const records = gpuTileFrontierEntryCodec.createReadbackView(bytes).toArray()
+    const canonical = new Map<string, GpuTileFrontierRetirement>()
+    let discarded = 0
+    for (const record of records.slice(0, count)) {
+        const page = pageFromFeedbackRecord(snapshot.addressSpace, record)
+        const physicalSlot = u32Field(record, 'physicalSlot')
+        const generation = u32Field(record, 'expectedGeneration')
+        const contentEpoch = u32Field(record, 'expectedContentEpoch')
+        const residencySnapshotEpoch = u32Field(record, 'residencySnapshotEpoch')
+        const resolved = snapshot.resolve(page)
+        if (residencySnapshotEpoch !== snapshot.epoch ||
+            resolved.physicalSlot !== physicalSlot ||
+            resolved.generation !== generation ||
+            resolved.contentEpoch !== contentEpoch) {
+            discarded++
+            continue
+        }
+        const retirement = Object.freeze({
+            page,
+            physicalSlot,
+            generation,
+            contentEpoch,
+            decisionFrameEpoch: frameEpoch,
+            residencySnapshotEpoch,
+        })
+        canonical.set(`${page.key}@${generation}`, retirement)
+    }
+    return Object.freeze({
+        retirements: Object.freeze(
+            [ ...canonical.values() ].sort((left, right) =>
+                compareGpuTileFrontierPathOrder(left.page, right.page)
+            )
+        ),
+        discarded,
+    })
+}
+
+function pageFromFeedbackRecord(
+    addressSpace: VirtualRasterAddressSpace,
+    record: Record<string, unknown>
+): VirtualRasterPageIdentity {
+
+    const samplingLevel = u32Field(record, 'samplingLevel')
+    const matrixLevel = u32Field(record, 'matrixLevel')
+    const tileRow = u32Field(record, 'tileRow')
+    const tileCol = u32Field(record, 'tileCol')
+    const compactIndex = u32Field(record, 'compactIndex')
+    let page: VirtualRasterPageIdentity
+    try {
+        page = addressSpace.pageFromTile({
+            matrixId: String(matrixLevel),
+            tileRow,
+            tileCol,
+        })
+    } catch (error) {
+        return invalidFeedback('GPU feedback references a page outside finite coverage.', {
+            addressSpaceId: addressSpace.id,
+        }, { matrixLevel, tileRow, tileCol, cause: String(error) })
+    }
+    if (page.level !== samplingLevel || addressSpace.tableIndex(page) !== compactIndex) {
+        return invalidFeedback('GPU feedback page address fields are inconsistent.', {
+            samplingLevel: page.level,
+            compactIndex: addressSpace.tableIndex(page),
+        }, { samplingLevel, compactIndex, page: page.key })
+    }
+    return page
+}
+
+function assertCounterMatches(
+    record: Record<string, unknown>,
+    name: string,
+    counter: number
+): void {
+
+    const value = u32Field(record, name)
+    if (value === counter) return
+    return invalidFeedback('GPU feedback diagnostics disagree with packed counters.', {
+        field: name,
+        value: counter,
+    }, { field: name, value })
 }
 
 function numberField(record: Record<string, unknown>, name: string): number {
@@ -507,6 +792,29 @@ function numberField(record: Record<string, unknown>, name: string): number {
         }, { field: name, value })
     }
     return value
+}
+
+function u32Field(record: Record<string, unknown>, name: string): number {
+
+    const value = numberField(record, name)
+    if (!Number.isInteger(value) || value < 0 || value > U32_MAX) {
+        return invalidFeedback('GPU feedback contains a field outside u32.', {
+            field: name,
+            value: 'u32',
+        }, { field: name, value })
+    }
+    return value
+}
+
+function counterBoolean(value: number, name: string): boolean {
+
+    if (value !== 0 && value !== 1) {
+        return invalidFeedback('GPU feedback contains an invalid boolean counter.', {
+            field: name,
+            value: [ 0, 1 ],
+        }, { field: name, value })
+    }
+    return value === 1
 }
 
 function booleanField(record: Record<string, unknown>, name: string): boolean {

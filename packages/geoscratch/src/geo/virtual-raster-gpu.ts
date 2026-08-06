@@ -58,6 +58,7 @@ const residencySubmissionAuthorities = new WeakMap<
     VirtualRasterGpuState,
     ReturnType<GPURuntime['createSubmissionAuthority']>
 >()
+const acknowledgedSnapshots = new WeakMap<VirtualRasterGpuState, VirtualRasterSnapshot>()
 
 export class VirtualRasterGpuState {
 
@@ -411,6 +412,7 @@ export class VirtualRasterGpuState {
             this.#clearStagedPublication()
             this.#acknowledgedSnapshotEpoch = snapshot.epoch
             this.#acknowledgedSnapshot = snapshot
+            acknowledgedSnapshots.set(this, snapshot)
             this.#acknowledgementSerial++
             this.#uploadedSlotGenerations = uploadedSlotGenerations
         } catch (error) {
@@ -506,6 +508,7 @@ export class VirtualRasterGpuState {
         this.#settlingPublication = undefined
         this.#stagedPublication = undefined
         this.#acknowledgedSnapshot = undefined
+        acknowledgedSnapshots.delete(this)
         this.#releaseStagedAtlasUploads()
         residencySubmissionAuthorityFor(this).dispose()
     }
@@ -606,6 +609,14 @@ export function virtualRasterResidencySubmissionStamp(
 ): SubmissionAuthorityStamp {
 
     return residencySubmissionAuthorityFor(gpuState).stamp()
+}
+
+/** @internal Current acknowledged snapshot for generation-safe Geo adapters. */
+export function virtualRasterGpuAcknowledgedSnapshot(
+    gpuState: VirtualRasterGpuState
+): VirtualRasterSnapshot | undefined {
+
+    return acknowledgedSnapshots.get(gpuState)
 }
 
 function residencySubmissionAuthorityFor(

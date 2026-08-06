@@ -127,6 +127,9 @@ async function createFeedbackFixture() {
     return {
         ...fake,
         runtime,
+        coverage,
+        addressSpace,
+        plane,
         residency,
         publication,
         gpuState,
@@ -134,6 +137,26 @@ async function createFeedbackFixture() {
         root,
         view,
     }
+}
+
+async function acknowledgePage(fixture, page, contentVersion, generation = 2) {
+
+    fixture.residency.stage(ownedVirtualRasterPagePayload({
+        page,
+        width: fixture.addressSpace.pageSize[0],
+        height: fixture.addressSpace.pageSize[1],
+        channels: 1,
+        data: new Uint8Array(
+            fixture.addressSpace.pageSize[0] * fixture.addressSpace.pageSize[1]
+        ),
+        contentVersion,
+    }), { generation })
+    const publication = fixture.residency.publish()
+    const update = fixture.gpuState.stage(publication)
+    const builder = fixture.runtime.createSubmission({ validation: 'throw' })
+    for (const command of update.commands) builder.upload(command)
+    await fixture.gpuState.acknowledge(publication, builder.submit())
+    return publication
 }
 
 function packedFeedback(frame, options = {}) {
@@ -380,6 +403,133 @@ describe('Geo Virtual Raster GPU feedback ring', () => {
             () => ring.feedback(first.frame, first.submitted),
             'GEO_GPU_TILE_FEEDBACK_CONSUMED'
         )
+
+        fixture.frontier.dispose()
+        fixture.gpuState.dispose()
+        fixture.residency.dispose()
+        fixture.runtime.dispose()
+    })
+
+    it('deduplicates canonical demands and drops generation-stale retirements', async() => {
+
+        const fixture = await createFeedbackFixture()
+        const ring = await VirtualRasterGpuFeedbackRing.create(fixture.frontier)
+        const snapshotEpoch = fixture.gpuState.facts().snapshotEpoch
+        const rootEntry = fixture.publication.snapshot.resolve(fixture.root)
+        const child = fixture.addressSpace.pageFromTile({
+            matrixId: '1',
+            tileRow: 0,
+            tileCol: 0,
+        })
+        const demand = priority => ({
+            samplingLevel: child.level,
+            matrixLevel: 1,
+            tileRow: 0,
+            tileCol: 0,
+            compactIndex: fixture.coverage.index(child.tile),
+            parentCompactIndex: fixture.coverage.index(fixture.root.tile),
+            parentPhysicalSlot: rootEntry.physicalSlot,
+            parentGeneration: rootEntry.generation,
+            priority,
+            decisionFrameEpoch: 0,
+            residencySnapshotEpoch: snapshotEpoch,
+            childMask: 1,
+        })
+        const retirement = {
+            physicalSlot: rootEntry.physicalSlot,
+            expectedGeneration: rootEntry.generation,
+            expectedContentEpoch: rootEntry.contentEpoch,
+            samplingLevel: fixture.root.level,
+            matrixLevel: 0,
+            tileRow: 0,
+            tileCol: 0,
+            compactIndex: fixture.coverage.index(fixture.root.tile),
+            previousLodState: 0,
+            transitionState: 0,
+            lastDemandEpoch: 0,
+            childDemandMask: 0,
+            residencySnapshotEpoch: snapshotEpoch,
+        }
+        const first = issueFeedbackFrame(fixture, ring, 0, {
+            demands: [ demand(3), demand(11) ],
+            retirements: [
+                retirement,
+                { ...retirement, expectedGeneration: retirement.expectedGeneration + 1 },
+            ],
+        })
+        issueFeedbackFrame(fixture, ring, 1)
+
+        const feedback = await ring.feedback(first.frame, first.submitted)
+        expect(feedback.demands).to.have.length(1)
+        expect(feedback.demands[0]).to.deep.include({
+            page: child,
+            parent: fixture.root,
+            priority: 11,
+            decisionFrameEpoch: 0,
+            residencySnapshotEpoch: snapshotEpoch,
+        })
+        expect(feedback.retirements).to.have.length(1)
+        expect(feedback.retirements[0]).to.deep.include({
+            page: fixture.root,
+            physicalSlot: rootEntry.physicalSlot,
+            generation: rootEntry.generation,
+            contentEpoch: rootEntry.contentEpoch,
+            decisionFrameEpoch: 0,
+            residencySnapshotEpoch: snapshotEpoch,
+        })
+        expect(feedback.counters).to.deep.include({
+            demandCount: 2,
+            retirementCount: 2,
+            discardedStaleRetirementCount: 1,
+        })
+        expect(feedback.diagnostics.map(diagnostic => diagnostic.code))
+            .to.include('GEO_GPU_TILE_FEEDBACK_STALE_RETIREMENT')
+        expect(Object.isFrozen(feedback.demands)).to.equal(true)
+        expect(Object.isFrozen(feedback.retirements)).to.equal(true)
+
+        fixture.frontier.dispose()
+        fixture.gpuState.dispose()
+        fixture.residency.dispose()
+        fixture.runtime.dispose()
+    })
+
+    it('fails closed on capacity overflow after releasing the readback slot', async() => {
+
+        const fixture = await createFeedbackFixture()
+        const ring = await VirtualRasterGpuFeedbackRing.create(fixture.frontier)
+        const first = issueFeedbackFrame(fixture, ring, 0, { demandOverflow: true })
+        issueFeedbackFrame(fixture, ring, 1)
+
+        await expectFeedbackError(
+            () => ring.feedback(first.frame, first.submitted),
+            'GEO_GPU_TILE_DEMAND_CAPACITY_EXCEEDED'
+        )
+        expect(ring.facts().slots[0].state).to.equal('idle')
+
+        fixture.frontier.dispose()
+        fixture.gpuState.dispose()
+        fixture.residency.dispose()
+        fixture.runtime.dispose()
+    })
+
+    it('consumes and rejects feedback after residency authority advances', async() => {
+
+        const fixture = await createFeedbackFixture()
+        const ring = await VirtualRasterGpuFeedbackRing.create(fixture.frontier)
+        const first = issueFeedbackFrame(fixture, ring, 0)
+        issueFeedbackFrame(fixture, ring, 1)
+        const child = fixture.addressSpace.pageFromTile({
+            matrixId: '1',
+            tileRow: 0,
+            tileCol: 0,
+        })
+        await acknowledgePage(fixture, child, 'feedback-child-v1')
+
+        await expectFeedbackError(
+            () => ring.feedback(first.frame, first.submitted),
+            'GEO_GPU_TILE_FEEDBACK_STALE'
+        )
+        expect(ring.facts().slots[0].state).to.equal('idle')
 
         fixture.frontier.dispose()
         fixture.gpuState.dispose()
