@@ -215,7 +215,11 @@ const typedRasterSample: VirtualRasterSample = typedRasterAccessor.sample(
         data: typedRasterData,
     } : undefined },
 )
-const typedRasterGpuState: VirtualRasterGpuState | undefined = undefined
+declare const typedRasterGpuState: VirtualRasterGpuState
+const typedSlotTable: scr.BufferResource = typedRasterGpuState.slotTable
+const typedSlotBytes: number = typedRasterGpuState.facts().slotTableBytes
+void typedSlotTable
+void typedSlotBytes
 const typedTileCoverage: TileMatrixCoverage = tileMatrixCoverage({
     tileMatrixSet: WebMercatorQuad,
     limits: [ {

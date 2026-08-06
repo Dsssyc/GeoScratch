@@ -142,7 +142,7 @@ export type VirtualRasterPageTableEntry = Readonly<{
     contentEpoch?: number
 }>
 
-export type VirtualRasterSampleStatus = 'resident' | 'fallback' | 'missing' | 'no-data'
+export type VirtualRasterSampleStatus = 'resident' | 'fallback' | 'missing' | 'failed' | 'no-data'
 
 export type VirtualRasterSample = Readonly<{
     status: VirtualRasterSampleStatus
@@ -691,6 +691,7 @@ export class VirtualRasterAccessor {
             `const ${namespace}_page_grid = array<vec2u, ${this.addressSpace.levelCount}>(${pageGrids});\n` +
             `const ${namespace}_level_offset = array<u32, ${this.addressSpace.levelCount}>(${levelOffsets});\n\n` +
             `fn ${namespace}_missing(level: u32) -> ${namespace}Sample { return ${namespace}Sample(vec4f(0.0), 0u, level, level); }\n\n` +
+            `fn ${namespace}_failed(level: u32) -> ${namespace}Sample { return ${namespace}Sample(vec4f(0.0), 4u, level, level); }\n\n` +
             `fn ${namespace}_load_texel(input_texel: vec2i, level: u32) -> ${namespace}Sample {\n` +
             `    let extent = ${namespace}_level_extent[level];\n` +
             `    let texel = vec2u(clamp(input_texel, vec2i(0), vec2i(extent) - vec2i(1)));\n` +
@@ -699,6 +700,7 @@ export class VirtualRasterAccessor {
             `    let base = table_index * 8u;\n` +
             `    let status = ${namespace}_page_table[base + 3u];\n` +
             `    if (status == 0u) { return ${namespace}_missing(level); }\n` +
+            `    if (status == 4u) { return ${namespace}_failed(level); }\n` +
             `    let resolved_level = ${namespace}_page_table[base + 2u];\n` +
             `    let level_scale = 1u << (resolved_level - level);\n` +
             `    let resolved_texel = texel / level_scale;\n` +
@@ -717,6 +719,7 @@ export class VirtualRasterAccessor {
             `    let tr = ${namespace}_load_texel(base_texel + vec2i(1, 0), level);\n` +
             `    let bl = ${namespace}_load_texel(base_texel + vec2i(0, 1), level);\n` +
             `    let br = ${namespace}_load_texel(base_texel + vec2i(1, 1), level);\n` +
+            `    if (tl.status == 4u || tr.status == 4u || bl.status == 4u || br.status == 4u) { return ${namespace}_failed(level); }\n` +
             `    if (tl.status == 0u || tr.status == 0u || bl.status == 0u || br.status == 0u) { return ${namespace}_missing(level); }\n` +
             `    if (tl.status == 3u || tr.status == 3u || bl.status == 3u || br.status == 3u) { return ${namespace}Sample(vec4f(0.0), 3u, level, max(max(tl.resolved_level, tr.resolved_level), max(bl.resolved_level, br.resolved_level))); }\n` +
             `    let value = mix(mix(tl.value, tr.value, fraction.x), mix(bl.value, br.value, fraction.x), fraction.y);\n` +
@@ -791,7 +794,10 @@ export class VirtualRasterAccessor {
             y: Math.floor(texel[1] / this.addressSpace.pageSize[1]!),
         })
         const entry = snapshot.resolve(requestedPage)
-        if (entry.status === 'missing' || entry.status === 'failed' ||
+        if (entry.status === 'failed') {
+            return { status: 'failed', resolvedLevel: profile.level }
+        }
+        if (entry.status === 'missing' ||
             entry.physicalSlot === undefined || entry.resolvedLevel === undefined) {
             return { status: 'missing', resolvedLevel: profile.level }
         }
@@ -960,13 +966,15 @@ function sampleFromResolved(
     const slots = [ ...new Set(samples.flatMap(sample =>
         sample.physicalSlot === undefined ? [] : [ sample.physicalSlot ],
     )) ].sort((a, b) => a - b)
-    const status: VirtualRasterSampleStatus = samples.some(sample => sample.status === 'missing')
-        ? 'missing'
-        : samples.some(sample => sample.status === 'no-data')
-            ? 'no-data'
-            : samples.some(sample => sample.status === 'fallback')
-                ? 'fallback'
-                : 'resident'
+    const status: VirtualRasterSampleStatus = samples.some(sample => sample.status === 'failed')
+        ? 'failed'
+        : samples.some(sample => sample.status === 'missing')
+            ? 'missing'
+            : samples.some(sample => sample.status === 'no-data')
+                ? 'no-data'
+                : samples.some(sample => sample.status === 'fallback')
+                    ? 'fallback'
+                    : 'resident'
     const result: {
         status: VirtualRasterSampleStatus
         value?: readonly number[]

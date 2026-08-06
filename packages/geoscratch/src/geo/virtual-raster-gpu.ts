@@ -28,6 +28,7 @@ export type VirtualRasterGpuUpdate = Readonly<{
     commands: readonly (TextureUploadCommand | UploadCommand)[]
     atlasUploads: readonly TextureUploadCommand[]
     pageTableUpload?: UploadCommand
+    slotTableUpload?: UploadCommand
 }>
 
 export type VirtualRasterGpuFacts = Readonly<{
@@ -40,6 +41,7 @@ export type VirtualRasterGpuFacts = Readonly<{
     atlasRows: number
     pageTableEntryCount: number
     pageTableBytes: number
+    slotTableBytes: number
 }>
 
 const BUFFER_COPY_DST = 0x08
@@ -47,6 +49,8 @@ const BUFFER_STORAGE = 0x80
 const TEXTURE_COPY_DST = 0x02
 const TEXTURE_BINDING = 0x04
 const PAGE_TABLE_WORDS = 8
+const SLOT_TABLE_WORDS = 12
+const SLOT_INVALID = 0xffff_ffff
 
 export class VirtualRasterGpuState {
 
@@ -57,12 +61,15 @@ export class VirtualRasterGpuState {
     readonly atlas: TextureResource
     readonly atlasView: TextureViewSpec
     readonly pageTable: BufferResource
+    readonly slotTable: BufferResource
     readonly atlasColumns: number
     readonly atlasRows: number
     readonly atlasWidth: number
     readonly atlasHeight: number
     readonly #pageTableWords: Uint32Array<ArrayBuffer>
     readonly #pageTableUpload: UploadCommand
+    readonly #slotTableWords: Uint32Array<ArrayBuffer>
+    readonly #slotTableUpload: UploadCommand
     #disposed = false
     #acknowledgedSnapshotEpoch = -1
     #stagedSnapshotEpoch: number | undefined
@@ -77,8 +84,11 @@ export class VirtualRasterGpuState {
         descriptor: VirtualRasterGpuStateDescriptor,
         atlas: TextureResource,
         pageTable: BufferResource,
+        slotTable: BufferResource,
         pageTableWords: Uint32Array<ArrayBuffer>,
         pageTableUpload: UploadCommand,
+        slotTableWords: Uint32Array<ArrayBuffer>,
+        slotTableUpload: UploadCommand,
         atlasColumns: number,
         atlasRows: number
     ) {
@@ -90,8 +100,11 @@ export class VirtualRasterGpuState {
         this.atlas = atlas
         this.atlasView = atlas.view()
         this.pageTable = pageTable
+        this.slotTable = slotTable
         this.#pageTableWords = pageTableWords
         this.#pageTableUpload = pageTableUpload
+        this.#slotTableWords = slotTableWords
+        this.#slotTableUpload = slotTableUpload
         this.atlasColumns = atlasColumns
         this.atlasRows = atlasRows
         this.atlasWidth = descriptor.addressSpace.pageSize[0]! * atlasColumns
@@ -137,21 +150,42 @@ export class VirtualRasterGpuState {
             atlas.dispose()
             throw error
         }
+        let slotTable: BufferResource
+        try {
+            slotTable = await runtime.createBuffer({
+                label: `${descriptor.plane.id} virtual raster slot table`,
+                size: descriptor.maxPhysicalPages * SLOT_TABLE_WORDS * 4,
+                usage: BUFFER_COPY_DST | BUFFER_STORAGE,
+            })
+        } catch (error) {
+            pageTable.dispose()
+            atlas.dispose()
+            throw error
+        }
         const pageTableWords = new Uint32Array(
             descriptor.addressSpace.pageTableEntryCount * PAGE_TABLE_WORDS
         )
+        const slotTableWords = new Uint32Array(descriptor.maxPhysicalPages * SLOT_TABLE_WORDS)
         const pageTableUpload = runtime.createUploadCommand({
             label: `${descriptor.plane.id} virtual raster page-table upload`,
             target: pageTable.region(),
             data: pageTableWords,
+        })
+        const slotTableUpload = runtime.createUploadCommand({
+            label: `${descriptor.plane.id} virtual raster slot-table upload`,
+            target: slotTable.region(),
+            data: slotTableWords,
         })
         return new VirtualRasterGpuState(
             runtime,
             descriptor,
             atlas,
             pageTable,
+            slotTable,
             pageTableWords,
             pageTableUpload,
+            slotTableWords,
+            slotTableUpload,
             atlasColumns,
             atlasRows
         )
@@ -260,16 +294,20 @@ export class VirtualRasterGpuState {
             throw error
         }
         this.#encodePageTable(snapshot)
+        encodeSlotTable(this.#slotTableWords, snapshot, this.maxPhysicalPages)
         this.#stagedSnapshotEpoch = snapshot.epoch
         this.#stagedSlotGenerations = stagedGenerations
         this.#stagedAtlasUploads = [ ...atlasUploads ]
-        this.#stagedCommandIds = new Set([ ...atlasUploads, this.#pageTableUpload ].map(command => command.id))
+        this.#stagedCommandIds = new Set(
+            [ ...atlasUploads, this.#pageTableUpload, this.#slotTableUpload ].map(command => command.id)
+        )
         this.#stagedPublication = publication
         return Object.freeze({
             snapshotEpoch: snapshot.epoch,
-            commands: Object.freeze([ ...atlasUploads, this.#pageTableUpload ]),
+            commands: Object.freeze([ ...atlasUploads, this.#pageTableUpload, this.#slotTableUpload ]),
             atlasUploads: Object.freeze(atlasUploads),
             pageTableUpload: this.#pageTableUpload,
+            slotTableUpload: this.#slotTableUpload,
         })
     }
 
@@ -314,6 +352,23 @@ export class VirtualRasterGpuState {
                 actual: { missingCommandIds: Object.freeze(missingCommandIds) },
             })
         }
+        if (this.#stagedCommandIds.size > 0) {
+            const nativeOutcome = await submitted.nativeOutcome
+            if (nativeOutcome.status !== 'observed-succeeded') {
+                return throwGeoDiagnostic({
+                    code: 'GEO_VIRTUAL_RASTER_GPU_PUBLICATION_NATIVE_OUTCOME_FAILED',
+                    phase: 'residency',
+                    subject: { kind: 'virtual-raster-publication', id: String(snapshot.epoch) },
+                    message: 'Publication acknowledgement requires a successful native outcome for its staged work.',
+                    expected: { nativeOutcome: 'observed-succeeded' },
+                    actual: {
+                        submissionId: submitted.id,
+                        snapshotEpoch: snapshot.epoch,
+                        nativeOutcome: nativeOutcome.status,
+                    },
+                })
+            }
+        }
         this.#acknowledgedSnapshotEpoch = snapshot.epoch
         this.#uploadedSlotGenerations = new Map(this.#stagedSlotGenerations)
         this.#stagedSnapshotEpoch = undefined
@@ -357,6 +412,7 @@ export class VirtualRasterGpuState {
             atlasRows: number
             pageTableEntryCount: number
             pageTableBytes: number
+            slotTableBytes: number
         } = {
             snapshotEpoch: this.#acknowledgedSnapshotEpoch,
             maxPhysicalPages: this.maxPhysicalPages,
@@ -366,6 +422,7 @@ export class VirtualRasterGpuState {
             atlasRows: this.atlasRows,
             pageTableEntryCount: this.addressSpace.pageTableEntryCount,
             pageTableBytes: this.#pageTableWords.byteLength,
+            slotTableBytes: this.#slotTableWords.byteLength,
         }
         if (this.#stagedSnapshotEpoch !== undefined) {
             facts.stagedSnapshotEpoch = this.#stagedSnapshotEpoch
@@ -378,7 +435,9 @@ export class VirtualRasterGpuState {
         if (this.#disposed) return
         this.#disposed = true
         this.#pageTableUpload.dispose()
+        this.#slotTableUpload.dispose()
         this.pageTable.dispose()
+        this.slotTable.dispose()
         this.atlas.dispose()
         this.#stagedSlotGenerations.clear()
         this.#uploadedSlotGenerations.clear()
@@ -391,9 +450,20 @@ export class VirtualRasterGpuState {
 
         this.#pageTableWords.fill(0)
         for (const entry of snapshot.pageTable) {
-            if (entry.physicalSlot === undefined || entry.resolvedLevel === undefined) continue
             const tableIndex = this.addressSpace.tableIndex(entry.requestedPage)
             const base = tableIndex * PAGE_TABLE_WORDS
+            if (entry.status === 'failed') {
+                this.#pageTableWords[base] = SLOT_INVALID
+                this.#pageTableWords[base + 1] = SLOT_INVALID
+                this.#pageTableWords[base + 2] = entry.resolvedLevel ?? entry.requestedLevel
+                this.#pageTableWords[base + 3] = 4
+                this.#pageTableWords[base + 4] = entry.generation ?? 0
+                this.#pageTableWords[base + 5] = entry.contentEpoch ?? 0
+                this.#pageTableWords[base + 6] = entry.requestedLevel
+                this.#pageTableWords[base + 7] = snapshot.epoch
+                continue
+            }
+            if (entry.physicalSlot === undefined || entry.resolvedLevel === undefined) continue
             const slotX = entry.physicalSlot % this.atlasColumns
             const slotY = Math.floor(entry.physicalSlot / this.atlasColumns)
             this.#pageTableWords[base] = slotX
@@ -423,6 +493,40 @@ export class VirtualRasterGpuState {
 
         for (const upload of this.#stagedAtlasUploads) upload.dispose()
         this.#stagedAtlasUploads.length = 0
+    }
+}
+
+function encodeSlotTable(
+    target: Uint32Array<ArrayBuffer>,
+    snapshot: VirtualRasterSnapshot,
+    maxPhysicalPages: number
+): void {
+
+    target.fill(0)
+    const coverage = snapshot.addressSpace.tileCoverage
+    for (const [ slot, physical ] of [ ...physicalPagesForSnapshot(snapshot).entries() ]
+        .sort((a, b) => a[0] - b[0])) {
+        if (slot < 0 || slot >= maxPhysicalPages) {
+            throw new RangeError('Virtual raster physical slot exceeds the slot-table capacity.')
+        }
+        const base = slot * SLOT_TABLE_WORDS
+        const tile = physical.page.tile
+        target[base] = 1
+        target[base + 1] = physical.page.level
+        target[base + 2] = tile === undefined || coverage === undefined
+            ? SLOT_INVALID
+            : coverage.tileMatrixSet.tileMatrices.findIndex(matrix => matrix.id === tile.matrixId)
+        target[base + 3] = tile?.tileRow ?? SLOT_INVALID
+        target[base + 4] = tile?.tileCol ?? SLOT_INVALID
+        target[base + 5] = tile === undefined || coverage === undefined
+            ? SLOT_INVALID
+            : coverage.index(tile)
+        target[base + 6] = physical.physicalSlot
+        target[base + 7] = physical.generation
+        target[base + 8] = physical.contentEpoch
+        target[base + 9] = snapshot.epoch
+        target[base + 10] = snapshot.epoch
+        target[base + 11] = 0
     }
 }
 

@@ -1,6 +1,7 @@
 import { expect } from 'chai'
 import { GPURuntime } from 'geoscratch/scratch'
 import {
+    GeoDiagnosticError,
     VirtualRasterResidency,
     createVirtualRasterGpuState,
     ownedVirtualRasterPagePayload,
@@ -10,6 +11,34 @@ import {
     virtualRasterSamplingProfile,
 } from 'geoscratch/geo'
 import { createFakeGpu } from './scratch-test-utils.js'
+
+const SLOT_TABLE_WORDS = 12
+const SLOT_INVALID = 0xffff_ffff
+
+async function expectGeoDiagnostic(action, expected) {
+
+    let failure
+    try {
+        await action()
+    } catch (error) {
+        failure = error
+    }
+    expect(failure).to.be.instanceOf(GeoDiagnosticError)
+    expect(failure.diagnostic).to.include(expected)
+    return failure.diagnostic
+}
+
+function submitUpdate(runtime, update, validation = 'throw') {
+
+    const builder = runtime.createSubmission({ validation })
+    for (const command of update.commands) builder.upload(command)
+    return builder.submit()
+}
+
+function wordsFromWrite(write) {
+
+    return new Uint32Array(write.data.buffer, write.data.byteOffset, write.data.byteLength / 4)
+}
 
 function scalarPage(page, values, contentVersion = 'v1') {
 
@@ -310,7 +339,8 @@ describe('Geo virtual raster', () => {
 
     it('lowers a publication into stable Scratch atlas/page-table resources and uploads', async() => {
 
-        const fake = createFakeGpu()
+        const fakeOptions = { deferErrorScopePops: false }
+        const fake = createFakeGpu(fakeOptions)
         const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const { addressSpace, plane, residency, pages } = fixture({ maxPhysicalPages: 2 })
         stage(residency, pages.get('0/0/0'))
@@ -324,39 +354,92 @@ describe('Geo virtual raster', () => {
         })
         const stableAtlas = gpuState.atlas
         const stablePageTable = gpuState.pageTable
+        const stableSlotTable = gpuState.slotTable
         const update = gpuState.stage(publication)
 
         expect(update.atlasUploads).to.have.length(2)
         expect(update.pageTableUpload).to.exist
-        expect(update.commands).to.have.length(3)
-        const builder = runtime.createSubmission({ validation: 'throw' })
-        for (const command of update.commands) builder.upload(command)
-        const work = builder.submit()
-        await work.nativeOutcome
+        expect(update.slotTableUpload).to.exist
+        expect(update.commands).to.have.length(4)
+        expect(update.commands.at(-1)).to.equal(update.slotTableUpload)
+        expect(gpuState.slotTable).to.equal(stableSlotTable)
+        expect(gpuState.facts()).to.deep.include({
+            slotTableBytes: 2 * SLOT_TABLE_WORDS * Uint32Array.BYTES_PER_ELEMENT,
+        })
+        const work = submitUpdate(runtime, update)
+        expect(await work.nativeOutcome).to.deep.include({ status: 'observed-succeeded' })
         await work.done
         await gpuState.acknowledge(publication, work)
 
+        const slotWords = wordsFromWrite(fake.calls.queueWrites.find(write =>
+            write.data.byteLength === 2 * SLOT_TABLE_WORDS * Uint32Array.BYTES_PER_ELEMENT
+        ))
+        for (const [ slot, page ] of [ '0/0/0', '0/1/0' ].entries()) {
+            const entry = snapshot.resolve(pages.get(page).page)
+            const base = slot * SLOT_TABLE_WORDS
+            expect(slotWords[base]).to.equal(1)
+            expect(slotWords[base + 7]).to.equal(entry.generation)
+            expect(slotWords[base + 8]).to.equal(entry.contentEpoch)
+            expect(slotWords[base + 9]).to.equal(snapshot.epoch)
+            expect(Array.from(slotWords.slice(base + 2, base + 6)))
+                .to.deep.equal([ SLOT_INVALID, SLOT_INVALID, SLOT_INVALID, SLOT_INVALID ])
+        }
         expect(update.atlasUploads.every(upload => upload.isDisposed)).to.equal(true)
         expect(update.pageTableUpload.isDisposed).to.equal(false)
+        expect(update.slotTableUpload.isDisposed).to.equal(false)
         expect(gpuState.atlas).to.equal(stableAtlas)
         expect(gpuState.pageTable).to.equal(stablePageTable)
+        expect(gpuState.slotTable).to.equal(stableSlotTable)
         const unchanged = residency.publish()
         expect(gpuState.stage(unchanged).commands).to.deep.equal([])
-        const emptyWork = runtime.createSubmission({ validation: 'throw' }).submit()
-        await gpuState.acknowledge(unchanged, emptyWork)
-        stage(residency, scalarPage(
-            pages.get('0/0/0').page,
-            [ 1, 2, 3, 4 ],
-            'v2'
-        ), 2)
+        const unrelated = await runtime.createBuffer({
+            label: 'unrelated publication acknowledgement work',
+            size: Uint32Array.BYTES_PER_ELEMENT,
+            usage: 0x08,
+        })
+        const unrelatedUpload = runtime.createUploadCommand({
+            label: 'unrelated publication acknowledgement upload',
+            target: unrelated.region(),
+            data: new Uint32Array([ 0 ]),
+        })
+        fakeOptions.deferErrorScopePops = true
+        fake.errors.failNext('writeBuffer', 'validation', new Error('unrelated publication work failed'))
+        const rejectedEffectfulWork = runtime.createSubmission({ validation: 'throw' })
+            .upload(unrelatedUpload)
+            .submit()
+        const acknowledgedWithoutObservation = await Promise.race([
+            gpuState.acknowledge(unchanged, rejectedEffectfulWork).then(() => true),
+            new Promise(resolve => setTimeout(() => resolve(false), 50)),
+        ])
+        expect(acknowledgedWithoutObservation).to.equal(true)
+        expect(gpuState.facts()).to.deep.include({ snapshotEpoch: unchanged.snapshot.epoch })
+        expect(fake.errors.pendingPops).to.not.be.empty
+        for (let index = 0; index < fake.errors.pendingPops.length; index++) {
+            fake.errors.settlePop(index)
+        }
+        expect(await rejectedEffectfulWork.nativeOutcome).to.deep.include({ status: 'observed-failed' })
+        await rejectedEffectfulWork.done.catch(() => undefined)
+        fakeOptions.deferErrorScopePops = false
+        unrelatedUpload.dispose()
+        unrelated.dispose()
+        stage(residency, pages.get('1/0/0'), 2)
         const changedAfterEmpty = residency.publish()
         const changedUpdate = gpuState.stage(changedAfterEmpty)
         expect(changedUpdate.atlasUploads).to.have.length(1)
         await gpuState.abandon(changedAfterEmpty)
+        const releasedSlotPublication = residency.publish()
+        const releasedSlotUpdate = gpuState.stage(releasedSlotPublication)
+        expect(releasedSlotUpdate.atlasUploads).to.deep.equal([])
+        expect(releasedSlotUpdate.commands).to.have.length(2)
+        const releasedSlotWork = submitUpdate(runtime, releasedSlotUpdate)
+        await gpuState.acknowledge(releasedSlotPublication, releasedSlotWork)
+        const releasedSlotWords = wordsFromWrite(fake.calls.queueWrites.at(-1))
+        expect(Array.from(releasedSlotWords.slice(0, SLOT_TABLE_WORDS)))
+            .to.deep.equal(Array(SLOT_TABLE_WORDS).fill(0))
         expect(fake.calls.queueTextureWrites).to.have.length(2)
-        expect(fake.calls.queueWrites).to.have.length(1)
+        expect(fake.calls.queueWrites).to.have.length(4)
         expect(gpuState.facts()).to.deep.include({
-            snapshotEpoch: snapshot.epoch,
+            snapshotEpoch: releasedSlotPublication.snapshot.epoch,
             maxPhysicalPages: 2,
             atlasWidth: 4,
             atlasHeight: 2,
@@ -366,6 +449,114 @@ describe('Geo virtual raster', () => {
         gpuState.dispose()
         residency.dispose()
         runtime.dispose()
+    })
+
+    it('keeps terminal failures GPU-distinct without sampling an atlas slot', async() => {
+
+        const fake = createFakeGpu()
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
+        const { addressSpace, plane, residency, pages, cpuPages } = fixture({ maxPhysicalPages: 1 })
+        const residentPage = pages.get('0/0/0')
+        const failedPage = pages.get('0/1/0')
+        expect(stage(residency, residentPage)).to.deep.include({ status: 'staged' })
+        expect(stage(residency, failedPage)).to.deep.include({ status: 'failed' })
+        const publication = residency.publish()
+        const entry = publication.snapshot.resolve(failedPage.page)
+        const gpuState = await createVirtualRasterGpuState(runtime, {
+            addressSpace,
+            plane,
+            maxPhysicalPages: 1,
+        })
+        const update = gpuState.stage(publication)
+        const work = submitUpdate(runtime, update)
+        await gpuState.acknowledge(publication, work)
+
+        const pageTableWords = wordsFromWrite(fake.calls.queueWrites.find(write =>
+            write.data.byteLength === addressSpace.pageTableEntryCount * 8 * Uint32Array.BYTES_PER_ELEMENT
+        ))
+        const base = addressSpace.tableIndex(failedPage.page) * 8
+        expect(Array.from(pageTableWords.slice(base, base + 8))).to.deep.equal([
+            SLOT_INVALID,
+            SLOT_INVALID,
+            failedPage.page.level,
+            4,
+            0,
+            0,
+            failedPage.page.level,
+            publication.snapshot.epoch,
+        ])
+        const accessor = virtualRasterAccessor({ addressSpace, plane })
+        const sample = accessor.sample(publication.snapshot, {
+            texel: [ 2, 0 ],
+            profile: virtualRasterSamplingProfile({
+                filter: 'nearest',
+                level: 0,
+                outerBoundary: 'clamp',
+            }),
+        }, cpuPages)
+        expect(sample.status).to.equal('failed')
+        const wgsl = accessor.wgslModule({ group: 0, pageTableBinding: 0, atlasBinding: 1 })
+        expect(wgsl).to.include('if (status == 4u)')
+
+        gpuState.dispose()
+        residency.dispose()
+        runtime.dispose()
+    })
+
+    it('keeps a staged publication pending after terminal native failures', async() => {
+
+        for (const outcome of [ 'observed-failed', 'observation-failed', 'unobserved' ]) {
+            const fakeOptions = { deferErrorScopePops: false }
+            const fake = createFakeGpu(fakeOptions)
+            const runtime = await GPURuntime.create({
+                gpu: fake.gpu,
+                ...(outcome === 'unobserved' ? { diagnostics: { submissionScopes: 'off' } } : {}),
+            })
+            const { addressSpace, plane, residency, pages } = fixture({ maxPhysicalPages: 1 })
+            stage(residency, pages.get('0/0/0'))
+            const publication = residency.publish()
+            const gpuState = await createVirtualRasterGpuState(runtime, {
+                addressSpace,
+                plane,
+                maxPhysicalPages: 1,
+            })
+            const update = gpuState.stage(publication)
+            fakeOptions.deferErrorScopePops = outcome === 'observation-failed'
+            if (outcome === 'observed-failed') {
+                fake.errors.failNext('writeBuffer', 'validation', new Error('slot upload failed'))
+            }
+            const work = submitUpdate(runtime, update)
+            if (outcome === 'observation-failed') {
+                fake.errors.rejectPop(0, new Error('native observation failed'))
+                for (let index = 1; index < fake.errors.pendingPops.length; index++) {
+                    fake.errors.settlePop(index)
+                }
+            }
+            expect(await work.nativeOutcome).to.deep.include({ status: outcome })
+            if (outcome === 'observed-failed' || outcome === 'observation-failed') {
+                await work.done.catch(() => undefined)
+            } else {
+                await work.done
+            }
+            const diagnostic = await expectGeoDiagnostic(() => gpuState.acknowledge(publication, work), {
+                code: 'GEO_VIRTUAL_RASTER_GPU_PUBLICATION_NATIVE_OUTCOME_FAILED',
+                phase: 'residency',
+            })
+            expect(diagnostic.actual).to.deep.include({
+                submissionId: work.id,
+                snapshotEpoch: publication.snapshot.epoch,
+                nativeOutcome: outcome,
+            })
+            expect(gpuState.facts()).to.deep.include({
+                snapshotEpoch: -1,
+                stagedSnapshotEpoch: publication.snapshot.epoch,
+            })
+            expect(publication.inspect().stagingBytes).to.equal(4)
+            await gpuState.abandon(publication)
+            gpuState.dispose()
+            residency.dispose()
+            runtime.dispose()
+        }
     })
 
     it('disposes staged and published bytes without retaining unbounded facts', async() => {
