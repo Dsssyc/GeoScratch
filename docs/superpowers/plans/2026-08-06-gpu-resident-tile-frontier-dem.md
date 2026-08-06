@@ -367,7 +367,7 @@ const submitted = frontier.encode(runtime.createSubmission(), evenFrame).submit(
 evenView.dispose()
 ```
 
-Assert frame epoch 0 reads A/writes B, frame epoch 1 reads B/writes A, object ids remain stable, stale view/residency stamps fail at submission, and no `mapAsync` or direct native buffer read occurs.
+Assert the first successfully submitted frame reads A/writes B and the next successfully submitted frame reads B/writes A regardless of caller `frameEpoch`; cancelled tokens, unsubmitted builders, and synchronous submission failures do not advance parity. Object ids remain stable, stale view/residency/sequence stamps fail at submission, and no `mapAsync` or direct native buffer read occurs.
 
 - [ ] **Step 5: Run frontier unit RED**
 
@@ -412,7 +412,7 @@ Requirements encoded in WGSL:
 
 - [ ] **Step 7: Implement persistent resources and A/B templates**
 
-`GpuTileFrontier.create()` allocates all buffers once. `stageSeed(snapshot)` resolves configured roots against the acknowledged snapshot and initializes frontier A plus dispatch A. `writeView()` is the sole per-frame CPU pack and advances the bounded view submission authority once. `frame(viewToken)` chooses one of two precreated compute/render resource templates by `viewToken.frameEpoch & 1`; it never inspects GPU counts. `encode(builder, frame)` validates ownership/liveness, adds the captured residency/view stamp requirements, then appends the private immutable MapMeta upload and exact private compute template. The caller disposes the view token after submission. Task 3C owns readback-slot selection and backpressure.
+`GpuTileFrontier.create()` allocates all buffers once. `stageSeed(snapshot)` resolves configured roots against the acknowledged snapshot and initializes frontier A plus dispatch A. `writeView()` is the sole per-frame CPU pack, advances the bounded view submission authority once, and captures the current frontier-sequence stamp. `frame(viewToken)` chooses one of two precreated compute/render resource templates from that successful-submit sequence; caller `frameEpoch` remains decision metadata and never controls A/B state. `encode(builder, frame)` validates ownership/liveness, adds the captured residency/view requirements, consumes the captured sequence stamp only when synchronous submission succeeds, then appends the private immutable MapMeta upload and exact private compute template. The caller disposes the view token after submission. Task 3C owns readback-slot selection and backpressure.
 
 Each A/B draw-argument buffer contains one 16-byte region per `GpuTileFrontierDrawTemplate`. `finalizeArguments` writes static `vertexCount/firstVertex/firstInstance` plus GPU visible count into the region matched to the frame's visible buffer. Each `VirtualRasterGpuFeedbackRing` command copies one fixed packed demand/retire/diagnostic/counter region with `retain: 'consume-on-read'`; `feedback(frame, submitted)` obtains the operation through `command.result({ after: submitted })`, consumes it once, validates decision/residency epochs and releases the ring claim in `finally`. Frontier disposal disposes all three commands after in-flight operations settle or are cancelled.
 
