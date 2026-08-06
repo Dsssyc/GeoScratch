@@ -15,6 +15,11 @@ import {
     type SubmissionBuilder,
     type UploadCommand,
 } from '../scratch/index.js'
+import {
+    appendSubmissionBuilderOpaqueSteps,
+    submissionBuilderOpaqueSequenceMatches,
+    type SubmissionBuilderOpaqueSequence,
+} from '../scratch/gpu/submission.js'
 import { throwGeoDiagnostic } from './diagnostics.js'
 import {
     compareGpuTileFrontierPathOrder,
@@ -208,6 +213,7 @@ const frameRecords = new WeakMap<GpuTileFrontierFrame, FrameRecord>()
 const encodedBuilderRecords = new WeakMap<SubmissionBuilder, Readonly<{
     owner: GpuTileFrontier
     frame: GpuTileFrontierFrame
+    sequence: SubmissionBuilderOpaqueSequence
 }>>()
 
 type ViewTokenRecord = {
@@ -591,14 +597,26 @@ export class GpuTileFrontier {
                     : encodedBuilderRecords.has(builder),
             })
         }
-        const encoded = builder
+        builder
             .require(record.view.residencyStamp)
             .require(record.view.viewStamp)
-            .upload(record.view.command)
-            .compute(this.#pass, [ ...record.template.commands ])
-            .consume(record.view.sequenceStamp)
-        encodedBuilderRecords.set(encoded, Object.freeze({ owner: this, frame }))
-        return encoded
+        const sequence = appendSubmissionBuilderOpaqueSteps(builder, [
+            {
+                label: 'GPU tile frontier view upload',
+                step: { kind: 'upload', command: record.view.command },
+            },
+            {
+                label: 'GPU tile frontier compute',
+                step: {
+                    kind: 'compute',
+                    passSpec: this.#pass,
+                    commands: [ ...record.template.commands ],
+                },
+            },
+        ])
+        builder.consume(record.view.sequenceStamp)
+        encodedBuilderRecords.set(builder, Object.freeze({ owner: this, frame, sequence }))
+        return builder
     }
 
     drawArgument(frame: GpuTileFrontierFrame, id: string): GpuTileFrontierDrawArgument {
@@ -768,7 +786,8 @@ export function gpuTileFrontierFeedbackEncodingMatches(
 ): boolean {
 
     const record = encodedBuilderRecords.get(builder)
-    return record?.owner === frontier && record.frame === frame
+    return record?.owner === frontier && record.frame === frame &&
+        submissionBuilderOpaqueSequenceMatches(builder, record.sequence)
 }
 
 /** @internal Registers a bounded frontier-owned feedback lifecycle. */

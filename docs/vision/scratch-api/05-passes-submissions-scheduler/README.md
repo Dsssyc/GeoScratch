@@ -436,6 +436,8 @@ Each resource read access retains `declaredContentEpoch`, containing the authore
 
 `SubmissionBuilder.steps` defines one total order across encoder-backed work and queue-side uploads. Recording commands into an encoder is not the same as enqueuing them: `GPUQueue.writeBuffer(...)` and `GPUQueue.writeTexture(...)` enter the queue when called, while clear, copy, readback staging, resolve, compute, and render work enter the queue only when a finished command buffer is submitted.
 
+Package-owned higher-level composition may place an executable step behind a frozen `{ kind: 'opaque', label }` marker in that same total order. The actual step remains in module-private Scratch state and is never returned through `SubmissionBuilder.steps`; package code receives only a privately branded sequence witness. `submit()` fails before native observation if a marker is removed, duplicated, replaced, or reordered, or if one of its private commands is repeated in a public step. This is not a public hidden-command factory and does not change ordinary caller-authored Scratch steps, whose commands remain directly inspectable.
+
 Submission lowering therefore uses three phases:
 
 1. Resolve readiness, fallback, dependency validation, ownership, lifecycle, and pass compatibility before creating an encoder or touching `GPUQueue`.

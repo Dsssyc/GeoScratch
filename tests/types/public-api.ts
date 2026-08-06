@@ -341,6 +341,17 @@ const typedFeedbackEncodedSubmission: scr.SubmissionBuilder = typedFeedbackRing.
     typedEncodedFrontierSubmission,
     typedFrontierFrame,
 )
+const typedOpaqueSubmissionStep = typedFeedbackEncodedSubmission.steps.find(
+    step => step.kind === 'opaque'
+)
+if (typedOpaqueSubmissionStep?.kind === 'opaque') {
+    const typedOpaqueSubmissionLabel: string = typedOpaqueSubmissionStep.label
+    void typedOpaqueSubmissionLabel
+    // @ts-expect-error Opaque package-owned steps never expose their command.
+    typedOpaqueSubmissionStep.command
+}
+// @ts-expect-error Package-owned opaque-step composition is not a public Scratch export.
+scr.appendSubmissionBuilderOpaqueSteps
 const typedFeedbackResult: Promise<VirtualRasterGpuFeedbackBatch> = typedFeedbackRing.feedback(
     typedFrontierFrame,
     typedFrontierSubmittedWork,

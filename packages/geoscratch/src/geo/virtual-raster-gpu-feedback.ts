@@ -5,6 +5,7 @@ import type {
     SubmissionBuilder,
     SubmittedWork,
 } from '../scratch/index.js'
+import { appendSubmissionBuilderOpaqueSteps } from '../scratch/gpu/submission.js'
 import { createGeoDiagnostic, throwGeoDiagnostic, type GeoDiagnostic } from './diagnostics.js'
 import {
     compareGpuTileFrontierPathOrder,
@@ -197,36 +198,14 @@ export class VirtualRasterGpuFeedbackRing {
     ): SubmissionBuilder {
 
         this.#assertActive()
-        const access = gpuTileFrontierFeedbackFrameAccess(this.frontier, frame)
+        gpuTileFrontierFeedbackFrameAccess(this.frontier, frame)
         const encodedByFrame = gpuTileFrontierFeedbackEncodingMatches(
             this.frontier,
             builder,
             frame
         )
-        const steps = builder?.steps
-        const uploadIndexes = Array.isArray(steps)
-            ? steps.flatMap((step, index) =>
-                step.kind === 'upload' && step.command === access.viewCommand
-                    ? [ index ]
-                    : []
-            )
-            : []
-        const computeIndexes = Array.isArray(steps)
-            ? steps.flatMap((step, index) =>
-                step.kind === 'compute' &&
-                step.passSpec === access.pass &&
-                step.commands.length === access.commands.length &&
-                step.commands.every((command, index) => command === access.commands[index])
-                    ? [ index ]
-                    : []
-            )
-            : []
-        const uploadIndex = uploadIndexes[0] ?? -1
-        const computeIndex = computeIndexes[0] ?? -1
         if (builder?.runtime !== this.frontier.runtime || builder.isSubmitted ||
             !encodedByFrame ||
-            uploadIndexes.length !== 1 || computeIndexes.length !== 1 ||
-            computeIndex <= uploadIndex ||
             this.#encodedBuilders.has(builder)) {
             return throwGeoDiagnostic({
                 code: 'GEO_GPU_TILE_FEEDBACK_FRAME_INVALID',
@@ -242,10 +221,6 @@ export class VirtualRasterGpuFeedbackRing {
                     runtimeId: builder?.runtime?.id,
                     frontierId: frame?.frontierId,
                     submitted: builder?.isSubmitted,
-                    uploadIndex,
-                    computeIndex,
-                    uploadCount: uploadIndexes.length,
-                    computeCount: computeIndexes.length,
                     encodedByFrame,
                     encoded: builder === undefined
                         ? false
@@ -275,10 +250,12 @@ export class VirtualRasterGpuFeedbackRing {
                 },
             })
         }
+        appendSubmissionBuilderOpaqueSteps(builder, [ {
+            label: 'GPU tile frontier feedback readback',
+            step: { kind: 'readback', command },
+        } ])
         this.#encodedBuilders.add(builder)
-        return builder
-            .readback(command)
-            .consume(this.#authority.stamp())
+        return builder.consume(this.#authority.stamp())
     }
 
     async feedback(

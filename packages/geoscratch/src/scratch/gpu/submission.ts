@@ -344,7 +344,7 @@ type ResolveStep = {
     command: ResolveQuerySetCommand
 }
 
-type SubmissionStep =
+type ExecutableSubmissionStep =
     | RenderStep
     | ComputeStep
     | UploadStep
@@ -353,6 +353,13 @@ type SubmissionStep =
     | ReadbackStep
     | ResolveStep
     | DebugStep
+
+type OpaqueSubmissionStep = Readonly<{
+    kind: 'opaque'
+    label: string
+}>
+
+type SubmissionStep = ExecutableSubmissionStep | OpaqueSubmissionStep
 
 type ResolvedPassDisposition =
     | { disposition: 'execute', triggerCommandId?: never }
@@ -597,6 +604,36 @@ const submissionAuthorityConsumptions = new WeakMap<
     SubmissionAuthorityConsumption[]
 >()
 
+type SubmissionBuilderOpaqueStepRecord = Readonly<{
+    owner: SubmissionBuilder
+    expectedIndex: number
+    executable: ExecutableSubmissionStep
+}>
+
+/** @internal */
+export type SubmissionBuilderOpaqueSequence = Readonly<{
+    kind: 'submission-builder-opaque-sequence'
+    builderId: string
+    firstStepIndex: number
+    stepCount: number
+}>
+
+const submissionBuilderOpaqueStepRecords = new WeakMap<
+    OpaqueSubmissionStep,
+    SubmissionBuilderOpaqueStepRecord
+>()
+const submissionBuilderOpaqueSteps = new WeakMap<
+    SubmissionBuilder,
+    OpaqueSubmissionStep[]
+>()
+const submissionBuilderOpaqueSequenceRecords = new WeakMap<
+    SubmissionBuilderOpaqueSequence,
+    Readonly<{
+        owner: SubmissionBuilder
+        steps: readonly OpaqueSubmissionStep[]
+    }>
+>()
+
 export class SubmissionBuilder {
 
     constructor(runtime: GPURuntime, options: SubmissionBuilderOptions = {}) {
@@ -610,6 +647,7 @@ export class SubmissionBuilder {
         this.isSubmitted = false
         submissionAuthorityRequirements.set(this, [])
         submissionAuthorityConsumptions.set(this, [])
+        submissionBuilderOpaqueSteps.set(this, [])
     }
 
     render(passSpec: RenderPassSpec, commands: RenderCommand[] = []) {
@@ -728,9 +766,11 @@ export class SubmissionBuilder {
             })
         }
 
+        assertSubmissionBuilderOpaqueStepsIntact(this)
         assertSubmissionAuthorityRequirements(this)
 
-        const resolvedPlan = resolveSubmissionBeforeEncoding(this)
+        const recordedSteps = materializeSubmissionBuilderSteps(this)
+        const resolvedPlan = resolveSubmissionBeforeEncoding(this, recordedSteps)
         applySubmissionValidationDisposition(this, resolvedPlan.report)
         assertResolvedSubmissionTemporalDependencies(this, resolvedPlan.steps)
         for (const step of resolvedPlan.steps) {
@@ -1520,6 +1560,200 @@ export class SubmissionBuilder {
     }
 }
 
+/** @internal Package-owned composition point for commands that must remain opaque to consumers. */
+export function appendSubmissionBuilderOpaqueSteps(
+    builder: SubmissionBuilder,
+    entries: readonly Readonly<{
+        label: string
+        step: ExecutableSubmissionStep
+    }>[]
+): SubmissionBuilderOpaqueSequence {
+
+    if (!(builder instanceof SubmissionBuilder) || builder.isSubmitted || entries.length === 0) {
+        throwGPUDiagnostic({
+            code: 'SCRATCH_SUBMISSION_INTERNAL_STEP_INVALID',
+            severity: 'error',
+            phase: 'submission',
+            subject: builder?.subject ?? { kind: 'Submission' },
+            message: 'Opaque submission steps require one or more steps on an open SubmissionBuilder.',
+            expected: { builder: 'open SubmissionBuilder', minimumStepCount: 1 },
+            actual: {
+                builder: builder?.constructor?.name,
+                submitted: builder?.isSubmitted,
+                stepCount: entries.length,
+            },
+        })
+    }
+
+    const firstStepIndex = builder.steps.length
+    const markers = entries.map((entry, offset) => {
+        const marker = Object.freeze({
+            kind: 'opaque' as const,
+            label: entry.label,
+        })
+        submissionBuilderOpaqueStepRecords.set(marker, Object.freeze({
+            owner: builder,
+            expectedIndex: firstStepIndex + offset,
+            executable: snapshotOpaqueExecutableStep(entry.step),
+        }))
+        return marker
+    })
+    submissionBuilderOpaqueSteps.get(builder)!.push(...markers)
+    builder.steps.push(...markers)
+
+    const sequence = Object.freeze({
+        kind: 'submission-builder-opaque-sequence' as const,
+        builderId: builder.id,
+        firstStepIndex,
+        stepCount: markers.length,
+    })
+    submissionBuilderOpaqueSequenceRecords.set(sequence, Object.freeze({
+        owner: builder,
+        steps: Object.freeze([ ...markers ]),
+    }))
+    return sequence
+}
+
+/** @internal Verifies exact package-owned graph provenance without exposing its commands. */
+export function submissionBuilderOpaqueSequenceMatches(
+    builder: SubmissionBuilder,
+    sequence: SubmissionBuilderOpaqueSequence
+): boolean {
+
+    const record = submissionBuilderOpaqueSequenceRecords.get(sequence)
+    if (record?.owner !== builder || sequence.builderId !== builder.id ||
+        sequence.firstStepIndex + sequence.stepCount > builder.steps.length ||
+        record.steps.length !== sequence.stepCount) {
+        return false
+    }
+    return record.steps.every((step, offset) =>
+        builder.steps[sequence.firstStepIndex + offset] === step &&
+        builder.steps.filter(candidate => candidate === step).length === 1 &&
+        !builder.steps.some(candidate =>
+            candidate.kind !== 'opaque' &&
+            executableSubmissionStepsShareCommand(
+                submissionBuilderOpaqueStepRecords.get(step)!.executable,
+                candidate
+            )
+        )
+    )
+}
+
+function snapshotOpaqueExecutableStep(
+    step: ExecutableSubmissionStep
+): ExecutableSubmissionStep {
+
+    if (step.kind === 'render') {
+        return Object.freeze({
+            ...step,
+            commands: Object.freeze([ ...step.commands ]) as unknown as RenderCommand[],
+        })
+    }
+    if (step.kind === 'compute') {
+        return Object.freeze({
+            ...step,
+            commands: Object.freeze([ ...step.commands ]) as unknown as ComputeCommand[],
+        })
+    }
+    return Object.freeze({ ...step })
+}
+
+function assertSubmissionBuilderOpaqueStepsIntact(builder: SubmissionBuilder): void {
+
+    const expected = submissionBuilderOpaqueSteps.get(builder) ?? []
+    const actualIndices = new Map<OpaqueSubmissionStep, number[]>()
+    for (const [ index, step ] of builder.steps.entries()) {
+        if (step.kind !== 'opaque') continue
+        const record = submissionBuilderOpaqueStepRecords.get(step)
+        if (record?.owner !== builder) {
+            return throwSubmissionBuilderOpaqueStepTampered(builder, step.label, undefined, [ index ])
+        }
+        const indices = actualIndices.get(step) ?? []
+        indices.push(index)
+        actualIndices.set(step, indices)
+    }
+    for (const step of expected) {
+        const record = submissionBuilderOpaqueStepRecords.get(step)!
+        const indices = actualIndices.get(step) ?? []
+        if (indices.length !== 1 || indices[0] !== record.expectedIndex) {
+            return throwSubmissionBuilderOpaqueStepTampered(
+                builder,
+                step.label,
+                record.expectedIndex,
+                indices
+            )
+        }
+        const conflictIndices = builder.steps.flatMap((candidate, index) =>
+            candidate.kind !== 'opaque' &&
+            executableSubmissionStepsShareCommand(record.executable, candidate)
+                ? [ index ]
+                : []
+        )
+        if (conflictIndices.length > 0) {
+            return throwSubmissionBuilderOpaqueStepTampered(
+                builder,
+                step.label,
+                record.expectedIndex,
+                [ record.expectedIndex, ...conflictIndices ]
+            )
+        }
+    }
+}
+
+function executableSubmissionStepsShareCommand(
+    left: ExecutableSubmissionStep,
+    right: ExecutableSubmissionStep
+): boolean {
+
+    const leftCommands = executableSubmissionStepCommands(left)
+    const rightCommands = executableSubmissionStepCommands(right)
+    return leftCommands.some(command => rightCommands.includes(command))
+}
+
+function executableSubmissionStepCommands(
+    step: ExecutableSubmissionStep
+): readonly object[] {
+
+    if (step.kind === 'render' || step.kind === 'compute') return step.commands
+    return [ step.command ]
+}
+
+function throwSubmissionBuilderOpaqueStepTampered(
+    builder: SubmissionBuilder,
+    label: string,
+    expectedIndex: number | undefined,
+    actualIndices: readonly number[]
+): never {
+
+    return throwGPUDiagnostic({
+        code: 'SCRATCH_SUBMISSION_INTERNAL_STEP_TAMPERED',
+        severity: 'error',
+        phase: 'submission',
+        subject: builder.subject,
+        message: 'A package-owned opaque submission step was removed, duplicated, replaced, or reordered.',
+        expected: {
+            label,
+            ...(expectedIndex === undefined ? {} : { index: expectedIndex }),
+            occurrences: 1,
+        },
+        actual: { indices: actualIndices, occurrences: actualIndices.length },
+    })
+}
+
+function materializeSubmissionBuilderSteps(
+    builder: SubmissionBuilder
+): readonly ExecutableSubmissionStep[] {
+
+    return builder.steps.map(step => {
+        if (step.kind !== 'opaque') return step
+        const record = submissionBuilderOpaqueStepRecords.get(step)
+        if (record?.owner !== builder) {
+            return throwSubmissionBuilderOpaqueStepTampered(builder, step.label, undefined, [])
+        }
+        return record.executable
+    })
+}
+
 function assertResolvedSubmissionTemporalDependencies(
     builder: SubmissionBuilder,
     steps: readonly ResolvedSubmissionStep[]
@@ -2111,9 +2345,12 @@ function submissionDebugLabel(
     return `${prefix.slice(0, maximumPrefixLength)}${suffix}`
 }
 
-function resolveSubmissionBeforeEncoding(builder: SubmissionBuilder): ResolvedSubmissionPlan {
+function resolveSubmissionBeforeEncoding(
+    builder: SubmissionBuilder,
+    recordedSteps: readonly ExecutableSubmissionStep[]
+): ResolvedSubmissionPlan {
 
-    validateSubmissionDebugGroups(builder)
+    validateSubmissionDebugGroups(builder, recordedSteps)
     const diagnostics: ScratchDiagnostic[] = []
     const steps: ResolvedSubmissionStep[] = []
     const executionOutcomes: SubmissionExecutionOutcome[] = []
@@ -2121,7 +2358,7 @@ function resolveSubmissionBeforeEncoding(builder: SubmissionBuilder): ResolvedSu
     let querySlots: QuerySlotSimulation = new Map()
     const readbackSteps = new Map<ReadbackCommand, number>()
 
-    for (const [stepIndex, step] of builder.steps.entries()) {
+    for (const [stepIndex, step] of recordedSteps.entries()) {
         if (step.kind === 'debug') {
             validateDebugStep(builder, step)
             steps.push(step)
@@ -2340,7 +2577,10 @@ function applySubmissionValidationDisposition(builder: SubmissionBuilder, report
     if (diagnostic !== undefined) throw new ScratchDiagnosticError(diagnostic, report)
 }
 
-function validateSubmissionDebugGroups(builder: SubmissionBuilder): void {
+function validateSubmissionDebugGroups(
+    builder: SubmissionBuilder,
+    recordedSteps: readonly ExecutableSubmissionStep[]
+): void {
 
     let encoderSegmentCommands: DebugCommand[] = []
     const validateSegment = () => {
@@ -2352,7 +2592,7 @@ function validateSubmissionDebugGroups(builder: SubmissionBuilder): void {
         encoderSegmentCommands = []
     }
 
-    for (const step of builder.steps) {
+    for (const step of recordedSteps) {
         if (step.kind === 'upload') {
             validateSegment()
             continue

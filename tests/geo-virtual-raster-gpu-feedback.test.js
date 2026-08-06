@@ -380,6 +380,71 @@ describe('Geo Virtual Raster GPU feedback ring', () => {
         fixture.runtime.dispose()
     })
 
+    it('does not expose frontier or readback commands through public submission steps', async() => {
+
+        const fixture = await createFeedbackFixture()
+        const ring = await VirtualRasterGpuFeedbackRing.create(fixture.frontier)
+        const token = fixture.frontier.writeView(fixture.view(0))
+        const frame = fixture.frontier.frame(token)
+        const builder = fixture.frontier.encode(
+            fixture.runtime.createSubmission({ validation: 'throw' }),
+            frame
+        )
+        ring.encode(builder, frame)
+
+        const privateAccess = gpuTileFrontierTestFrameAccess(fixture.frontier, frame)
+        const privateCommandIds = new Set([
+            privateAccess.viewCommand.id,
+            ...privateAccess.commands.map(command => command.id),
+            ...ring.facts().slots.map(slot => slot.commandId),
+        ])
+        const exposedCommands = builder.steps.flatMap(step => [
+            ...('command' in step ? [ step.command ] : []),
+            ...('commands' in step ? step.commands : []),
+        ])
+        expect(exposedCommands.some(command => privateCommandIds.has(command.id)))
+            .to.equal(false)
+
+        token.dispose()
+        fixture.frontier.dispose()
+        fixture.gpuState.dispose()
+        fixture.residency.dispose()
+        fixture.runtime.dispose()
+    })
+
+    it('rejects mutation that replays a leaked frontier graph before native issue', async() => {
+
+        const fixture = await createFeedbackFixture()
+        const ring = await VirtualRasterGpuFeedbackRing.create(fixture.frontier)
+        const token = fixture.frontier.writeView(fixture.view(0))
+        const frame = fixture.frontier.frame(token)
+        const builder = fixture.frontier.encode(
+            fixture.runtime.createSubmission({ validation: 'throw' }),
+            frame
+        )
+        const replayStep = builder.steps.at(-1)
+        expect(replayStep).not.to.equal(undefined)
+        ring.encode(builder, frame)
+        builder.steps.push(replayStep)
+        const queueSubmissionsBefore = fixture.calls.queueSubmissions.length
+
+        let failure
+        try {
+            builder.submit()
+        } catch (error) {
+            failure = error
+        }
+        expect(failure).to.be.instanceOf(ScratchDiagnosticError)
+        expect(failure.diagnostic.code).to.equal('SCRATCH_SUBMISSION_INTERNAL_STEP_TAMPERED')
+        expect(fixture.calls.queueSubmissions).to.have.length(queueSubmissionsBefore)
+
+        token.dispose()
+        fixture.frontier.dispose()
+        fixture.gpuState.dispose()
+        fixture.residency.dispose()
+        fixture.runtime.dispose()
+    })
+
     it('applies three-slot backpressure without blocking frontier submission', async() => {
 
         const fixture = await createFeedbackFixture()

@@ -545,6 +545,8 @@ type SubmissionDiagnosticCode =
     | 'SCRATCH_SUBMISSION_PASS_COMMAND_INCOMPATIBLE'
     | 'SCRATCH_SUBMISSION_SURFACE_VIEW_OUT_OF_SCOPE'
     | 'SCRATCH_SUBMISSION_WORK_ALREADY_SUBMITTED'
+    | 'SCRATCH_SUBMISSION_INTERNAL_STEP_INVALID'
+    | 'SCRATCH_SUBMISSION_INTERNAL_STEP_TAMPERED'
     | 'SCRATCH_SUBMISSION_NATIVE_POLICY_INVALID'
     | 'SCRATCH_SUBMISSION_NATIVE_OBSERVATION_BUDGET_EXCEEDED'
     | 'SCRATCH_SUBMISSION_NATIVE_VALIDATION_FAILED'
@@ -555,6 +557,8 @@ type SubmissionDiagnosticCode =
     | 'SCRATCH_SUBMISSION_NATIVE_OBSERVATION_FAILED'
     | 'SCRATCH_SUBMISSION_QUEUE_COMPLETION_FAILED'
 ```
+
+`SCRATCH_SUBMISSION_INTERNAL_STEP_INVALID` 拒绝空的或不属于 open builder 的包内 opaque-step 组合请求。`SCRATCH_SUBMISSION_INTERNAL_STEP_TAMPERED` 拒绝 branded opaque step 被删除、复制、替换、重排，或其中 private command 又被 public step 使用。两者都是 native observation、encoder creation、readback claim 与 queue effect 之前的同步 preflight failure；diagnostic 只暴露有界 marker label 与 index，绝不暴露隐藏 command 或 pass descriptor。
 
 `skipped-empty` 是 execution outcome，不是 diagnostic code。Validation mode 只控制 optional dependency findings; 它不会关闭 readiness resolution，也不会删除 execution-outcome facts。
 

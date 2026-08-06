@@ -418,6 +418,8 @@ Submission 完成后，`SubmittedWork.resourceAccesses` 与 `producerEpochs` 保
 
 `SubmissionBuilder.steps` 在 encoder-backed work 与 queue-side upload 之间定义一个全序。把 command 记录进 encoder 不等于把它送入 queue: `GPUQueue.writeBuffer(...)` 和 `GPUQueue.writeTexture(...)` 在调用时进入 queue，而 clear、copy、readback staging、resolve、compute 与 render work 只有在 finished command buffer 被 submit 时才进入 queue。
 
+包内上层组合可以在同一全序中，用 frozen `{ kind: 'opaque', label }` marker 承载一个 executable step。真实 step 只存在于 Scratch module-private state 中，绝不会经 `SubmissionBuilder.steps` 返回；包内调用者只能持有 privately branded sequence witness。若 marker 被删除、复制、替换或重排，或其中任一 private command 又出现在 public step 中，`submit()` 会在 native observation 前失败。这不是 public hidden-command factory，也不会改变调用方自行加入的普通 Scratch step；这些普通 command 仍然可以直接观察。
+
 因此 submission lowering 分三阶段:
 
 1. 在创建 encoder 或接触 `GPUQueue` 前，完成 readiness、fallback、dependency validation、ownership、lifecycle 与 pass compatibility 解析。

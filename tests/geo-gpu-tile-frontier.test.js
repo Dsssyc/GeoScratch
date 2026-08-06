@@ -434,9 +434,17 @@ describe('Geo GPU tile frontier contracts and reference oracle', () => {
         const firstEncodedStep = builder.steps.length
         expect(frontier.encode(builder, frame)).to.equal(builder)
         expect(builder.steps.slice(firstEncodedStep).map(step => step.kind))
-            .to.deep.equal([ 'upload', 'compute' ])
-        expect(builder.steps.at(-1).commands.map(command => command.label))
-            .to.deep.equal(FRONTIER_COMMAND_LABELS)
+            .to.deep.equal([ 'opaque', 'opaque' ])
+        expect(builder.steps.slice(firstEncodedStep).map(step => step.label))
+            .to.deep.equal([
+                'GPU tile frontier view upload',
+                'GPU tile frontier compute',
+            ])
+        for (const step of builder.steps.slice(firstEncodedStep)) {
+            expect(step).not.to.have.property('command')
+            expect(step).not.to.have.property('commands')
+            expect(step).not.to.have.property('passSpec')
+        }
         const submitted = builder.submit()
         expect(await submitted.nativeOutcome).to.deep.include({ status: 'observed-succeeded' })
 

@@ -546,6 +546,8 @@ type SubmissionDiagnosticCode =
     | 'SCRATCH_SUBMISSION_PASS_COMMAND_INCOMPATIBLE'
     | 'SCRATCH_SUBMISSION_SURFACE_VIEW_OUT_OF_SCOPE'
     | 'SCRATCH_SUBMISSION_WORK_ALREADY_SUBMITTED'
+    | 'SCRATCH_SUBMISSION_INTERNAL_STEP_INVALID'
+    | 'SCRATCH_SUBMISSION_INTERNAL_STEP_TAMPERED'
     | 'SCRATCH_SUBMISSION_NATIVE_POLICY_INVALID'
     | 'SCRATCH_SUBMISSION_NATIVE_OBSERVATION_BUDGET_EXCEEDED'
     | 'SCRATCH_SUBMISSION_NATIVE_VALIDATION_FAILED'
@@ -556,6 +558,8 @@ type SubmissionDiagnosticCode =
     | 'SCRATCH_SUBMISSION_NATIVE_OBSERVATION_FAILED'
     | 'SCRATCH_SUBMISSION_QUEUE_COMPLETION_FAILED'
 ```
+
+`SCRATCH_SUBMISSION_INTERNAL_STEP_INVALID` rejects an empty or non-open package-owned opaque-step composition request. `SCRATCH_SUBMISSION_INTERNAL_STEP_TAMPERED` rejects removal, duplication, replacement, reordering, or public command reuse involving a branded opaque step. Both are synchronous preflight failures before native observation, encoder creation, readback claim, or queue effect; diagnostics expose only bounded marker labels and indices, never the hidden command or pass descriptor.
 
 `skipped-empty` is an execution outcome rather than a diagnostic code. Validation mode controls optional dependency findings; it never disables readiness resolution or removes execution-outcome facts.
 

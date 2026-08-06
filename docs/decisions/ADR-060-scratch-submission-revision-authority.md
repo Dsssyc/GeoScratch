@@ -58,6 +58,12 @@ disposed state.
   boundary.
 - Invalid, duplicate-consume, wrong-Runtime, stale, and disposed requirements produce structured
   `SCRATCH_SUBMISSION_AUTHORITY_*` diagnostics.
+- Package-owned higher-level graph composition may append executable work through a
+  non-entrypoint opaque-step helper. Public `SubmissionBuilder.steps` retains a frozen
+  labeled marker at the exact ordered position, while the actual command/pass descriptor
+  and a branded sequence witness remain module-private. Submission rejects marker
+  removal, duplication, replacement, reordering, and public reuse of any command hidden
+  by the marker before native issue.
 
 Consumption records that the queue-action prefix before its ordered boundary was
 synchronously issued. It does not claim that later queue actions completed, that a
@@ -78,8 +84,9 @@ boundary. Scratch intentionally keeps direct resource, region, command, bind-set
 declared-access descriptors inspectable. An expert may recover resources from those
 descriptors and construct another explicit Scratch command or readback. Such use is an
 intentional escape hatch and assumes responsibility for its own temporal authority.
-Higher-level APIs may narrow their own public capabilities without making Scratch's
-primitive graph secret.
+Higher-level APIs may narrow their own public capabilities. Their package-owned opaque
+steps prevent those private commands from leaking through a composed builder, without
+making ordinary Scratch-authored primitive graphs secret.
 
 ## Rejected Alternatives
 
