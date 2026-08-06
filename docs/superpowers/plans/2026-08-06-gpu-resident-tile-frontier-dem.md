@@ -45,7 +45,7 @@
 - `tests/browser/geo-gpu-tile-frontier.mjs`: CPU oracle 与真实 GPU 输出的一对一 proof harness。
 - `tests/browser/scratch-dem-layer.mjs`: DEM 高俯仰、bearing、teleport、tight budget、failure、resize 和 cleanup proof。
 - `tests/browser/geo-virtual-raster-dem.mjs`: DEM demand/residency/cache/churn 的 GPU-frontier 版本 proof。
-- `docs/decisions/ADR-060-gpu-resident-tile-frontier-dem.md`: 接受最终所有权与 clean-cut 决策。
+- `docs/decisions/ADR-061-gpu-resident-tile-frontier-dem.md`: 接受最终所有权与 clean-cut 决策。
 - `docs/vision/geo-api/geoscratch-geo-api-vision-docs/05-tiles-lod-streaming-residency/README_zh.md`: 固化 GPU frontier 与现有 demand/residency 的所有权衔接。
 - `docs/review/gpu-resident-tile-frontier-dem-final-audit.md`: 保存最终事实、命令、截图路径、提交与残余问题。
 
@@ -727,7 +727,7 @@ git commit -m "Verify GPU-driven DEM frontier"
 - Modify: `tests/geo-virtual-raster-dem.test.js`
 - Modify: `tests/dem-flow-cleanup.test.js`
 - Modify: `tests/examples-structure.test.js`
-- Create: `docs/decisions/ADR-060-gpu-resident-tile-frontier-dem.md`
+- Create: `docs/decisions/ADR-061-gpu-resident-tile-frontier-dem.md`
 - Modify: `docs/vision/scratch-graphics-kernel.md`
 - Modify: `docs/vision/geo-api/geoscratch-geo-api-vision-docs/05-tiles-lod-streaming-residency/README_zh.md`
 
@@ -748,7 +748,7 @@ Run the focused cleanup tests and confirm RED while the file still exists.
 
 Delete `terrain-selection.ts`; remove imports and tests that preserve old camera-neighborhood counts, CPU node arrays, legacy `slice(0, maxNodes)` behavior or selection-shaped Virtual Raster plans. Keep only a test-only CPU oracle for the new frontier semantics in `gpu-tile-frontier-reference.ts`.
 
-- [ ] **Step 3: Write ADR-060**
+- [ ] **Step 3: Write ADR-061**
 
 ADR must state:
 
@@ -772,7 +772,7 @@ rg -n "selectTerrainNodes|nodeLevels|nodeBoxes|canonicalNodes|uploaded-indirect-
 npm --workspace geoscratch run build
 npx mocha tests/scratch-dem-layer-clean-cut.test.js tests/geo-virtual-raster-dem.test.js tests/dem-flow-cleanup.test.js tests/examples-structure.test.js
 git diff --check
-git add -A examples/demLayer/terrain-selection.ts tests/scratch-dem-layer-clean-cut.test.js tests/geo-virtual-raster-dem.test.js tests/dem-flow-cleanup.test.js tests/examples-structure.test.js docs/decisions/ADR-060-gpu-resident-tile-frontier-dem.md docs/vision/scratch-graphics-kernel.md docs/vision/geo-api/geoscratch-geo-api-vision-docs/05-tiles-lod-streaming-residency/README_zh.md
+git add -A examples/demLayer/terrain-selection.ts tests/scratch-dem-layer-clean-cut.test.js tests/geo-virtual-raster-dem.test.js tests/dem-flow-cleanup.test.js tests/examples-structure.test.js docs/decisions/ADR-061-gpu-resident-tile-frontier-dem.md docs/vision/scratch-graphics-kernel.md docs/vision/geo-api/geoscratch-geo-api-vision-docs/05-tiles-lod-streaming-residency/README_zh.md
 git commit -m "Remove legacy DEM tile selection"
 ```
 
