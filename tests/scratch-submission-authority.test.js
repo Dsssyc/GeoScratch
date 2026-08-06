@@ -160,6 +160,43 @@ describe('Scratch SubmissionAuthority', () => {
         runtime.dispose()
     })
 
+    it('splits encoder-backed work at an ordered consumption boundary', async() => {
+
+        const fake = createFakeGpu()
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
+        const authority = runtime.createSubmissionAuthority({ label: 'encoder boundary' })
+        const leadingBuffer = await runtime.createBuffer({ size: 4, usage: 0x08 })
+        const trailingBuffer = await runtime.createBuffer({ size: 4, usage: 0x08 })
+        const leading = runtime.createClearBufferCommand({ target: leadingBuffer.region() })
+        const trailing = runtime.createClearBufferCommand({ target: trailingBuffer.region() })
+
+        const submitted = runtime.createSubmission({ validation: 'throw' })
+            .clear(leading)
+            .consume(authority.stamp())
+            .clear(trailing)
+            .submit()
+
+        expect(authority.revision).to.equal(1)
+        expect(fake.calls.commandEncoders).to.have.length(2)
+        expect(fake.calls.queueSubmissions).to.have.length(2)
+        expect(fake.calls.queueSubmissions.map(commandBuffers => commandBuffers.length))
+            .to.deep.equal([ 1, 1 ])
+        expect(submitted.commandBuffers).to.have.length(2)
+        expect(submitted.commandBuffers.map(commandBuffer =>
+            commandBuffer.commands.map(command => command.buffer)))
+            .to.deep.equal([
+                [ leadingBuffer.gpuBuffer ],
+                [ trailingBuffer.gpuBuffer ],
+            ])
+
+        trailing.dispose()
+        leading.dispose()
+        trailingBuffer.dispose()
+        leadingBuffer.dispose()
+        authority.dispose()
+        runtime.dispose()
+    })
+
     it('does not consume a stamp when synchronous queue replay fails', async() => {
 
         const fake = createFakeGpu()
