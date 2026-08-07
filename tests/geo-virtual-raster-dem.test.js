@@ -19,9 +19,56 @@ import {
     resolveDemStitchedGrid,
 } from '../examples/demLayer/dem-virtual-raster.ts'
 import { DemPhaseBudget } from '../examples/demLayer/dem-phase-budget.ts'
+import { readDemCachePolicy } from '../examples/demLayer/dem-cache-policy.ts'
 import { demWebMercatorManifest as manifest } from './fixtures/dem-webmercator-manifest.js'
 
 describe('DEM WebMercator virtual raster', () => {
+
+    it('keeps DEM disk caching explicit and application configurable', () => {
+
+        expect(readDemCachePolicy(new URLSearchParams())).to.deep.equal({ mode: 'none' })
+        expect(readDemCachePolicy(new URLSearchParams('cache=persistent'))).to.deep.equal({
+            mode: 'persistent',
+            namespace: 'geoscratch-dem-webmercator-raw-v2',
+            maxPayloadBytes: 128 * 1024 * 1024,
+            maxEntries: 2048,
+            requestPersistence: false,
+            lifecycle: { kind: 'session' },
+        })
+        expect(readDemCachePolicy(new URLSearchParams([
+            [ 'cache', 'persistent' ],
+            [ 'cacheNamespace', 'editable-dem' ],
+            [ 'cacheLifecycle', 'durable-reuse' ],
+            [ 'cacheMaxMiB', '512' ],
+            [ 'cacheMaxEntries', '8192' ],
+            [ 'cachePersistence', 'request' ],
+        ]))).to.deep.equal({
+            mode: 'persistent',
+            namespace: 'editable-dem',
+            maxPayloadBytes: 512 * 1024 * 1024,
+            maxEntries: 8192,
+            requestPersistence: true,
+            lifecycle: { kind: 'durable', open: 'reuse' },
+        })
+        expect(readDemCachePolicy(new URLSearchParams(
+            'cache=persistent&cacheLifecycle=durable-clear-before-open'
+        )).lifecycle).to.deep.equal({ kind: 'durable', open: 'clear-before-open' })
+    })
+
+    it('rejects ignored or unbounded DEM cache configuration', () => {
+
+        for (const query of [
+            'cache=none&cacheNamespace=ignored',
+            'cache=persistent&cacheLifecycle=unknown',
+            'cache=persistent&cacheMaxMiB=0',
+            'cache=persistent&cacheMaxEntries=65537',
+            'cache=persistent&cachePersistence=forever',
+            'cache=persistent&cacheUnknown=1',
+            'cache=persistent&cacheLifecycle=session&cacheLifecycle=session',
+        ]) {
+            expect(() => readDemCachePolicy(new URLSearchParams(query))).to.throw()
+        }
+    })
 
     it('configures and enforces independent network and decode concurrency budgets', async() => {
 

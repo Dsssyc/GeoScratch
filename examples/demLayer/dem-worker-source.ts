@@ -18,6 +18,7 @@ import type {
     WorkerTaskHandle,
     WorkerTaskPriority,
     WorkerTaskState,
+    PersistentCacheLifecycle,
 } from 'geoscratch/scratch'
 import type {
     DemTileCandidateDescriptor,
@@ -51,7 +52,6 @@ export type DemWorkerTileSourceDescriptor = Readonly<{
     sampleType: 'uint8'
     cacheSchemaVersion: number
     cachePolicy: DemCachePolicy
-    requestPersistence?: boolean
     workerCount?: number
     maxNetworkRequests?: number
     maxDecodeTasks?: number
@@ -66,6 +66,10 @@ export type DemWorkerRequestExecutorFacts = Readonly<{
     workers: readonly DemTileWorkerFacts[]
     cache: Readonly<{
         mode: DemCachePolicy['mode']
+        lifecycle?: PersistentCacheLifecycle
+        requestPersistence: boolean
+        maxPayloadBytes: number
+        maxEntries: number
         entryCount: number
         payloadBytes: number
         hitCount: number
@@ -150,8 +154,7 @@ export async function createDemWorkerRequestExecutor(
                     cache: shardCacheConfiguration(
                         descriptor.cachePolicy,
                         index,
-                        workerCount,
-                        descriptor.requestPersistence ?? false
+                        workerCount
                     ),
                 },
             }))
@@ -164,7 +167,7 @@ export async function createDemWorkerRequestExecutor(
     let requestSequence = 0
     let disposed = false
     let disposePromise: Promise<void> | undefined
-    let workerFacts = contexts.map(() => emptyWorkerFacts(descriptor.cachePolicy.mode))
+    let workerFacts = contexts.map(() => emptyWorkerFacts(descriptor.cachePolicy))
 
     const source: DemWorkerRequestExecutor = Object.freeze({
         request(demand) {
@@ -244,7 +247,7 @@ export async function createDemWorkerRequestExecutor(
             system.inspect(),
             group.inspect(),
             workerFacts,
-            descriptor.cachePolicy.mode,
+            descriptor.cachePolicy,
             phaseBudget.inspect()
         )
     }
@@ -463,7 +466,7 @@ function aggregateFacts(
     system: WorkerSystemFacts,
     group: WorkerGroupFacts,
     workers: readonly DemTileWorkerFacts[],
-    mode: DemCachePolicy['mode'],
+    policy: DemCachePolicy,
     phaseBudget: DemPhaseBudgetFacts
 ): DemWorkerRequestExecutorFacts {
 
@@ -477,7 +480,17 @@ function aggregateFacts(
         group,
         workers: Object.freeze([ ...workers ]),
         cache: Object.freeze({
-            mode,
+            mode: policy.mode,
+            ...(policy.mode === 'none' ? {
+                requestPersistence: false,
+                maxPayloadBytes: 0,
+                maxEntries: 0,
+            } : {
+                lifecycle: policy.lifecycle,
+                requestPersistence: policy.requestPersistence,
+                maxPayloadBytes: policy.maxPayloadBytes,
+                maxEntries: policy.maxEntries,
+            }),
             entryCount: sumCache(facts => facts.entryCount),
             payloadBytes: sumCache(facts => facts.payloadBytes),
             hitCount: sumCache(facts => facts.hitCount),
@@ -500,8 +513,7 @@ function aggregateFacts(
 function shardCacheConfiguration(
     policy: DemCachePolicy,
     shard: number,
-    count: number,
-    requestPersistence: boolean
+    count: number
 ): DemTileWorkerInit['cache'] {
 
     if (policy.mode === 'none') return Object.freeze({ mode: 'none' })
@@ -512,7 +524,8 @@ function shardCacheConfiguration(
             maxPayloadBytes: dividedBudget(policy.maxPayloadBytes, count),
             maxEntries: dividedBudget(policy.maxEntries, count),
             maxHistory: 64,
-            requestPersistence: requestPersistence && shard === 0,
+            requestPersistence: policy.requestPersistence && shard === 0,
+            lifecycle: policy.lifecycle,
         }),
     })
 }
@@ -538,12 +551,12 @@ function defaultWorkerCount(): number {
     return Math.max(1, Math.min(4, hardware - 1))
 }
 
-function emptyWorkerFacts(mode: DemCachePolicy['mode']): DemTileWorkerFacts {
+function emptyWorkerFacts(policy: DemCachePolicy): DemTileWorkerFacts {
 
     return Object.freeze({
-        cache: mode === 'none'
+        cache: policy.mode === 'none'
             ? emptyDisabledCacheFacts()
-            : emptyPersistentCacheFacts(),
+            : emptyPersistentCacheFacts(policy),
         pendingCandidateCount: 0,
         networkRequestCount: 0,
         decodedPageCount: 0,
@@ -581,13 +594,16 @@ function emptyDisabledCacheFacts(): Extract<DemTileCacheFacts, { mode: 'none' }>
     })
 }
 
-function emptyPersistentCacheFacts(): Extract<DemTileCacheFacts, { mode: 'persistent' }> {
+function emptyPersistentCacheFacts(
+    policy: Extract<DemCachePolicy, { mode: 'persistent' }>
+): Extract<DemTileCacheFacts, { mode: 'persistent' }> {
 
     return Object.freeze({
         mode: 'persistent',
         namespace: 'pending',
         observationScope: 'instance',
         state: 'active',
+        lifecycle: policy.lifecycle,
         maxPayloadBytes: 0,
         maxEntries: 0,
         maxHistory: 0,
@@ -605,7 +621,7 @@ function emptyPersistentCacheFacts(): Extract<DemTileCacheFacts, { mode: 'persis
         garbageCollectionCount: 0,
         cleanupFailureCount: 0,
         quotaFailureCount: 0,
-        persistenceRequested: false,
+        persistenceRequested: policy.requestPersistence,
         history: Object.freeze([]),
     })
 }

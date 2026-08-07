@@ -117,7 +117,6 @@ export type DemVirtualRasterRuntimeOptions = Readonly<{
     manifest: DemVirtualRasterManifest
     tileServerUrl: string
     cachePolicy: DemCachePolicy
-    requestPersistence?: boolean
     workerCount?: number
     maxNetworkRequests?: number
     maxDecodeTasks?: number
@@ -572,7 +571,6 @@ export async function createDemVirtualRasterRuntime({
     manifest,
     tileServerUrl,
     cachePolicy,
-    requestPersistence = false,
     workerCount,
     maxNetworkRequests,
     maxDecodeTasks,
@@ -604,7 +602,6 @@ export async function createDemVirtualRasterRuntime({
             sampleType: manifest.source.sampleType,
             cacheSchemaVersion: DEM_CACHE_SCHEMA_VERSION,
             cachePolicy,
-            requestPersistence,
             ...(workerCount === undefined ? {} : { workerCount }),
             ...(maxNetworkRequests === undefined ? {} : { maxNetworkRequests }),
             ...(maxDecodeTasks === undefined ? {} : { maxDecodeTasks }),
@@ -747,6 +744,7 @@ export async function createDemVirtualRasterRuntime({
             tileOrientation: model.manifest.pixelOrientation.tile,
             sourceOrientation: model.manifest.pixelOrientation.source,
             cachePolicy: cachePolicy.mode,
+            cacheConfiguration: cachePolicy,
             demandStopped,
             stopped,
             residency: residency.inspect(),

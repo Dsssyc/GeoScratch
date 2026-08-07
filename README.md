@@ -79,7 +79,7 @@ shares no mutable state or lifecycle authority with `GPURuntime` and has no Geo,
 tile, DEM, or GPU dependency.
 
 The DEM Layer is the executable reference path: terrain demand resolves standard
-WebMercatorQuad tiles in Workers, persists decode-ready raw height pages through
+WebMercatorQuad tiles in Workers, can persist decode-ready raw height pages through
 Scratch Cache, transfers pages into a finite atlas, and samples them logically in
 the vertex shader with cross-page filtering and parent fallback. The source PNG is
 only an offline COG build input; the browser has no full-image or legacy-tile
@@ -98,6 +98,7 @@ const cache = await PersistentCache.open({
     namespace: 'my-dataset-v1',
     maxPayloadBytes: 128 * 1024 * 1024,
     maxEntries: 2048,
+    lifecycle: { kind: 'durable', open: 'reuse' },
 })
 const key = persistentCacheKey({ id: 'tiles/10/843/418', revision: 'source-v3' })
 await cache.put(key, {
@@ -114,6 +115,10 @@ API; applications own those policies and conversions. Omitting cache constructio
 the explicit no-cache mode. Storage commits and garbage collection remain safe across
 contexts; synchronous `inspect()` reports bounded `observationScope: 'instance'`
 facts instead of claiming a globally synchronized diagnostic snapshot.
+Lifecycle is explicit: durable caches either reuse or clear before open, while a
+session cache resets before open and cleans on awaited disposal. Session storage is
+still disk-backed; omit cache construction when a visualization should not write
+IndexedDB or OPFS.
 
 ## Scratch Async Resource Allocation
 

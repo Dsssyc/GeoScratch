@@ -12,10 +12,20 @@ export type PersistentCacheKey = Readonly<{
 
 export type PersistentCacheState = 'active' | 'disposing' | 'disposed'
 
+export type PersistentCacheLifecycle =
+    | Readonly<{
+        kind: 'durable'
+        open: 'reuse' | 'clear-before-open'
+    }>
+    | Readonly<{
+        kind: 'session'
+    }>
+
 export type PersistentCacheDescriptor = Readonly<{
     namespace: string
     maxPayloadBytes: number
     maxEntries: number
+    lifecycle: PersistentCacheLifecycle
     maxHistory?: number
     requestPersistence?: boolean
 }>
@@ -113,6 +123,7 @@ export type PersistentCacheFacts = Readonly<{
     namespace: string
     observationScope: 'instance'
     state: PersistentCacheState
+    lifecycle: PersistentCacheLifecycle
     maxPayloadBytes: number
     maxEntries: number
     maxHistory: number

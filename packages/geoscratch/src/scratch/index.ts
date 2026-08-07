@@ -47,6 +47,7 @@ export type {
     PersistentCacheFacts,
     PersistentCacheKey,
     PersistentCacheKeyDescriptor,
+    PersistentCacheLifecycle,
     PersistentCacheState,
 } from './cache/index.js'
 export { plane, sphere } from './geometry/index.js'

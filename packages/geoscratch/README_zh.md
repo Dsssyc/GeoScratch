@@ -72,6 +72,7 @@ const cache = await PersistentCache.open({
     namespace: 'my-dataset-v1',
     maxPayloadBytes: 128 * 1024 * 1024,
     maxEntries: 2048,
+    lifecycle: { kind: 'durable', open: 'reuse' },
 })
 const key = persistentCacheKey({ id: 'object/42', revision: 'v1' })
 await cache.put(key, { metadata: { format: 'raw' }, payload: bytes.buffer })
@@ -84,6 +85,9 @@ payload。hit 返回 caller-owned buffer。Cache 不依赖 Worker、GPU 或 Geo�
 memory tier，也不提供 Buffer/Texture 转换 API。跨 context 的 commit 与 garbage
 collection 保持存储一致性，而同步 `inspect()` 明确只返回有界的
 `observationScope: 'instance'` 事实。
+生命周期必须显式声明：durable cache 可选择复用或在 open 前清空；session cache
+会在 open 前重置，并在显式等待的 dispose 中清理。session 仍然写入磁盘；如果应用
+不应写 IndexedDB/OPFS，就应直接不创建 cache。
 
 ## Scratch 异步资源分配
 

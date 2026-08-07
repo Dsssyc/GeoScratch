@@ -7,6 +7,7 @@ import type {
 import type {
     PersistentCacheDescriptor,
     PersistentCacheFacts,
+    PersistentCacheLifecycle,
 } from 'geoscratch/scratch'
 
 export type DemCachePolicy =
@@ -16,6 +17,8 @@ export type DemCachePolicy =
         namespace: string
         maxPayloadBytes: number
         maxEntries: number
+        requestPersistence: boolean
+        lifecycle: PersistentCacheLifecycle
     }>
 
 export type DemTileCacheConfiguration =

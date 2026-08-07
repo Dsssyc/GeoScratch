@@ -50,6 +50,7 @@ describe('Scratch persistent cache contract', () => {
                 namespace: 'node-unavailable',
                 maxPayloadBytes: 1024,
                 maxEntries: 4,
+                lifecycle: { kind: 'durable', open: 'reuse' },
             })
         } catch (error) {
             failure = error
@@ -73,6 +74,35 @@ describe('Scratch persistent cache contract', () => {
                     namespace,
                     maxPayloadBytes: 1024,
                     maxEntries: 4,
+                    lifecycle: { kind: 'durable', open: 'reuse' },
+                })
+            } catch (error) {
+                failure = error
+            }
+
+            expect(isScratchDiagnosticError(failure)).to.equal(true)
+            expect(failure.diagnostic).to.deep.include({
+                domain: 'cache',
+                code: 'CACHE_DESCRIPTOR_INVALID',
+                phase: 'cache-open',
+            })
+        }
+    })
+
+    it('requires an explicit bounded cache lifecycle policy', async() => {
+
+        for (const lifecycle of [
+            undefined,
+            { kind: 'durable', open: 'later' },
+            { kind: 'session', open: 'reuse' },
+        ]) {
+            let failure
+            try {
+                await PersistentCache.open({
+                    namespace: 'invalid-lifecycle',
+                    maxPayloadBytes: 1024,
+                    maxEntries: 4,
+                    ...(lifecycle === undefined ? {} : { lifecycle }),
                 })
             } catch (error) {
                 failure = error

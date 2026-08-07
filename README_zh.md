@@ -76,7 +76,7 @@ cancellation、stale-result rejection、stateful context、Transferable 所有�
 tile、DEM 或 GPU。
 
 DEM Layer 是这条路径的可执行参考：terrain demand 在 Worker 中获取和解码标准
-WebMercatorQuad tile，通过 Scratch Cache 持久化可直接使用的 raw height page，将
+WebMercatorQuad tile，可通过 Scratch Cache 持久化可直接使用的 raw height page，将
 page 转移到有限 atlas，并在 vertex shader 中进行跨页逻辑过滤和 parent fallback。
 源 PNG 只用于离线构建 COG；浏览器没有完整图片或旧瓦片路径回退。
 
@@ -93,6 +93,7 @@ const cache = await PersistentCache.open({
     namespace: 'my-dataset-v1',
     maxPayloadBytes: 128 * 1024 * 1024,
     maxEntries: 2048,
+    lifecycle: { kind: 'durable', open: 'reuse' },
 })
 const key = persistentCacheKey({ id: 'tiles/10/843/418', revision: 'source-v3' })
 await cache.put(key, {
@@ -108,6 +109,9 @@ transfer。它没有隐藏 memory tier，也不提供 Buffer/Texture 转换 API�
 转换由 application 持有。不创建 cache 就是显式 no-cache mode。存储 commit 与
 garbage collection 保证跨 context 一致性；同步 `inspect()` 只报告有界的
 `observationScope: 'instance'` 事实，不虚构全局同步 diagnostic snapshot。
+生命周期必须显式声明：durable cache 可选择复用或在 open 前清空；session cache
+会在 open 前重置，并在显式等待的 dispose 中清理。session 仍然写入磁盘；如果可视化
+不应写 IndexedDB/OPFS，就应直接不创建 cache。
 
 ## Scratch 异步资源分配
 

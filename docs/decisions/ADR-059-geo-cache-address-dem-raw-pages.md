@@ -4,6 +4,8 @@
 
 Accepted
 
+DEM cache policy amended by ADR-062.
+
 ## Date
 
 2026-08-06
@@ -47,9 +49,10 @@ record contracts are deleted without aliases.
 
 ### DEM is the first raw consumer
 
-The DEM example owns only two policies: `none` and `persistent`. Default execution
-uses `none`; the persistent proof explicitly supplies a namespace and finite byte
-and entry budgets. Each stable page key is assigned to one Worker context shard, and
+The DEM example owns the application decision between no cache and a configured
+persistent cache. Default execution uses `none`; configured storage explicitly
+supplies namespace, finite byte and entry budgets, persistence request, and the
+ADR-062 lifecycle. Each stable page key is assigned to one Worker context shard, and
 that context opens an independent Scratch cache namespace. Worker, Cache, and GPU
 lifecycles remain separate and are composed by the example.
 

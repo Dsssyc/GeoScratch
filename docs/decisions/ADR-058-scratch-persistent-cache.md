@@ -4,6 +4,8 @@
 
 Accepted
 
+Lifecycle policy amended by ADR-062.
+
 ## Date
 
 2026-08-06
@@ -45,6 +47,7 @@ const cache = await PersistentCache.open<Metadata>({
     maxEntries: 4096,
     maxHistory: 64,
     requestPersistence: false,
+    lifecycle: { kind: 'durable', open: 'reuse' },
 })
 
 await cache.dispose()
@@ -114,9 +117,10 @@ selected in the same transaction that publishes a new entry. Public mutation is
 limited to exact `delete`, ID-prefix `invalidate`, `clear`, and explicit garbage
 collection.
 
-Lifecycle is `active | disposing | disposed`. `dispose()` is idempotent, rejects new
-operations, waits for operations already admitted by that instance, and closes its
-database connection without clearing persisted data.
+Lifecycle state is `active | disposing | disposed`. ADR-062 requires an explicit
+retention lifecycle. Durable reuse keeps the original behavior: `dispose()` is
+idempotent, rejects new operations, waits for operations already admitted by that
+instance, and closes its database connection without clearing persisted data.
 
 Cache joins the shared diagnostic envelope:
 

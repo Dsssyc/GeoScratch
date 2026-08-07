@@ -18,6 +18,7 @@ import {
     createDemVirtualRasterRuntime,
     fetchDemVirtualRasterManifest,
 } from './dem-virtual-raster.ts'
+import { readDemCachePolicy } from './dem-cache-policy.ts'
 import type { DemCachePolicy } from './dem-tile-protocol.ts'
 import lodMapShader from './shaders/lod-map.wgsl?raw'
 import terrainShader from './shaders/terrain-mesh.wgsl?raw'
@@ -81,10 +82,7 @@ const FAILURE_SCENARIOS = Object.freeze([
 const parameters = new URLSearchParams(window.location.search)
 const proofMode = parameters.get('proof') === '1'
 const tileServerUrl = parameters.get('tileServer') ?? 'http://127.0.0.1:8787'
-const cachePolicy = readCachePolicy(
-    parameters.get('cache'),
-    parameters.get('cacheNamespace')
-)
+const cachePolicy = readDemCachePolicy(parameters)
 const maxPhysicalPages = boundedIntegerParameter(
     parameters.get('atlasPages'),
     64,
@@ -165,7 +163,6 @@ async function main(lifetime: DemLifecycle, proof: FailureProofController) {
         manifest,
         tileServerUrl,
         cachePolicy,
-        requestPersistence: cachePolicy.mode === 'persistent',
         workerCount: 3,
         maxNetworkRequests: 2,
         maxDecodeTasks: 1,
@@ -383,24 +380,28 @@ function publishGraphFacts(runtime: GPURuntime, graph: DemLayer) {
     canvas.dataset.adapter = JSON.stringify(adapterFacts(runtime))
     canvas.dataset.tileServer = tileServerUrl
     canvas.dataset.cacheMode = cachePolicy.mode
+    canvas.dataset.cacheLifecycle = cacheLifecycleLabel(cachePolicy)
+    canvas.dataset.cacheNamespace = cachePolicy.mode === 'persistent'
+        ? cachePolicy.namespace
+        : ''
+    canvas.dataset.cacheMaxPayloadBytes = cachePolicy.mode === 'persistent'
+        ? String(cachePolicy.maxPayloadBytes)
+        : '0'
+    canvas.dataset.cacheMaxEntries = cachePolicy.mode === 'persistent'
+        ? String(cachePolicy.maxEntries)
+        : '0'
+    canvas.dataset.cachePersistenceRequested = cachePolicy.mode === 'persistent'
+        ? String(cachePolicy.requestPersistence)
+        : 'false'
     canvas.dataset.maxPhysicalPages = String(maxPhysicalPages)
 }
 
-function readCachePolicy(value: string | null, namespace: string | null): DemCachePolicy {
+function cacheLifecycleLabel(policy: DemCachePolicy): string {
 
-    switch (value ?? 'none') {
-        case 'none':
-            return Object.freeze({ mode: 'none' })
-        case 'persistent':
-            return Object.freeze({
-                mode: 'persistent',
-                maxPayloadBytes: 128 * 1024 * 1024,
-                maxEntries: 2048,
-                namespace: namespace ?? 'geoscratch-dem-webmercator-raw-v2',
-            })
-        default:
-            throw new TypeError(`Unsupported DEM cache mode: ${value}`)
-    }
+    if (policy.mode === 'none') return 'none'
+    return policy.lifecycle.kind === 'session'
+        ? 'session'
+        : `durable-${policy.lifecycle.open}`
 }
 
 function publishFrameFacts({

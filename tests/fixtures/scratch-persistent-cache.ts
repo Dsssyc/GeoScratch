@@ -4,6 +4,7 @@ import {
 } from 'geoscratch/scratch'
 import type {
     CacheReadOutcome,
+    PersistentCacheLifecycle,
     PersistentCacheKey,
 } from 'geoscratch/scratch'
 
@@ -52,6 +53,7 @@ export async function prepareScratchPersistentCacheProof(namespace: string) {
         maxPayloadBytes: 8,
         maxEntries: 2,
         maxHistory: 16,
+        lifecycle: { kind: 'durable', open: 'reuse' },
     })
     await budget.clear()
     const first = key('budget/first')
@@ -70,6 +72,7 @@ export async function prepareScratchPersistentCacheProof(namespace: string) {
     }
     await budget.clear()
     await budget.dispose()
+    const lifecycle = await prepareLifecycleProof(namespace)
 
     return Object.freeze({
         stored,
@@ -81,6 +84,7 @@ export async function prepareScratchPersistentCacheProof(namespace: string) {
         afterDispose,
         disposeIdentity: firstDispose === secondDispose,
         budget: budgetProof,
+        lifecycle,
     })
 }
 
@@ -108,6 +112,8 @@ export async function finishScratchPersistentCacheProof(namespace: string) {
     const crossContext = await proveCrossContextGarbageCollection(namespace)
     const reclaimedJournal = await proveReclaimedJournalCannotCommit(namespace)
     const repairedMetadata = await proveConcurrentInvalidMetadataRepair(namespace)
+    const lifecycle = await finishLifecycleProof(namespace)
+    const sessionCleanupFailure = await proveSessionCleanupFailure(namespace)
 
     let disposedCode: string | undefined
     try {
@@ -129,6 +135,109 @@ export async function finishScratchPersistentCacheProof(namespace: string) {
         crossContext,
         reclaimedJournal,
         repairedMetadata,
+        lifecycle,
+        sessionCleanupFailure,
+    })
+}
+
+async function prepareLifecycleProof(namespace: string) {
+
+    const resetNamespace = `${namespace}.reset-on-open`
+    const resetKey = key('lifecycle/reset')
+    const resetSeed = await openProofCache(resetNamespace, false)
+    await resetSeed.clear()
+    await resetSeed.put(resetKey, raw(41))
+    await resetSeed.dispose()
+    const reset = await openProofCache(resetNamespace, false, {
+        kind: 'durable',
+        open: 'clear-before-open',
+    })
+    const resetRead = serializeRead(await reset.get(resetKey))
+    const resetFacts = reset.inspect()
+    await reset.dispose()
+
+    const sessionNamespace = `${namespace}.session`
+    const sessionKey = key('lifecycle/session')
+    const staleSeed = await openProofCache(sessionNamespace, false)
+    await staleSeed.clear()
+    await staleSeed.put(sessionKey, raw(51))
+    await staleSeed.dispose()
+    const session = await openProofCache(sessionNamespace, false, { kind: 'session' })
+    const staleRead = serializeRead(await session.get(sessionKey))
+    await session.put(sessionKey, raw(52))
+
+    return Object.freeze({
+        resetRead,
+        resetFacts,
+        staleRead,
+        sessionFacts: session.inspect(),
+    })
+}
+
+async function finishLifecycleProof(namespace: string) {
+
+    const sessionNamespace = `${namespace}.session`
+    const sessionKey = key('lifecycle/session')
+    const session = await openProofCache(sessionNamespace, false, { kind: 'session' })
+    const reloadRead = serializeRead(await session.get(sessionKey))
+    await session.put(sessionKey, raw(61))
+    const activeRead = serializeRead(await session.get(sessionKey))
+    await session.dispose()
+
+    const durable = await openProofCache(sessionNamespace, false)
+    const disposedRead = serializeRead(await durable.get(sessionKey))
+    await durable.clear()
+    await durable.dispose()
+    return Object.freeze({ reloadRead, activeRead, disposedRead })
+}
+
+async function proveSessionCleanupFailure(namespace: string) {
+
+    const failureNamespace = `${namespace}.session-cleanup-failure`
+    const cache = await openProofCache(failureNamespace, false, { kind: 'session' })
+    await cache.put(key('lifecycle/cleanup-failure'), raw(71))
+    const payloads = await getPayloadDirectory(failureNamespace)
+    const prototype = Object.getPrototypeOf(payloads) as DirectoryPrototype
+    const originalRemoveEntry = prototype.removeEntry
+    let interceptedCount = 0
+    prototype.removeEntry = async function(
+        this: FileSystemDirectoryHandle,
+        name: string,
+        options?: FileSystemRemoveOptions
+    ) {
+
+        if (name.endsWith('.bin')) {
+            interceptedCount++
+            throw new DOMException('Injected session payload cleanup failure', 'NotAllowedError')
+        }
+        return await originalRemoveEntry.call(this, name, options)
+    }
+
+    let disposal
+    try {
+        disposal = await cache.dispose().then(
+            () => ({ status: 'resolved' as const }),
+            error => ({
+                status: 'rejected' as const,
+                code: (error as { diagnostic?: { code?: string } }).diagnostic?.code,
+            })
+        )
+    } finally {
+        prototype.removeEntry = originalRemoveEntry
+    }
+    const state = cache.inspect().state
+    const recovery = await openProofCache(failureNamespace, false)
+    const recoveryRead = serializeRead(await recovery.get(key('lifecycle/cleanup-failure')))
+    const payloadFileCount = await countPayloadFiles(failureNamespace)
+    const garbage = await recovery.collectGarbage({ minimumPendingAgeMs: 0 })
+    await recovery.dispose()
+    return Object.freeze({
+        interceptedCount,
+        disposal,
+        state,
+        recoveryRead,
+        payloadFileCount,
+        garbage,
     })
 }
 
@@ -285,7 +394,11 @@ async function proveConcurrentInvalidMetadataRepair(namespace: string) {
     return Object.freeze({ intercepted, read, facts })
 }
 
-async function openProofCache(namespace: string, requestPersistence: boolean) {
+async function openProofCache(
+    namespace: string,
+    requestPersistence: boolean,
+    lifecycle: PersistentCacheLifecycle = { kind: 'durable', open: 'reuse' }
+) {
 
     return await PersistentCache.open<ProofMetadata>({
         namespace,
@@ -293,6 +406,7 @@ async function openProofCache(namespace: string, requestPersistence: boolean) {
         maxEntries: 8,
         maxHistory: 32,
         requestPersistence,
+        lifecycle,
     })
 }
 
@@ -350,6 +464,16 @@ async function getPayloadDirectory(namespace: string): Promise<FileSystemDirecto
     return await namespaceDirectory.getDirectoryHandle('payloads', { create: true })
 }
 
+async function countPayloadFiles(namespace: string): Promise<number> {
+
+    const payloads = await getPayloadDirectory(namespace)
+    let count = 0
+    for await (const [ name, handle ] of (payloads as unknown as DirectoryPrototype).entries()) {
+        if (handle.kind === 'file' && name.endsWith('.bin')) count++
+    }
+    return count
+}
+
 async function seedInvalidMetadata(
     namespace: string,
     cacheKey: PersistentCacheKey
@@ -402,6 +526,11 @@ type DirectoryPrototype = {
     entries: (
         this: FileSystemDirectoryHandle
     ) => AsyncIterableIterator<[string, FileSystemHandle]>
+    removeEntry: (
+        this: FileSystemDirectoryHandle,
+        name: string,
+        options?: FileSystemRemoveOptions
+    ) => Promise<void>
 }
 
 type WritablePrototype = {

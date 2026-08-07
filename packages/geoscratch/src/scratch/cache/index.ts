@@ -31,5 +31,6 @@ export type {
     PersistentCacheFacts,
     PersistentCacheKey,
     PersistentCacheKeyDescriptor,
+    PersistentCacheLifecycle,
     PersistentCacheState,
 } from './types.js'

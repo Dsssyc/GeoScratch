@@ -23,6 +23,7 @@ import type {
     PersistentCacheFacts,
     PersistentCacheKey,
     PersistentCacheKeyDescriptor,
+    PersistentCacheLifecycle,
     PersistentCacheState,
 } from './types.js'
 
@@ -79,6 +80,7 @@ export class PersistentCache<Metadata extends object = Readonly<Record<string, u
     readonly maxPayloadBytes: number
     readonly maxEntries: number
     readonly maxHistory: number
+    readonly lifecycle: PersistentCacheLifecycle
     readonly #database: IDBDatabase
     readonly #payloadDirectory: FileSystemDirectoryHandle
     readonly #requestPersistence: boolean
@@ -112,6 +114,7 @@ export class PersistentCache<Metadata extends object = Readonly<Record<string, u
         this.maxPayloadBytes = descriptor.maxPayloadBytes
         this.maxEntries = descriptor.maxEntries
         this.maxHistory = descriptor.maxHistory ?? DEFAULT_MAX_HISTORY
+        this.lifecycle = snapshotLifecycle(descriptor.lifecycle)
         this.#requestPersistence = descriptor.requestPersistence ?? false
         this.#database = database
         this.#payloadDirectory = payloadDirectory
@@ -246,6 +249,7 @@ export class PersistentCache<Metadata extends object = Readonly<Record<string, u
             namespace: string
             observationScope: 'instance'
             state: PersistentCacheState
+            lifecycle: PersistentCacheLifecycle
             maxPayloadBytes: number
             maxEntries: number
             maxHistory: number
@@ -272,6 +276,7 @@ export class PersistentCache<Metadata extends object = Readonly<Record<string, u
             namespace: this.namespace,
             observationScope: 'instance',
             state: this.#state,
+            lifecycle: this.lifecycle,
             maxPayloadBytes: this.maxPayloadBytes,
             maxEntries: this.maxEntries,
             maxHistory: this.maxHistory,
@@ -335,6 +340,12 @@ export class PersistentCache<Metadata extends object = Readonly<Record<string, u
                     invalid.map(entry => entry.storageKey)
                 )
             )
+        }
+        if (clearsOnOpen(this.lifecycle)) {
+            await this.#clearLifecycle('open-lifecycle-reset')
+            await this.#refreshStorageFacts()
+            this.#record('opened', 'open', undefined, lifecycleDetail(this.lifecycle))
+            return
         }
         const victims = await databaseOperation(
             this.namespace,
@@ -586,16 +597,16 @@ export class PersistentCache<Metadata extends object = Readonly<Record<string, u
         return outcome
     }
 
-    async #clear(): Promise<CacheDeleteOutcome> {
+    async #clear(operation = 'clear'): Promise<CacheDeleteOutcome> {
 
         const commit = await databaseOperation(
             this.namespace,
             'cache-clear',
-            'clear',
+            operation,
             () => deleteMatchingEntries(this.#database, this.namespace, () => true)
         )
-        const outcome = await this.#finalizeDeletion(commit, 'clear')
-        this.#record('cleared', 'clear', undefined, `entries:${outcome.deletedCount}`)
+        const outcome = await this.#finalizeDeletion(commit, operation)
+        this.#record('cleared', operation, undefined, `entries:${outcome.deletedCount}`)
         return outcome
     }
 
@@ -655,6 +666,27 @@ export class PersistentCache<Metadata extends object = Readonly<Record<string, u
             removedPayloadCount,
             removedPendingCount: stalePending.length,
             cleanupFailureCount,
+        })
+    }
+
+    async #clearLifecycle(operation: string): Promise<void> {
+
+        await this.#clear(operation)
+        const garbage = await this.#collectGarbage(0)
+        if (garbage.cleanupFailureCount === 0) return
+        throw cacheDiagnosticError({
+            code: 'CACHE_STORAGE_FAILED',
+            severity: 'error',
+            phase: 'cache-lifecycle',
+            subject: { kind: 'PersistentCache', id: this.namespace },
+            message: 'Persistent cache lifecycle cleanup left payloads for later recovery.',
+            actual: {
+                lifecycle: this.lifecycle,
+                cleanupFailureCount: garbage.cleanupFailureCount,
+            },
+            operation,
+            storage: 'opfs',
+            retriable: true,
         })
     }
 
@@ -936,9 +968,19 @@ export class PersistentCache<Metadata extends object = Readonly<Record<string, u
     async #dispose(): Promise<void> {
 
         await Promise.allSettled([ ...this.#activeOperations ])
-        this.#database.close()
-        this.#state = 'disposed'
-        this.#record('disposed', 'dispose')
+        let cleanupFailure: unknown
+        try {
+            if (this.lifecycle.kind === 'session') {
+                await this.#clearLifecycle('session-dispose')
+            }
+        } catch (error) {
+            cleanupFailure = error
+        } finally {
+            this.#database.close()
+            this.#state = 'disposed'
+            this.#record('disposed', 'dispose')
+        }
+        if (cleanupFailure !== undefined) throw cleanupFailure
     }
 
     #record(
@@ -994,6 +1036,7 @@ function validateDescriptor(descriptor: PersistentCacheDescriptor): void {
         new TextEncoder().encode(descriptor.namespace).byteLength > MAX_NAMESPACE_UTF8_BYTES ||
         !nonNegativeSafeInteger(descriptor.maxPayloadBytes) ||
         !positiveSafeInteger(descriptor.maxEntries) ||
+        !validLifecycle(descriptor.lifecycle) ||
         (descriptor.maxHistory !== undefined && !nonNegativeSafeInteger(descriptor.maxHistory)) ||
         (descriptor.requestPersistence !== undefined &&
             typeof descriptor.requestPersistence !== 'boolean')) {
@@ -1002,11 +1045,42 @@ function validateDescriptor(descriptor: PersistentCacheDescriptor): void {
             severity: 'error',
             phase: 'cache-open',
             subject: cacheSubject(descriptor.namespace),
-            message: 'PersistentCache requires a bounded namespace and finite entry/payload budgets.',
+            message: 'PersistentCache requires a bounded namespace, finite budgets, and an explicit lifecycle.',
             actual: descriptor,
             operation: 'validate-descriptor',
         })
     }
+}
+
+function validLifecycle(value: unknown): value is PersistentCacheLifecycle {
+
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) return false
+    const lifecycle = value as Record<string, unknown>
+    const keys = Object.keys(lifecycle).sort().join('|')
+    if (lifecycle.kind === 'durable') {
+        return keys === 'kind|open' &&
+            (lifecycle.open === 'reuse' || lifecycle.open === 'clear-before-open')
+    }
+    return lifecycle.kind === 'session' && keys === 'kind'
+}
+
+function snapshotLifecycle(lifecycle: PersistentCacheLifecycle): PersistentCacheLifecycle {
+
+    return lifecycle.kind === 'durable'
+        ? Object.freeze({ kind: lifecycle.kind, open: lifecycle.open })
+        : Object.freeze({ kind: lifecycle.kind })
+}
+
+function clearsOnOpen(lifecycle: PersistentCacheLifecycle): boolean {
+
+    return lifecycle.kind === 'session' || lifecycle.open === 'clear-before-open'
+}
+
+function lifecycleDetail(lifecycle: PersistentCacheLifecycle): string {
+
+    return lifecycle.kind === 'session'
+        ? 'lifecycle:session'
+        : `lifecycle:durable/${lifecycle.open}`
 }
 
 function assertCacheKey(key: PersistentCacheKey): void {

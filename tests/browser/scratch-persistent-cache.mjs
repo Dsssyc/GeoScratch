@@ -127,6 +127,13 @@ function validate(value) {
         first.budget.facts.evictionCount !== 1) {
         failures.push('byte and entry budgets did not apply deterministic LRU eviction')
     }
+    if (first.lifecycle?.resetRead?.status !== 'miss' ||
+        first.lifecycle.resetFacts?.lifecycle?.kind !== 'durable' ||
+        first.lifecycle.resetFacts?.lifecycle?.open !== 'clear-before-open' ||
+        first.lifecycle?.staleRead?.status !== 'miss' ||
+        first.lifecycle.sessionFacts?.lifecycle?.kind !== 'session') {
+        failures.push('open-time durable reset or session isolation did not clear stale entries')
+    }
     if (second.rawReload?.status !== 'hit' || second.rawReload.byteLength !== 4 ||
         JSON.stringify(second.rawReload.payload) !== JSON.stringify([ 1, 2, 3, 4 ]) ||
         second.metadataReload?.status !== 'hit' || second.metadataReload.payload !== undefined ||
@@ -169,6 +176,20 @@ function validate(value) {
         JSON.stringify(second.repairedMetadata.read.payload) !==
             JSON.stringify([ 31, 32, 33, 34 ])) {
         failures.push('invalid metadata recovery deleted a concurrently repaired entry')
+    }
+    if (second.lifecycle?.reloadRead?.status !== 'miss' ||
+        second.lifecycle?.activeRead?.status !== 'hit' ||
+        second.lifecycle?.disposedRead?.status !== 'miss') {
+        failures.push('session cache reload isolation or explicit-dispose cleanup was incorrect')
+    }
+    if (second.sessionCleanupFailure?.interceptedCount < 2 ||
+        second.sessionCleanupFailure?.disposal?.status !== 'rejected' ||
+        second.sessionCleanupFailure?.disposal?.code !== 'CACHE_STORAGE_FAILED' ||
+        second.sessionCleanupFailure?.state !== 'disposed' ||
+        second.sessionCleanupFailure?.recoveryRead?.status !== 'miss' ||
+        second.sessionCleanupFailure?.payloadFileCount !== 0 ||
+        second.sessionCleanupFailure?.garbage?.cleanupFailureCount !== 0) {
+        failures.push('session cleanup failure was hidden or could not be recovered later')
     }
     if (events.consoleFailures.length !== 0 || events.consoleWarnings.length !== 0 ||
         events.pageErrors.length !== 0 || events.requestFailures.length !== 0 ||

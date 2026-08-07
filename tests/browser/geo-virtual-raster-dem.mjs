@@ -14,6 +14,7 @@ const viteEntry = resolve(repositoryRoot, 'node_modules/vite/bin/vite.js')
 const tileBuildEntry = resolve(tileServerRoot, '.venv/bin/dem-tile-build')
 const tileServeEntry = resolve(tileServerRoot, '.venv/bin/dem-tile-serve')
 const timeout = positiveInteger(process.env.GEO_VIRTUAL_RASTER_DEM_TIMEOUT_MS, 120_000)
+const headless = process.env.GEO_VIRTUAL_RASTER_DEM_HEADLESS === '1'
 const viteMode = process.env.GEO_VIRTUAL_RASTER_DEM_VITE_MODE === 'preview'
     ? 'preview'
     : 'dev'
@@ -66,7 +67,7 @@ try {
     await waitForHttpProcess(vite, `${baseUrl}/demLayer/index.html`, 'Vite')
     browser = await chromium.launch({
         channel: 'chrome',
-        headless: false,
+        headless,
         args: [ '--enable-unsafe-webgpu' ],
     })
     browserVersion = await browser.version()
@@ -96,7 +97,7 @@ for (const failure of cleanupFailures) failures.push(failure)
 const result = {
     schemaVersion: 1,
     status: failures.length === 0 ? 'passed' : 'failed',
-    headed: true,
+    headed: !headless,
     browserVersion,
     baseUrl,
     tileBaseUrl,
@@ -298,6 +299,8 @@ async function runStreamingProof(activeBrowser) {
     try {
         const url = `${baseUrl}/demLayer/index.html?proof=1&atlasPages=${operationalAtlasPages}` +
             `&cache=persistent&cacheNamespace=${encodeURIComponent(cacheNamespace)}` +
+            '&cacheLifecycle=durable-reuse&cacheMaxMiB=128&cacheMaxEntries=2048' +
+            '&cachePersistence=request' +
             `&tileServer=${encodeURIComponent(tileBaseUrl)}`
         await page.goto(url, { waitUntil: 'domcontentloaded', timeout })
         const initial = await waitForStableFacts(page)
@@ -609,6 +612,12 @@ function validateProof(value, processState) {
     const identityHashes = new Set()
     for (const [ name, facts ] of samples) {
         if (facts.status !== 'ready') failures.push(`${name} frame was not ready`)
+        if (facts.cacheMode !== 'persistent' || facts.cacheLifecycle !== 'durable-reuse' ||
+            facts.cacheNamespace !== cacheNamespace ||
+            facts.cacheMaxPayloadBytes !== String(128 * 1024 * 1024) ||
+            facts.cacheMaxEntries !== '2048' || facts.cachePersistenceRequested !== 'true') {
+            failures.push(`${name} frame did not publish the configured cache lifecycle`)
+        }
         if (facts.uncapturedErrors !== '0' || facts.deviceLosses !== '0' ||
             facts.diagnosticIncidents !== '0') {
             failures.push(`${name} frame retained a WebGPU diagnostic failure`)

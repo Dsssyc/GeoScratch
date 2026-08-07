@@ -72,6 +72,7 @@ const cache = await PersistentCache.open({
     namespace: 'my-dataset-v1',
     maxPayloadBytes: 128 * 1024 * 1024,
     maxEntries: 2048,
+    lifecycle: { kind: 'durable', open: 'reuse' },
 })
 const key = persistentCacheKey({ id: 'object/42', revision: 'v1' })
 await cache.put(key, { metadata: { format: 'raw' }, payload: bytes.buffer })
@@ -85,6 +86,10 @@ or Geo dependency, no hidden memory tier, and no Buffer/Texture conversion API.
 Cross-context commits and garbage collection preserve storage consistency, while
 synchronous `inspect()` truthfully reports bounded `observationScope: 'instance'`
 facts.
+Lifecycle is explicit: durable caches either reuse or clear before open, while a
+session cache resets before open and cleans on awaited disposal. Session storage is
+still disk-backed; omit cache construction when an application should not write
+IndexedDB or OPFS.
 
 ## Scratch Async Resource Allocation
 

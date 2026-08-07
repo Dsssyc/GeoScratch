@@ -48,6 +48,7 @@ const cache = await PersistentCache.open<Metadata>({
     maxEntries: 4096,
     maxHistory: 64,
     requestPersistence: false,
+    lifecycle: { kind: 'durable', open: 'reuse' },
 })
 
 await cache.dispose()

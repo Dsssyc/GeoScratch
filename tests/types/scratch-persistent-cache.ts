@@ -6,6 +6,7 @@ import type {
     CacheDiagnostic,
     CacheReadOutcome,
     CacheRecord,
+    PersistentCacheLifecycle,
     ScratchDiagnostic,
 } from 'geoscratch/scratch'
 import {
@@ -27,6 +28,7 @@ const cache = await PersistentCache.open<RasterMetadata>({
     maxPayloadBytes: 1024,
     maxEntries: 4,
     maxHistory: 8,
+    lifecycle: { kind: 'durable', open: 'reuse' },
 })
 const write = await cache.put(key, {
     metadata: { format: 'r8uint', width: 16, height: 16 },
@@ -48,6 +50,7 @@ await cache.clear()
 await cache.collectGarbage()
 const facts = cache.inspect()
 const observationScope: 'instance' = facts.observationScope
+const lifecycle: PersistentCacheLifecycle = facts.lifecycle
 await cache.dispose()
 
 const address = virtualRasterCacheAddress({
@@ -83,4 +86,5 @@ import('geoscratch/geo').then(module => module.createVirtualRasterCache)
 void write
 void facts
 void observationScope
+void lifecycle
 void addressKey
