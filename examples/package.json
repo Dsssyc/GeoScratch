@@ -10,10 +10,12 @@
   },
   "dependencies": {
     "@mapbox/tilebelt": "^1.0.2",
+    "@tweakpane/core": "^2.0.5",
     "d3-delaunay": "^6.0.4",
     "earcut": "^2.2.4",
     "geoscratch": "file:../packages/geoscratch",
     "hammerjs": "^2.0.8",
+    "tweakpane": "^4.0.5",
     "wgpu-matrix": "2.5.1"
   },
   "devDependencies": {

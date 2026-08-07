@@ -1,0 +1,56 @@
+#DemCachePanel {
+    --tp-base-background-color: hsla(216, 18%, 12%, 0.96);
+    --tp-base-shadow-color: hsla(220, 30%, 2%, 0.42);
+    --tp-button-background-color: hsl(180, 32%, 29%);
+    --tp-button-background-color-active: hsl(180, 35%, 37%);
+    --tp-button-background-color-focus: hsl(180, 34%, 34%);
+    --tp-button-background-color-hover: hsl(180, 33%, 33%);
+    --tp-button-foreground-color: hsl(180, 20%, 96%);
+    --tp-container-background-color: hsla(214, 14%, 22%, 0.72);
+    --tp-container-background-color-active: hsla(214, 16%, 31%, 0.78);
+    --tp-container-background-color-focus: hsla(180, 24%, 29%, 0.74);
+    --tp-container-background-color-hover: hsla(214, 15%, 27%, 0.76);
+    --tp-container-foreground-color: hsl(210, 12%, 90%);
+    --tp-groove-foreground-color: hsl(180, 35%, 49%);
+    --tp-input-background-color: hsla(216, 18%, 8%, 0.82);
+    --tp-input-background-color-active: hsla(216, 17%, 14%, 0.94);
+    --tp-input-background-color-focus: hsla(180, 19%, 16%, 0.96);
+    --tp-input-background-color-hover: hsla(216, 17%, 12%, 0.9);
+    --tp-input-foreground-color: hsl(210, 18%, 94%);
+    --tp-label-foreground-color: hsl(212, 10%, 72%);
+    position: fixed;
+    top: 12px;
+    right: 12px;
+    z-index: 12;
+    width: 304px;
+    max-width: calc(100vw - 24px);
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    pointer-events: auto;
+}
+
+#DemCachePanel:empty {
+    display: none;
+}
+
+#DemCachePanel [data-dem-cache-control="status"] input,
+#DemCachePanel [data-dem-cache-control="preference"] input {
+    font-size: 10px;
+}
+
+#DemCachePanel [data-dem-cache-control="apply"] button {
+    font-weight: 650;
+}
+
+#DemCachePanel [data-dem-cache-control="reset"] button {
+    border: 1px solid hsla(210, 12%, 68%, 0.22);
+    background: transparent;
+}
+
+@media (max-width: 640px) {
+    #DemCachePanel {
+        top: 8px;
+        right: 8px;
+        width: min(304px, calc(100vw - 16px));
+        max-width: calc(100vw - 16px);
+    }
+}

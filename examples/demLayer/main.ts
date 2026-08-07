@@ -18,6 +18,7 @@ import {
     createDemVirtualRasterRuntime,
     fetchDemVirtualRasterManifest,
 } from './dem-virtual-raster.ts'
+import { prepareDemCachePanel } from './dem-cache-panel.ts'
 import { readDemCachePolicy } from './dem-cache-policy.ts'
 import type { DemCachePolicy } from './dem-tile-protocol.ts'
 import lodMapShader from './shaders/lod-map.wgsl?raw'
@@ -67,6 +68,7 @@ declare global {
 }
 
 const canvas = document.getElementById('GPUFrame') as HTMLCanvasElement
+const cachePanelContainer = document.getElementById('DemCachePanel') as HTMLElement
 const FAILURE_RUNTIME_EVIDENCE_MAX_BYTES = 512 * 1024
 const FAILURE_CAPTURE_BOUNDS = Object.freeze({
     maxOperations: 1,
@@ -79,7 +81,10 @@ const FAILURE_SCENARIOS = Object.freeze([
     'after-map-acquisition',
     'invalid-terrain-shader-wgsl',
 ])
-const parameters = new URLSearchParams(window.location.search)
+const preparedCachePanel = prepareDemCachePanel({
+    parameters: new URLSearchParams(window.location.search),
+})
+const parameters = preparedCachePanel.parameters
 const proofMode = parameters.get('proof') === '1'
 const tileServerUrl = parameters.get('tileServer') ?? 'http://127.0.0.1:8787'
 const cachePolicy = readDemCachePolicy(parameters)
@@ -96,6 +101,11 @@ const failureConfiguration = Object.freeze({
         : undefined,
 })
 const pageLifetime = createDemLifecycle()
+const cachePanel = preparedCachePanel.mount({
+    container: cachePanelContainer,
+    location: window.location,
+    compact: window.matchMedia('(max-width: 640px)').matches,
+})
 const failureProof = createFailureProofController(failureConfiguration)
 let pageSettlement: PageSettlement | undefined
 let pageContext: PageContext | undefined
@@ -104,6 +114,7 @@ const handlePageHide = () => {
 }
 
 window.addEventListener('pagehide', handlePageHide, { once: true })
+pageLifetime.deferStop({ label: 'dem-cache-panel', run: cachePanel.dispose })
 pageLifetime.deferStop({
     label: 'pagehide-listener',
     run: () => window.removeEventListener('pagehide', handlePageHide),
@@ -393,6 +404,8 @@ function publishGraphFacts(runtime: GPURuntime, graph: DemLayer) {
     canvas.dataset.cachePersistenceRequested = cachePolicy.mode === 'persistent'
         ? String(cachePolicy.requestPersistence)
         : 'false'
+    canvas.dataset.cachePanelSource = preparedCachePanel.source
+    canvas.dataset.cachePanelStorageStatus = preparedCachePanel.storageStatus
     canvas.dataset.maxPhysicalPages = String(maxPhysicalPages)
 }
 

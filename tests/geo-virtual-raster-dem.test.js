@@ -28,6 +28,7 @@ import {
     resolveDemCachePanelConfig,
     serializeDemCachePanelConfig,
 } from '../examples/demLayer/dem-cache-panel-state.ts'
+import { prepareDemCachePanel } from '../examples/demLayer/dem-cache-panel.ts'
 import { demWebMercatorManifest as manifest } from './fixtures/dem-webmercator-manifest.js'
 
 describe('DEM WebMercator virtual raster', () => {
@@ -209,6 +210,47 @@ describe('DEM WebMercator virtual raster', () => {
             expect(removeDemCacheParameters(next).toString()).to.equal(
                 'tileServer=http%3A%2F%2Flocalhost%3A8787&proof=1'
             )
+        })
+
+        it('prepares browser preferences and degrades unavailable local storage', () => {
+
+            const stored = serializeDemCachePanelConfig({
+                ...DEM_CACHE_PANEL_DEFAULT_CONFIG,
+                policy: 'session',
+            })
+            const available = fakeStorage({
+                [DEM_CACHE_PANEL_STORAGE_KEY]: stored,
+            })
+            const restored = prepareDemCachePanel({
+                parameters: new URLSearchParams('proof=1'),
+                storage: available.storage,
+            })
+
+            expect(restored.source).to.equal('storage')
+            expect(restored.storageStatus).to.equal('valid')
+            expect(restored.parameters.get('proof')).to.equal('1')
+            expect(restored.parameters.get('cacheLifecycle')).to.equal('session')
+
+            available.storage.setItem(DEM_CACHE_PANEL_STORAGE_KEY, '{')
+            const damaged = prepareDemCachePanel({
+                parameters: new URLSearchParams(),
+                storage: available.storage,
+            })
+            expect(damaged.source).to.equal('default')
+            expect(damaged.storageStatus).to.equal('invalid')
+            expect(available.storage.getItem(DEM_CACHE_PANEL_STORAGE_KEY)).to.equal(null)
+
+            const unavailable = prepareDemCachePanel({
+                parameters: new URLSearchParams('cache=none'),
+                storage: {
+                    getItem: () => null,
+                    setItem: () => { throw new DOMException('denied', 'SecurityError') },
+                    removeItem: () => {},
+                },
+            })
+            expect(unavailable.source).to.equal('url')
+            expect(unavailable.storageStatus).to.equal('unavailable')
+            expect(unavailable.config.policy).to.equal('disabled')
         })
     })
 
@@ -677,6 +719,19 @@ describe('DEM WebMercator virtual raster', () => {
         expect(wgsl).to.not.include('f64')
     })
 })
+
+function fakeStorage(initial = {}) {
+
+    const values = new Map(Object.entries(initial))
+    return {
+        values,
+        storage: {
+            getItem: key => values.get(key) ?? null,
+            setItem: (key, value) => values.set(key, value),
+            removeItem: key => values.delete(key),
+        },
+    }
+}
 
 async function expectRejectedName(promise, name) {
 
