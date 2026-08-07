@@ -16,7 +16,7 @@ make traversal order an accidental rendering policy.
 The data frontier also describes one 256-texel raster page with a geometric error of
 `tileWidth / 64` texels. That value came from the render mesh sector size, not from the
 raster. It can force data residency two matrix levels finer than the texture footprint
-requires and creates a source-page floor that the render frontier cannot coarsen below.
+requires and unnecessarily enlarge the source working set.
 
 ## Source Model
 
@@ -89,9 +89,11 @@ newly desired bias. This bounded hysteresis avoids threshold oscillation without
 letting a stale camera pose retain a materially coarser cut. It requires no CPU
 authority, unbounded history, or delayed feedback control.
 
-The final trial unconditionally stops at each visible source-page root. If this
-source-page floor exceeds the budget, that complete cut remains drawable and the
-feedback reports the constraint. Emission is never truncated.
+The final trial unconditionally stops at each visible source-page root. Trial counts
+are allowed to be non-monotonic because conservative parent-frustum intersection can
+remain true while every refined child is rejected. Selection scans fine to coarse for
+the first in-budget complete cut. If no trial fits, it selects the measured minimum
+across all trials. Emission is never truncated.
 
 ### GPU frame order
 
@@ -113,18 +115,19 @@ Render-patch feedback adds:
 - vertical-view baseline budget;
 - current pitch-adjusted frame budget;
 - unnormalized requested patch count;
-- coarsest source-floor patch count;
+- minimum measured trial count and final source-root trial count;
 - selected quarter-level bias;
-- whether the source floor prevented satisfying the budget.
+- whether even the minimum measured trial exceeded the budget.
 
-These facts distinguish local quality pressure, global normalization, and a data-floor
-constraint without making delayed readback authoritative.
+These facts distinguish local quality pressure, global normalization, hierarchical
+culling, and an unsatisfied budget without making delayed readback authoritative.
 
 ## Acceptance Gates
 
 - Unit tests prove the budget is baseline-sized at zero pitch and approaches a 3x
   ceiling at high pitch.
-- Unit tests prove the selected trial is the finest complete cut within budget and
+- Unit tests prove the selected trial is the finest complete cut within budget,
+  non-monotonic trial counts remain valid, the fallback is the actual minimum, and
   hysteresis never retains an over-budget cut.
 - Static integration tests prove count, select, emit, and finalize dispatches remain
   GPU-ordered and indirect draw count is not host-authored.

@@ -65,6 +65,16 @@ describe('DEM render-patch frontier', () => {
             30,
             0
         )).to.equal(2)
+        expect(renderPatch.demRenderPatchSelectBudgetBias(
+            [ 9, 9, 9, 9, 9, 6, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3 ],
+            31,
+            0
+        )).to.equal(0)
+        expect(renderPatch.demRenderPatchSelectBudgetBias(
+            [ 50, 40, 32, 35 ],
+            30,
+            0
+        )).to.equal(2)
     })
 
     it('selects geometry detail from projected grid spacing after raster data reaches z10', () => {
@@ -157,11 +167,52 @@ describe('DEM render-patch frontier', () => {
             baselinePatchBudget: 9,
             framePatchBudget: 23,
             requestedPatchCount: 80,
-            sourceFloorPatchCount: 8,
+            minimumTrialPatchCount: 8,
+            sourceRootPatchCount: 8,
             selectedBiasStep: 3,
             selectedBiasLevels: 0.75,
-            budgetLimitedBySourceFloor: false,
+            budgetLimitedByMinimumTrial: false,
         })
+    })
+
+    it('accepts a non-monotonic complete-cut series and reports its actual minimum', () => {
+
+        const words = new Uint32Array(30)
+        words.set([
+            9,
+            0,
+            0,
+            8,
+            11,
+            1 * 256,
+            65_535 * 256,
+            17,
+            12,
+            31,
+            9,
+            0,
+            2,
+        ])
+        words.set([
+            9, 9, 9, 9, 9, 6, 2, 2, 2,
+            2, 2, 2, 2, 2, 2, 2, 3,
+        ], 13)
+
+        const facts = renderPatch.decodeDemRenderPatchState(
+            new Uint8Array(words.buffer),
+            { maximumRenderPatches: 12_544, expectedFrameEpoch: 17 }
+        )
+
+        expect(facts).to.deep.include({
+            selectedPatchCount: 9,
+            requestedPatchCount: 9,
+            selectedBiasStep: 0,
+            minimumTrialPatchCount: 2,
+            sourceRootPatchCount: 3,
+            budgetLimitedByMinimumTrial: false,
+        })
+        expect(facts).not.to.have.property('sourceFloorPatchCount')
+        expect(facts).not.to.have.property('budgetLimitedBySourceFloor')
     })
 
     it('rejects invalid projected-grid selection inputs', () => {

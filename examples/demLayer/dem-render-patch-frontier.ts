@@ -183,10 +183,11 @@ export type DemRenderPatchSelectionFacts = Readonly<{
     baselinePatchBudget: number
     framePatchBudget: number
     requestedPatchCount: number
-    sourceFloorPatchCount: number
+    minimumTrialPatchCount: number
+    sourceRootPatchCount: number
     selectedBiasStep: number
     selectedBiasLevels: number
-    budgetLimitedBySourceFloor: boolean
+    budgetLimitedByMinimumTrial: boolean
 }>
 
 export type DemRenderPatchFeedback = Readonly<DemRenderPatchSelectionFacts & {
@@ -299,11 +300,8 @@ export function demRenderPatchSelectBudgetBias(
 ): number {
 
     if (!Array.isArray(trialCounts) || trialCounts.length < 1 ||
-        trialCounts.some((count, index) => (
-            !Number.isSafeInteger(count) || count < 0 ||
-            (index > 0 && count > trialCounts[index - 1]!)
-        ))) {
-        throw new TypeError('DEM render-patch trial counts must be non-increasing integers')
+        trialCounts.some(count => !Number.isSafeInteger(count) || count < 0)) {
+        throw new TypeError('DEM render-patch trial counts must be non-negative integers')
     }
     if (!Number.isSafeInteger(framePatchBudget) || framePatchBudget < 1 ||
         !Number.isInteger(previousBiasStep) || previousBiasStep < 0 ||
@@ -311,12 +309,21 @@ export function demRenderPatchSelectBudgetBias(
         !Number.isFinite(hysteresisRatio) || hysteresisRatio < 0 || hysteresisRatio > 1) {
         throw new TypeError('DEM render-patch budget selection policy is invalid')
     }
-    let desiredBiasStep = trialCounts.length - 1
+    let desiredBiasStep = -1
+    let minimumTrialPatchCount = Number.POSITIVE_INFINITY
+    let minimumTrialBiasStep = 0
     for (let index = 0; index < trialCounts.length; index++) {
-        if (trialCounts[index]! <= framePatchBudget) {
-            desiredBiasStep = index
-            break
+        const trialPatchCount = trialCounts[index]!
+        if (trialPatchCount < minimumTrialPatchCount) {
+            minimumTrialPatchCount = trialPatchCount
+            minimumTrialBiasStep = index
         }
+        if (desiredBiasStep < 0 && trialPatchCount <= framePatchBudget) {
+            desiredBiasStep = index
+        }
+    }
+    if (desiredBiasStep < 0) {
+        desiredBiasStep = minimumTrialBiasStep
     }
     const previousCount = trialCounts[previousBiasStep]!
     if (previousCount <= framePatchBudget &&
@@ -433,11 +440,14 @@ export function decodeDemRenderPatchState(
     const framePatchBudget = word(9)
     const requestedPatchCount = word(10)
     const selectedBiasStep = word(11)
-    const sourceFloorPatchCount = word(12)
+    const minimumTrialPatchCount = word(12)
     const trialCounts = Array.from(
         { length: DEM_RENDER_PATCH_BIAS_STEP_COUNT },
         (_, index) => word(STATE_TRIAL_COUNTS_OFFSET_WORDS + index)
     )
+    const sourceRootPatchCount = trialCounts.at(-1)!
+    const observedMinimumTrialPatchCount = Math.min(...trialCounts)
+    const minimumTrialBiasStep = trialCounts.indexOf(observedMinimumTrialPatchCount)
     if (options.expectedFrameEpoch !== undefined && frameEpoch !== options.expectedFrameEpoch) {
         throw new DemRenderPatchFeedbackStaleError(options.expectedFrameEpoch, frameEpoch)
     }
@@ -453,20 +463,33 @@ export function decodeDemRenderPatchState(
         framePatchBudget > options.maximumRenderPatches ||
         selectedBiasStep >= DEM_RENDER_PATCH_BIAS_STEP_COUNT ||
         requestedPatchCount !== trialCounts[0] ||
-        sourceFloorPatchCount !== trialCounts.at(-1) ||
-        trialCounts.some((count, index) => index > 0 && count > trialCounts[index - 1]!) ||
+        minimumTrialPatchCount !== observedMinimumTrialPatchCount ||
         attemptedPatchCount !== trialCounts[selectedBiasStep] ||
-        (sourceFloorPatchCount <= framePatchBudget && attemptedPatchCount > framePatchBudget)) {
-        throw new RangeError('DEM render-patch budget feedback is inconsistent')
+        (minimumTrialPatchCount <= framePatchBudget &&
+            attemptedPatchCount > framePatchBudget) ||
+        (minimumTrialPatchCount > framePatchBudget &&
+            (selectedBiasStep !== minimumTrialBiasStep ||
+                attemptedPatchCount !== minimumTrialPatchCount))) {
+        throw new RangeError(`DEM render-patch budget feedback is inconsistent: ${JSON.stringify({
+            attemptedPatchCount,
+            baselinePatchBudget,
+            framePatchBudget,
+            requestedPatchCount,
+            selectedBiasStep,
+            minimumTrialPatchCount,
+            sourceRootPatchCount,
+            trialCounts,
+        })}`)
     }
     const budgetFacts = {
         baselinePatchBudget,
         framePatchBudget,
         requestedPatchCount,
-        sourceFloorPatchCount,
+        minimumTrialPatchCount,
+        sourceRootPatchCount,
         selectedBiasStep,
         selectedBiasLevels: selectedBiasStep / DEM_RENDER_PATCH_BIAS_STEPS_PER_LEVEL,
-        budgetLimitedBySourceFloor: sourceFloorPatchCount > framePatchBudget,
+        budgetLimitedByMinimumTrial: minimumTrialPatchCount > framePatchBudget,
     }
     if (selectedPatchCount === 0) {
         return Object.freeze({

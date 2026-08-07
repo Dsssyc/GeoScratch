@@ -11,7 +11,7 @@ struct DemRenderPatchState {
     framePatchBudget: atomic<u32>,
     requestedPatchCount: atomic<u32>,
     selectedBiasStep: atomic<u32>,
-    sourceFloorPatchCount: atomic<u32>,
+    minimumTrialPatchCount: atomic<u32>,
     trialCounts: array<atomic<u32>, 17>,
 };
 
@@ -308,7 +308,7 @@ fn resetRenderPatches() {
     atomicStore(&renderPatchState.baselinePatchBudget, 0u);
     atomicStore(&renderPatchState.framePatchBudget, 0u);
     atomicStore(&renderPatchState.requestedPatchCount, 0u);
-    atomicStore(&renderPatchState.sourceFloorPatchCount, 0u);
+    atomicStore(&renderPatchState.minimumTrialPatchCount, 0u);
     for (var step = 0u; step < 17u; step += 1u) {
         atomicStore(&renderPatchState.trialCounts[step], 0u);
     }
@@ -391,13 +391,24 @@ fn selectRenderPatchBudget() {
         u32(ceil(f32(baselinePatchBudget) * pitchRatio)),
     );
     let finalStep = renderPatchPolicy.biasStepCount - 1u;
-    var desiredBiasStep = finalStep;
+    var desiredBiasStep = 0u;
+    var foundInBudget = false;
+    var minimumTrialPatchCount = 0xffffffffu;
+    var minimumTrialBiasStep = 0u;
     for (var step = 0u; step < 17u; step += 1u) {
         if (step >= renderPatchPolicy.biasStepCount) { break; }
-        if (atomicLoad(&renderPatchState.trialCounts[step]) <= framePatchBudget) {
-            desiredBiasStep = step;
-            break;
+        let trialPatchCount = atomicLoad(&renderPatchState.trialCounts[step]);
+        if (trialPatchCount < minimumTrialPatchCount) {
+            minimumTrialPatchCount = trialPatchCount;
+            minimumTrialBiasStep = step;
         }
+        if (!foundInBudget && trialPatchCount <= framePatchBudget) {
+            desiredBiasStep = step;
+            foundInBudget = true;
+        }
+    }
+    if (!foundInBudget) {
+        desiredBiasStep = minimumTrialBiasStep;
     }
     let previousBiasStep = min(
         atomicLoad(&renderPatchState.selectedBiasStep),
@@ -416,8 +427,8 @@ fn selectRenderPatchBudget() {
         atomicLoad(&renderPatchState.trialCounts[0]),
     );
     atomicStore(
-        &renderPatchState.sourceFloorPatchCount,
-        atomicLoad(&renderPatchState.trialCounts[finalStep]),
+        &renderPatchState.minimumTrialPatchCount,
+        minimumTrialPatchCount,
     );
     atomicStore(&renderPatchState.selectedBiasStep, selectedBiasStep);
 }

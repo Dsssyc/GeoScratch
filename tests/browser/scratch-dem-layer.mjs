@@ -195,6 +195,7 @@ async function verifyNormalDem(activeBrowser) {
             facts.status === 'ready' && Number(facts.observedFrames) >= 1
         ))
         const adapterFacts = await readRuntimeAdapterFacts(page, loadedFacts)
+        const rapidCameraTransition = await captureRapidCameraTransition(page)
         const scenarios = []
         for (const definition of cameraScenarios) {
             scenarios.push(await captureConvergedCamera(page, definition))
@@ -226,6 +227,7 @@ async function verifyNormalDem(activeBrowser) {
         return {
             adapter: adapterFacts,
             proof: {
+                rapidCameraTransition,
                 scenarios,
                 resizedFacts,
                 drainedFacts,
@@ -246,6 +248,47 @@ async function verifyNormalDem(activeBrowser) {
     } finally {
         await context.close()
     }
+}
+
+async function captureRapidCameraTransition(page) {
+
+    const beforeResize = await readDemFacts(page)
+    await page.setViewportSize({ width: 1512, height: 982 })
+    await waitForConvergedFacts(page, facts => (
+        Number(facts.resizeGeneration) > Number(beforeResize.resizeGeneration)
+    ))
+    const beforeSequence = await readDemFacts(page)
+    let finalCamera
+    const stepCount = 84
+    for (let index = 0; index < stepCount; index++) {
+        const phase = index % 28
+        finalCamera = {
+            center: [
+                cameraCenter[0] + Math.sin(index * 0.37) * 0.18,
+                cameraCenter[1] + Math.cos(index * 0.23) * 0.12,
+            ],
+            zoom: 8.5 + ((index * 7) % 24) / 4,
+            pitch: phase < 14 ? phase * 6.2 : (27 - phase) * 6.2,
+            bearing: ((index * 47) % 360) - 180,
+        }
+        await page.evaluate(camera => window.__DEM_LAYER_PROOF__.moveCamera(camera), finalCamera)
+        await delay(5)
+    }
+    const finalFacts = await waitForConvergedFacts(page, facts => (
+        Number(facts.observedFrames) > Number(beforeSequence.observedFrames) &&
+        cameraMatches(facts, finalCamera)
+    ))
+    const transitionResizeGeneration = Number(finalFacts.resizeGeneration)
+    await page.setViewportSize({ width: 1024, height: 768 })
+    const restoredFacts = await waitForConvergedFacts(page, facts => (
+        Number(facts.resizeGeneration) > transitionResizeGeneration
+    ))
+    return Object.freeze({
+        stepCount,
+        finalCamera: Object.freeze(finalCamera),
+        finalFacts,
+        restoredFacts,
+    })
 }
 
 function scenario(name, zoom, pitch, bearing, viewport) {
@@ -815,12 +858,35 @@ function validateResult(result) {
 function validateNormalProof(proof, failures) {
 
     const scenarios = proof.scenarios ?? []
+    const rapidCameraTransition = proof.rapidCameraTransition
     const resized = proof.resizedFacts
     const drained = proof.drainedFacts
     if (scenarios.length !== cameraScenarios.length) {
         failures.push('normal DEM proof did not run every camera scenario')
     }
     const allFacts = []
+    if (rapidCameraTransition?.stepCount !== 84 ||
+        !cameraMatches(
+            rapidCameraTransition?.finalFacts ?? {},
+            rapidCameraTransition?.finalCamera ?? {}
+        )) {
+        failures.push('rapid pitched-to-top-down camera transition did not complete')
+    } else {
+        validateDemFacts(
+            'rapid pitched-to-top-down transition',
+            rapidCameraTransition.finalFacts,
+            failures
+        )
+        validateDemFacts(
+            'rapid transition restored viewport',
+            rapidCameraTransition.restoredFacts,
+            failures
+        )
+        allFacts.push(
+            rapidCameraTransition.finalFacts,
+            rapidCameraTransition.restoredFacts
+        )
+    }
     for (const result of scenarios) {
         if (result.facts?.length !== 3 || result.signatures?.length !== 3) {
             failures.push(`${result.name} did not retain three stable frames`)
@@ -1054,7 +1120,7 @@ function validateDemFacts(label, facts, failures, expectedStatus = 'ready') {
         `${label} render-patch cell-span range`,
         failures
     )
-    const sourceFloorLimited = renderPatchFeedback?.sourceFloorPatchCount >
+    const minimumTrialLimited = renderPatchFeedback?.minimumTrialPatchCount >
         renderPatchFeedback?.framePatchBudget
     if (renderPatchFeedback?.selectedPatchCount !== Number(facts.renderPatchCount) ||
         renderPatchFeedback?.descriptorOverflowCount !== 0 ||
@@ -1062,8 +1128,15 @@ function validateDemFacts(label, facts, failures, expectedStatus = 'ready') {
         renderPatchFeedback?.baselinePatchBudget < 1 ||
         renderPatchFeedback?.framePatchBudget < renderPatchFeedback?.baselinePatchBudget ||
         renderPatchFeedback?.requestedPatchCount < renderPatchFeedback?.selectedPatchCount ||
-        renderPatchFeedback?.budgetLimitedBySourceFloor !== sourceFloorLimited ||
-        (!sourceFloorLimited &&
+        !Number.isSafeInteger(renderPatchFeedback?.minimumTrialPatchCount) ||
+        renderPatchFeedback.minimumTrialPatchCount < 0 ||
+        renderPatchFeedback.minimumTrialPatchCount >
+            renderPatchFeedback.selectedPatchCount ||
+        !Number.isSafeInteger(renderPatchFeedback?.sourceRootPatchCount) ||
+        renderPatchFeedback.sourceRootPatchCount <
+            renderPatchFeedback.minimumTrialPatchCount ||
+        renderPatchFeedback?.budgetLimitedByMinimumTrial !== minimumTrialLimited ||
+        (!minimumTrialLimited &&
             renderPatchFeedback?.selectedPatchCount > renderPatchFeedback?.framePatchBudget) ||
         !Array.isArray(renderPatchLevelRange) || renderPatchLevelRange[0] < 4 ||
         renderPatchLevelRange[1] > 14 ||
@@ -1248,6 +1321,12 @@ function summarizeNormalProof(proof) {
 
     const resize = parseJsonOrUndefined(proof.resizedFacts.lastResizeFacts)
     return {
+        rapidCameraTransition: {
+            stepCount: proof.rapidCameraTransition.stepCount,
+            finalCamera: proof.rapidCameraTransition.finalCamera,
+            final: summarizeFacts(proof.rapidCameraTransition.finalFacts),
+            restored: summarizeFacts(proof.rapidCameraTransition.restoredFacts),
+        },
         scenarios: proof.scenarios.map(result => ({
             name: result.name,
             camera: result.camera,

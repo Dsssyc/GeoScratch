@@ -41,11 +41,14 @@ bias is read back to control the frame. The previous bias may be retained only
 within the budget hysteresis band and at most one quarter-step coarser than the
 current optimum.
 
-The coarsest trial stops at visible source-page roots. If those roots already
-exceed the frame budget, rendering preserves the complete source cut instead of
-truncating descriptors and leaving terrain holes. Delayed diagnostic feedback
-reports the baseline and pitch-adjusted budgets, requested and selected counts,
-source-page floor, selected bias, level range, and overflow counters.
+The final trial stops at visible source-page roots. Counts across the 17 trials
+are not assumed to be monotonic: child AABBs can all be rejected while a
+conservative parent AABB still intersects the frustum. The GPU selects the first
+fine-to-coarse trial inside budget; if none fits, it selects the trial with the
+smallest measured count. It never truncates descriptors or leaves terrain holes.
+Delayed feedback reports the baseline and pitch-adjusted budgets, requested and
+selected counts, minimum-trial and source-root counts, selected bias, level range,
+and overflow counters.
 
 Every render patch retains its explicit Virtual Raster `samplingLevel`. The LoD
 map stores geometry level and sampling level separately, so edge vertex snapping

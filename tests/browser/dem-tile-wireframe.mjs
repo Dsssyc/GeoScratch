@@ -470,7 +470,7 @@ function validateProof(value, processState) {
             sample.renderPatchFeedback?.baselinePatchBudget >= 1 &&
             sample.renderPatchFeedback?.framePatchBudget >=
                 sample.renderPatchFeedback?.baselinePatchBudget &&
-            (sample.renderPatchFeedback?.budgetLimitedBySourceFloor === true ||
+            (sample.renderPatchFeedback?.budgetLimitedByMinimumTrial === true ||
                 sample.renderPatchCount <= sample.renderPatchFeedback?.framePatchBudget) &&
             sample.renderPatchDescriptorOverflowCount === 0 &&
             sample.renderPatchLookupOverflowCount === 0 &&

@@ -113,7 +113,7 @@ demRenderPatchSelectBudgetBias(counts, budget, previousBiasStep): number
 - [x] **Step 2: Expand policy and state contracts**
 
 Add a maximum count ratio of `3`, 17 quarter-level trial counters, selected bias,
-requested count, source-floor count, and baseline/frame budgets.
+requested count, minimum-trial and source-root counts, and baseline/frame budgets.
 
 - [x] **Step 3: Replace vertical AABB area with two horizontal elevation-plane footprints**
 
@@ -134,8 +134,8 @@ reset -> count -> select -> expand -> finalize
 
 - [x] **Step 6: Decode and publish the extended diagnostic state**
 
-The browser dataset must expose requested count, source-floor count, both budgets,
-selected bias, and budget-limited status.
+The browser dataset must expose requested count, minimum-trial and source-root counts,
+both budgets, selected bias, and budget-limited status.
 
 - [x] **Step 7: Run focused render-patch and clean-cut tests**
 
@@ -163,8 +163,8 @@ geometricErrorMeters: matrix.cellSize
 
 - [x] **Step 2: Add browser assertions for budget consistency**
 
-Selected count must be within the frame budget unless the reported source-floor count
-itself exceeds that budget. Descriptor and lookup overflow remain zero.
+Selected count must be within the frame budget unless the minimum measured complete
+cut itself exceeds that budget. Descriptor and lookup overflow remain zero.
 
 - [x] **Step 3: Run all automated verification**
 
@@ -184,6 +184,6 @@ bias, level range, overflow counters, and screenshot evidence.
 
 - [x] **Step 5: Record the accepted implementation and commit**
 
-The ADR must describe the measured GPU normalization, source-floor behavior, and
-verification evidence. Stage only files owned by this change and commit with an
-imperative subject.
+The ADR must describe measured GPU normalization, non-monotonic hierarchical culling,
+minimum-trial fallback, and verification evidence. Stage only files owned by this
+change and commit with an imperative subject.

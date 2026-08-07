@@ -1346,10 +1346,11 @@ function stateSnapshot(
         renderPatchBaselineBudget: renderPatches?.baselinePatchBudget ?? 0,
         renderPatchFrameBudget: renderPatches?.framePatchBudget ?? 0,
         renderPatchRequestedCount: renderPatches?.requestedPatchCount ?? 0,
-        renderPatchSourceFloorCount: renderPatches?.sourceFloorPatchCount ?? 0,
+        renderPatchMinimumTrialCount: renderPatches?.minimumTrialPatchCount ?? 0,
+        renderPatchSourceRootCount: renderPatches?.sourceRootPatchCount ?? 0,
         renderPatchSelectedBiasLevels: renderPatches?.selectedBiasLevels ?? 0,
-        renderPatchBudgetLimitedBySourceFloor:
-            renderPatches?.budgetLimitedBySourceFloor ?? false,
+        renderPatchBudgetLimitedByMinimumTrial:
+            renderPatches?.budgetLimitedByMinimumTrial ?? false,
         renderPatchFeedback: renderPatches,
         convergenceState: latest?.convergenceState ?? 'transitioning',
         frontierFacts: latest,

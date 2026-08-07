@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted; extends ADR-065 with a global frame budget.
+Accepted; extends ADR-065 with a global frame budget. Amended after the rapid-camera
+transition regression described below.
 
 ## Date
 
@@ -23,7 +24,7 @@ for GeoScratch's GPU-resident frontier and indirect rendering path.
 
 The DEM raster frontier also used a mesh-derived error value. Dividing one tile by
 the 64-cell terrain sector coupled data residency to render geometry and could
-create an unnecessarily fine source-page floor.
+create an unnecessarily large source working set.
 
 ## Decision
 
@@ -57,8 +58,11 @@ threshold(step) = maximumCellSpanPixels * 2^(step / 4)
 
 Every trial uses the same parent-before-child stop rule and canonical terminal
 deduplication as emission, so every count describes a complete prefix-free cut.
-The final trial always stops at each visible source-page root and defines the
-smallest cut this stage can produce.
+The final trial always stops at each visible source-page root.
+
+Trial counts are not required to be monotonic. Frustum-AABB testing is conservative:
+a parent can intersect the frustum while all of its refined children are rejected.
+A finer complete visible cut can therefore contain fewer patches than a coarser cut.
 
 For a nominal 512-pixel patch span, the vertical-view baseline is:
 
@@ -67,10 +71,12 @@ For a nominal 512-pixel patch span, the vertical-view baseline is:
 ```
 
 The pitch-adjusted budget interpolates from that baseline to three times the
-baseline with `sin(pitch)^2`. The GPU chooses the least biased complete cut inside
-the budget. A previous choice is retained only when its current count is within
-75% through 100% of the budget and it is no more than one quarter-step coarser
-than the newly desired cut.
+baseline with `sin(pitch)^2`. The GPU scans fine to coarse and chooses the first
+complete cut inside the budget. If none fits, it chooses the trial with the minimum
+measured count rather than assuming the final source-root trial is smallest. A
+previous choice is retained only when its current count is within 75% through 100%
+of the budget and it is no more than one quarter-step coarser than the newly desired
+cut.
 
 The persistent compute order is:
 
@@ -81,13 +87,17 @@ reset -> count 17 trials -> select -> emit -> finalize indirect draw
 The CPU uploads camera metadata but neither traverses the patch tree nor reads a
 count back to control rendering. Delayed readback is diagnostic-only.
 
-### Preserve completeness when the source floor exceeds budget
+### Preserve completeness when no measured trial fits
 
 Render patches currently refine visible resident source pages; they do not merge
-multiple source pages into a synthetic ancestor. When the visible source-page
-count exceeds the frame budget, the complete source cut is retained and feedback
-sets `budgetLimitedBySourceFloor`. Descriptor truncation is forbidden because it
-would create terrain holes and make invocation order an accidental policy.
+multiple source pages into a synthetic ancestor. When every measured complete cut
+exceeds the frame budget, the minimum-count trial is retained and feedback sets
+`budgetLimitedByMinimumTrial`. Descriptor truncation is forbidden because it would
+create terrain holes and make invocation order an accidental policy.
+
+Feedback reports `minimumTrialPatchCount` and `sourceRootPatchCount` separately.
+This prevents conservative hierarchical culling from being misrepresented as a
+source-page floor.
 
 ## Consequences
 
@@ -98,10 +108,11 @@ would create terrain holes and make invocation order an accidental policy.
 - The frame graph adds persistent count and selection kernels but no per-frame GPU
   objects, host-authored instance list, or control readback.
 - Diagnostics expose baseline and frame budgets, requested and selected counts,
-  source floor, selected bias, level range, and both overflow counters.
-- The source-page floor is explicit. Coarsening below it would require a separate
-  render-root authority capable of merging source pages while preserving virtual-
-  raster sampling; this ADR does not hide that as an achieved property.
+  minimum-trial and source-root counts, selected bias, level range, and both
+  overflow counters.
+- Coarsening below every available complete cut would require a separate render-root
+  authority capable of merging source pages while preserving virtual-raster sampling;
+  this ADR does not hide that as an achieved property.
 
 ## Verification
 
@@ -109,8 +120,8 @@ Headless Chrome 151 on Apple Metal produced stable complete cuts with no descrip
 or lookup overflow, no uncaptured WebGPU error, and no device loss.
 
 At 1024 by 768 pixels, top-down `z9`, `z10`, `z12`, and `z14` selected 20, 6, 7,
-and 4 render patches. The corresponding baseline budget was 9; `z9` correctly
-reported a 20-page source floor, while `z12` and `z14` normalized requested counts
+and 4 render patches. The corresponding baseline budget was 9; `z9` reported a
+minimum available count of 20, while `z12` and `z14` normalized requested counts
 of 10 to 7 and 4.
 
 At the same viewport, 45-degree views selected 19 and 18 patches, 70-degree views
@@ -120,6 +131,12 @@ Their pitch-adjusted budgets were 18, 25, and 27 respectively. A 390 by 844,
 
 The wireframe gate confirms distinct stable tile colors, post-stitch triangle
 edges, mixed geometry levels at `z14`, and complete viewport coverage.
+
+The amended rapid-camera gate executes 84 continuous center, zoom, pitch, and
+bearing changes, including a pitched-to-top-down return. It remains `ready` with
+no console or page error. The captured regression sequence
+`[9, 9, 9, 9, 9, 6, 2, ..., 2, 3]` is also retained as a unit test proving that a
+non-monotonic complete-cut series is valid and that its actual minimum is selected.
 
 ## Rejected Alternatives
 
