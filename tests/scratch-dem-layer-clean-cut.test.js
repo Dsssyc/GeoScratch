@@ -166,6 +166,10 @@ describe('DEM Layer clean cut', () => {
         expect(renderPatchSource).to.include('renderPatchLookupCapacity')
         expect(renderPatchShader).to.include('source.samplingLevel')
         expect(renderPatchShader).to.include('projectedCellSpanPixels')
+        expect(renderPatchShader).to.include('countRenderPatchTrials')
+        expect(renderPatchShader).to.include('selectRenderPatchBudget')
+        expect(renderPatchShader).to.include('trialCounts')
+        expect(renderPatchShader).to.include('step < finalStep &&')
         expect(renderPatchShader).to.include('clipFromRelativeWorld')
         expect(renderPatchShader).to.include('minimumCellSpanQ8')
         expect(renderPatchShader).to.include('frameEpoch')
@@ -177,6 +181,10 @@ describe('DEM Layer clean cut', () => {
         expect(renderPatchShader).not.to.include('mapMeta.zoomHint')
         expect(renderPatchShader).to.include('atomicAdd(&renderPatchState.count')
         expect(renderPatchShader).to.include('drawArguments[1] = renderPatchCount')
+        expect(layerSource).to.include('geometricErrorMeters: matrix.cellSize,')
+        expect(layerSource).not.to.include(
+            'geometricErrorMeters: matrix.cellSize * matrix.tileWidth'
+        )
         expect(layerSource).to.include('latestRenderPatchFeedback')
         expect(layerSource).to.include('renderPatchCellSpanRange')
         expect(terrainShader).to.include('fn renderPatchLookup(')
@@ -639,12 +647,12 @@ describe('DEM Layer clean cut', () => {
         expect(initialIdentityFacts).to.deep.include({
             hash: initialIdentityHash,
             uploads: 4,
-            bindLayouts: 6,
-            bindSets: 10,
-            programs: 5,
-            pipelines: 5,
+            bindLayouts: 8,
+            bindSets: 14,
+            programs: 7,
+            pipelines: 7,
             passes: 2,
-            commands: 20,
+            commands: 24,
         })
         expect(graph.persistentFacts()).to.deep.equal(initialPersistentFacts)
 
@@ -679,11 +687,15 @@ describe('DEM Layer clean cut', () => {
             renderMaximumMatrixLevel: 14,
         })
         expect(graph.contractFacts().renderPatches).to.deep.include({
-            selectionPath: 'gpu-projected-grid-spacing-render-patches',
+            selectionPath: 'gpu-normalized-projected-grid-render-patches',
             maximumExtraLevels: 4,
             maximumMatrixLevel: 14,
             dataMaximumMatrixLevel: 10,
             maximumCellSpanPixels: 8,
+            maximumPatchCountRatio: 3,
+            biasStepsPerLevel: 4,
+            biasStepCount: 17,
+            budgetHysteresisRatio: 0.75,
             nominalPatchSpanPixels: 512,
             terrainSectorSize: 64,
         })
@@ -693,7 +705,7 @@ describe('DEM Layer clean cut', () => {
         expect(fake.calls.maps.filter(mapping => (
             mapping.size === graph.contractFacts().frontier.feedbackOutput.layout.byteLength
         ))).to.have.length(2)
-        expect(fake.calls.maps.filter(mapping => mapping.size === 32)).to.have.length(2)
+        expect(fake.calls.maps.filter(mapping => mapping.size === 120)).to.have.length(2)
 
         graph.dispose()
         expect(() => graph.setTerrainPresentation('tile-wireframe'))
@@ -725,6 +737,7 @@ function cameraState(zoomHint, viewport) {
         viewport,
         verticalFovRadians: Math.PI / 3,
         cameraLatitudeRadians: 31.684162 * Math.PI / 180,
+        cameraPitchRadians: 0,
         zoomHint,
     })
 }

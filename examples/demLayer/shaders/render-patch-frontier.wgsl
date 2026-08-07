@@ -7,6 +7,12 @@ struct DemRenderPatchState {
     minimumCellSpanQ8: atomic<u32>,
     maximumCellSpanQ8: atomic<u32>,
     frameEpoch: atomic<u32>,
+    baselinePatchBudget: atomic<u32>,
+    framePatchBudget: atomic<u32>,
+    requestedPatchCount: atomic<u32>,
+    selectedBiasStep: atomic<u32>,
+    sourceFloorPatchCount: atomic<u32>,
+    trialCounts: array<atomic<u32>, 17>,
 };
 
 struct DemRenderPatchAtomicLookupEntry {
@@ -177,20 +183,17 @@ fn patchVisible(bounds: DemRenderPatchBounds) -> bool {
     return true;
 }
 
-fn patchBoundsCorner(bounds: DemRenderPatchBounds, index: u32) -> vec3f {
-    return vec3f(
-        select(bounds.minimum.x, bounds.maximum.x, (index & 1u) != 0u),
-        select(bounds.minimum.y, bounds.maximum.y, (index & 2u) != 0u),
-        select(bounds.minimum.z, bounds.maximum.z, (index & 4u) != 0u),
-    );
-}
-
-fn projectedCellSpanPixels(bounds: DemRenderPatchBounds) -> f32 {
+fn projectedPlaneCellSpanPixels(bounds: DemRenderPatchBounds, elevation: f32) -> f32 {
     var minimumNdc = vec2f(1e20f);
     var maximumNdc = vec2f(-1e20f);
-    for (var index = 0u; index < 8u; index += 1u) {
+    for (var index = 0u; index < 4u; index += 1u) {
+        let point = vec3f(
+            select(bounds.minimum.x, bounds.maximum.x, (index & 1u) != 0u),
+            select(bounds.minimum.y, bounds.maximum.y, (index & 2u) != 0u),
+            elevation,
+        );
         let clip = mapMeta.clipFromRelativeWorld * vec4f(
-            patchBoundsCorner(bounds, index),
+            point,
             1.0f,
         );
         if (clip.w <= 1e-5f) {
@@ -208,6 +211,26 @@ fn projectedCellSpanPixels(bounds: DemRenderPatchBounds) -> f32 {
     );
     return sqrt(projectedSize.x * projectedSize.y) /
         f32(renderPatchPolicy.terrainSectorSize);
+}
+
+fn projectedCellSpanPixels(bounds: DemRenderPatchBounds) -> f32 {
+    return max(
+        projectedPlaneCellSpanPixels(bounds, bounds.minimum.z),
+        projectedPlaneCellSpanPixels(bounds, bounds.maximum.z),
+    );
+}
+
+fn trialCellSpanThreshold(biasStep: u32) -> f32 {
+    return renderPatchPolicy.maximumCellSpanPixels * exp2(
+        f32(biasStep) / f32(renderPatchPolicy.biasStepsPerLevel),
+    );
+}
+
+fn canonicalTerminalForDepth(terminalRow: u32, terminalCol: u32, depth: u32) -> bool {
+    let remainingBits = renderPatchPolicy.maximumExtraLevels - depth;
+    let duplicateMask = (1u << remainingBits) - 1u;
+    return (terminalRow & duplicateMask) == 0u &&
+        (terminalCol & duplicateMask) == 0u;
 }
 
 fn cellSpanQ8(cellSpanPixels: f32) -> u32 {
@@ -282,10 +305,121 @@ fn resetRenderPatches() {
     atomicStore(&renderPatchState.minimumCellSpanQ8, 0xffffffffu);
     atomicStore(&renderPatchState.maximumCellSpanQ8, 0u);
     atomicStore(&renderPatchState.frameEpoch, mapMeta.frameEpoch);
+    atomicStore(&renderPatchState.baselinePatchBudget, 0u);
+    atomicStore(&renderPatchState.framePatchBudget, 0u);
+    atomicStore(&renderPatchState.requestedPatchCount, 0u);
+    atomicStore(&renderPatchState.sourceFloorPatchCount, 0u);
+    for (var step = 0u; step < 17u; step += 1u) {
+        atomicStore(&renderPatchState.trialCounts[step], 0u);
+    }
     drawArguments[0] = renderPatchPolicy.terrainVertexCount;
     drawArguments[1] = 0u;
     drawArguments[2] = 0u;
     drawArguments[3] = 0u;
+}
+
+@compute @workgroup_size(64)
+fn countRenderPatchTrials(@builtin(global_invocation_id) globalId: vec3u) {
+    let terminalWidth = 1u << renderPatchPolicy.maximumExtraLevels;
+    let candidatesPerSource = terminalWidth * terminalWidth;
+    let sourceIndex = globalId.x / candidatesPerSource;
+    let terminalIndex = globalId.x % candidatesPerSource;
+    let sourceCount = sourceDrawArguments[1];
+    if (sourceIndex >= sourceCount) {
+        return;
+    }
+    let source = sourceVisibleInstances[sourceIndex];
+    let terminalRow = terminalIndex / terminalWidth;
+    let terminalCol = terminalIndex % terminalWidth;
+    let availableDepth = min(
+        renderPatchPolicy.maximumExtraLevels,
+        renderPatchPolicy.renderMaximumMatrixLevel - source.matrixLevel,
+    );
+    var visibleDepthMask = 0u;
+    var cellSpans: array<f32, 5>;
+
+    for (var depth = 0u; depth <= 4u; depth += 1u) {
+        if (depth > availableDepth) { break; }
+        let remainingBits = renderPatchPolicy.maximumExtraLevels - depth;
+        let scale = 1u << depth;
+        let matrixLevel = source.matrixLevel + depth;
+        let tileRow = source.tileRow * scale + (terminalRow >> remainingBits);
+        let tileCol = source.tileCol * scale + (terminalCol >> remainingBits);
+        let bounds = patchBounds(matrixLevel, tileRow, tileCol);
+        if (!patchVisible(bounds)) { break; }
+        visibleDepthMask |= 1u << depth;
+        cellSpans[depth] = projectedCellSpanPixels(bounds);
+    }
+
+    let finalStep = renderPatchPolicy.biasStepCount - 1u;
+    for (var step = 0u; step < 17u; step += 1u) {
+        let threshold = trialCellSpanThreshold(step);
+        for (var depth = 0u; depth <= 4u; depth += 1u) {
+            if (depth > availableDepth || (visibleDepthMask & (1u << depth)) == 0u) {
+                break;
+            }
+            let refine = step < finalStep &&
+                depth < availableDepth && cellSpans[depth] > threshold;
+            if (refine) { continue; }
+            if (canonicalTerminalForDepth(terminalRow, terminalCol, depth)) {
+                atomicAdd(&renderPatchState.trialCounts[step], 1u);
+            }
+            break;
+        }
+    }
+}
+
+@compute @workgroup_size(1)
+fn selectRenderPatchBudget() {
+    let nominalPatchSpan = max(
+        1.0f,
+        f32(renderPatchPolicy.terrainSectorSize) *
+            renderPatchPolicy.maximumCellSpanPixels,
+    );
+    let viewportColumns = u32(ceil(mapMeta.viewport.x / nominalPatchSpan)) + 1u;
+    let viewportRows = u32(ceil(mapMeta.viewport.y / nominalPatchSpan)) + 1u;
+    let baselinePatchBudget = min(
+        renderPatchPolicy.maximumRenderPatches,
+        viewportColumns * viewportRows,
+    );
+    let pitchSine = sin(clamp(mapMeta.cameraPitchRadians, 0.0f, 1.57079632679f));
+    let pitchWeight = pitchSine * pitchSine;
+    let pitchRatio = 1.0f +
+        (renderPatchPolicy.maximumPatchCountRatio - 1.0f) * pitchWeight;
+    let framePatchBudget = min(
+        renderPatchPolicy.maximumRenderPatches,
+        u32(ceil(f32(baselinePatchBudget) * pitchRatio)),
+    );
+    let finalStep = renderPatchPolicy.biasStepCount - 1u;
+    var desiredBiasStep = finalStep;
+    for (var step = 0u; step < 17u; step += 1u) {
+        if (step >= renderPatchPolicy.biasStepCount) { break; }
+        if (atomicLoad(&renderPatchState.trialCounts[step]) <= framePatchBudget) {
+            desiredBiasStep = step;
+            break;
+        }
+    }
+    let previousBiasStep = min(
+        atomicLoad(&renderPatchState.selectedBiasStep),
+        finalStep,
+    );
+    let previousCount = atomicLoad(&renderPatchState.trialCounts[previousBiasStep]);
+    let retainPrevious = previousCount <= framePatchBudget &&
+        f32(previousCount) >= f32(framePatchBudget) *
+            renderPatchPolicy.budgetHysteresisRatio &&
+        previousBiasStep <= desiredBiasStep + 1u;
+    let selectedBiasStep = select(desiredBiasStep, previousBiasStep, retainPrevious);
+    atomicStore(&renderPatchState.baselinePatchBudget, baselinePatchBudget);
+    atomicStore(&renderPatchState.framePatchBudget, framePatchBudget);
+    atomicStore(
+        &renderPatchState.requestedPatchCount,
+        atomicLoad(&renderPatchState.trialCounts[0]),
+    );
+    atomicStore(
+        &renderPatchState.sourceFloorPatchCount,
+        atomicLoad(&renderPatchState.trialCounts[finalStep]),
+    );
+    atomicStore(&renderPatchState.selectedBiasStep, selectedBiasStep);
 }
 
 @compute @workgroup_size(64)
@@ -305,6 +439,8 @@ fn expandRenderPatches(@builtin(global_invocation_id) globalId: vec3u) {
         renderPatchPolicy.maximumExtraLevels,
         renderPatchPolicy.renderMaximumMatrixLevel - source.matrixLevel,
     );
+    let selectedBiasStep = atomicLoad(&renderPatchState.selectedBiasStep);
+    let selectedThreshold = trialCellSpanThreshold(selectedBiasStep);
 
     for (var depth = 0u; depth <= 4u; depth += 1u) {
         if (depth > availableDepth) { return; }
@@ -317,13 +453,11 @@ fn expandRenderPatches(@builtin(global_invocation_id) globalId: vec3u) {
         if (!patchVisible(bounds)) { return; }
 
         let cellSpanPixels = projectedCellSpanPixels(bounds);
-        let refine = depth < availableDepth &&
-            cellSpanPixels > renderPatchPolicy.maximumCellSpanPixels;
+        let refine = selectedBiasStep < renderPatchPolicy.biasStepCount - 1u &&
+            depth < availableDepth && cellSpanPixels > selectedThreshold;
         if (refine) { continue; }
 
-        let duplicateMask = (1u << remainingBits) - 1u;
-        if ((terminalRow & duplicateMask) != 0u ||
-            (terminalCol & duplicateMask) != 0u) {
+        if (!canonicalTerminalForDepth(terminalRow, terminalCol, depth)) {
             return;
         }
         emitRenderPatch(source, matrixLevel, tileRow, tileCol, cellSpanPixels);

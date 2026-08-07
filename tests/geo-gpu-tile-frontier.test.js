@@ -150,6 +150,7 @@ function createFixture(options = {}) {
         viewport: [ 1024, 1024 ],
         verticalFovRadians: Math.PI / 2,
         cameraLatitudeRadians: 0,
+        cameraPitchRadians: 0,
         zoomHint: 2,
         frameEpoch: 10,
         residencySnapshotEpoch: SNAPSHOT_EPOCH,
@@ -1382,6 +1383,7 @@ describe('Geo GPU tile frontier contracts and reference oracle', () => {
                 zoomHint: 128,
                 frameEpoch: 132,
                 residencySnapshotEpoch: 136,
+                cameraPitchRadians: 140,
             },
         })
         expect(gpuTileFrontierLayouts.policy).to.deep.include({

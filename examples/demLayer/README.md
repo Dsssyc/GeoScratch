@@ -26,11 +26,26 @@ the page, alter cache query parameters, or rebuild the virtual raster.
 ## Data and geometry LoD
 
 The source-backed `WebMercatorQuad` data frontier is capped by the manifest at
-`z10`. Terrain geometry is independent: a persistent GPU compute stage expands
-visible resident pages into frustum-culled render patches through `z14`, then
-writes the LoD-map and terrain indirect draw arguments. Zooming beyond `z10`
-therefore continues to refine the 64 by 64 terrain sectors without requesting,
-decoding, or caching synthetic higher-level raster pages.
+`z10`. Its level metric is one raster texel (`TileMatrix.cellSize`), independent
+of the 64 by 64 render mesh. Terrain geometry is a separate authority: persistent
+GPU compute stages expand visible resident pages into frustum-culled render
+patches through `z14`, then write the logical-patch lookup and terrain indirect
+draw arguments. Zooming beyond `z10` therefore continues to refine geometry
+without requesting, decoding, or caching synthetic higher-level raster pages.
+
+Render-patch selection combines local projected grid spacing with a global,
+pitch-aware frame budget. The GPU counts 17 complete quadtree cuts at quarter-LoD
+thresholds, selects the finest cut inside the budget, emits that cut, and finalizes
+the indirect draw count in one ordered compute pass. No patch count or selected
+bias is read back to control the frame. The previous bias may be retained only
+within the budget hysteresis band and at most one quarter-step coarser than the
+current optimum.
+
+The coarsest trial stops at visible source-page roots. If those roots already
+exceed the frame budget, rendering preserves the complete source cut instead of
+truncating descriptors and leaving terrain holes. Delayed diagnostic feedback
+reports the baseline and pitch-adjusted budgets, requested and selected counts,
+source-page floor, selected bias, level range, and overflow counters.
 
 Every render patch retains its explicit Virtual Raster `samplingLevel`. The LoD
 map stores geometry level and sampling level separately, so edge vertex snapping

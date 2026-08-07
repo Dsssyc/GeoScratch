@@ -412,9 +412,9 @@ function validateProof(value, processState) {
         wireframe.stableIdentityHash === restored?.stableIdentityHash &&
         JSON.stringify(baseline.identityFacts) === JSON.stringify(wireframe.identityFacts) &&
         JSON.stringify(wireframe.identityFacts) === JSON.stringify(restored.identityFacts) &&
-        baseline.identityFacts?.programs === 5 &&
-        baseline.identityFacts?.pipelines === 5 &&
-        baseline.identityFacts?.commands === 20,
+        baseline.identityFacts?.programs === 7 &&
+        baseline.identityFacts?.pipelines === 7 &&
+        baseline.identityFacts?.commands === 24,
     'live presentation switching rebuilt or replaced the persistent DEM graph')
 
     expect(failures,
@@ -428,7 +428,7 @@ function validateProof(value, processState) {
         baseline?.graphContract?.commandIds?.drawTerrain?.shaded?.length === 2 &&
         baseline.graphContract.commandIds.drawTerrain.tileWireframe?.length === 2 &&
         baseline.graphContract.commandIds.renderPatches?.length === 2 &&
-        baseline.graphContract.commandIds.renderPatches.every(ids => ids.length === 5) &&
+        baseline.graphContract.commandIds.renderPatches.every(ids => ids.length === 7) &&
         baseline.graphContract.dataMaximumMatrixLevel === 10 &&
         baseline.graphContract.renderMaximumMatrixLevel === 14 &&
         baseline.graphContract.renderPatches?.maximumExtraLevels === 4,
@@ -443,7 +443,7 @@ function validateProof(value, processState) {
     const requestedDataLevels = value.events?.tileRequestLevels ?? []
     expect(failures,
         baseline.graphContract?.renderPatches?.selectionPath ===
-            'gpu-projected-grid-spacing-render-patches' &&
+            'gpu-normalized-projected-grid-render-patches' &&
         baseline.graphContract.renderPatches.maximumCellSpanPixels === 8 &&
         baseline.graphContract.renderPatches.nominalPatchSpanPixels === 512 &&
         baseline.graphContract.renderPatches.renderPatchLookupCapacity >
@@ -466,6 +466,12 @@ function validateProof(value, processState) {
             sample.renderPatchCount <=
                 baseline.graphContract.renderPatches.maximumRenderPatches &&
             sample.renderPatchFeedback?.selectedPatchCount === sample.renderPatchCount &&
+            sample.renderPatchFeedback?.requestedPatchCount >= sample.renderPatchCount &&
+            sample.renderPatchFeedback?.baselinePatchBudget >= 1 &&
+            sample.renderPatchFeedback?.framePatchBudget >=
+                sample.renderPatchFeedback?.baselinePatchBudget &&
+            (sample.renderPatchFeedback?.budgetLimitedBySourceFloor === true ||
+                sample.renderPatchCount <= sample.renderPatchFeedback?.framePatchBudget) &&
             sample.renderPatchDescriptorOverflowCount === 0 &&
             sample.renderPatchLookupOverflowCount === 0 &&
             sample.renderPatchFeedback?.frameEpoch === sample.renderPatchFrameEpoch &&
@@ -488,10 +494,11 @@ function validateProof(value, processState) {
     )}`)
 
     expect(failures,
-        wireframe?.renderPatchCount <= 64 &&
+        wireframe?.renderPatchCount <= wireframe?.renderPatchFeedback?.framePatchBudget &&
         wireframe.renderPatchLevelRange?.[0] >= 9 &&
         wireframe.renderPatchLevelRange?.[1] <= 11 &&
-        wireframe.renderPatchCellSpanRange?.[1] <= 8,
+        wireframe.renderPatchCellSpanRange?.[1] <= 8 * 2 **
+            wireframe.renderPatchFeedback.selectedBiasLevels,
     `zoom-10 pitched geometry remained over-dense: ${JSON.stringify({
         count: wireframe?.renderPatchCount,
         levels: wireframe?.renderPatchLevelRange,

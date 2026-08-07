@@ -84,11 +84,14 @@ The selection pass chooses the least coarsening trial whose complete-cut count i
 greater than the frame budget.
 
 The previously selected bias remains active while its current count lies between 75%
-and 100% of the budget. This bounded hysteresis avoids threshold oscillation without
-CPU authority, unbounded history, or delayed feedback control.
+and 100% of the budget and it is at most one quarter-level step coarser than the
+newly desired bias. This bounded hysteresis avoids threshold oscillation without
+letting a stale camera pose retain a materially coarser cut. It requires no CPU
+authority, unbounded history, or delayed feedback control.
 
-If even the coarsest render trial exceeds the budget, the source-page floor remains
-drawable and the feedback reports that fact. Emission is never truncated.
+The final trial unconditionally stops at each visible source-page root. If this
+source-page floor exceeds the budget, that complete cut remains drawable and the
+feedback reports the constraint. Emission is never truncated.
 
 ### GPU frame order
 
@@ -136,4 +139,3 @@ constraint without making delayed readback authoritative.
 - [MapLibre covering tiles](https://github.com/maplibre/maplibre-gl-js/blob/main/src/geo/projection/covering_tiles.ts)
 - [MapLibre covering-tiles guide](https://github.com/maplibre/maplibre-gl-js/blob/main/developer-guides/covering-tiles.md)
 - [Cesium terrain quadtree](https://github.com/CesiumGS/cesium/blob/main/packages/engine/Source/Scene/QuadtreePrimitive.js)
-

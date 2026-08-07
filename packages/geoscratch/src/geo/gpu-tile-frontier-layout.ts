@@ -22,6 +22,7 @@ export type GpuTileFrontierView = Readonly<{
     viewport: readonly [number, number]
     verticalFovRadians: number
     cameraLatitudeRadians: number
+    cameraPitchRadians: number
     zoomHint: number
     frameEpoch: number
     residencySnapshotEpoch: number
@@ -158,6 +159,7 @@ export const gpuTileFrontierMapMetaCodec = layoutCodec({
         { name: 'zoomHint', type: 'f32' },
         { name: 'frameEpoch', type: 'u32' },
         { name: 'residencySnapshotEpoch', type: 'u32' },
+        { name: 'cameraPitchRadians', type: 'f32' },
     ],
 }, { usage: [ 'uniform', 'storage', 'readback' ] })
 

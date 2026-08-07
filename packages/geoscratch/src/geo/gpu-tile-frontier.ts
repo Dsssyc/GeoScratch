@@ -1679,6 +1679,8 @@ function validateView(frontier: GpuTileFrontier, view: GpuTileFrontierView): voi
         view.verticalFovRadians <= 0 || view.verticalFovRadians >= Math.PI ||
         !Number.isFinite(view.cameraLatitudeRadians) ||
         Math.abs(view.cameraLatitudeRadians) > Math.PI / 2 ||
+        !Number.isFinite(view.cameraPitchRadians) ||
+        view.cameraPitchRadians < 0 || view.cameraPitchRadians > Math.PI / 2 ||
         !Number.isFinite(view.zoomHint) ||
         !u32(view.frameEpoch) || !u32(view.residencySnapshotEpoch) ||
         view.residencySnapshotEpoch !== acknowledgedEpoch) {
@@ -1719,6 +1721,7 @@ function mapMetaRecord(
         zoomHint: view.zoomHint,
         frameEpoch: view.frameEpoch,
         residencySnapshotEpoch: view.residencySnapshotEpoch,
+        cameraPitchRadians: view.cameraPitchRadians,
     }
 }
 

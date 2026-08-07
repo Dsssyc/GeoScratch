@@ -14,6 +14,7 @@ const tileServerRoot = resolve(examplesRoot, 'demLayer/tile-server')
 const tileBuildEntry = resolve(tileServerRoot, '.venv/bin/dem-tile-build')
 const tileServeEntry = resolve(tileServerRoot, '.venv/bin/dem-tile-serve')
 const timeout = positiveInteger(process.env.DEM_LAYER_BROWSER_TIMEOUT_MS, 120_000)
+const headless = process.env.GEO_VIRTUAL_RASTER_DEM_HEADLESS === '1'
 const outputDirectory = resolve(
     process.env.DEM_LAYER_BROWSER_OUTPUT ?? '/tmp/geoscratch-dem-layer-browser'
 )
@@ -43,6 +44,7 @@ const cameraScenarios = Object.freeze([
     scenario('flat-z9', 9, 0, 0),
     scenario('flat-z10', 10, 0, 0),
     scenario('flat-z12', 12, 0, 0),
+    scenario('flat-z14', 14, 0, 0),
     scenario('pitch45-bearing90-z9', 9, 45, 90),
     scenario('pitch45-bearing225-z10', 10, 45, 225),
     scenario('pitch70-bearing0-z9', 9, 70, 0),
@@ -82,7 +84,7 @@ try {
     await waitForVite(vite, `${baseUrl}/demLayer/index.html`)
     browser = await chromium.launch({
         channel: 'chrome',
-        headless: false,
+        headless,
         args: [ '--enable-unsafe-webgpu' ],
     })
     browserVersion = await browser.version()
@@ -139,7 +141,7 @@ const failures = validateResult({
 const result = {
     schemaVersion: 1,
     browserVersion,
-    headed: true,
+    headed: !headless,
     baseUrl,
     tileBaseUrl,
     outputDirectory,
@@ -858,6 +860,16 @@ function validateNormalProof(proof, failures) {
             }
         }
     }
+    const normalizationProofs = scenarios.flatMap(result => result.facts.map(facts => (
+        parseJsonOrUndefined(facts.renderPatchFeedback)
+    ))).filter(feedback => (
+        feedback?.selectedBiasStep > 0 &&
+        feedback?.requestedPatchCount > feedback?.selectedPatchCount &&
+        feedback?.selectedPatchCount <= feedback?.framePatchBudget
+    ))
+    if (normalizationProofs.length === 0) {
+        failures.push('no camera scenario exercised GPU render-patch budget normalization')
+    }
     validateDemFacts('resized', resized, failures)
     validateDemFacts('drained', drained, failures, 'stopped')
     allFacts.push(resized, drained)
@@ -1010,10 +1022,12 @@ function validateDemFacts(label, facts, failures, expectedStatus = 'ready') {
         contract?.dataMaximumMatrixLevel !== 10 ||
         contract?.renderMaximumMatrixLevel !== 14 ||
         contract?.renderPatches?.selectionPath !==
-            'gpu-projected-grid-spacing-render-patches' ||
+            'gpu-normalized-projected-grid-render-patches' ||
         contract?.renderPatches?.maximumExtraLevels !== 4 ||
         contract?.renderPatches?.maximumCellSpanPixels !== 8 ||
         contract?.renderPatches?.nominalPatchSpanPixels !== 512 ||
+        contract?.renderPatches?.maximumPatchCountRatio !== 3 ||
+        contract?.renderPatches?.biasStepCount !== 17 ||
         contract?.renderPatches?.renderPatchLookupCapacity <=
             contract?.renderPatches?.maximumRenderPatches ||
         contract?.terrainVertexCount !== 24_576 ||
@@ -1040,9 +1054,17 @@ function validateDemFacts(label, facts, failures, expectedStatus = 'ready') {
         `${label} render-patch cell-span range`,
         failures
     )
+    const sourceFloorLimited = renderPatchFeedback?.sourceFloorPatchCount >
+        renderPatchFeedback?.framePatchBudget
     if (renderPatchFeedback?.selectedPatchCount !== Number(facts.renderPatchCount) ||
         renderPatchFeedback?.descriptorOverflowCount !== 0 ||
         renderPatchFeedback?.lookupOverflowCount !== 0 ||
+        renderPatchFeedback?.baselinePatchBudget < 1 ||
+        renderPatchFeedback?.framePatchBudget < renderPatchFeedback?.baselinePatchBudget ||
+        renderPatchFeedback?.requestedPatchCount < renderPatchFeedback?.selectedPatchCount ||
+        renderPatchFeedback?.budgetLimitedBySourceFloor !== sourceFloorLimited ||
+        (!sourceFloorLimited &&
+            renderPatchFeedback?.selectedPatchCount > renderPatchFeedback?.framePatchBudget) ||
         !Array.isArray(renderPatchLevelRange) || renderPatchLevelRange[0] < 4 ||
         renderPatchLevelRange[1] > 14 ||
         !Array.isArray(renderPatchCellSpanRange) || renderPatchCellSpanRange[0] < 0 ||
@@ -1273,6 +1295,7 @@ function summarizeNormalProof(proof) {
 function summarizeFacts(facts) {
 
     const frontier = parseJsonOrUndefined(facts.frontier)
+    const renderPatchFeedback = parseJsonOrUndefined(facts.renderPatchFeedback)
     return {
         status: facts.status,
         frames: Number(facts.frames),
@@ -1284,6 +1307,10 @@ function summarizeFacts(facts) {
             frontier?.maximumSelectedMatrixLevel,
         ],
         convergenceState: frontier?.convergenceState,
+        renderPatchCount: Number(facts.renderPatchCount),
+        renderPatchLevelRange: parseJsonOrUndefined(facts.renderPatchLevelRange),
+        renderPatchCellSpanRange: parseJsonOrUndefined(facts.renderPatchCellSpanRange),
+        renderPatchFeedback,
         cameraView: parseJsonOrUndefined(facts.cameraView),
         stableIdentityCount: Number(facts.currentStableIdentityCount),
         stableIdentityHash: facts.currentStableIdentityHash,

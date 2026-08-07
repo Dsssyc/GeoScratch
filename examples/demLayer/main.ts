@@ -488,6 +488,16 @@ function publishFrameFacts({
         state.renderPatchLookupOverflowCount
     )
     canvas.dataset.renderPatchFrameEpoch = String(state.renderPatchFrameEpoch ?? '')
+    canvas.dataset.renderPatchBaselineBudget = String(state.renderPatchBaselineBudget)
+    canvas.dataset.renderPatchFrameBudget = String(state.renderPatchFrameBudget)
+    canvas.dataset.renderPatchRequestedCount = String(state.renderPatchRequestedCount)
+    canvas.dataset.renderPatchSourceFloorCount = String(state.renderPatchSourceFloorCount)
+    canvas.dataset.renderPatchSelectedBiasLevels = String(
+        state.renderPatchSelectedBiasLevels
+    )
+    canvas.dataset.renderPatchBudgetLimitedBySourceFloor = String(
+        state.renderPatchBudgetLimitedBySourceFloor
+    )
     canvas.dataset.renderPatchFeedback = JSON.stringify(
         state.renderPatchFeedback ?? null
     )

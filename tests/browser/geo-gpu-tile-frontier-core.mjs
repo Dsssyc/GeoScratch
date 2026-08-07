@@ -2198,6 +2198,7 @@ fn capture(@builtin(global_invocation_id) id: vec3u) {
             viewport: [ 1024, 1024 ],
             verticalFovRadians: Math.PI / 2,
             cameraLatitudeRadians: 0,
+            cameraPitchRadians: 0,
             zoomHint: options.zoomHint,
             frameEpoch: options.frameEpoch,
             residencySnapshotEpoch: options.snapshotEpoch,
@@ -2219,6 +2220,7 @@ fn capture(@builtin(global_invocation_id) id: vec3u) {
             options.far
         )
         const [ cameraHigh, cameraLow ] = splitVector(options.camera)
+        const directionLength = Math.hypot(...options.direction)
         return {
             clipFromRelativeWorld: mat4.multiply(projection, viewMatrix),
             cameraHigh,
@@ -2226,6 +2228,10 @@ fn capture(@builtin(global_invocation_id) id: vec3u) {
             viewport: [ 1024, 1024 ],
             verticalFovRadians: options.verticalFovRadians,
             cameraLatitudeRadians: 0,
+            cameraPitchRadians: Math.acos(Math.max(
+                -1,
+                Math.min(1, -options.direction[2] / directionLength)
+            )),
             zoomHint: options.zoomHint,
             frameEpoch: options.frameEpoch,
             residencySnapshotEpoch: options.snapshotEpoch,

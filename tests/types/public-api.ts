@@ -306,6 +306,7 @@ const typedFrontierView: GpuTileFrontierView = {
     viewport: [ 1920, 1080 ],
     verticalFovRadians: 1,
     cameraLatitudeRadians: 0,
+    cameraPitchRadians: 0,
     zoomHint: 0,
     frameEpoch: 1,
     residencySnapshotEpoch: 1,

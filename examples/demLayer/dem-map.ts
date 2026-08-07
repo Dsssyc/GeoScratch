@@ -272,6 +272,7 @@ export function readDemCameraState(
     ], clipFromRelativeWorld)
     const verticalFovRadians = radiansFromTransformValue(transform._fov, transform.fov)
     const center = map.getCenter()
+    const pitchDegrees = map.getPitch()
 
     return Object.freeze({
         far,
@@ -282,9 +283,10 @@ export function readDemCameraState(
         viewport: [ viewport.width, viewport.height ] as const,
         verticalFovRadians,
         cameraLatitudeRadians: cameraPosition.lngLat.lat * Math.PI / 180,
+        cameraPitchRadians: pitchDegrees * Math.PI / 180,
         zoomHint: map.getZoom(),
         center: [ center.lng, center.lat ] as const,
-        pitchDegrees: map.getPitch(),
+        pitchDegrees,
         bearingDegrees: map.getBearing(),
     })
 }

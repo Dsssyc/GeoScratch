@@ -120,6 +120,7 @@ async function createFeedbackFixture(options = {}) {
         viewport: [ 1024, 1024 ],
         verticalFovRadians: Math.PI / 2,
         cameraLatitudeRadians: 0,
+        cameraPitchRadians: 0,
         zoomHint: 1,
         frameEpoch,
         residencySnapshotEpoch: gpuState.facts().snapshotEpoch,

@@ -10,6 +10,63 @@ const {
 
 describe('DEM render-patch frontier', () => {
 
+    it('derives a pitch-aware frame budget from the nominal viewport cover', () => {
+
+        expect(renderPatch.demRenderPatchFrameBudget).to.be.a('function')
+        expect(renderPatch.demRenderPatchFrameBudget({
+            viewport: [ 1024, 768 ],
+            cameraPitchRadians: 0,
+        })).to.deep.equal({
+            baselinePatchBudget: 9,
+            framePatchBudget: 9,
+        })
+        expect(renderPatch.demRenderPatchFrameBudget({
+            viewport: [ 1024, 768 ],
+            cameraPitchRadians: Math.PI / 3,
+        })).to.deep.equal({
+            baselinePatchBudget: 9,
+            framePatchBudget: 23,
+        })
+        expect(renderPatch.demRenderPatchFrameBudget({
+            viewport: [ 1024, 768 ],
+            cameraPitchRadians: Math.PI / 2,
+            maximumRenderPatches: 20,
+        })).to.deep.equal({
+            baselinePatchBudget: 9,
+            framePatchBudget: 20,
+        })
+    })
+
+    it('chooses the finest complete cut inside budget with bounded hysteresis', () => {
+
+        expect(renderPatch.demRenderPatchSelectBudgetBias).to.be.a('function')
+        expect(renderPatch.demRenderPatchSelectBudgetBias(
+            [ 80, 52, 27, 8 ],
+            30,
+            0
+        )).to.equal(2)
+        expect(renderPatch.demRenderPatchSelectBudgetBias(
+            [ 29, 23, 8 ],
+            30,
+            1
+        )).to.equal(1)
+        expect(renderPatch.demRenderPatchSelectBudgetBias(
+            [ 18, 17, 16, 15 ],
+            18,
+            3
+        )).to.equal(0)
+        expect(renderPatch.demRenderPatchSelectBudgetBias(
+            [ 50, 31, 28 ],
+            30,
+            1
+        )).to.equal(2)
+        expect(renderPatch.demRenderPatchSelectBudgetBias(
+            [ 80, 52, 40 ],
+            30,
+            0
+        )).to.equal(2)
+    })
+
     it('selects geometry detail from projected grid spacing after raster data reaches z10', () => {
 
         expect(DEM_MAX_RENDER_MATRIX_LEVEL).to.equal(14)
@@ -63,8 +120,9 @@ describe('DEM render-patch frontier', () => {
 
     it('decodes bounded delayed GPU selection facts', () => {
 
-        const words = new Uint32Array([
-            384,
+        const words = new Uint32Array(30)
+        words.set([
+            20,
             0,
             0,
             10,
@@ -72,14 +130,23 @@ describe('DEM render-patch frontier', () => {
             3 * 256,
             8 * 256,
             41,
+            9,
+            23,
+            80,
+            3,
+            8,
         ])
+        words.set([
+            80, 52, 27, 20, 18, 16, 14, 12, 11,
+            10, 9, 9, 8, 8, 8, 8, 8,
+        ], 13)
         const facts = renderPatch.decodeDemRenderPatchState(
             new Uint8Array(words.buffer),
             { maximumRenderPatches: 12_544, expectedFrameEpoch: 41 }
         )
 
         expect(facts).to.deep.equal({
-            selectedPatchCount: 384,
+            selectedPatchCount: 20,
             descriptorOverflowCount: 0,
             lookupOverflowCount: 0,
             minimumMatrixLevel: 10,
@@ -87,6 +154,13 @@ describe('DEM render-patch frontier', () => {
             minimumCellSpanPixels: 3,
             maximumCellSpanPixels: 8,
             frameEpoch: 41,
+            baselinePatchBudget: 9,
+            framePatchBudget: 23,
+            requestedPatchCount: 80,
+            sourceFloorPatchCount: 8,
+            selectedBiasStep: 3,
+            selectedBiasLevels: 0.75,
+            budgetLimitedBySourceFloor: false,
         })
     })
 
@@ -119,7 +193,7 @@ describe('DEM render-patch frontier', () => {
             maximumMatrixLevel: 15,
         })).to.throw('matrix')
         expect(() => renderPatch.decodeDemRenderPatchState(
-            new Uint8Array(32),
+            new Uint8Array(120),
             { maximumRenderPatches: 12_544, expectedFrameEpoch: 9 }
         )).to.throw('frame epoch')
     })

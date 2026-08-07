@@ -472,6 +472,7 @@ function validateView(view: GpuTileFrontierView): void {
         ...view.viewport,
         view.verticalFovRadians,
         view.cameraLatitudeRadians,
+        view.cameraPitchRadians,
         view.zoomHint,
         view.frameEpoch,
         view.residencySnapshotEpoch,
@@ -484,6 +485,8 @@ function validateView(view: GpuTileFrontierView): void {
         view.viewport.some(value => value <= 0) ||
         view.verticalFovRadians <= 0 ||
         view.verticalFovRadians >= Math.PI ||
+        view.cameraPitchRadians < 0 ||
+        view.cameraPitchRadians > Math.PI / 2 ||
         !u32(view.frameEpoch) ||
         !u32(view.residencySnapshotEpoch)) {
         invalidReference('GPU tile frontier view facts must be finite and dimensionally exact.', view)

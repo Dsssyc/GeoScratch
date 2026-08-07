@@ -372,6 +372,7 @@ export async function createDemLayer({
             viewport: camera.viewport,
             verticalFovRadians: camera.verticalFovRadians,
             cameraLatitudeRadians: camera.cameraLatitudeRadians,
+            cameraPitchRadians: camera.cameraPitchRadians,
             zoomHint: camera.zoomHint,
             frameEpoch: state.frame + 1,
             residencySnapshotEpoch,
@@ -711,8 +712,7 @@ async function createFrontier(
                 matrixLevel: Number(matrixId),
                 minimumElevationMeters: elevation[0]!,
                 maximumElevationMeters: elevation[1]!,
-                geometricErrorMeters: matrix.cellSize * matrix.tileWidth /
-                    TERRAIN_SECTOR_SIZE,
+                geometricErrorMeters: matrix.cellSize,
             })
         }),
         roots: virtualRaster.safetyCoverPages,
@@ -1057,6 +1057,7 @@ function frontierDecisionKey(camera: DemCameraState, residencySnapshotEpoch: num
         camera.viewport,
         camera.verticalFovRadians,
         camera.cameraLatitudeRadians,
+        camera.cameraPitchRadians,
         camera.zoomHint,
         residencySnapshotEpoch,
     ])
@@ -1342,6 +1343,13 @@ function stateSnapshot(
             renderPatches?.descriptorOverflowCount ?? 0,
         renderPatchLookupOverflowCount: renderPatches?.lookupOverflowCount ?? 0,
         renderPatchFrameEpoch: renderPatches?.frameEpoch,
+        renderPatchBaselineBudget: renderPatches?.baselinePatchBudget ?? 0,
+        renderPatchFrameBudget: renderPatches?.framePatchBudget ?? 0,
+        renderPatchRequestedCount: renderPatches?.requestedPatchCount ?? 0,
+        renderPatchSourceFloorCount: renderPatches?.sourceFloorPatchCount ?? 0,
+        renderPatchSelectedBiasLevels: renderPatches?.selectedBiasLevels ?? 0,
+        renderPatchBudgetLimitedBySourceFloor:
+            renderPatches?.budgetLimitedBySourceFloor ?? false,
         renderPatchFeedback: renderPatches,
         convergenceState: latest?.convergenceState ?? 'transitioning',
         frontierFacts: latest,
@@ -1435,7 +1443,9 @@ function assertCamera(value: DemCameraState) {
         !Number.isFinite(value.zoomHint) || value.clipFromRelativeWorld?.length !== 16 ||
         value.cameraLow?.length !== 3 || value.cameraHigh?.length !== 3 ||
         value.viewport?.length !== 2 || !Number.isFinite(value.verticalFovRadians) ||
-        !Number.isFinite(value.cameraLatitudeRadians)) {
+        !Number.isFinite(value.cameraLatitudeRadians) ||
+        !Number.isFinite(value.cameraPitchRadians) || value.cameraPitchRadians < 0 ||
+        value.cameraPitchRadians > Math.PI / 2) {
         throw new TypeError('DEM camera state is incomplete')
     }
 }
