@@ -20,9 +20,197 @@ import {
 } from '../examples/demLayer/dem-virtual-raster.ts'
 import { DemPhaseBudget } from '../examples/demLayer/dem-phase-budget.ts'
 import { readDemCachePolicy } from '../examples/demLayer/dem-cache-policy.ts'
+import {
+    DEM_CACHE_PANEL_DEFAULT_CONFIG,
+    DEM_CACHE_PANEL_STORAGE_KEY,
+    removeDemCacheParameters,
+    replaceDemCacheParameters,
+    resolveDemCachePanelConfig,
+    serializeDemCachePanelConfig,
+} from '../examples/demLayer/dem-cache-panel-state.ts'
 import { demWebMercatorManifest as manifest } from './fixtures/dem-webmercator-manifest.js'
 
 describe('DEM WebMercator virtual raster', () => {
+
+    describe('DEM cache panel configuration', () => {
+
+        it('uses the existing no-cache defaults without URL or stored state', () => {
+
+            const resolved = resolveDemCachePanelConfig(new URLSearchParams(), null)
+
+            expect(DEM_CACHE_PANEL_STORAGE_KEY).to.equal(
+                'geoscratch.examples.dem.cache-panel.v1'
+            )
+            expect(resolved.source).to.equal('default')
+            expect(resolved.storageStatus).to.equal('missing')
+            expect(resolved.config).to.deep.equal(DEM_CACHE_PANEL_DEFAULT_CONFIG)
+            expect(resolved.parameters.toString()).to.equal('')
+            expect(readDemCachePolicy(resolved.parameters)).to.deep.equal({ mode: 'none' })
+        })
+
+        it('restores a complete versioned preference for a bare URL', () => {
+
+            const stored = serializeDemCachePanelConfig({
+                policy: 'durable',
+                namespace: 'editable-dem',
+                maxMiB: 512,
+                maxEntries: 8192,
+                persistence: 'request',
+            })
+            const resolved = resolveDemCachePanelConfig(
+                new URLSearchParams('tileServer=http%3A%2F%2Flocalhost%3A8787&atlasPages=32'),
+                stored
+            )
+
+            expect(JSON.parse(stored)).to.deep.equal({
+                schemaVersion: 1,
+                config: {
+                    policy: 'durable',
+                    namespace: 'editable-dem',
+                    maxMiB: 512,
+                    maxEntries: 8192,
+                    persistence: 'request',
+                },
+            })
+            expect(resolved.source).to.equal('storage')
+            expect(resolved.storageStatus).to.equal('valid')
+            expect(resolved.config.policy).to.equal('durable')
+            expect(resolved.parameters.get('tileServer')).to.equal('http://localhost:8787')
+            expect(resolved.parameters.get('atlasPages')).to.equal('32')
+            expect(readDemCachePolicy(resolved.parameters)).to.deep.equal({
+                mode: 'persistent',
+                namespace: 'editable-dem',
+                maxPayloadBytes: 512 * 1024 * 1024,
+                maxEntries: 8192,
+                requestPersistence: true,
+                lifecycle: { kind: 'durable', open: 'reuse' },
+            })
+        })
+
+        it('treats any explicit cache URL state as authoritative', () => {
+
+            const stored = serializeDemCachePanelConfig({
+                ...DEM_CACHE_PANEL_DEFAULT_CONFIG,
+                policy: 'durable',
+            })
+            const explicit = resolveDemCachePanelConfig(
+                new URLSearchParams('cache=none&atlasPages=16'),
+                stored
+            )
+
+            expect(explicit.source).to.equal('url')
+            expect(explicit.storageStatus).to.equal('valid')
+            expect(explicit.config.policy).to.equal('disabled')
+            expect(explicit.parameters.toString()).to.equal('cache=none&atlasPages=16')
+            expect(() => resolveDemCachePanelConfig(
+                new URLSearchParams('cacheLifecycle=session'),
+                stored
+            )).to.throw('cache=none cannot accept cacheLifecycle')
+            expect(() => resolveDemCachePanelConfig(
+                new URLSearchParams('cache=none&cache=none'),
+                stored
+            )).to.throw('Duplicate DEM cache option: cache')
+        })
+
+        it('maps every panel policy into the existing strict query contract', () => {
+
+            const expected = [
+                [ 'disabled', { mode: 'none' } ],
+                [ 'session', {
+                    mode: 'persistent',
+                    lifecycle: { kind: 'session' },
+                } ],
+                [ 'durable', {
+                    mode: 'persistent',
+                    lifecycle: { kind: 'durable', open: 'reuse' },
+                } ],
+                [ 'clear-on-open', {
+                    mode: 'persistent',
+                    lifecycle: { kind: 'durable', open: 'clear-before-open' },
+                } ],
+            ]
+            for (const [ policy, facts ] of expected) {
+                const parameters = replaceDemCacheParameters(
+                    new URLSearchParams('proof=1'),
+                    { ...DEM_CACHE_PANEL_DEFAULT_CONFIG, policy }
+                )
+                expect(parameters.get('proof')).to.equal('1')
+                expect(readDemCachePolicy(parameters)).to.deep.include(facts)
+                if (policy === 'disabled') {
+                    expect(parameters.toString()).to.equal('proof=1&cache=none')
+                } else {
+                    expect([ ...parameters.keys() ].filter(key => key.startsWith('cache')))
+                        .to.deep.equal([
+                            'cache',
+                            'cacheLifecycle',
+                            'cacheNamespace',
+                            'cacheMaxMiB',
+                            'cacheMaxEntries',
+                            'cachePersistence',
+                        ])
+                }
+            }
+        })
+
+        it('rejects invalid drafts and safely ignores damaged stored state', () => {
+
+            for (const invalid of [
+                '{',
+                JSON.stringify({ schemaVersion: 2, config: DEM_CACHE_PANEL_DEFAULT_CONFIG }),
+                JSON.stringify({ schemaVersion: 1, config: {
+                    ...DEM_CACHE_PANEL_DEFAULT_CONFIG,
+                    maxMiB: 0,
+                } }),
+                JSON.stringify({ schemaVersion: 1, config: {
+                    ...DEM_CACHE_PANEL_DEFAULT_CONFIG,
+                    policy: 'forever',
+                } }),
+            ]) {
+                const resolved = resolveDemCachePanelConfig(new URLSearchParams(), invalid)
+                expect(resolved.source).to.equal('default')
+                expect(resolved.storageStatus).to.equal('invalid')
+                expect(resolved.config).to.deep.equal(DEM_CACHE_PANEL_DEFAULT_CONFIG)
+            }
+            expect(() => serializeDemCachePanelConfig({
+                ...DEM_CACHE_PANEL_DEFAULT_CONFIG,
+                namespace: '',
+            })).to.throw('namespace')
+            expect(() => replaceDemCacheParameters(new URLSearchParams(), {
+                ...DEM_CACHE_PANEL_DEFAULT_CONFIG,
+                maxEntries: 65_537,
+            })).to.throw('cacheMaxEntries')
+        })
+
+        it('replaces and removes only cache query parameters', () => {
+
+            const current = new URLSearchParams([
+                [ 'tileServer', 'http://localhost:8787' ],
+                [ 'cache', 'persistent' ],
+                [ 'cacheLifecycle', 'session' ],
+                [ 'proof', '1' ],
+                [ 'cacheNamespace', 'old' ],
+            ])
+            const next = replaceDemCacheParameters(current, {
+                policy: 'clear-on-open',
+                namespace: 'new-dem',
+                maxMiB: 256,
+                maxEntries: 4096,
+                persistence: 'best-effort',
+            })
+
+            expect(current.get('cacheNamespace')).to.equal('old')
+            expect(next.get('tileServer')).to.equal('http://localhost:8787')
+            expect(next.get('proof')).to.equal('1')
+            expect(next.get('cacheLifecycle')).to.equal('durable-clear-before-open')
+            expect(next.get('cacheNamespace')).to.equal('new-dem')
+            expect(next.get('cacheMaxMiB')).to.equal('256')
+            expect(next.get('cacheMaxEntries')).to.equal('4096')
+            expect(next.get('cachePersistence')).to.equal('best-effort')
+            expect(removeDemCacheParameters(next).toString()).to.equal(
+                'tileServer=http%3A%2F%2Flocalhost%3A8787&proof=1'
+            )
+        })
+    })
 
     it('keeps DEM disk caching explicit and application configurable', () => {
 

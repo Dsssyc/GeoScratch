@@ -1,20 +1,29 @@
 import type { PersistentCacheLifecycle } from 'geoscratch/scratch'
 import type { DemCachePolicy } from './dem-tile-protocol.ts'
 
-const DEFAULT_NAMESPACE = 'geoscratch-dem-webmercator-raw-v2'
-const DEFAULT_MAX_MIB = 128
-const DEFAULT_MAX_ENTRIES = 2048
-const MAX_MIB = 4096
-const MAX_ENTRIES = 65_536
-const MEBIBYTE = 1024 * 1024
-const CACHE_PARAMETERS = Object.freeze(new Set([
+export const DEM_CACHE_POLICY_DEFAULTS = Object.freeze({
+    namespace: 'geoscratch-dem-webmercator-raw-v2',
+    maxMiB: 128,
+    maxEntries: 2048,
+    persistence: 'best-effort' as const,
+    lifecycle: 'session' as const,
+})
+export const DEM_CACHE_POLICY_LIMITS = Object.freeze({
+    minMiB: 1,
+    maxMiB: 4096,
+    minEntries: 1,
+    maxEntries: 65_536,
+})
+export const DEM_CACHE_PARAMETER_NAMES = Object.freeze([
     'cache',
-    'cacheNamespace',
     'cacheLifecycle',
+    'cacheNamespace',
     'cacheMaxMiB',
     'cacheMaxEntries',
     'cachePersistence',
-]))
+] as const)
+const MEBIBYTE = 1024 * 1024
+const CACHE_PARAMETERS = Object.freeze(new Set<string>(DEM_CACHE_PARAMETER_NAMES))
 
 export function readDemCachePolicy(parameters: URLSearchParams): DemCachePolicy {
 
@@ -31,20 +40,20 @@ export function readDemCachePolicy(parameters: URLSearchParams): DemCachePolicy 
     }
     if (mode !== 'persistent') throw new TypeError(`Unsupported DEM cache mode: ${mode}`)
 
-    const namespace = parameters.get('cacheNamespace') ?? DEFAULT_NAMESPACE
+    const namespace = parameters.get('cacheNamespace') ?? DEM_CACHE_POLICY_DEFAULTS.namespace
     if (namespace.length === 0) throw new TypeError('DEM cache namespace must not be empty')
     const maxMiB = boundedInteger(
         parameters.get('cacheMaxMiB'),
-        DEFAULT_MAX_MIB,
-        1,
-        MAX_MIB,
+        DEM_CACHE_POLICY_DEFAULTS.maxMiB,
+        DEM_CACHE_POLICY_LIMITS.minMiB,
+        DEM_CACHE_POLICY_LIMITS.maxMiB,
         'cacheMaxMiB'
     )
     const maxEntries = boundedInteger(
         parameters.get('cacheMaxEntries'),
-        DEFAULT_MAX_ENTRIES,
-        1,
-        MAX_ENTRIES,
+        DEM_CACHE_POLICY_DEFAULTS.maxEntries,
+        DEM_CACHE_POLICY_LIMITS.minEntries,
+        DEM_CACHE_POLICY_LIMITS.maxEntries,
         'cacheMaxEntries'
     )
     return Object.freeze({
