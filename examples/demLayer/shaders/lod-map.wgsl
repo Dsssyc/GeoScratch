@@ -16,15 +16,16 @@ struct VertexInput {
 struct VertexOutput {
     @builtin(position) position: vec4f,
     @location(0) @interpolate(flat) encodedMatrixLevel: f32,
+    @location(1) @interpolate(flat) encodedSamplingLevel: f32,
 };
 
 @group(0) @binding(0) var<uniform> mapMeta: GpuTileFrontierMapMeta;
 @group(0) @binding(1) var<uniform> terrainConfig: DemTerrainConfig;
 
 @group(1) @binding(0) var<storage, read> visibleInstances:
-    array<GpuTileFrontierVisibleInstance>;
+    array<DemRenderPatch>;
 
-fn normalizedTileBounds(instance: GpuTileFrontierVisibleInstance) -> vec4f {
+fn normalizedTileBounds(instance: DemRenderPatch) -> vec4f {
     let inverseMatrixWidth = exp2(-f32(instance.matrixLevel));
     return vec4f(
         f32(instance.tileCol) * inverseMatrixWidth,
@@ -55,10 +56,16 @@ fn vMain(input: VertexInput) -> VertexOutput {
     var output: VertexOutput;
     output.position = vec4f(uv.x * 2.0f - 1.0f, 1.0f - uv.y * 2.0f, 0.0f, 1.0f);
     output.encodedMatrixLevel = f32(instance.matrixLevel) / 255.0f;
+    output.encodedSamplingLevel = f32(instance.samplingLevel) / 255.0f;
     return output;
 }
 
 @fragment
 fn fMain(input: VertexOutput) -> @location(0) vec4f {
-    return vec4f(input.encodedMatrixLevel, 0.0f, 0.0f, 1.0f);
+    return vec4f(
+        input.encodedMatrixLevel,
+        input.encodedSamplingLevel,
+        0.0f,
+        1.0f,
+    );
 }

@@ -17,11 +17,25 @@ The `DEM Layer` panel in the upper-right corner contains live rendering controls
 and cache configuration.
 
 The `Rendering` folder exposes `Tile wireframe`. It switches immediately to the
-already-created diagnostic pipeline: each logical `(level, row, column)` tile
-receives a stable pseudo-random color and only the post-stitch triangle edges are
-drawn. The setting is stored independently at
+already-created diagnostic pipeline: each logical render patch
+`(matrixLevel, row, column)` receives a stable pseudo-random color and only the
+post-stitch triangle edges are drawn. The setting is stored independently at
 `geoscratch.examples.demLayer.rendering.v1` in `localStorage`; it does not reload
 the page, alter cache query parameters, or rebuild the virtual raster.
+
+## Data and geometry LoD
+
+The source-backed `WebMercatorQuad` data frontier is capped by the manifest at
+`z10`. Terrain geometry is independent: a persistent GPU compute stage expands
+visible resident pages into frustum-culled render patches through `z14`, then
+writes the LoD-map and terrain indirect draw arguments. Zooming beyond `z10`
+therefore continues to refine the 64 by 64 terrain sectors without requesting,
+decoding, or caching synthetic higher-level raster pages.
+
+Every render patch retains its explicit Virtual Raster `samplingLevel`. The LoD
+map stores geometry level and sampling level separately, so edge vertex snapping
+uses render LoD while shared-edge height sampling uses the coarser available data
+LoD. Wireframe mode makes this post-`z10` subdivision directly visible.
 
 The `Cache` folder exposes all supported application cache settings:
 

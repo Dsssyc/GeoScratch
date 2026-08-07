@@ -23,7 +23,6 @@ import {
     WEB_MERCATOR_QUAD_WORLD_WIDTH,
     WebMercatorQuad,
     gpuTileFrontierPolicy,
-    gpuTileFrontierRenderWgslModule,
 } from 'geoscratch/geo'
 import type {
     GpuTileFrontierFacts,
@@ -37,8 +36,19 @@ import type {
     DemVirtualRasterPublication,
     createDemVirtualRasterRuntime,
 } from './dem-virtual-raster.ts'
+import {
+    DEM_MAX_RENDER_EXTRA_LEVELS,
+    DEM_MAX_RENDER_MATRIX_LEVEL,
+    createDemRenderPatchFrontier,
+    demRenderPatchTargetMatrixLevel,
+    demRenderPatchWgslModule,
+} from './dem-render-patch-frontier.ts'
+import type {
+    DemRenderPatchFrontier,
+} from './dem-render-patch-frontier.ts'
 
 type DemShaders = {
+    renderPatch: string
     lodMap: string
     terrain: string
 }
@@ -65,6 +75,8 @@ type Uniforms = Awaited<ReturnType<typeof createUniformResources>>
 type Buffers = Awaited<ReturnType<typeof createBufferResources>>
 type Textures = Awaited<ReturnType<typeof createTextures>>
 type Frontier = Awaited<ReturnType<typeof createFrontier>>
+type FrontierRenderTemplates = ReturnType<typeof createFrontierRenderTemplates>
+type RenderPatchFrontier = DemRenderPatchFrontier
 type RenderTemplates = ReturnType<typeof createRenderTemplates>
 type Layouts = Awaited<ReturnType<typeof createBindLayouts>>
 type BindSets = Awaited<ReturnType<typeof createBindSets>>
@@ -86,6 +98,8 @@ type DemGraph = {
     buffers: Buffers
     textures: Textures
     frontier: Frontier
+    frontierRenderTemplates: FrontierRenderTemplates
+    renderPatchFrontier: RenderPatchFrontier
     feedbackRing: VirtualRasterGpuFeedbackRing
     renderTemplates: RenderTemplates
     layouts: Layouts
@@ -135,7 +149,13 @@ type DemState = {
     latestFrontierFacts?: GpuTileFrontierFacts
     latestFeedbackDiagnostics: readonly unknown[]
     terrainPresentation: DemTerrainPresentation
-    stageActivity: { 'frontier-compute': number; 'lod-map': number; terrain: number }
+    renderPatchTargetMatrixLevel: number
+    stageActivity: {
+        'frontier-compute': number
+        'render-patch-compute': number
+        'lod-map': number
+        terrain: number
+    }
 }
 
 type PersistentFacts = Readonly<{
@@ -168,7 +188,12 @@ type ConsumedFeedback = Readonly<{
     feedback?: VirtualRasterGpuFeedbackBatch
 }>
 
-export const DEM_STAGE_ORDER = Object.freeze([ 'frontier-compute', 'lod-map', 'terrain' ])
+export const DEM_STAGE_ORDER = Object.freeze([
+    'frontier-compute',
+    'render-patch-compute',
+    'lod-map',
+    'terrain',
+])
 export const LOD_MAP_SIZE = Object.freeze({ width: 512, height: 256 })
 export const TERRAIN_SECTOR_SIZE = 64
 export const TERRAIN_EXAGGERATION = 50
@@ -210,7 +235,19 @@ export async function createDemLayer({
     const textures = await createTextures(runtime, size)
     const frontier = await createFrontier(runtime, virtualRaster, geometry)
     const feedbackRing = await VirtualRasterGpuFeedbackRing.create(frontier)
-    const renderTemplates = createRenderTemplates(frontier)
+    const frontierRenderTemplates = createFrontierRenderTemplates(frontier)
+    const renderPatchFrontier = await createDemRenderPatchFrontier(runtime, {
+        sourceTemplates: frontierRenderTemplates.lodMap,
+        maximumSourceTiles: frontier.descriptor.policy.maximumActiveTiles,
+        dataMaximumMatrixLevel: frontier.descriptor.policy.maximumMatrixLevel,
+        renderMaximumMatrixLevel: DEM_MAX_RENDER_MATRIX_LEVEL,
+        maximumExtraLevels: DEM_MAX_RENDER_EXTRA_LEVELS,
+        coordinateBits: virtualRaster.addressCodec.coordinateBits,
+        elevationRangeMeters: terrainElevationRange(virtualRaster),
+        terrainVertexCount: geometry.vertexCount,
+        shader: shaders.renderPatch,
+    })
+    const renderTemplates = createRenderTemplates(renderPatchFrontier)
     const layouts = await createBindLayouts(
         runtime,
         codecs,
@@ -254,6 +291,8 @@ export async function createDemLayer({
         buffers,
         textures,
         frontier,
+        frontierRenderTemplates,
+        renderPatchFrontier,
         feedbackRing,
         renderTemplates,
         layouts,
@@ -288,6 +327,7 @@ export async function createDemLayer({
             .upload(uniforms.config.upload)
             .upload(buffers.positions.upload)
             .upload(buffers.indices.upload)
+        renderPatchFrontier.initialize(uploadBuilder)
         for (const upload of publication.update.commands) uploadBuilder.upload(upload)
         const residencySubmitted = uploadBuilder.submit()
         await Promise.all([
@@ -339,6 +379,7 @@ export async function createDemLayer({
             frame = frontier.frame(viewToken)
             const builder = runtime.createSubmission({ validation: 'throw' })
             frontier.encode(builder, frame)
+            renderPatchFrontier.encode(builder, frame)
             builder
                 .render(passes.lodMap, [ commands.lodMap[frame.parity] ])
                 .render(passes.terrain, [
@@ -399,8 +440,17 @@ export async function createDemLayer({
         state.frame++
         state.virtualSnapshotEpoch = virtualRaster.gpu.facts().snapshotEpoch
         state.stageActivity['frontier-compute']++
+        state.stageActivity['render-patch-compute']++
         state.stageActivity['lod-map']++
         state.stageActivity.terrain++
+        state.renderPatchTargetMatrixLevel = demRenderPatchTargetMatrixLevel(
+            frontier.descriptor.policy.maximumMatrixLevel,
+            camera.zoomHint,
+            {
+                maximumMatrixLevel: DEM_MAX_RENDER_MATRIX_LEVEL,
+                maximumExtraLevels: DEM_MAX_RENDER_EXTRA_LEVELS,
+            }
+        )
         const needsFollowUp = feedback === undefined ||
             feedback.facts.convergenceState === 'transitioning' ||
             (reconciliation?.requestedCount ?? 0) > 0
@@ -462,6 +512,7 @@ export async function createDemLayer({
         state.disposed = true
         pendingFeedback.length = 0
         feedbackRing.dispose()
+        renderPatchFrontier.dispose()
         frontier.dispose()
     }
 
@@ -650,11 +701,7 @@ async function createFrontier(
         maximumActiveTiles * 4,
         virtualRaster.scheduler.maxRequests
     ))
-    const elevation = [
-        virtualRaster.manifest.offset * TERRAIN_EXAGGERATION,
-        (virtualRaster.manifest.offset + virtualRaster.manifest.scale * 255) *
-            TERRAIN_EXAGGERATION,
-    ].sort((left, right) => left - right)
+    const elevation = terrainElevationRange(virtualRaster)
 
     return GpuTileFrontier.create(runtime, {
         gpuState: virtualRaster.gpu,
@@ -687,7 +734,26 @@ async function createFrontier(
     })
 }
 
-function createRenderTemplates(frontier: GpuTileFrontier) {
+function terrainElevationRange(
+    virtualRaster: DemVirtualRaster
+): readonly [number, number] {
+
+    return Object.freeze([
+        virtualRaster.manifest.offset * TERRAIN_EXAGGERATION,
+        (virtualRaster.manifest.offset + virtualRaster.manifest.scale * 255) *
+            TERRAIN_EXAGGERATION,
+    ].sort((left, right) => left - right) as [number, number])
+}
+
+function createFrontierRenderTemplates(frontier: GpuTileFrontier) {
+
+    return Object.freeze({
+        lodMap: frontier.renderTemplates('lod-map'),
+        terrain: frontier.renderTemplates('terrain'),
+    })
+}
+
+function createRenderTemplates(frontier: DemRenderPatchFrontier) {
 
     return Object.freeze({
         lodMap: frontier.renderTemplates('lod-map'),
@@ -814,7 +880,7 @@ async function createPrograms(
     virtualRaster: DemVirtualRaster
 ) {
 
-    const renderWgsl = gpuTileFrontierRenderWgslModule()
+    const renderWgsl = demRenderPatchWgslModule()
     const configRequirement: ProgramBufferLayoutRequirement = {
         group: 0,
         binding: 1,
@@ -1073,31 +1139,43 @@ function verifyFrameProvenance(
 
     const lodCommand = graph.commands.lodMap[frame.parity]
     const terrainCommand = graph.commands.terrain[terrainPresentation][frame.parity]
+    const renderPatchCommands = graph.renderPatchFrontier.commandsFor(frame)
+    const sourceTemplate = graph.frontierRenderTemplates.lodMap[frame.parity]
     const lodTemplate = graph.renderTemplates.lodMap[frame.parity]
     const terrainTemplate = graph.renderTemplates.terrain[frame.parity]
     const pairs = [
         {
-            name: 'frontier-map-meta-to-lod-draw',
-            resource: lodTemplate.mapMeta,
-            consumerCommandId: lodCommand.id,
+            name: 'frontier-map-meta-to-render-patch',
+            resource: sourceTemplate.mapMeta,
+            consumerCommandId: renderPatchCommands.expand.id,
         },
         {
-            name: 'frontier-visible-to-lod-draw',
+            name: 'frontier-visible-to-render-patch',
+            resource: sourceTemplate.visibleInstances,
+            consumerCommandId: renderPatchCommands.expand.id,
+        },
+        {
+            name: 'frontier-indirect-to-render-patch',
+            resource: sourceTemplate.drawArgument.resource,
+            consumerCommandId: renderPatchCommands.expand.id,
+        },
+        {
+            name: 'render-patch-visible-to-lod-draw',
             resource: lodTemplate.visibleInstances,
             consumerCommandId: lodCommand.id,
         },
         {
-            name: 'frontier-indirect-to-lod-draw',
+            name: 'render-patch-indirect-to-lod-draw',
             resource: lodTemplate.drawArgument.resource,
             consumerCommandId: lodCommand.id,
         },
         {
-            name: 'frontier-visible-to-terrain-draw',
+            name: 'render-patch-visible-to-terrain-draw',
             resource: terrainTemplate.visibleInstances,
             consumerCommandId: terrainCommand.id,
         },
         {
-            name: 'frontier-indirect-to-terrain-draw',
+            name: 'render-patch-indirect-to-terrain-draw',
             resource: terrainTemplate.drawArgument.resource,
             consumerCommandId: terrainCommand.id,
         },
@@ -1162,7 +1240,10 @@ function identityFactSnapshot(graph: DemGraph) {
 
 function identityObjectsByKind(graph: DemGraph) {
 
+    const renderPatchIdentity = graph.renderPatchFrontier.identityObjects()
     const templateResources = [
+        ...graph.frontierRenderTemplates.lodMap,
+        ...graph.frontierRenderTemplates.terrain,
         ...graph.renderTemplates.lodMap,
         ...graph.renderTemplates.terrain,
     ].flatMap(template => [
@@ -1181,18 +1262,21 @@ function identityObjectsByKind(graph: DemGraph) {
             graph.textures.lodMap,
             graph.textures.depth,
             ...templateResources,
+            ...renderPatchIdentity.resources,
         ]),
         uploads: [
             graph.uniforms.config.upload,
             graph.buffers.positions.upload,
             graph.buffers.indices.upload,
+            ...renderPatchIdentity.uploads,
         ],
-        bindLayouts: Object.values(graph.layouts),
-        bindSets: allBindSets(graph.bindSets),
-        programs: Object.values(graph.programs),
-        pipelines: Object.values(graph.pipelines),
-        passes: Object.values(graph.passes),
+        bindLayouts: [ ...Object.values(graph.layouts), ...renderPatchIdentity.bindLayouts ],
+        bindSets: [ ...allBindSets(graph.bindSets), ...renderPatchIdentity.bindSets ],
+        programs: [ ...Object.values(graph.programs), ...renderPatchIdentity.programs ],
+        pipelines: [ ...Object.values(graph.pipelines), ...renderPatchIdentity.pipelines ],
+        passes: [ ...Object.values(graph.passes), ...renderPatchIdentity.passes ],
         commands: [
+            ...renderPatchIdentity.commands,
             ...graph.commands.lodMap,
             ...graph.commands.terrain.shaded,
             ...graph.commands.terrain['tile-wireframe'],
@@ -1229,13 +1313,17 @@ function persistentFactSnapshot(runtime: GPURuntime): PersistentFacts {
 
 function graphContractSnapshot(graph: DemGraph) {
 
+    const dataMaximumMatrixLevel = graph.frontier.descriptor.policy.maximumMatrixLevel
     return Object.freeze({
         stageOrder: DEM_STAGE_ORDER,
         countPath: 'gpu-produced-indirect-arguments',
         selectionPath: 'gpu-resident-active-frontier',
+        dataMaximumMatrixLevel,
+        renderMaximumMatrixLevel: DEM_MAX_RENDER_MATRIX_LEVEL,
         terrainVertexCount: graph.geometry.vertexCount,
         lodMapSize: LOD_MAP_SIZE,
         frontier: graph.frontier.facts(),
+        renderPatches: graph.renderPatchFrontier.facts(),
         feedback: graph.feedbackRing.facts(),
         virtualRaster: Object.freeze({
             contentVersion: graph.virtualRaster.manifest.contentVersion,
@@ -1248,10 +1336,14 @@ function graphContractSnapshot(graph: DemGraph) {
         }),
         persistentIdentityCount: stableIdentitySnapshot(graph).length,
         passIds: Object.freeze({
+            renderPatches: graph.renderPatchFrontier.identityObjects().passes[0]!.id,
             lodMap: graph.passes.lodMap.id,
             terrain: graph.passes.terrain.id,
         }),
         commandIds: Object.freeze({
+            renderPatches: Object.freeze(
+                graph.renderPatchFrontier.facts().parity.map(parity => parity.commandIds)
+            ),
             drawLodMap: Object.freeze(graph.commands.lodMap.map(command => command.id)),
             drawTerrain: Object.freeze({
                 shaded: Object.freeze(
@@ -1285,8 +1377,10 @@ function createState(
         latestFrontierFacts: undefined,
         latestFeedbackDiagnostics: Object.freeze([]),
         terrainPresentation,
+        renderPatchTargetMatrixLevel: 0,
         stageActivity: {
             'frontier-compute': 0,
+            'render-patch-compute': 0,
             'lod-map': 0,
             terrain: 0,
         },
@@ -1328,6 +1422,7 @@ function stateSnapshot(
         frontierFacts: latest,
         latestFeedbackDiagnostics: state.latestFeedbackDiagnostics,
         terrainPresentation: state.terrainPresentation,
+        renderPatchTargetMatrixLevel: state.renderPatchTargetMatrixLevel,
         feedback: feedbackRing.facts(),
         stageActivity: Object.freeze({ ...state.stageActivity }),
     })
@@ -1394,8 +1489,11 @@ function assertVirtualRaster(value: DemVirtualRaster) {
 
 function assertShaders(value: DemShaders) {
 
-    if (typeof value?.lodMap !== 'string' || typeof value?.terrain !== 'string') {
-        throw new TypeError('DEM shaders must contain lodMap and terrain WGSL strings')
+    if (typeof value?.renderPatch !== 'string' || typeof value?.lodMap !== 'string' ||
+        typeof value?.terrain !== 'string') {
+        throw new TypeError(
+            'DEM shaders must contain renderPatch, lodMap, and terrain WGSL strings'
+        )
     }
 }
 

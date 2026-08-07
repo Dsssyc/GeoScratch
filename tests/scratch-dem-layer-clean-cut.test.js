@@ -134,6 +134,39 @@ async function createTestVirtualRaster(runtime) {
 
 describe('DEM Layer clean cut', () => {
 
+    it('separates the bounded data frontier from zoom-dependent render patches', () => {
+
+        const layerSource = read('examples', 'demLayer', 'dem-layer.ts')
+        const renderPatchSource = read(
+            'examples',
+            'demLayer',
+            'dem-render-patch-frontier.ts'
+        )
+        const renderPatchShader = read(
+            'examples',
+            'demLayer',
+            'shaders',
+            'render-patch-frontier.wgsl'
+        )
+        const lodShader = read('examples', 'demLayer', 'shaders', 'lod-map.wgsl')
+        const terrainShader = read('examples', 'demLayer', 'shaders', 'terrain-mesh.wgsl')
+
+        expect(layerSource).to.include('createDemRenderPatchFrontier(')
+        expect(layerSource).to.include('renderPatchFrontier.encode(builder, frame)')
+        expect(layerSource).to.include("'render-patch-compute'")
+        expect(renderPatchSource).to.include('DEM_MAX_RENDER_MATRIX_LEVEL = 14')
+        expect(renderPatchSource).to.include('DEM_MAX_RENDER_EXTRA_LEVELS = 4')
+        expect(renderPatchSource).to.include('dataMaximumMatrixLevel')
+        expect(renderPatchSource).to.include('renderMaximumMatrixLevel')
+        expect(renderPatchShader).to.include('source.samplingLevel')
+        expect(renderPatchShader).to.include('targetMatrixLevel')
+        expect(renderPatchShader).to.include('atomicAdd(&renderPatchState.count')
+        expect(renderPatchShader).to.include('drawArguments[1] = renderPatchCount')
+        expect(lodShader).to.include('encodedSamplingLevel')
+        expect(terrainShader).to.include('fn samplingLevelAt(')
+        expect(terrainShader).not.to.include('fn coarserSamplingLevel(')
+    })
+
     it('uses a GPU-resident frontier without a CPU selection compatibility path', () => {
 
         const layerSource = read('examples', 'demLayer', 'dem-layer.ts')
@@ -472,6 +505,12 @@ describe('DEM Layer clean cut', () => {
             virtualRaster,
             size: { width: 320, height: 180 },
             shaders: {
+                renderPatch: read(
+                    'examples',
+                    'demLayer',
+                    'shaders',
+                    'render-patch-frontier.wgsl'
+                ),
                 lodMap: read('examples', 'demLayer', 'shaders', 'lod-map.wgsl'),
                 terrain: read('examples', 'demLayer', 'shaders', 'terrain-mesh.wgsl'),
             },
@@ -516,6 +555,12 @@ describe('DEM Layer clean cut', () => {
             virtualRaster,
             size: { width: 320, height: 180 },
             shaders: {
+                renderPatch: read(
+                    'examples',
+                    'demLayer',
+                    'shaders',
+                    'render-patch-frontier.wgsl'
+                ),
                 lodMap: read('examples', 'demLayer', 'shaders', 'lod-map.wgsl'),
                 terrain: read('examples', 'demLayer', 'shaders', 'terrain-mesh.wgsl'),
             },
@@ -556,11 +601,13 @@ describe('DEM Layer clean cut', () => {
             ])
 
         expect(first.provenance.map(fact => fact.name)).to.deep.equal([
-            'frontier-map-meta-to-lod-draw',
-            'frontier-visible-to-lod-draw',
-            'frontier-indirect-to-lod-draw',
-            'frontier-visible-to-terrain-draw',
-            'frontier-indirect-to-terrain-draw',
+            'frontier-map-meta-to-render-patch',
+            'frontier-visible-to-render-patch',
+            'frontier-indirect-to-render-patch',
+            'render-patch-visible-to-lod-draw',
+            'render-patch-indirect-to-lod-draw',
+            'render-patch-visible-to-terrain-draw',
+            'render-patch-indirect-to-terrain-draw',
             'lod-map-pass-to-terrain-draw',
         ])
         expect(second.provenance.every(fact => (
@@ -573,13 +620,13 @@ describe('DEM Layer clean cut', () => {
         expect(graph.currentIdentityFacts()).not.to.equal(graph.currentIdentityFacts())
         expect(initialIdentityFacts).to.deep.include({
             hash: initialIdentityHash,
-            uploads: 3,
-            bindLayouts: 4,
-            bindSets: 6,
-            programs: 3,
-            pipelines: 3,
-            passes: 2,
-            commands: 6,
+            uploads: 4,
+            bindLayouts: 7,
+            bindSets: 12,
+            programs: 6,
+            pipelines: 6,
+            passes: 3,
+            commands: 18,
         })
         expect(graph.persistentFacts()).to.deep.equal(initialPersistentFacts)
 
@@ -610,6 +657,14 @@ describe('DEM Layer clean cut', () => {
         expect(graph.contractFacts()).to.deep.include({
             countPath: 'gpu-produced-indirect-arguments',
             selectionPath: 'gpu-resident-active-frontier',
+            dataMaximumMatrixLevel: 10,
+            renderMaximumMatrixLevel: 14,
+        })
+        expect(graph.contractFacts().renderPatches).to.deep.include({
+            selectionPath: 'gpu-expanded-render-patches',
+            maximumExtraLevels: 4,
+            maximumMatrixLevel: 14,
+            dataMaximumMatrixLevel: 10,
         })
         expect(fake.calls.maps).to.have.length(2)
         expect(fake.calls.maps.every(mapping => (

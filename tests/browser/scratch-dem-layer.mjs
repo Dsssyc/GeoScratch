@@ -25,23 +25,32 @@ const tilePort = process.env.DEM_LAYER_TILE_PORT === undefined
     ? await findAvailablePort()
     : positiveInteger(process.env.DEM_LAYER_TILE_PORT)
 const tileBaseUrl = `http://127.0.0.1:${tilePort}`
-const expectedStageOrder = Object.freeze([ 'frontier-compute', 'lod-map', 'terrain' ])
+const expectedStageOrder = Object.freeze([
+    'frontier-compute',
+    'render-patch-compute',
+    'lod-map',
+    'terrain',
+])
 const requiredProvenanceNames = Object.freeze([
-    'frontier-map-meta-to-lod-draw',
-    'frontier-visible-to-lod-draw',
-    'frontier-indirect-to-lod-draw',
-    'frontier-visible-to-terrain-draw',
-    'frontier-indirect-to-terrain-draw',
+    'frontier-map-meta-to-render-patch',
+    'frontier-visible-to-render-patch',
+    'frontier-indirect-to-render-patch',
+    'render-patch-visible-to-lod-draw',
+    'render-patch-indirect-to-lod-draw',
+    'render-patch-visible-to-terrain-draw',
+    'render-patch-indirect-to-terrain-draw',
     'lod-map-pass-to-terrain-draw',
 ])
 const cameraCenter = Object.freeze([ 120.980697, 31.684162 ])
 const cameraScenarios = Object.freeze([
     scenario('flat-z9', 9, 0, 0),
     scenario('flat-z10', 10, 0, 0),
+    scenario('flat-z12', 12, 0, 0),
     scenario('pitch45-bearing90-z9', 9, 45, 90),
     scenario('pitch45-bearing225-z10', 10, 45, 225),
     scenario('pitch70-bearing0-z9', 9, 70, 0),
     scenario('pitch70-bearing90-z10', 10, 70, 90),
+    scenario('pitch70-bearing90-z14', 14, 70, 90),
     scenario('pitch85-bearing90-z9', 9, 85, 90),
     scenario('pitch85-bearing225-z10', 10, 85, 225),
     scenario('mobile-pitch70-bearing90-z10', 10, 70, 90, {
@@ -999,9 +1008,22 @@ function validateDemFacts(label, facts, failures, expectedStatus = 'ready') {
     const contract = parseJson(facts.graphContract, `${label} graph contract`, failures)
     if (contract?.countPath !== 'gpu-produced-indirect-arguments' ||
         contract?.selectionPath !== 'gpu-resident-active-frontier' ||
+        contract?.dataMaximumMatrixLevel !== 10 ||
+        contract?.renderMaximumMatrixLevel !== 14 ||
+        contract?.renderPatches?.selectionPath !== 'gpu-expanded-render-patches' ||
+        contract?.renderPatches?.maximumExtraLevels !== 4 ||
         contract?.terrainVertexCount !== 24_576 ||
         JSON.stringify(contract?.stageOrder) !== JSON.stringify(expectedStageOrder)) {
         failures.push(`${label} persistent graph contract drifted`)
+    }
+    const cameraView = parseJson(facts.cameraView, `${label} camera view`, failures)
+    const expectedRenderLevel = Math.min(14, Math.ceil(cameraView?.zoom ?? 0))
+    if (Number(facts.renderPatchTargetMatrixLevel) !== expectedRenderLevel) {
+        failures.push(`${label} render-patch target did not follow zoom`)
+    }
+    const levelRange = parseJson(facts.levelRange, `${label} data level range`, failures)
+    if (!Array.isArray(levelRange) || levelRange[1] > 10) {
+        failures.push(`${label} data frontier exceeded the z10 source ceiling`)
     }
     if (contract?.virtualRaster?.completeImageUpload !== false ||
         contract?.virtualRaster?.crossPageFiltering !== 'logical-bilinear' ||

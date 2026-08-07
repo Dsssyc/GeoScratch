@@ -30,7 +30,7 @@ struct VertexOutput {
 @group(1) @binding(0) var<storage, read> indices: array<u32>;
 @group(1) @binding(1) var<storage, read> gridPositions: array<u32>;
 @group(1) @binding(2) var<storage, read> visibleInstances:
-    array<GpuTileFrontierVisibleInstance>;
+    array<DemRenderPatch>;
 
 @group(2) @binding(2) var lodMap: texture_2d<f32>;
 
@@ -46,7 +46,7 @@ fn gridPosition(index: u32) -> vec2u {
     return vec2u(gridPositions[index * 2u], gridPositions[index * 2u + 1u]);
 }
 
-fn logicalTileColor(instance: GpuTileFrontierVisibleInstance) -> vec3f {
+fn logicalTileColor(instance: DemRenderPatch) -> vec3f {
     var hash = instance.matrixLevel * 0x9e3779b9u;
     hash = hash ^ (instance.tileRow * 0x85ebca6bu);
     hash = hash ^ (instance.tileCol * 0xc2b2ae35u);
@@ -90,7 +90,7 @@ fn fixedAxisFromShiftedNumerator(numerator: u32, shift: u32) -> DemAddressFixedA
 }
 
 fn fixedMercatorPosition(
-    instance: GpuTileFrontierVisibleInstance,
+    instance: DemRenderPatch,
     grid: vec2u,
 ) -> DemAddressFixedPosition {
     let shift = terrainConfig.coordinateBits - instance.matrixLevel - 6u;
@@ -178,7 +178,7 @@ fn sourceContains(uv: vec2f) -> bool {
 }
 
 fn lodMapUv(
-    instance: GpuTileFrontierVisibleInstance,
+    instance: DemRenderPatch,
     local: vec2f,
 ) -> vec2f {
     let inverseMatrixWidth = exp2(-f32(instance.matrixLevel));
@@ -211,9 +211,10 @@ fn matrixLevelAt(coordinate: vec2i) -> u32 {
     return u32(round(textureLoad(lodMap, bounded, 0).r * 255.0f));
 }
 
-fn coarserSamplingLevel(ownMatrixLevel: u32, neighborMatrixLevel: u32, own: u32) -> u32 {
-    let levelDelta = ownMatrixLevel - min(ownMatrixLevel, neighborMatrixLevel);
-    return min(own + levelDelta, DemHeight_level_count - 1u);
+fn samplingLevelAt(coordinate: vec2i) -> u32 {
+    let dimensions = max(vec2i(terrainConfig.lodMapDimensions), vec2i(1));
+    let bounded = clamp(coordinate, vec2i(0), dimensions - vec2i(1));
+    return u32(round(textureLoad(lodMap, bounded, 0).g * 255.0f));
 }
 
 fn positionCs(position: DemAddressFixedPosition, elevation: f32) -> vec4f {
@@ -268,7 +269,9 @@ fn vMain(input: VertexInput) -> VertexOutput {
     if (grid.x == 0u) {
         heightLevel = max(
             heightLevel,
-            coarserSamplingLevel(ownMatrixLevel, leftLevel, instance.samplingLevel),
+            samplingLevelAt(lodMapTexel(
+                lodMapUv(instance, vec2f(0.0f, center.y)) - vec2f(texelSize.x, 0.0f),
+            )),
         );
         if (leftLevel < middleLevel && grid.y % 2u == 1u) {
             grid.y += 1u;
@@ -277,7 +280,9 @@ fn vMain(input: VertexInput) -> VertexOutput {
     if (grid.x == TERRAIN_SECTOR_SIZE) {
         heightLevel = max(
             heightLevel,
-            coarserSamplingLevel(ownMatrixLevel, rightLevel, instance.samplingLevel),
+            samplingLevelAt(lodMapTexel(
+                lodMapUv(instance, vec2f(1.0f, center.y)) + vec2f(texelSize.x, 0.0f),
+            )),
         );
         if (rightLevel < middleLevel && grid.y % 2u == 1u) {
             grid.y += 1u;
@@ -286,7 +291,9 @@ fn vMain(input: VertexInput) -> VertexOutput {
     if (grid.y == 0u) {
         heightLevel = max(
             heightLevel,
-            coarserSamplingLevel(ownMatrixLevel, bottomLevel, instance.samplingLevel),
+            samplingLevelAt(lodMapTexel(
+                lodMapUv(instance, vec2f(center.x, 0.0f)) + vec2f(0.0f, texelSize.y),
+            )),
         );
         if (bottomLevel < middleLevel && grid.x % 2u == 1u) {
             grid.x += 1u;
@@ -295,7 +302,9 @@ fn vMain(input: VertexInput) -> VertexOutput {
     if (grid.y == TERRAIN_SECTOR_SIZE) {
         heightLevel = max(
             heightLevel,
-            coarserSamplingLevel(ownMatrixLevel, topLevel, instance.samplingLevel),
+            samplingLevelAt(lodMapTexel(
+                lodMapUv(instance, vec2f(center.x, 1.0f)) - vec2f(0.0f, texelSize.y),
+            )),
         );
         if (topLevel < middleLevel && grid.x % 2u == 1u) {
             grid.x += 1u;

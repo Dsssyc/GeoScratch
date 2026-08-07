@@ -21,6 +21,7 @@ import {
 import { prepareDemControlPanel } from './dem-control-panel.ts'
 import { readDemCachePolicy } from './dem-cache-policy.ts'
 import type { DemCachePolicy } from './dem-tile-protocol.ts'
+import renderPatchShader from './shaders/render-patch-frontier.wgsl?raw'
 import lodMapShader from './shaders/lod-map.wgsl?raw'
 import terrainShader from './shaders/terrain-mesh.wgsl?raw'
 
@@ -199,7 +200,11 @@ async function main(lifetime: DemLifecycle, proof: FailureProofController) {
         surface,
         virtualRaster,
         size: initialSize,
-        shaders: { lodMap: lodMapShader, terrain: terrainShader },
+        shaders: {
+            renderPatch: renderPatchShader,
+            lodMap: lodMapShader,
+            terrain: terrainShader,
+        },
         terrainPresentation: tileWireframeEnabled ? 'tile-wireframe' : 'shaded',
         failureProof: proof,
     })
@@ -472,6 +477,9 @@ function publishFrameFacts({
     canvas.dataset.staleGenerationCount = String(state.staleGenerationCount)
     canvas.dataset.budgetLimitedCount = String(state.budgetLimitedCount)
     canvas.dataset.levelRange = JSON.stringify(state.levelRange)
+    canvas.dataset.renderPatchTargetMatrixLevel = String(
+        state.renderPatchTargetMatrixLevel
+    )
     canvas.dataset.maximumObservedSse = String(state.maximumObservedSse)
     canvas.dataset.convergenceState = state.convergenceState
     canvas.dataset.readbackInFlightCount = String(state.readbackInFlightCount)

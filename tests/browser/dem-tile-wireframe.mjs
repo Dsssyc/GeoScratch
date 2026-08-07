@@ -134,21 +134,43 @@ async function runWireframeProof(activeBrowser) {
         const wireframe = await waitForStableMode(
             page,
             'tile-wireframe',
-            baseline.observedFrames
+            baseline.observedFrames,
+            camera
         )
         const wireframeCapture = await captureState(page, 'tile-wireframe')
+
+        const refinement = []
+        let previous = wireframe
+        for (const zoom of [ 11, 12, 14 ]) {
+            const refinementCamera = Object.freeze({ ...camera, zoom })
+            await page.evaluate(
+                value => window.__DEM_LAYER_PROOF__.moveCamera(value),
+                refinementCamera
+            )
+            const facts = await waitForStableMode(
+                page,
+                'tile-wireframe',
+                previous.observedFrames,
+                refinementCamera
+            )
+            const capture = await captureState(page, `tile-wireframe-z${zoom}`)
+            refinement.push(Object.freeze({ ...facts, capture }))
+            previous = facts
+        }
 
         await page.locator('[data-dem-control="tile-wireframe"] .tp-ckbv_w').click()
         const restored = await waitForStableMode(
             page,
             'shaded',
-            wireframe.observedFrames
+            previous.observedFrames,
+            Object.freeze({ ...camera, zoom: 14 })
         )
         const restoredCapture = await captureState(page, 'restored-shaded')
         return Object.freeze({
             url: page.url(),
             baseline: Object.freeze({ ...baseline, capture: shadedCapture }),
             wireframe: Object.freeze({ ...wireframe, capture: wireframeCapture }),
+            refinement: Object.freeze(refinement),
             restored: Object.freeze({ ...restored, capture: restoredCapture }),
             events,
         })
@@ -157,7 +179,12 @@ async function runWireframeProof(activeBrowser) {
     }
 }
 
-async function waitForStableMode(page, presentation, afterObservedFrames) {
+async function waitForStableMode(
+    page,
+    presentation,
+    afterObservedFrames,
+    expectedCamera = camera
+) {
 
     await page.waitForFunction(({ expectedPresentation, afterFrames, expectedCamera }) => {
         const canvas = document.querySelector('#GPUFrame')
@@ -196,7 +223,7 @@ async function waitForStableMode(page, presentation, afterObservedFrames) {
     }, {
         expectedPresentation: presentation,
         afterFrames: afterObservedFrames,
-        expectedCamera: camera,
+        expectedCamera,
     }, { timeout })
     return await readFacts(page)
 }
@@ -220,9 +247,12 @@ async function readFacts(page) {
             identityFacts: parse(canvas.dataset.currentIdentityFacts),
             persistentFacts: parse(canvas.dataset.persistentFacts),
             graphContract: graphContract === null ? null : {
+                dataMaximumMatrixLevel: graphContract.dataMaximumMatrixLevel,
+                renderMaximumMatrixLevel: graphContract.renderMaximumMatrixLevel,
                 terrainVertexCount: graphContract.terrainVertexCount,
                 countPath: graphContract.countPath,
                 selectionPath: graphContract.selectionPath,
+                renderPatches: graphContract.renderPatches,
                 commandIds: graphContract.commandIds,
             },
             frontier: frontier === null ? null : {
@@ -233,6 +263,10 @@ async function readFacts(page) {
                 staleGenerationCount: frontier.staleGenerationCount,
             },
             cameraView: parse(canvas.dataset.cameraView),
+            dataLevelRange: parse(canvas.dataset.levelRange),
+            renderPatchTargetMatrixLevel: Number(
+                canvas.dataset.renderPatchTargetMatrixLevel
+            ),
             tileWireframeChecked: checkbox instanceof HTMLInputElement
                 ? checkbox.checked
                 : undefined,
@@ -349,7 +383,7 @@ function validateProof(value, processState) {
 
     const failures = []
     if (value === undefined) return [ 'DEM tile wireframe proof was not produced' ]
-    const { baseline, wireframe, restored } = value
+    const { baseline, wireframe, refinement, restored } = value
     expect(failures,
         baseline?.terrainPresentation === 'shaded' &&
         baseline.tileWireframeChecked === false &&
@@ -365,9 +399,9 @@ function validateProof(value, processState) {
         wireframe.stableIdentityHash === restored?.stableIdentityHash &&
         JSON.stringify(baseline.identityFacts) === JSON.stringify(wireframe.identityFacts) &&
         JSON.stringify(wireframe.identityFacts) === JSON.stringify(restored.identityFacts) &&
-        baseline.identityFacts?.programs === 3 &&
-        baseline.identityFacts?.pipelines === 3 &&
-        baseline.identityFacts?.commands === 6,
+        baseline.identityFacts?.programs === 6 &&
+        baseline.identityFacts?.pipelines === 6 &&
+        baseline.identityFacts?.commands === 18,
     'live presentation switching rebuilt or replaced the persistent DEM graph')
 
     expect(failures,
@@ -379,8 +413,35 @@ function validateProof(value, processState) {
 
     expect(failures,
         baseline?.graphContract?.commandIds?.drawTerrain?.shaded?.length === 2 &&
-        baseline.graphContract.commandIds.drawTerrain.tileWireframe?.length === 2,
+        baseline.graphContract.commandIds.drawTerrain.tileWireframe?.length === 2 &&
+        baseline.graphContract.commandIds.renderPatches?.length === 2 &&
+        baseline.graphContract.dataMaximumMatrixLevel === 10 &&
+        baseline.graphContract.renderMaximumMatrixLevel === 14 &&
+        baseline.graphContract.renderPatches?.maximumExtraLevels === 4,
     'graph contract does not expose both persistent parity command sets')
+
+    const refinementTargets = refinement?.map(sample => (
+        sample.renderPatchTargetMatrixLevel
+    ))
+    const refinementDataLevels = [ wireframe, ...(refinement ?? []) ].map(sample => (
+        sample?.dataLevelRange?.[1]
+    ))
+    const refinementHashes = [ wireframe, ...(refinement ?? []) ].map(sample => (
+        sample?.capture?.canvas?.sha256
+    ))
+    const requestedDataLevels = value.events?.tileRequestLevels ?? []
+    expect(failures,
+        JSON.stringify(refinementTargets) === JSON.stringify([ 11, 12, 14 ]) &&
+        refinementDataLevels.every(level => Number.isInteger(level) && level <= 10) &&
+        new Set(refinementHashes).size === 4 &&
+        requestedDataLevels.length > 0 &&
+        requestedDataLevels.every(level => Number.isInteger(level) && level <= 10),
+    `render-patch LoD did not refine independently: ${JSON.stringify({
+        refinementTargets,
+        refinementDataLevels,
+        refinementHashes,
+        requestedDataLevels,
+    })}`)
 
     const pixels = wireframe?.capture?.pixels
     expect(failures,
@@ -430,12 +491,32 @@ function expect(failures, condition, message) {
 
 function observePage(page) {
 
-    const events = { consoleFailures: [], pageErrors: [], httpFailures: [] }
+    const events = {
+        consoleFailures: [],
+        pageErrors: [],
+        httpFailures: [],
+        tileRequests: [],
+        tileRequestLevels: [],
+        tileRequestCount: 0,
+    }
     page.on('console', message => {
         if (message.type() === 'error') pushBounded(events.consoleFailures, message.text())
     })
     page.on('pageerror', error => pushBounded(events.pageErrors, serializeError(error)))
     page.on('response', response => {
+        const url = new URL(response.url())
+        const tileMatch = /^\/tiles\/WebMercatorQuad\/(\d+)\/\d+\/\d+\.png$/.exec(
+            url.pathname
+        )
+        if (url.origin === tileBaseUrl && tileMatch !== null) {
+            pushBounded(events.tileRequests, response.url())
+            events.tileRequestCount++
+            const matrixLevel = Number(tileMatch[1])
+            if (!events.tileRequestLevels.includes(matrixLevel)) {
+                events.tileRequestLevels.push(matrixLevel)
+                events.tileRequestLevels.sort((left, right) => left - right)
+            }
+        }
         if (response.status() >= 400) {
             pushBounded(events.httpFailures, `${response.status()} ${response.url()}`)
         }

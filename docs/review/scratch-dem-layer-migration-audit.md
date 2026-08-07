@@ -2,7 +2,16 @@
 
 ## Current Architecture Supersession
 
-As of 2026-08-06, ADR-061 replaces the CPU selector and CPU-authored indirect-count
+As of 2026-08-07, ADR-063 supplements ADR-061 by separating the `z4..z10` data-page
+frontier from the `z4..z14` terrain render-patch frontier. The data frontier remains
+the only residency, request, cache, and fallback authority. An example-owned compute
+stage expands its visible pages into bounded, frustum-culled render patches and writes
+the LoD-map and terrain indirect arguments. The LoD map records geometry level and
+sampling level independently, so stitching no longer infers data availability from
+mesh density. See
+[ADR-063](../decisions/ADR-063-dem-render-patch-lod-decoupling.md).
+
+As of 2026-08-06, ADR-061 replaced the CPU selector and CPU-authored indirect-count
 path described in the historical source-parity matrix below. The current DEM owns no
 `selectTerrainNodes()` production path: Geo's persistent GPU frontier produces visible
 instances, demand, and indirect arguments from acknowledged Virtual Raster residency.
@@ -10,6 +19,26 @@ The matrix remains a record of the earlier Scratch API migration and must not be
 the current DEM execution architecture. See
 [ADR-061](../decisions/ADR-061-gpu-resident-tile-frontier-dem.md) and the final GPU
 frontier audit.
+
+### Current Render-Patch Verification
+
+The 2026-08-07 real Chrome/WebGPU gate keeps the camera center, pitch 70, and bearing
+90 while moving through zooms 10, 11, 12, and 14. In every sample the converged data
+frontier remained within levels 9..10. The published render-patch target advanced
+10, 11, 12, and 14; all four wireframe canvas hashes differed. Chrome reported zero
+uncaptured GPU errors, device losses, console failures, page errors, or HTTP failures.
+Every observed `WebMercatorQuad` tile response remained within source levels 4..10.
+
+The current example graph publishes 76 stable identities: 20 resources, four uploads,
+seven BindLayouts, 12 BindSets, six Programs, six pipelines, three passes, and 18
+commands. The resource and identity facts remain unchanged across all zooms and live
+wireframe/shaded switching. The frame sequence is now:
+
+1. data frontier compute;
+2. render-patch reset, expansion/culling, and indirect finalization compute;
+3. LoD-map indirect draw from render patches;
+4. terrain indirect draw from the same render patches;
+5. bounded data-frontier feedback.
 
 ## Audit Status
 
@@ -97,7 +126,7 @@ Observed facts:
 The gate is `tests/scratch-dem-dynamic-count-capability.test.js` and commit `5515b31`.
 No file under `packages/geoscratch/src/scratch/` changed for DEM.
 
-## Persistent Graph Inventory
+## Historical CPU-Migration Persistent Graph Inventory
 
 The graph contains:
 
@@ -119,7 +148,7 @@ texture is not bound, so the verified resize has zero stale BindSets and zero pr
 calls. The code still checks and prepares a set if an allocation-sensitive binding is
 ever made stale.
 
-## Submission And Provenance Matrix
+## Historical CPU-Migration Submission And Provenance Matrix
 
 | Step | Persistent operation | Resource effect | Required consumer fact |
 | --- | --- | --- | --- |
@@ -215,8 +244,12 @@ scenarios, and clean browser/server shutdown. The complete repository suite repo
 
 ## Remaining Limitations
 
-- CPU LoD is fixed-capacity and synchronous; streaming, residency, and budgets remain
-  future Geo/application work.
+- Render-patch LoD currently follows integer camera zoom and inherits distance
+  degradation from the data frontier's source-page level. It does not yet have an
+  independent reusable Geo SSE/hysteresis policy.
+- GPU patch count, overflow, and selected-level state are bounded internally but are
+  not continuously read back to the CPU; visual proof and declared target facts avoid
+  a per-frame diagnostic readback cost.
 - The proof controls MapLibre camera state but does not validate remote CARTO service
   uptime.
 - Scratch records exact logical/native outcomes but does not claim physical VRAM
