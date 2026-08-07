@@ -264,9 +264,6 @@ async function readFacts(page) {
             },
             cameraView: parse(canvas.dataset.cameraView),
             dataLevelRange: parse(canvas.dataset.levelRange),
-            renderPatchTargetMatrixLevel: Number(
-                canvas.dataset.renderPatchTargetMatrixLevel
-            ),
             tileWireframeChecked: checkbox instanceof HTMLInputElement
                 ? checkbox.checked
                 : undefined,
@@ -399,8 +396,8 @@ function validateProof(value, processState) {
         wireframe.stableIdentityHash === restored?.stableIdentityHash &&
         JSON.stringify(baseline.identityFacts) === JSON.stringify(wireframe.identityFacts) &&
         JSON.stringify(wireframe.identityFacts) === JSON.stringify(restored.identityFacts) &&
-        baseline.identityFacts?.programs === 6 &&
-        baseline.identityFacts?.pipelines === 6 &&
+        baseline.identityFacts?.programs === 5 &&
+        baseline.identityFacts?.pipelines === 5 &&
         baseline.identityFacts?.commands === 18,
     'live presentation switching rebuilt or replaced the persistent DEM graph')
 
@@ -420,9 +417,6 @@ function validateProof(value, processState) {
         baseline.graphContract.renderPatches?.maximumExtraLevels === 4,
     'graph contract does not expose both persistent parity command sets')
 
-    const refinementTargets = refinement?.map(sample => (
-        sample.renderPatchTargetMatrixLevel
-    ))
     const refinementDataLevels = [ wireframe, ...(refinement ?? []) ].map(sample => (
         sample?.dataLevelRange?.[1]
     ))
@@ -431,13 +425,16 @@ function validateProof(value, processState) {
     ))
     const requestedDataLevels = value.events?.tileRequestLevels ?? []
     expect(failures,
-        JSON.stringify(refinementTargets) === JSON.stringify([ 11, 12, 14 ]) &&
+        baseline.graphContract?.renderPatches?.selectionPath ===
+            'gpu-screen-space-error-render-patches' &&
+        baseline.graphContract.renderPatches.refineErrorPixels === 2 &&
+        baseline.graphContract.renderPatches.renderPatchLookupCapacity >
+            baseline.graphContract.renderPatches.maximumRenderPatches &&
         refinementDataLevels.every(level => Number.isInteger(level) && level <= 10) &&
         new Set(refinementHashes).size === 4 &&
         requestedDataLevels.length > 0 &&
         requestedDataLevels.every(level => Number.isInteger(level) && level <= 10),
     `render-patch LoD did not refine independently: ${JSON.stringify({
-        refinementTargets,
         refinementDataLevels,
         refinementHashes,
         requestedDataLevels,

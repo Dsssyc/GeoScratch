@@ -27,11 +27,15 @@ import type {
 
 export const DEM_MAX_RENDER_MATRIX_LEVEL = 14
 export const DEM_MAX_RENDER_EXTRA_LEVELS = 4
+export const DEM_RENDER_PATCH_REFINE_ERROR_PIXELS = 2
+export const DEM_RENDER_PATCH_TERRAIN_SECTOR_SIZE = 64
 
 const WORKGROUP_SIZE = 64
 const DRAW_ARGUMENT_BYTES = 16
-const DRAW_ARGUMENT_COUNT = 2
-const STATE_BYTES = 16
+const DRAW_ARGUMENT_COUNT = 1
+const STATE_BYTES = 32
+const LOOKUP_ENTRY_BYTES = 8
+const WEB_MERCATOR_WORLD_WIDTH_METERS = 40_075_016
 const bufferUsage = globalThis.GPUBufferUsage ?? Object.freeze({
     COPY_DST: 0x08,
     COPY_SRC: 0x04,
@@ -64,18 +68,18 @@ const renderPatchPolicyCodec = layoutCodec({
         { name: 'minimumElevationMeters', type: 'f32' },
         { name: 'maximumElevationMeters', type: 'f32' },
         { name: 'coordinateBits', type: 'u32' },
-        { name: 'lodMapVertexCount', type: 'u32' },
         { name: 'terrainVertexCount', type: 'u32' },
-        { name: 'reserved0', type: 'u32' },
-        { name: 'reserved1', type: 'u32' },
-        { name: 'reserved2', type: 'u32' },
+        { name: 'renderPatchLookupCapacity', type: 'u32' },
+        { name: 'terrainSectorSize', type: 'u32' },
+        { name: 'refineErrorPixels', type: 'f32' },
+        { name: 'reserved', type: 'f32' },
     ],
 }, { usage: [ 'uniform', 'storage', 'readback' ] })
 
 type Disposable = { dispose(): void }
 type BufferBindingType = 'uniform' | 'read-storage' | 'storage'
 
-type DrawTemplateId = 'lod-map' | 'terrain'
+type DrawTemplateId = 'terrain'
 
 export type DemRenderPatchRenderTemplate = Readonly<{
     frontierId: string
@@ -83,6 +87,7 @@ export type DemRenderPatchRenderTemplate = Readonly<{
     templateId: DrawTemplateId
     mapMeta: BufferResource
     visibleInstances: BufferResource
+    renderPatchLookup: BufferResource
     drawArgument: Readonly<{
         resource: BufferResource
         region: BufferRegion
@@ -95,11 +100,13 @@ type ParityResources = Readonly<{
     parity: 0 | 1
     source: GpuTileFrontierRenderTemplate
     renderPatches: BufferResource
+    renderPatchLookup: BufferResource
     state: BufferResource
     drawArguments: BufferResource
 }>
 
 type ParityCommands = Readonly<{
+    clearLookup: ClearBufferCommand
     reset: DispatchCommand
     expand: DispatchCommand
     finalize: DispatchCommand
@@ -107,20 +114,25 @@ type ParityCommands = Readonly<{
 
 export type DemRenderPatchFrontierFacts = Readonly<{
     id: string
-    selectionPath: 'gpu-expanded-render-patches'
+    selectionPath: 'gpu-screen-space-error-render-patches'
     disposed: boolean
     dataMaximumMatrixLevel: number
     maximumMatrixLevel: number
     maximumExtraLevels: number
     maximumSourceTiles: number
     maximumRenderPatches: number
+    refineErrorPixels: number
+    terrainSectorSize: number
     renderPatchBytes: number
+    renderPatchLookupCapacity: number
+    renderPatchLookupBytes: number
     drawArgumentBytes: number
     workgroupSize: number
     parity: readonly Readonly<{
         parity: 0 | 1
         sourceBufferId: string
         renderPatchBufferId: string
+        renderPatchLookupBufferId: string
         stateBufferId: string
         drawArgumentBufferId: string
         commandIds: readonly string[]
@@ -164,14 +176,58 @@ export type DemRenderPatchFrontierOptions = Readonly<{
     coordinateBits: number
     elevationRangeMeters: readonly [number, number]
     terrainVertexCount: number
+    terrainSectorSize?: number
+    refineErrorPixels?: number
     shader: string
 }>
 
 let nextRenderPatchFrontierId = 1
 
-export function demRenderPatchTargetMatrixLevel(
+export function demRenderPatchScreenSpaceError({
+    matrixLevel,
+    distanceMeters,
+    viewportHeight,
+    verticalFovRadians,
+    terrainSectorSize = DEM_RENDER_PATCH_TERRAIN_SECTOR_SIZE,
+}: Readonly<{
+    matrixLevel: number
+    distanceMeters: number
+    viewportHeight: number
+    verticalFovRadians: number
+    terrainSectorSize?: number
+}>): number {
+
+    if (!Number.isInteger(matrixLevel) || matrixLevel < 0 || matrixLevel > 30) {
+        throw new TypeError('DEM render-patch matrix level must be an integer in [0, 30]')
+    }
+    if (!Number.isFinite(distanceMeters) || distanceMeters < 0) {
+        throw new TypeError('DEM render-patch distance must be finite and non-negative')
+    }
+    if (!Number.isFinite(viewportHeight) || viewportHeight <= 0) {
+        throw new TypeError('DEM render-patch viewport height must be positive and finite')
+    }
+    if (!Number.isFinite(verticalFovRadians) || verticalFovRadians <= 0 ||
+        verticalFovRadians >= Math.PI) {
+        throw new TypeError('DEM render-patch vertical FOV must be in (0, pi)')
+    }
+    if (!Number.isInteger(terrainSectorSize) || terrainSectorSize < 1) {
+        throw new TypeError('DEM render-patch terrain sector size must be a positive integer')
+    }
+    const geometricErrorMeters = WEB_MERCATOR_WORLD_WIDTH_METERS /
+        2 ** matrixLevel / terrainSectorSize
+    return geometricErrorMeters * viewportHeight /
+        (2 * Math.tan(verticalFovRadians / 2) * Math.max(distanceMeters, 1e-6))
+}
+
+export function demRenderPatchSelectMatrixLevel(
     sourceMatrixLevel: number,
-    zoomHint: number,
+    distanceMeters: number,
+    view: Readonly<{
+        viewportHeight: number
+        verticalFovRadians: number
+        terrainSectorSize?: number
+        refineErrorPixels?: number
+    }>,
     options: Readonly<{
         maximumMatrixLevel?: number
         maximumExtraLevels?: number
@@ -181,23 +237,61 @@ export function demRenderPatchTargetMatrixLevel(
     if (!Number.isInteger(sourceMatrixLevel) || sourceMatrixLevel < 0) {
         throw new TypeError('DEM render-patch source matrix level must be a non-negative integer')
     }
-    if (!Number.isFinite(zoomHint) || zoomHint < 0) {
-        throw new TypeError('DEM render-patch zoom hint must be a finite non-negative number')
+    if (!Number.isFinite(distanceMeters) || distanceMeters < 0) {
+        throw new TypeError('DEM render-patch distance must be finite and non-negative')
     }
     const maximumMatrixLevel = options.maximumMatrixLevel ?? DEM_MAX_RENDER_MATRIX_LEVEL
     const maximumExtraLevels = options.maximumExtraLevels ?? DEM_MAX_RENDER_EXTRA_LEVELS
-    if (!Number.isInteger(maximumMatrixLevel) || maximumMatrixLevel < sourceMatrixLevel) {
+    if (!Number.isInteger(maximumMatrixLevel) ||
+        maximumMatrixLevel < sourceMatrixLevel ||
+        maximumMatrixLevel > DEM_MAX_RENDER_MATRIX_LEVEL) {
         throw new TypeError('DEM render-patch maximum matrix level is invalid')
     }
     if (!Number.isInteger(maximumExtraLevels) || maximumExtraLevels < 0 ||
         maximumExtraLevels > DEM_MAX_RENDER_EXTRA_LEVELS) {
         throw new TypeError('DEM render-patch maximum extra levels is invalid')
     }
-    return Math.max(sourceMatrixLevel, Math.min(
+    const maximumSelectedLevel = Math.max(sourceMatrixLevel, Math.min(
         maximumMatrixLevel,
-        sourceMatrixLevel + maximumExtraLevels,
-        Math.ceil(zoomHint)
+        sourceMatrixLevel + maximumExtraLevels
     ))
+    const refineErrorPixels = view.refineErrorPixels ??
+        DEM_RENDER_PATCH_REFINE_ERROR_PIXELS
+    if (!Number.isFinite(refineErrorPixels) || refineErrorPixels <= 0) {
+        throw new TypeError('DEM render-patch refine error must be positive and finite')
+    }
+    let matrixLevel = sourceMatrixLevel
+    while (matrixLevel < maximumSelectedLevel && demRenderPatchScreenSpaceError({
+        matrixLevel,
+        distanceMeters,
+        viewportHeight: view.viewportHeight,
+        verticalFovRadians: view.verticalFovRadians,
+        terrainSectorSize: view.terrainSectorSize,
+    }) > refineErrorPixels) {
+        matrixLevel++
+    }
+    return matrixLevel
+}
+
+export function demRenderPatchLookupCapacity(
+    maximumSourceTiles: number,
+    maximumExtraLevels: number
+): number {
+
+    if (!Number.isSafeInteger(maximumSourceTiles) || maximumSourceTiles < 1) {
+        throw new TypeError('DEM render-patch maximum source tiles must be positive')
+    }
+    if (!Number.isInteger(maximumExtraLevels) || maximumExtraLevels < 0 ||
+        maximumExtraLevels > DEM_MAX_RENDER_EXTRA_LEVELS) {
+        throw new TypeError('DEM render-patch maximum extra levels is invalid')
+    }
+    const required = maximumSourceTiles * 4 ** maximumExtraLevels * 2
+    let capacity = 1
+    while (capacity < required) capacity *= 2
+    if (!Number.isSafeInteger(capacity) || capacity > 0x4000_0000) {
+        throw new RangeError('DEM render-patch lookup capacity exceeds supported bounds')
+    }
+    return capacity
 }
 
 export function demRenderPatchWgslModule() {
@@ -207,6 +301,19 @@ export function demRenderPatchWgslModule() {
         code: [
             frontier.code,
             renderPatchCodec.wgslAccessors({ namespace: 'DemRenderPatch' }),
+            `
+fn DemRenderPatch_lookupKey(matrixLevel: u32, tileRow: u32, tileCol: u32) -> u32 {
+    return 1u + (matrixLevel << 28u) + (tileRow << 14u) + tileCol;
+}
+
+fn DemRenderPatch_lookupSlot(key: u32, probe: u32, capacity: u32) -> u32 {
+    var hash = key;
+    hash = (hash ^ (hash >> 16u)) * 0x7feb352du;
+    hash = (hash ^ (hash >> 15u)) * 0x846ca68bu;
+    hash = hash ^ (hash >> 16u);
+    return (hash + probe) & (capacity - 1u);
+}
+`,
         ].join('\n'),
         layoutDependencies: Object.freeze([
             ...frontier.layoutDependencies,
@@ -224,7 +331,12 @@ export async function createDemRenderPatchFrontier(
     const id = `dem-render-patch-frontier-${nextRenderPatchFrontierId++}`
     const maximumRenderPatches = descriptor.maximumSourceTiles *
         4 ** descriptor.maximumExtraLevels
+    const renderPatchLookupCapacity = demRenderPatchLookupCapacity(
+        descriptor.maximumSourceTiles,
+        descriptor.maximumExtraLevels
+    )
     const renderPatchBytes = maximumRenderPatches * renderPatchCodec.byteLength()
+    const renderPatchLookupBytes = renderPatchLookupCapacity * LOOKUP_ENTRY_BYTES
     const owned: Disposable[] = []
     const own = <Value extends Disposable>(value: Value): Value => {
         owned.push(value)
@@ -249,11 +361,11 @@ export async function createDemRenderPatchFrontier(
                 minimumElevationMeters: descriptor.elevationRangeMeters[0],
                 maximumElevationMeters: descriptor.elevationRangeMeters[1],
                 coordinateBits: descriptor.coordinateBits,
-                lodMapVertexCount: 4,
                 terrainVertexCount: descriptor.terrainVertexCount,
-                reserved0: 0,
-                reserved1: 0,
-                reserved2: 0,
+                renderPatchLookupCapacity,
+                terrainSectorSize: descriptor.terrainSectorSize,
+                refineErrorPixels: descriptor.refineErrorPixels,
+                reserved: 0,
             }),
         }))
         const parityResources = await Promise.all(descriptor.sourceTemplates.map(
@@ -265,6 +377,11 @@ export async function createDemRenderPatchFrontier(
                     renderPatches: own(await runtime.createBuffer({
                         label: `DEM render patches ${parity}`,
                         size: renderPatchBytes,
+                        usage: bufferUsage.COPY_DST | bufferUsage.STORAGE,
+                    })),
+                    renderPatchLookup: own(await runtime.createBuffer({
+                        label: `DEM render-patch lookup ${parity}`,
+                        size: renderPatchLookupBytes,
                         usage: bufferUsage.COPY_DST | bufferUsage.STORAGE,
                     })),
                     state: own(await runtime.createBuffer({
@@ -296,7 +413,7 @@ export async function createDemRenderPatchFrontier(
                 target: resources.drawArguments.region(),
             })),
         ]))
-        const shared = gpuTileFrontierRenderWgslModule()
+        const shared = demRenderPatchWgslModule()
         const shader = own(await runtime.createShaderModule({
             label: 'DEM render-patch frontier shader',
             sourceParts: [
@@ -304,14 +421,12 @@ export async function createDemRenderPatchFrontier(
                     label: 'DEM render-patch shared ABI',
                     code: [
                         shared.code,
-                        renderPatchCodec.wgslAccessors({ namespace: 'DemRenderPatch' }),
                         renderPatchPolicyCodec.wgslAccessors({
                             namespace: 'DemRenderPatchPolicy',
                         }),
                     ].join('\n'),
                     layoutDependencies: [
                         ...shared.layoutDependencies,
-                        renderPatchCodec.artifact,
                         renderPatchPolicyCodec.artifact,
                     ],
                 },
@@ -355,6 +470,12 @@ export async function createDemRenderPatchFrontier(
                 binding(3, 'sourceDrawArguments', 'read-storage', DRAW_ARGUMENT_BYTES),
                 binding(4, 'renderPatches', 'storage', renderPatchBytes),
                 binding(5, 'renderPatchState', 'storage', STATE_BYTES),
+                binding(
+                    7,
+                    'renderPatchLookup',
+                    'storage',
+                    renderPatchLookupBytes
+                ),
             ],
             own
         )
@@ -391,6 +512,7 @@ export async function createDemRenderPatchFrontier(
                     layout: renderPatchCodec.artifact,
                 }),
                 renderPatchState: resources.state.region(),
+                renderPatchLookup: resources.renderPatchLookup.region(),
             }, { label: `DEM expand render patches ${resources.parity}` }))
             const finalizeSet = own(await runtime.createBindSet(finalizeKernel.layout, {
                 renderPatchPolicy: policy.region({ layout: renderPatchPolicyCodec.artifact }),
@@ -398,6 +520,10 @@ export async function createDemRenderPatchFrontier(
                 drawArguments: resources.drawArguments.region(),
             }, { label: `DEM finalize render patches ${resources.parity}` }))
             bindSets.push(resetSet, expandSet, finalizeSet)
+            const clearLookup = own(runtime.createClearBufferCommand({
+                label: `Clear DEM render-patch lookup ${resources.parity}`,
+                target: resources.renderPatchLookup.region(),
+            }))
             const reset = own(runtime.createDispatchCommand({
                 label: `Reset DEM render patches ${resources.parity}`,
                 pipeline: resetKernel.pipeline,
@@ -415,7 +541,7 @@ export async function createDemRenderPatchFrontier(
                 bindSets: [ { set: expandSet } ],
                 count: {
                     workgroups: [
-                        Math.ceil(descriptor.maximumSourceTiles / WORKGROUP_SIZE),
+                        Math.ceil(maximumRenderPatches / WORKGROUP_SIZE),
                         1,
                         1,
                     ],
@@ -427,7 +553,12 @@ export async function createDemRenderPatchFrontier(
                     resources.source.drawArgument.resource,
                     resources.renderPatches,
                     resources.state,
-                ], [ resources.renderPatches, resources.state ]),
+                    resources.renderPatchLookup,
+                ], [
+                    resources.renderPatches,
+                    resources.state,
+                    resources.renderPatchLookup,
+                ]),
                 whenMissing: 'throw',
             }))
             const finalize = own(runtime.createDispatchCommand({
@@ -441,7 +572,7 @@ export async function createDemRenderPatchFrontier(
                 ),
                 whenMissing: 'throw',
             }))
-            return Object.freeze({ reset, expand, finalize })
+            return Object.freeze({ clearLookup, reset, expand, finalize })
         })) as unknown as readonly [ParityCommands, ParityCommands]
         const programs = Object.freeze([
             resetKernel.program,
@@ -461,13 +592,14 @@ export async function createDemRenderPatchFrontier(
 
         const templates = (templateId: DrawTemplateId) => Object.freeze(
             parityResources.map(resources => {
-                const offset = templateId === 'lod-map' ? 0 : DRAW_ARGUMENT_BYTES
+                const offset = 0
                 return Object.freeze({
                     frontierId: id,
                     parity: resources.parity,
                     templateId,
                     mapMeta: resources.source.mapMeta,
                     visibleInstances: resources.renderPatches,
+                    renderPatchLookup: resources.renderPatchLookup,
                     drawArgument: Object.freeze({
                         resource: resources.drawArguments,
                         region: resources.drawArguments.region({
@@ -484,7 +616,6 @@ export async function createDemRenderPatchFrontier(
             ]
         )
         const renderTemplates = Object.freeze({
-            'lod-map': templates('lod-map'),
             terrain: templates('terrain'),
         })
         const identity: IdentityObjects = Object.freeze({
@@ -492,6 +623,7 @@ export async function createDemRenderPatchFrontier(
                 policy,
                 ...parityResources.flatMap(resources => [
                     resources.renderPatches,
+                    resources.renderPatchLookup,
                     resources.state,
                     resources.drawArguments,
                 ]),
@@ -505,6 +637,7 @@ export async function createDemRenderPatchFrontier(
             commands: Object.freeze([
                 ...initializationClears,
                 ...commands.flatMap(parity => [
+                    parity.clearLookup,
                     parity.reset,
                     parity.expand,
                     parity.finalize,
@@ -532,6 +665,7 @@ export async function createDemRenderPatchFrontier(
                     throw new TypeError('DEM render-patch encoding requires the current source frontier frame')
                 }
                 const selected = commands[parity]
+                builder.clear(selected.clearLookup)
                 return builder.compute(pass, [
                     selected.reset,
                     selected.expand,
@@ -558,23 +692,29 @@ export async function createDemRenderPatchFrontier(
             facts() {
                 return Object.freeze({
                     id,
-                    selectionPath: 'gpu-expanded-render-patches' as const,
+                    selectionPath: 'gpu-screen-space-error-render-patches' as const,
                     disposed,
                     dataMaximumMatrixLevel: descriptor.dataMaximumMatrixLevel,
                     maximumMatrixLevel: descriptor.renderMaximumMatrixLevel,
                     maximumExtraLevels: descriptor.maximumExtraLevels,
                     maximumSourceTiles: descriptor.maximumSourceTiles,
                     maximumRenderPatches,
+                    refineErrorPixels: descriptor.refineErrorPixels,
+                    terrainSectorSize: descriptor.terrainSectorSize,
                     renderPatchBytes,
+                    renderPatchLookupCapacity,
+                    renderPatchLookupBytes,
                     drawArgumentBytes: DRAW_ARGUMENT_BYTES * DRAW_ARGUMENT_COUNT,
                     workgroupSize: WORKGROUP_SIZE,
                     parity: Object.freeze(parityResources.map(resources => Object.freeze({
                         parity: resources.parity,
                         sourceBufferId: resources.source.visibleInstances.id,
                         renderPatchBufferId: resources.renderPatches.id,
+                        renderPatchLookupBufferId: resources.renderPatchLookup.id,
                         stateBufferId: resources.state.id,
                         drawArgumentBufferId: resources.drawArguments.id,
                         commandIds: Object.freeze([
+                            commands[resources.parity].clearLookup.id,
                             commands[resources.parity].reset.id,
                             commands[resources.parity].expand.id,
                             commands[resources.parity].finalize.id,
@@ -671,6 +811,10 @@ function validateOptions(
     const renderMaximumMatrixLevel = options.renderMaximumMatrixLevel ??
         DEM_MAX_RENDER_MATRIX_LEVEL
     const maximumExtraLevels = options.maximumExtraLevels ?? DEM_MAX_RENDER_EXTRA_LEVELS
+    const terrainSectorSize = options.terrainSectorSize ??
+        DEM_RENDER_PATCH_TERRAIN_SECTOR_SIZE
+    const refineErrorPixels = options.refineErrorPixels ??
+        DEM_RENDER_PATCH_REFINE_ERROR_PIXELS
     if (runtime === undefined || typeof runtime.createBuffer !== 'function') {
         throw new TypeError('DEM render-patch frontier requires GPURuntime')
     }
@@ -688,6 +832,7 @@ function validateOptions(
         [ 'maximumExtraLevels', maximumExtraLevels ],
         [ 'coordinateBits', options.coordinateBits ],
         [ 'terrainVertexCount', options.terrainVertexCount ],
+        [ 'terrainSectorSize', terrainSectorSize ],
     ] as const) {
         if (!Number.isInteger(value) || value < 0) {
             throw new TypeError(`DEM render-patch ${name} must be a non-negative integer`)
@@ -695,6 +840,7 @@ function validateOptions(
     }
     if (options.maximumSourceTiles < 1 || options.terrainVertexCount < 1 ||
         renderMaximumMatrixLevel < options.dataMaximumMatrixLevel ||
+        renderMaximumMatrixLevel > DEM_MAX_RENDER_MATRIX_LEVEL ||
         maximumExtraLevels > DEM_MAX_RENDER_EXTRA_LEVELS ||
         maximumExtraLevels > renderMaximumMatrixLevel ||
         options.coordinateBits <= renderMaximumMatrixLevel) {
@@ -705,6 +851,9 @@ function validateOptions(
         options.elevationRangeMeters[0] > options.elevationRangeMeters[1]) {
         throw new TypeError('DEM render-patch elevation range is invalid')
     }
+    if (!Number.isFinite(refineErrorPixels) || refineErrorPixels <= 0) {
+        throw new TypeError('DEM render-patch refine error must be positive and finite')
+    }
     if (typeof options.shader !== 'string' || options.shader.trim() === '') {
         throw new TypeError('DEM render-patch shader source is required')
     }
@@ -713,6 +862,8 @@ function validateOptions(
         sourceTemplates: options.sourceTemplates,
         renderMaximumMatrixLevel,
         maximumExtraLevels,
+        terrainSectorSize,
+        refineErrorPixels,
     })
 }
 

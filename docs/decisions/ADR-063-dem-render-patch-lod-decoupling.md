@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Superseded by [ADR-064](ADR-064-dem-screen-space-render-patch-lod.md)
 
 ## Date
 
@@ -112,7 +112,8 @@ mesh-stitching are not generic GPU primitives.
   stitching visible without changing the shaded path.
 - The persistent graph adds bounded parity patch/state/argument buffers and three
   compute kernels; it creates no per-frame GPU objects.
-- The current example policy uses integer zoom plus inherited data-frontier distance
-  degradation. A future reusable Geo render-patch policy may add independent geometric
-  SSE/hysteresis, but it must retain the data/render/sampling separation established
-  here.
+- The original implementation used integer zoom plus inherited data-frontier distance
+  degradation. A pitched-camera regression proved that assumption insufficient: every
+  descendant of one source page received the same render level, so near and far geometry
+  did not independently converge to a screen-space error. ADR-064 retains this ADR's
+  data/render/sampling separation while replacing that selection and the fixed LoD map.

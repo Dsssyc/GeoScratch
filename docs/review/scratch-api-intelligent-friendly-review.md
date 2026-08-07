@@ -289,25 +289,24 @@ repair, OOM attribution, device-loss recovery, or an unbounded always-on trace.
 ### DEM Layer Persistent Graph And Application-Owned LoD
 
 The DEM Layer clean cut is a closer rendering-business test than a synthetic API
-probe: MapLibre camera state drives CPU terrain traversal, six changing GPU inputs,
-two dependent render passes, and native indirect draws. The implementation keeps 42
-Scratch identities stable across camera changes and Surface resize; a frame creates
-only a `SubmissionBuilder` and bounded observation bookkeeping. Browser facts recompute
-the complete 13-resource/11-upload/layout/BindSet/Program/pipeline/pass/command identity
-inventory instead of comparing a construction-time hash to itself.
+probe: MapLibre camera state drives a persistent GPU data frontier, a second bounded
+GPU screen-space-error render frontier, virtual-raster sampling, and a native indirect
+terrain draw. The implementation keeps 71 Scratch identities stable across camera
+changes and Surface resize; a frame creates only a `SubmissionBuilder`, a view token,
+and bounded feedback bookkeeping.
 
 The following current contracts materially reduced ambiguity for the implementation
 and for an Agent reviewing it:
 
 - `LayoutCodec` owns uniform alignment and packing, so camera, tile, and static
   records are updated through named fields rather than repeated byte-offset arithmetic.
-- Stable `UploadCommand` objects retain typed-array source identity. Mutating those
-  arrays makes CPU-selected instance counts explicit data, while stable indirect
-  `DrawCommand` objects keep command shape immutable.
+- Stable compute and indirect command objects make data-frontier visibility,
+  render-patch descriptors, logical neighbor lookup, and draw counts explicit GPU
+  products rather than CPU-authored instance arrays.
 - `contentEpoch: 'current-at-step'`, `SubmittedWork.resourceAccesses`, and producer
-  facts prove the exact node-level, node-box, indirect-argument, and LoD-map chains.
-  The terrain pass can therefore explain which earlier step produced every consumed
-  epoch without a CPU readback or console inference.
+  facts prove the exact frontier-to-render-patch and render-patch-to-terrain descriptor,
+  lookup, and indirect-argument chains. The terrain pass can therefore explain which
+  earlier step produced every consumed epoch without console inference.
 - Explicit BindLayouts, Programs, pipelines, PassSpecs, and commands make persistent
   graph identity auditable. Surface and depth allocation replacement is separate from
   graph reconstruction, and stale BindSet preparation is inspected only after resize.
@@ -321,24 +320,22 @@ and for an Agent reviewing it:
   MapLibre, ImageBitmap, listeners, or frame scheduling.
 
 The exercise also identifies responsibilities that correctly remain above Scratch.
-The CPU LoD selector owns terrain bounds, subdivision policy, the 5,000-node cap, and
-serializable selection facts. The map host owns camera interpretation and the normal
-basemap. The page lifecycle owns decoded-image transfer, coalesced render scheduling,
-listener removal, late async settlement, and cleanup order. It tracks the finite page
-initialization and each full render/resize task, and registers issued native work before
-provenance validation may fail. Visual parity still requires a headed browser and pixel
-evidence; Scratch's logical provenance cannot decide whether an application chose the
-right terrain policy or camera matrix.
+Geo owns the data-page frontier and virtual-raster contracts; the DEM example owns its
+two-pixel geometry error, `z14` ceiling, 64-sector mesh, patch hashing, and stitching.
+The map host owns camera interpretation and the normal basemap. The page lifecycle owns
+coalesced render scheduling, listener removal, late async settlement, and cleanup order.
+Visual correctness still requires a real WebGPU browser and pixel evidence; Scratch's
+logical provenance cannot decide whether an application chose the right terrain policy
+or camera matrix.
 
 The remaining friction is explicit rather than hidden. The application still needs
-substantial proof wiring to publish compact graph, selection, lifecycle, and pixel
-facts. WGSL storage bindings required six mechanical read-only access corrections
-before native validation accepted the preserved shaders; the migration also had to
-delete unreachable palette declarations, an uncalled color map, and commented styling
-paths rather than carrying them forward as false parity. Neither fact warrants a
-DEM-specific core abstraction, an automatic render graph, a generic lifecycle stack,
-or CPU-dynamic command closures. The useful result is that Scratch exposes enough
-stable facts for the application to prove its own policy and ownership decisions.
+substantial proof wiring to publish compact graph, frontier, lifecycle, and pixel facts.
+The pitched-camera regression was a terrain-policy error even though every Scratch
+resource and submission contract was valid. Replacing the zoom-uniform policy required
+only existing buffers, compute dispatch, GPU clear, indirect draw, binding, and
+provenance primitives. That is evidence for the intended boundary: Scratch makes the
+implementation inspectable and composable, but it does not pretend to choose a correct
+geospatial LoD policy for the application.
 
 ## Resolved Review Items
 

@@ -78,7 +78,9 @@ tile、DEM 或 GPU。
 DEM Layer 是这条路径的可执行参考：terrain demand 在 Worker 中获取和解码标准
 WebMercatorQuad tile，可通过 Scratch Cache 持久化可直接使用的 raw height page，将
 page 转移到有限 atlas，并在 vertex shader 中进行跨页逻辑过滤和 parent fallback。
-源 PNG 只用于离线构建 COG；浏览器没有完整图片或旧瓦片路径回退。
+源 PNG 只用于离线构建 COG；浏览器没有完整图片或旧瓦片路径回退。栅格 residency
+仍受源数据细节上限约束，独立的 GPU 屏幕空间误差前沿则按距离选择地形 patch，并以
+全局逻辑瓦片身份查询 mesh-stitching 邻居。
 
 ## Scratch Persistent Cache
 

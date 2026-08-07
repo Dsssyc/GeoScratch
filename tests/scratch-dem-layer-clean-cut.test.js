@@ -134,7 +134,7 @@ async function createTestVirtualRaster(runtime) {
 
 describe('DEM Layer clean cut', () => {
 
-    it('separates the bounded data frontier from zoom-dependent render patches', () => {
+    it('separates the bounded data frontier from distance-adaptive render patches', () => {
 
         const layerSource = read('examples', 'demLayer', 'dem-layer.ts')
         const renderPatchSource = read(
@@ -148,7 +148,6 @@ describe('DEM Layer clean cut', () => {
             'shaders',
             'render-patch-frontier.wgsl'
         )
-        const lodShader = read('examples', 'demLayer', 'shaders', 'lod-map.wgsl')
         const terrainShader = read('examples', 'demLayer', 'shaders', 'terrain-mesh.wgsl')
 
         expect(layerSource).to.include('createDemRenderPatchFrontier(')
@@ -158,13 +157,27 @@ describe('DEM Layer clean cut', () => {
         expect(renderPatchSource).to.include('DEM_MAX_RENDER_EXTRA_LEVELS = 4')
         expect(renderPatchSource).to.include('dataMaximumMatrixLevel')
         expect(renderPatchSource).to.include('renderMaximumMatrixLevel')
+        expect(renderPatchSource).to.include('refineErrorPixels')
+        expect(renderPatchSource).to.include('renderPatchLookupCapacity')
         expect(renderPatchShader).to.include('source.samplingLevel')
-        expect(renderPatchShader).to.include('targetMatrixLevel')
+        expect(renderPatchShader).to.include('screenSpaceError')
+        expect(renderPatchShader).to.include('distanceToAabb')
+        expect(renderPatchShader).to.include('insertRenderPatchLookup')
+        expect(renderPatchShader).not.to.include('targetMatrixLevel')
+        expect(renderPatchShader).not.to.include('mapMeta.zoomHint')
         expect(renderPatchShader).to.include('atomicAdd(&renderPatchState.count')
         expect(renderPatchShader).to.include('drawArguments[1] = renderPatchCount')
-        expect(lodShader).to.include('encodedSamplingLevel')
-        expect(terrainShader).to.include('fn samplingLevelAt(')
+        expect(terrainShader).to.include('fn renderPatchLookup(')
+        expect(terrainShader).to.include('fn neighboringPatch(')
+        expect(terrainShader).to.include('fn snapEdgeCoordinate(')
         expect(terrainShader).not.to.include('fn coarserSamplingLevel(')
+        expect(fs.existsSync(path.join(
+            root,
+            'examples',
+            'demLayer',
+            'shaders',
+            'lod-map.wgsl'
+        ))).to.equal(false)
     })
 
     it('uses a GPU-resident frontier without a CPU selection compatibility path', () => {
@@ -236,10 +249,10 @@ describe('DEM Layer clean cut', () => {
         expect(frameSource).to.include('frontier.writeView({')
         expect(frameSource).to.include('frontier.encode(builder, frame)')
         expect(frameSource).to.include('feedbackRing.encode(builder, frame)')
-        expect(frameSource).to.include('.render(passes.lodMap')
         expect(frameSource).to.include('.render(passes.terrain')
+        expect(frameSource).not.to.include('passes.lodMap')
         expect(layerSource).to.include("contentEpoch: 'current-at-step'")
-        expect(layerSource.match(/count: \{ indirect:/g)).to.have.length(2)
+        expect(layerSource.match(/count: \{ indirect:/g)).to.have.length(1)
         expect(layerSource).to.include('depthWriteEnabled: true')
         expect(layerSource).to.include("depthCompare: 'less'")
         expect(allSources).not.to.match(/runtime\.(device|queue)\b/)
@@ -445,13 +458,11 @@ describe('DEM Layer clean cut', () => {
     it('preserves the DEM payload and enumerates every reachable WGSL correction', () => {
 
         const demBytes = fs.readFileSync(path.join(root, 'examples', 'demLayer', 'assets', 'dem.png'))
-        const lodShader = read('examples', 'demLayer', 'shaders', 'lod-map.wgsl')
         const terrainShader = read('examples', 'demLayer', 'shaders', 'terrain-mesh.wgsl')
         const browserProof = read('tests', 'browser', 'scratch-dem-layer.mjs')
 
         expect(sha256(demBytes)).to.equal('aa7a584830f198772d242df1ce1ae47e21b2bdc85bfc1f97101af8be986c57e1')
-        expect(lodShader.match(/var<storage, read>/g)).to.have.length(1)
-        expect(terrainShader.match(/var<storage, read>/g)).to.have.length(3)
+        expect(terrainShader.match(/var<storage, read>/g)).to.have.length(4)
         expect(terrainShader).not.to.match(/\b(lSampler|palette|colorMap)\b/)
         expect(terrainShader).not.to.include('demTexture')
         expect(terrainShader).not.to.match(/nodeBox|canonicalNodes|cameraCoordinate/)
@@ -511,7 +522,6 @@ describe('DEM Layer clean cut', () => {
                     'shaders',
                     'render-patch-frontier.wgsl'
                 ),
-                lodMap: read('examples', 'demLayer', 'shaders', 'lod-map.wgsl'),
                 terrain: read('examples', 'demLayer', 'shaders', 'terrain-mesh.wgsl'),
             },
             provenanceVerifier() {
@@ -561,7 +571,6 @@ describe('DEM Layer clean cut', () => {
                     'shaders',
                     'render-patch-frontier.wgsl'
                 ),
-                lodMap: read('examples', 'demLayer', 'shaders', 'lod-map.wgsl'),
                 terrain: read('examples', 'demLayer', 'shaders', 'terrain-mesh.wgsl'),
             },
         })
@@ -595,7 +604,6 @@ describe('DEM Layer clean cut', () => {
             logicalPipelineLabel(pipeline.descriptor.label)
         )))
             .to.deep.equal([
-                'DEM LoD-map pipeline',
                 'DEM terrain pipeline',
                 'DEM tile wireframe pipeline',
             ])
@@ -604,11 +612,9 @@ describe('DEM Layer clean cut', () => {
             'frontier-map-meta-to-render-patch',
             'frontier-visible-to-render-patch',
             'frontier-indirect-to-render-patch',
-            'render-patch-visible-to-lod-draw',
-            'render-patch-indirect-to-lod-draw',
             'render-patch-visible-to-terrain-draw',
+            'render-patch-lookup-to-terrain-draw',
             'render-patch-indirect-to-terrain-draw',
-            'lod-map-pass-to-terrain-draw',
         ])
         expect(second.provenance.every(fact => (
             fact.declaredContentEpoch === 'current-at-step' &&
@@ -621,11 +627,11 @@ describe('DEM Layer clean cut', () => {
         expect(initialIdentityFacts).to.deep.include({
             hash: initialIdentityHash,
             uploads: 4,
-            bindLayouts: 7,
-            bindSets: 12,
-            programs: 6,
-            pipelines: 6,
-            passes: 3,
+            bindLayouts: 6,
+            bindSets: 10,
+            programs: 5,
+            pipelines: 5,
+            passes: 2,
             commands: 18,
         })
         expect(graph.persistentFacts()).to.deep.equal(initialPersistentFacts)
@@ -661,11 +667,15 @@ describe('DEM Layer clean cut', () => {
             renderMaximumMatrixLevel: 14,
         })
         expect(graph.contractFacts().renderPatches).to.deep.include({
-            selectionPath: 'gpu-expanded-render-patches',
+            selectionPath: 'gpu-screen-space-error-render-patches',
             maximumExtraLevels: 4,
             maximumMatrixLevel: 14,
             dataMaximumMatrixLevel: 10,
+            refineErrorPixels: 2,
+            terrainSectorSize: 64,
         })
+        expect(graph.contractFacts().renderPatches.renderPatchLookupCapacity)
+            .to.be.greaterThan(graph.contractFacts().renderPatches.maximumRenderPatches)
         expect(fake.calls.maps).to.have.length(2)
         expect(fake.calls.maps.every(mapping => (
             mapping.size === graph.contractFacts().frontier.feedbackOutput.layout.byteLength

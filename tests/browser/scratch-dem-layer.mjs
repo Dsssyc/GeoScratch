@@ -28,18 +28,15 @@ const tileBaseUrl = `http://127.0.0.1:${tilePort}`
 const expectedStageOrder = Object.freeze([
     'frontier-compute',
     'render-patch-compute',
-    'lod-map',
     'terrain',
 ])
 const requiredProvenanceNames = Object.freeze([
     'frontier-map-meta-to-render-patch',
     'frontier-visible-to-render-patch',
     'frontier-indirect-to-render-patch',
-    'render-patch-visible-to-lod-draw',
-    'render-patch-indirect-to-lod-draw',
     'render-patch-visible-to-terrain-draw',
+    'render-patch-lookup-to-terrain-draw',
     'render-patch-indirect-to-terrain-draw',
-    'lod-map-pass-to-terrain-draw',
 ])
 const cameraCenter = Object.freeze([ 120.980697, 31.684162 ])
 const cameraScenarios = Object.freeze([
@@ -1010,17 +1007,17 @@ function validateDemFacts(label, facts, failures, expectedStatus = 'ready') {
         contract?.selectionPath !== 'gpu-resident-active-frontier' ||
         contract?.dataMaximumMatrixLevel !== 10 ||
         contract?.renderMaximumMatrixLevel !== 14 ||
-        contract?.renderPatches?.selectionPath !== 'gpu-expanded-render-patches' ||
+        contract?.renderPatches?.selectionPath !==
+            'gpu-screen-space-error-render-patches' ||
         contract?.renderPatches?.maximumExtraLevels !== 4 ||
+        contract?.renderPatches?.refineErrorPixels !== 2 ||
+        contract?.renderPatches?.renderPatchLookupCapacity <=
+            contract?.renderPatches?.maximumRenderPatches ||
         contract?.terrainVertexCount !== 24_576 ||
         JSON.stringify(contract?.stageOrder) !== JSON.stringify(expectedStageOrder)) {
         failures.push(`${label} persistent graph contract drifted`)
     }
-    const cameraView = parseJson(facts.cameraView, `${label} camera view`, failures)
-    const expectedRenderLevel = Math.min(14, Math.ceil(cameraView?.zoom ?? 0))
-    if (Number(facts.renderPatchTargetMatrixLevel) !== expectedRenderLevel) {
-        failures.push(`${label} render-patch target did not follow zoom`)
-    }
+    parseJson(facts.cameraView, `${label} camera view`, failures)
     const levelRange = parseJson(facts.levelRange, `${label} data level range`, failures)
     if (!Array.isArray(levelRange) || levelRange[1] > 10) {
         failures.push(`${label} data frontier exceeded the z10 source ceiling`)

@@ -2,14 +2,15 @@
 
 ## Current Architecture Supersession
 
-As of 2026-08-07, ADR-063 supplements ADR-061 by separating the `z4..z10` data-page
-frontier from the `z4..z14` terrain render-patch frontier. The data frontier remains
-the only residency, request, cache, and fallback authority. An example-owned compute
-stage expands its visible pages into bounded, frustum-culled render patches and writes
-the LoD-map and terrain indirect arguments. The LoD map records geometry level and
-sampling level independently, so stitching no longer infers data availability from
-mesh density. See
-[ADR-063](../decisions/ADR-063-dem-render-patch-lod-decoupling.md).
+As of 2026-08-07, ADR-064 supersedes ADR-063's integer-zoom render selection while
+retaining its separation of the `z4..z10` data-page frontier from the `z4..z14`
+terrain render-patch frontier. The data frontier remains the only residency, request,
+cache, and fallback authority. An example-owned compute stage independently stops each
+bounded descendant path when its camera-distance screen-space error reaches two pixels,
+then writes one terrain indirect argument and a global logical-patch lookup. Terrain
+stitching resolves selected neighbors from `(matrixLevel, tileRow, tileCol)` rather
+than a finite source-domain LoD texture. See
+[ADR-064](../decisions/ADR-064-dem-screen-space-render-patch-lod.md).
 
 As of 2026-08-06, ADR-061 replaced the CPU selector and CPU-authored indirect-count
 path described in the historical source-parity matrix below. The current DEM owns no
@@ -22,23 +23,19 @@ frontier audit.
 
 ### Current Render-Patch Verification
 
-The 2026-08-07 real Chrome/WebGPU gate keeps the camera center, pitch 70, and bearing
-90 while moving through zooms 10, 11, 12, and 14. In every sample the converged data
-frontier remained within levels 9..10. The published render-patch target advanced
-10, 11, 12, and 14; all four wireframe canvas hashes differed. Chrome reported zero
-uncaptured GPU errors, device losses, console failures, page errors, or HTTP failures.
-Every observed `WebMercatorQuad` tile response remained within source levels 4..10.
+The 2026-08-07 real Chrome/WebGPU gate holds the camera at pitch 70 and bearing 90.
+The converged data frontier remains within levels 9..10 while the wireframe shows
+distance-adaptive render patches spanning the same view. Chrome reports zero uncaptured
+GPU errors, device losses, diagnostic incidents, console failures, or page errors.
 
-The current example graph publishes 76 stable identities: 20 resources, four uploads,
-seven BindLayouts, 12 BindSets, six Programs, six pipelines, three passes, and 18
-commands. The resource and identity facts remain unchanged across all zooms and live
-wireframe/shaded switching. The frame sequence is now:
+The current example graph publishes 71 stable identities: 21 resources, four uploads,
+six BindLayouts, 10 BindSets, five Programs, five pipelines, two passes, and 18
+commands. The frame sequence is now:
 
 1. data frontier compute;
-2. render-patch reset, expansion/culling, and indirect finalization compute;
-3. LoD-map indirect draw from render patches;
-4. terrain indirect draw from the same render patches;
-5. bounded data-frontier feedback.
+2. render-patch lookup clear, SSE selection/culling, and indirect finalization compute;
+3. terrain indirect draw from the selected render patches;
+4. bounded data-frontier feedback.
 
 ## Audit Status
 
@@ -92,11 +89,11 @@ current-contract change is enumerated.
 | Dynamic LoD count `[4, bindingUsed]` | Yes | Binding range closure | Stable UploadCommand plus indirect DrawCommand | Replaced | `lodArguments`; two-submission capability proof | Exact upload/read epoch chain | No CPU resolver closure |
 | Dynamic terrain count `[indexNum, bindingUsed]` with `asLine = 0` | Yes | Binding range closure | Stable UploadCommand plus indirect DrawCommand | Replaced | `terrainArguments = [24576, count, 0, 0]` | Native drawIndirect proof | Storage-indexed shader path intentionally retained |
 | Plane geometry at `log2(64)` | Yes | `LocalTerrain.setResource()` | DEM graph initialization | Preserved | 16,388 position scalars and 24,576 index scalars | Terrain renders nonblank | Generator itself remains library utility |
-| LoD-map pass before terrain pass | Yes | Global pre-render director stage | Two persistent PassSpecs in one submission | Replaced | `DEM_STAGE_ORDER`, builder order, LoD-map current-at-step read | Published producer/consumer epoch | No automatic scheduler added |
-| Fixed LoD map 512 by 256 | Yes | Legacy Texture | DEM TextureResource | Preserved | `LOD_MAP_SIZE` and `rgba8unorm` target | Graph contract and render proof | Fixed legacy resolution retained |
+| LoD-map pass before terrain pass | Yes | Global pre-render director stage | GPU render-patch lookup plus one terrain PassSpec | Replaced | `DEM_STAGE_ORDER`; compute-produced descriptor, lookup, and indirect epochs precede terrain reads | Published producer/consumer epochs | No automatic scheduler added |
+| Fixed LoD map 512 by 256 | Yes | Legacy Texture | Logical render-patch hash keyed by standard tile identity | Replaced and removed | Two parity lookup buffers avoid source-extent texel aliasing | Pitched global-identity wireframe proof | Hash capacity remains explicitly bounded |
 | DEM texture | Yes | Worker-backed image loader | Page-owned ImageBitmap then graph texture/upload | Preserved | PNG payload SHA-256 `aa7a584830f198772d242df1ce1ae47e21b2bdc85bfc1f97101af8be986c57e1` | Initialization upload observed before close | No mip chain added |
-| `lodMapShader` | Yes | Library terrain shader module | `shaders/lod-map.wgsl` | Preserved with correction | Reversing two `var<storage, read>` additions yields legacy SHA-256 `ba2a35...40bdc` | Pipeline and pass execute | Read-only access spelling is the only diff |
-| `terrainMeshShader` active path | Yes | Library terrain shader module | `shaders/terrain-mesh.wgsl` | Preserved with enumerated correction | Reversing four `var<storage, read>` additions after removing the unreachable palette/color-map/comment paths yields canonical active SHA-256 `248ae79a...34b46` | Terrain pixels nonblank/change | Active vertex elevation, LoD stitching, depth, and grayscale fragment behavior are unchanged |
+| `lodMapShader` | Yes | Library terrain shader module | Render-patch compute and terrain lookup functions | Replaced and removed | No `lod-map.wgsl`, texture, program, pipeline, pass, or command remains | Terrain executes directly after compute | Logical lookup is the only adjacency authority |
+| `terrainMeshShader` active path | Yes | Library terrain shader module | `shaders/terrain-mesh.wgsl` | Preserved and strengthened | High-precision position/elevation path remains; neighbor lookup and arbitrary bounded level-delta snapping replace LoD-texture sampling | Terrain pixels are nonblank and pitched wireframe exposes adaptive patches | Active depth and grayscale behavior remain unchanged |
 | `lastShader` | No | Export-only dead accumulation | None | Removed | No terrain import or pass referenced it | Not applicable | Hello GAW owns a different example-local shader with the same generic name |
 | `terrainMeshLineShader` and line pipeline | No | `LocalTerrain`, gated by constant `asLine = 0` | None | Removed | No setter/control changed `asLine`; reachable getter selected mesh pipeline | Proof exercises only reachable mesh path | Line visualization is not preserved |
 | Border image | No | Image loader only | None | Removed | Loaded but absent from every BindSet | Not applicable | None |

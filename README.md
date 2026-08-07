@@ -83,7 +83,9 @@ WebMercatorQuad tiles in Workers, can persist decode-ready raw height pages thro
 Scratch Cache, transfers pages into a finite atlas, and samples them logically in
 the vertex shader with cross-page filtering and parent fallback. The source PNG is
 only an offline COG build input; the browser has no full-image or legacy-tile
-fallback.
+fallback. Raster residency remains capped by source detail while a separate GPU
+screen-space-error frontier selects distance-adaptive terrain patches and resolves
+mesh-stitching neighbors through global logical tile identity.
 
 ## Scratch Persistent Cache
 

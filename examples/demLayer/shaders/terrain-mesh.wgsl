@@ -1,11 +1,23 @@
 struct DemTerrainConfig {
     sourceMercatorBox: vec4f,
     elevationRange: vec2f,
-    lodMapDimensions: vec2f,
-    sectorSize: u32,
     coordinateBits: u32,
     exaggeration: f32,
+    renderMaximumMatrixLevel: u32,
+    renderPatchLookupCapacity: u32,
     reserved: f32,
+};
+
+struct DemRenderPatchLookupEntry {
+    key: u32,
+    patchIndex: u32,
+};
+
+struct DemRenderPatchNeighbor {
+    found: u32,
+    matrixLevel: u32,
+    samplingLevel: u32,
+    patchIndex: u32,
 };
 
 struct VertexInput {
@@ -31,8 +43,8 @@ struct VertexOutput {
 @group(1) @binding(1) var<storage, read> gridPositions: array<u32>;
 @group(1) @binding(2) var<storage, read> visibleInstances:
     array<DemRenderPatch>;
-
-@group(2) @binding(2) var lodMap: texture_2d<f32>;
+@group(1) @binding(3) var<storage, read> renderPatchLookupEntries:
+    array<DemRenderPatchLookupEntry>;
 
 const TERRAIN_SECTOR_SIZE: u32 = 64u;
 const WEB_MERCATOR_WORLD_WIDTH_METERS: f32 = 40075016.0f;
@@ -177,44 +189,94 @@ fn sourceContains(uv: vec2f) -> bool {
     return all(uv >= vec2f(0.0f)) && all(uv <= vec2f(1.0f));
 }
 
-fn lodMapUv(
+fn missingNeighbor() -> DemRenderPatchNeighbor {
+    return DemRenderPatchNeighbor(0u, 0u, 0u, 0xffffffffu);
+}
+
+fn renderPatchLookup(
+    matrixLevel: u32,
+    tileRow: u32,
+    tileCol: u32,
+) -> DemRenderPatchNeighbor {
+    let key = DemRenderPatch_lookupKey(matrixLevel, tileRow, tileCol);
+    for (var probe = 0u; probe < terrainConfig.renderPatchLookupCapacity; probe += 1u) {
+        let slot = DemRenderPatch_lookupSlot(
+            key,
+            probe,
+            terrainConfig.renderPatchLookupCapacity,
+        );
+        let entry = renderPatchLookupEntries[slot];
+        if (entry.key == 0u) { return missingNeighbor(); }
+        if (entry.key == key) {
+            let resolvedPatch = visibleInstances[entry.patchIndex];
+            return DemRenderPatchNeighbor(
+                1u,
+                resolvedPatch.matrixLevel,
+                resolvedPatch.samplingLevel,
+                entry.patchIndex,
+            );
+        }
+    }
+    return missingNeighbor();
+}
+
+fn patchCoveringRenderCell(renderRow: u32, renderCol: u32) -> DemRenderPatchNeighbor {
+    var matrixLevel = terrainConfig.renderMaximumMatrixLevel;
+    loop {
+        let shift = terrainConfig.renderMaximumMatrixLevel - matrixLevel;
+        let result = renderPatchLookup(matrixLevel, renderRow >> shift, renderCol >> shift);
+        if (result.found != 0u) { return result; }
+        if (matrixLevel == 0u) { break; }
+        matrixLevel -= 1u;
+    }
+    return missingNeighbor();
+}
+
+fn neighboringPatch(
     instance: DemRenderPatch,
+    edge: u32,
     local: vec2f,
-) -> vec2f {
-    let inverseMatrixWidth = exp2(-f32(instance.matrixLevel));
-    let normalized = vec2f(
-        f32(instance.tileCol) + local.x,
-        f32(instance.tileRow) + 1.0f - local.y,
-    ) * inverseMatrixWidth;
-    let extent = terrainConfig.sourceMercatorBox.zw -
-        terrainConfig.sourceMercatorBox.xy;
-    return (normalized - terrainConfig.sourceMercatorBox.xy) / extent;
-}
-
-fn lodMapTexel(uv: vec2f) -> vec2i {
-    let dimensions = max(vec2i(terrainConfig.lodMapDimensions), vec2i(1));
-    let bounded = clamp(uv, vec2f(0.0f), vec2f(0.99999994f));
-    return clamp(
-        vec2i(floor(bounded * vec2f(dimensions))),
-        vec2i(0),
-        dimensions - vec2i(1),
+) -> DemRenderPatchNeighbor {
+    let levelDelta = terrainConfig.renderMaximumMatrixLevel - instance.matrixLevel;
+    let scale = 1u << levelDelta;
+    let matrixWidth = 1u << terrainConfig.renderMaximumMatrixLevel;
+    let west = instance.tileCol * scale;
+    let north = instance.tileRow * scale;
+    let alongX = min(scale - 1u, u32(floor(clamp(local.x, 0.0f, 0.99999994f) * f32(scale))));
+    let alongSouth = min(
+        scale - 1u,
+        u32(floor(clamp(1.0f - local.y, 0.0f, 0.99999994f) * f32(scale))),
     );
+    var row = north + alongSouth;
+    var column = west + alongX;
+    switch edge {
+        case 0u: {
+            column = (west + matrixWidth - 1u) % matrixWidth;
+        }
+        case 1u: {
+            column = (west + scale) % matrixWidth;
+        }
+        case 2u: {
+            if (north == 0u) { return missingNeighbor(); }
+            row = north - 1u;
+        }
+        default: {
+            row = north + scale;
+            if (row >= matrixWidth) { return missingNeighbor(); }
+        }
+    }
+    return patchCoveringRenderCell(row, column);
 }
 
-fn lodMapTexelSize() -> vec2f {
-    return 1.0f / max(terrainConfig.lodMapDimensions, vec2f(1.0f));
-}
-
-fn matrixLevelAt(coordinate: vec2i) -> u32 {
-    let dimensions = max(vec2i(terrainConfig.lodMapDimensions), vec2i(1));
-    let bounded = clamp(coordinate, vec2i(0), dimensions - vec2i(1));
-    return u32(round(textureLoad(lodMap, bounded, 0).r * 255.0f));
-}
-
-fn samplingLevelAt(coordinate: vec2i) -> u32 {
-    let dimensions = max(vec2i(terrainConfig.lodMapDimensions), vec2i(1));
-    let bounded = clamp(coordinate, vec2i(0), dimensions - vec2i(1));
-    return u32(round(textureLoad(lodMap, bounded, 0).g * 255.0f));
+fn snapEdgeCoordinate(
+    coordinate: u32,
+    matrixLevel: u32,
+    neighborMatrixLevel: u32,
+) -> u32 {
+    if (neighborMatrixLevel >= matrixLevel) { return coordinate; }
+    let levelDelta = min(matrixLevel - neighborMatrixLevel, 6u);
+    let step = 1u << levelDelta;
+    return min(TERRAIN_SECTOR_SIZE, ((coordinate + step - 1u) / step) * step);
 }
 
 fn positionCs(position: DemAddressFixedPosition, elevation: f32) -> vec4f {
@@ -247,67 +309,35 @@ fn vMain(input: VertexInput) -> VertexOutput {
     let instance = visibleInstances[input.instanceIndex];
     let triangleId = input.vertexIndex / 3u;
     var grid = gridPosition(indices[input.vertexIndex]);
-    let center = triangleCentroid(triangleId);
-    let middleTexel = lodMapTexel(lodMapUv(instance, center));
-    let texelSize = lodMapTexelSize();
-    let middleLevel = matrixLevelAt(middleTexel);
-    let leftLevel = matrixLevelAt(lodMapTexel(
-        lodMapUv(instance, vec2f(0.0f, center.y)) - vec2f(texelSize.x, 0.0f),
-    ));
-    let rightLevel = matrixLevelAt(lodMapTexel(
-        lodMapUv(instance, vec2f(1.0f, center.y)) + vec2f(texelSize.x, 0.0f),
-    ));
-    let topLevel = matrixLevelAt(lodMapTexel(
-        lodMapUv(instance, vec2f(center.x, 1.0f)) - vec2f(0.0f, texelSize.y),
-    ));
-    let bottomLevel = matrixLevelAt(lodMapTexel(
-        lodMapUv(instance, vec2f(center.x, 0.0f)) + vec2f(0.0f, texelSize.y),
-    ));
     let ownMatrixLevel = instance.matrixLevel;
     var heightLevel = min(instance.samplingLevel, DemHeight_level_count - 1u);
 
     if (grid.x == 0u) {
-        heightLevel = max(
-            heightLevel,
-            samplingLevelAt(lodMapTexel(
-                lodMapUv(instance, vec2f(0.0f, center.y)) - vec2f(texelSize.x, 0.0f),
-            )),
-        );
-        if (leftLevel < middleLevel && grid.y % 2u == 1u) {
-            grid.y += 1u;
+        let left = neighboringPatch(instance, 0u, triangleCentroid(triangleId));
+        if (left.found != 0u) {
+            heightLevel = max(heightLevel, left.samplingLevel);
+            grid.y = snapEdgeCoordinate(grid.y, ownMatrixLevel, left.matrixLevel);
         }
     }
     if (grid.x == TERRAIN_SECTOR_SIZE) {
-        heightLevel = max(
-            heightLevel,
-            samplingLevelAt(lodMapTexel(
-                lodMapUv(instance, vec2f(1.0f, center.y)) + vec2f(texelSize.x, 0.0f),
-            )),
-        );
-        if (rightLevel < middleLevel && grid.y % 2u == 1u) {
-            grid.y += 1u;
+        let right = neighboringPatch(instance, 1u, triangleCentroid(triangleId));
+        if (right.found != 0u) {
+            heightLevel = max(heightLevel, right.samplingLevel);
+            grid.y = snapEdgeCoordinate(grid.y, ownMatrixLevel, right.matrixLevel);
         }
     }
     if (grid.y == 0u) {
-        heightLevel = max(
-            heightLevel,
-            samplingLevelAt(lodMapTexel(
-                lodMapUv(instance, vec2f(center.x, 0.0f)) + vec2f(0.0f, texelSize.y),
-            )),
-        );
-        if (bottomLevel < middleLevel && grid.x % 2u == 1u) {
-            grid.x += 1u;
+        let bottom = neighboringPatch(instance, 3u, triangleCentroid(triangleId));
+        if (bottom.found != 0u) {
+            heightLevel = max(heightLevel, bottom.samplingLevel);
+            grid.x = snapEdgeCoordinate(grid.x, ownMatrixLevel, bottom.matrixLevel);
         }
     }
     if (grid.y == TERRAIN_SECTOR_SIZE) {
-        heightLevel = max(
-            heightLevel,
-            samplingLevelAt(lodMapTexel(
-                lodMapUv(instance, vec2f(center.x, 1.0f)) - vec2f(0.0f, texelSize.y),
-            )),
-        );
-        if (topLevel < middleLevel && grid.x % 2u == 1u) {
-            grid.x += 1u;
+        let top = neighboringPatch(instance, 2u, triangleCentroid(triangleId));
+        if (top.found != 0u) {
+            heightLevel = max(heightLevel, top.samplingLevel);
+            grid.x = snapEdgeCoordinate(grid.x, ownMatrixLevel, top.matrixLevel);
         }
     }
 

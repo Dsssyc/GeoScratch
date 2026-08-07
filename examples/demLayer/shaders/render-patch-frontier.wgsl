@@ -1,8 +1,17 @@
 struct DemRenderPatchState {
     count: atomic<u32>,
     overflowCount: atomic<u32>,
+    lookupOverflowCount: atomic<u32>,
     minimumMatrixLevel: atomic<u32>,
     maximumMatrixLevel: atomic<u32>,
+    reserved0: atomic<u32>,
+    reserved1: atomic<u32>,
+    reserved2: atomic<u32>,
+};
+
+struct DemRenderPatchAtomicLookupEntry {
+    key: atomic<u32>,
+    patchIndex: u32,
 };
 
 struct DemRenderPatchBounds {
@@ -28,6 +37,8 @@ struct DemRenderPatchQuanta {
 @group(0) @binding(4) var<storage, read_write> renderPatches: array<DemRenderPatch>;
 @group(0) @binding(5) var<storage, read_write> renderPatchState: DemRenderPatchState;
 @group(0) @binding(6) var<storage, read_write> drawArguments: array<u32>;
+@group(0) @binding(7) var<storage, read_write> renderPatchLookup:
+    array<DemRenderPatchAtomicLookupEntry>;
 
 const WEB_MERCATOR_WORLD_WIDTH_METERS: f32 = 40075016.0f;
 
@@ -166,71 +177,138 @@ fn patchVisible(bounds: DemRenderPatchBounds) -> bool {
     return true;
 }
 
-fn targetMatrixLevel(sourceMatrixLevel: u32) -> u32 {
-    let requested = u32(ceil(max(mapMeta.zoomHint, 0.0f)));
-    return max(sourceMatrixLevel, min(
-        renderPatchPolicy.renderMaximumMatrixLevel,
-        min(
-            sourceMatrixLevel + renderPatchPolicy.maximumExtraLevels,
-            requested,
-        ),
-    ));
+fn intervalDistance(minimum: f32, maximum: f32) -> f32 {
+    if (0.0f < minimum) { return minimum; }
+    if (0.0f > maximum) { return -maximum; }
+    return 0.0f;
+}
+
+fn distanceToAabb(bounds: DemRenderPatchBounds) -> f32 {
+    let delta = vec3f(
+        intervalDistance(bounds.minimum.x, bounds.maximum.x),
+        intervalDistance(bounds.minimum.y, bounds.maximum.y),
+        intervalDistance(bounds.minimum.z, bounds.maximum.z),
+    );
+    return length(delta);
+}
+
+fn screenSpaceError(matrixLevel: u32, bounds: DemRenderPatchBounds) -> f32 {
+    let distance = max(distanceToAabb(bounds), 1e-6f);
+    let tileWidthMeters = ldexp(WEB_MERCATOR_WORLD_WIDTH_METERS, -i32(matrixLevel));
+    let geometricErrorMeters = tileWidthMeters / f32(renderPatchPolicy.terrainSectorSize);
+    let denominator = 2.0f * tan(mapMeta.verticalFovRadians * 0.5f) * distance;
+    return geometricErrorMeters * mapMeta.viewport.y / denominator;
+}
+
+fn insertRenderPatchLookup(
+    matrixLevel: u32,
+    tileRow: u32,
+    tileCol: u32,
+    patchIndex: u32,
+) -> bool {
+    let key = DemRenderPatch_lookupKey(matrixLevel, tileRow, tileCol);
+    for (var probe = 0u; probe < renderPatchPolicy.renderPatchLookupCapacity; probe += 1u) {
+        let slot = DemRenderPatch_lookupSlot(
+            key,
+            probe,
+            renderPatchPolicy.renderPatchLookupCapacity,
+        );
+        loop {
+            let claimed = atomicCompareExchangeWeak(&renderPatchLookup[slot].key, 0u, key);
+            if (claimed.exchanged) {
+                renderPatchLookup[slot].patchIndex = patchIndex;
+                return true;
+            }
+            if (claimed.old_value == key) { return true; }
+            if (claimed.old_value != 0u) { break; }
+        }
+    }
+    return false;
+}
+
+fn emitRenderPatch(
+    source: GpuTileFrontierVisibleInstance,
+    matrixLevel: u32,
+    tileRow: u32,
+    tileCol: u32,
+) {
+    let outputIndex = atomicAdd(&renderPatchState.count, 1u);
+    if (outputIndex >= renderPatchPolicy.maximumRenderPatches) {
+        atomicAdd(&renderPatchState.overflowCount, 1u);
+        return;
+    }
+    renderPatches[outputIndex] = DemRenderPatch(
+        matrixLevel,
+        tileRow,
+        tileCol,
+        source.samplingLevel,
+        source.matrixLevel,
+        source.tileRow,
+        source.tileCol,
+        source.compactIndex,
+    );
+    if (!insertRenderPatchLookup(matrixLevel, tileRow, tileCol, outputIndex)) {
+        atomicAdd(&renderPatchState.lookupOverflowCount, 1u);
+    }
+    atomicMin(&renderPatchState.minimumMatrixLevel, matrixLevel);
+    atomicMax(&renderPatchState.maximumMatrixLevel, matrixLevel);
 }
 
 @compute @workgroup_size(1)
 fn resetRenderPatches() {
     atomicStore(&renderPatchState.count, 0u);
     atomicStore(&renderPatchState.overflowCount, 0u);
+    atomicStore(&renderPatchState.lookupOverflowCount, 0u);
     atomicStore(&renderPatchState.minimumMatrixLevel, 0xffffffffu);
     atomicStore(&renderPatchState.maximumMatrixLevel, 0u);
-    drawArguments[0] = renderPatchPolicy.lodMapVertexCount;
+    atomicStore(&renderPatchState.reserved0, 0u);
+    atomicStore(&renderPatchState.reserved1, 0u);
+    atomicStore(&renderPatchState.reserved2, 0u);
+    drawArguments[0] = renderPatchPolicy.terrainVertexCount;
     drawArguments[1] = 0u;
     drawArguments[2] = 0u;
     drawArguments[3] = 0u;
-    drawArguments[4] = renderPatchPolicy.terrainVertexCount;
-    drawArguments[5] = 0u;
-    drawArguments[6] = 0u;
-    drawArguments[7] = 0u;
 }
 
 @compute @workgroup_size(64)
 fn expandRenderPatches(@builtin(global_invocation_id) globalId: vec3u) {
-    let sourceIndex = globalId.x;
+    let terminalWidth = 1u << renderPatchPolicy.maximumExtraLevels;
+    let candidatesPerSource = terminalWidth * terminalWidth;
+    let sourceIndex = globalId.x / candidatesPerSource;
+    let terminalIndex = globalId.x % candidatesPerSource;
     let sourceCount = sourceDrawArguments[1];
     if (sourceIndex >= sourceCount) {
         return;
     }
     let source = sourceVisibleInstances[sourceIndex];
-    let targetLevel = targetMatrixLevel(source.matrixLevel);
-    let extraLevels = targetLevel - source.matrixLevel;
-    let scale = 1u << extraLevels;
-    let childCount = scale * scale;
-    for (var childIndex = 0u; childIndex < 256u; childIndex += 1u) {
-        if (childIndex >= childCount) {
-            break;
+    let terminalRow = terminalIndex / terminalWidth;
+    let terminalCol = terminalIndex % terminalWidth;
+    let availableDepth = min(
+        renderPatchPolicy.maximumExtraLevels,
+        renderPatchPolicy.renderMaximumMatrixLevel - source.matrixLevel,
+    );
+
+    for (var depth = 0u; depth <= 4u; depth += 1u) {
+        if (depth > availableDepth) { return; }
+        let remainingBits = renderPatchPolicy.maximumExtraLevels - depth;
+        let scale = 1u << depth;
+        let matrixLevel = source.matrixLevel + depth;
+        let tileRow = source.tileRow * scale + (terminalRow >> remainingBits);
+        let tileCol = source.tileCol * scale + (terminalCol >> remainingBits);
+        let bounds = patchBounds(matrixLevel, tileRow, tileCol);
+        if (!patchVisible(bounds)) { return; }
+
+        let refine = depth < availableDepth &&
+            screenSpaceError(matrixLevel, bounds) > renderPatchPolicy.refineErrorPixels;
+        if (refine) { continue; }
+
+        let duplicateMask = (1u << remainingBits) - 1u;
+        if ((terminalRow & duplicateMask) != 0u ||
+            (terminalCol & duplicateMask) != 0u) {
+            return;
         }
-        let childRow = source.tileRow * scale + childIndex / scale;
-        let childCol = source.tileCol * scale + childIndex % scale;
-        if (!patchVisible(patchBounds(targetLevel, childRow, childCol))) {
-            continue;
-        }
-        let outputIndex = atomicAdd(&renderPatchState.count, 1u);
-        if (outputIndex >= renderPatchPolicy.maximumRenderPatches) {
-            atomicAdd(&renderPatchState.overflowCount, 1u);
-            continue;
-        }
-        renderPatches[outputIndex] = DemRenderPatch(
-            targetLevel,
-            childRow,
-            childCol,
-            source.samplingLevel,
-            source.matrixLevel,
-            source.tileRow,
-            source.tileCol,
-            source.compactIndex,
-        );
-        atomicMin(&renderPatchState.minimumMatrixLevel, targetLevel);
-        atomicMax(&renderPatchState.maximumMatrixLevel, targetLevel);
+        emitRenderPatch(source, matrixLevel, tileRow, tileCol);
+        return;
     }
 }
 
@@ -241,5 +319,4 @@ fn finalizeRenderPatches() {
         renderPatchPolicy.maximumRenderPatches,
     );
     drawArguments[1] = renderPatchCount;
-    drawArguments[5] = renderPatchCount;
 }
