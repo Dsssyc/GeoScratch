@@ -20,6 +20,8 @@ struct VertexOutput {
     @location(2) uv: vec2f,
     @location(3) @interpolate(flat) sampleStatus: f32,
     @location(4) @interpolate(flat) resolvedHeightLevel: f32,
+    @location(5) barycentric: vec3f,
+    @location(6) @interpolate(flat) tileColor: vec3f,
 };
 
 @group(0) @binding(0) var<uniform> mapMeta: GpuTileFrontierMapMeta;
@@ -42,6 +44,29 @@ fn nan() -> f32 {
 
 fn gridPosition(index: u32) -> vec2u {
     return vec2u(gridPositions[index * 2u], gridPositions[index * 2u + 1u]);
+}
+
+fn logicalTileColor(instance: GpuTileFrontierVisibleInstance) -> vec3f {
+    var hash = instance.matrixLevel * 0x9e3779b9u;
+    hash = hash ^ (instance.tileRow * 0x85ebca6bu);
+    hash = hash ^ (instance.tileCol * 0xc2b2ae35u);
+    hash = (hash ^ (hash >> 16u)) * 0x7feb352du;
+    hash = (hash ^ (hash >> 15u)) * 0x846ca68bu;
+    hash = hash ^ (hash >> 16u);
+    return vec3f(
+        0.35f + 0.65f * f32(hash & 255u) / 255.0f,
+        0.35f + 0.65f * f32((hash >> 8u) & 255u) / 255.0f,
+        0.35f + 0.65f * f32((hash >> 16u) & 255u) / 255.0f,
+    );
+}
+
+fn barycentricForVertex(vertexIndex: u32) -> vec3f {
+    let corner = vertexIndex % 3u;
+    return vec3f(
+        select(0.0f, 1.0f, corner == 0u),
+        select(0.0f, 1.0f, corner == 1u),
+        select(0.0f, 1.0f, corner == 2u),
+    );
 }
 
 fn triangleCentroid(triangleId: u32) -> vec2f {
@@ -298,10 +323,23 @@ fn vMain(input: VertexInput) -> VertexOutput {
         output.resolvedHeightLevel = f32(heightLevel);
     }
     output.level = f32(ownMatrixLevel);
+    output.barycentric = barycentricForVertex(input.vertexIndex);
+    output.tileColor = logicalTileColor(instance);
     return output;
 }
 
 @fragment
 fn fMain(input: VertexOutput) -> @location(0) vec4f {
     return vec4f(1.0f - input.depth) * 0.5f;
+}
+
+@fragment
+fn fTileWireframe(input: VertexOutput) -> @location(0) vec4f {
+    let width = max(fwidth(input.barycentric), vec3f(1e-5f));
+    let interior = smoothstep(vec3f(0.0f), width * 1.35f, input.barycentric);
+    let coverage = 1.0f - min(min(interior.x, interior.y), interior.z);
+    if (coverage <= 0.01f) {
+        discard;
+    }
+    return vec4f(input.tileColor * coverage, coverage);
 }

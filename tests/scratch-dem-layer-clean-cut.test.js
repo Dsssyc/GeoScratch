@@ -426,6 +426,23 @@ describe('DEM Layer clean cut', () => {
         expect(terrainShader).to.include('fixedAxisFromShiftedNumerator')
         expect(terrainShader).to.include('relativeFixedMeters')
         expect(terrainShader).to.include('grid.x == 0u')
+        expect(terrainShader).to.include('@location(5) barycentric: vec3f')
+        expect(terrainShader).to.include(
+            '@location(6) @interpolate(flat) tileColor: vec3f'
+        )
+        expect(terrainShader).to.include('fn logicalTileColor(')
+        expect(terrainShader).to.include('fn barycentricForVertex(')
+        expect(terrainShader).to.include('@fragment\nfn fTileWireframe(')
+        expect(terrainShader).to.include('fwidth(input.barycentric)')
+        expect(terrainShader).to.include('discard;')
+        const tileColorFunction = terrainShader.slice(
+            terrainShader.indexOf('fn logicalTileColor('),
+            terrainShader.indexOf('fn barycentricForVertex(')
+        )
+        expect(tileColorFunction).to.include('instance.matrixLevel')
+        expect(tileColorFunction).to.include('instance.tileRow')
+        expect(tileColorFunction).to.include('instance.tileCol')
+        expect(tileColorFunction).not.to.include('physicalSlot')
         const layer = read('examples', 'demLayer', 'dem-layer.ts')
         const main = read('examples', 'demLayer', 'main.ts')
         expect(layer).not.to.include('createExternalImageUploadCommand')
@@ -507,16 +524,36 @@ describe('DEM Layer clean cut', () => {
         const initialIdentities = graph.stableIdentities
         const initialIdentityFacts = graph.stableIdentityFacts
         const initialPersistentFacts = graph.persistentFacts()
+        expect(graph.state().terrainPresentation).to.equal('shaded')
         const initialized = await graph.initialize()
         await initialized.observation
 
         const first = await graph.renderFrame(cameraState(9, [ 320, 180 ]))
         await first.observation
+        const shadedPipelineLabel = latestRenderPipelineLabel(fake.calls)
+        graph.setTerrainPresentation('tile-wireframe')
         const second = await graph.renderFrame(cameraState(10, [ 320, 180 ]))
         await second.observation
+        const wireframePipelineLabel = latestRenderPipelineLabel(fake.calls)
+        graph.setTerrainPresentation('shaded')
+        const third = await graph.renderFrame(cameraState(10, [ 320, 180 ]))
+        await third.observation
+        const restoredPipelineLabel = latestRenderPipelineLabel(fake.calls)
 
         expect(second.needsFollowUp).to.equal(true)
         expect(second.feedback).to.equal(undefined)
+        expect(shadedPipelineLabel).to.equal('DEM terrain pipeline')
+        expect(wireframePipelineLabel).to.equal('DEM tile wireframe pipeline')
+        expect(restoredPipelineLabel).to.equal('DEM terrain pipeline')
+        expect(graph.state().terrainPresentation).to.equal('shaded')
+        expect(fake.calls.renderPipelines.map(pipeline => (
+            logicalPipelineLabel(pipeline.descriptor.label)
+        )))
+            .to.deep.equal([
+                'DEM LoD-map pipeline',
+                'DEM terrain pipeline',
+                'DEM tile wireframe pipeline',
+            ])
 
         expect(first.provenance.map(fact => fact.name)).to.deep.equal([
             'frontier-map-meta-to-lod-draw',
@@ -539,10 +576,10 @@ describe('DEM Layer clean cut', () => {
             uploads: 3,
             bindLayouts: 4,
             bindSets: 6,
-            programs: 2,
-            pipelines: 2,
+            programs: 3,
+            pipelines: 3,
             passes: 2,
-            commands: 4,
+            commands: 6,
         })
         expect(graph.persistentFacts()).to.deep.equal(initialPersistentFacts)
 
@@ -565,20 +602,25 @@ describe('DEM Layer clean cut', () => {
         expect(resizedPersistentFacts.logicalFootprintBytes)
             .to.be.greaterThan(initialPersistentFacts.logicalFootprintBytes)
         expect(graph.state()).to.deep.include({
-            frame: 2,
+            frame: 3,
             resizeGeneration: 1,
             lastResizeFacts: resizeFacts,
+            terrainPresentation: 'shaded',
         })
         expect(graph.contractFacts()).to.deep.include({
             countPath: 'gpu-produced-indirect-arguments',
             selectionPath: 'gpu-resident-active-frontier',
         })
-        expect(fake.calls.maps).to.have.length(1)
-        expect(fake.calls.maps[0].size).to.equal(
-            graph.contractFacts().frontier.feedbackOutput.layout.byteLength
-        )
+        expect(fake.calls.maps).to.have.length(2)
+        expect(fake.calls.maps.every(mapping => (
+            mapping.size === graph.contractFacts().frontier.feedbackOutput.layout.byteLength
+        ))).to.equal(true)
 
         graph.dispose()
+        expect(() => graph.setTerrainPresentation('tile-wireframe'))
+            .to.throw('disposed')
+        expect(() => graph.setTerrainPresentation('invalid'))
+            .to.throw('presentation')
         await runtime.dispose()
     })
 })
@@ -606,4 +648,16 @@ function cameraState(zoomHint, viewport) {
         cameraLatitudeRadians: 31.684162 * Math.PI / 180,
         zoomHint,
     })
+}
+
+function latestRenderPipelineLabel(calls) {
+
+    const pass = calls.renderPasses.at(-1)
+    const pipelineAction = pass?.actions.find(action => action.type === 'setPipeline')
+    return logicalPipelineLabel(pipelineAction?.pipeline.descriptor.label)
+}
+
+function logicalPipelineLabel(label) {
+
+    return label?.split(' [scratch:')[0]
 }

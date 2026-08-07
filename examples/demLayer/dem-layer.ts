@@ -43,6 +43,8 @@ type DemShaders = {
     terrain: string
 }
 
+export type DemTerrainPresentation = 'shaded' | 'tile-wireframe'
+
 type DemFailureProof = {
     terrainShader(source: string): string
     beforeTerrainShaderModule(runtime: GPURuntime): void
@@ -107,7 +109,8 @@ type ProvenanceFact = Readonly<{
 type ProvenanceVerifier = (
     submitted: SubmittedWork,
     graph: DemGraph,
-    frame: GpuTileFrontierFrame
+    frame: GpuTileFrontierFrame,
+    terrainPresentation: DemTerrainPresentation
 ) => readonly ProvenanceFact[]
 
 type ResizeFacts = Readonly<{
@@ -131,6 +134,7 @@ type DemState = {
     supersededFeedbackCount: number
     latestFrontierFacts?: GpuTileFrontierFacts
     latestFeedbackDiagnostics: readonly unknown[]
+    terrainPresentation: DemTerrainPresentation
     stageActivity: { 'frontier-compute': number; 'lod-map': number; terrain: number }
 }
 
@@ -148,6 +152,7 @@ type DemLayerOptions = {
     virtualRaster: DemVirtualRaster
     size: SurfaceSize
     shaders: DemShaders
+    terrainPresentation?: DemTerrainPresentation
     failureProof?: DemFailureProof
     provenanceVerifier?: ProvenanceVerifier
 }
@@ -184,6 +189,7 @@ export async function createDemLayer({
     virtualRaster,
     size,
     shaders,
+    terrainPresentation = 'shaded',
     failureProof = defaultFailureProof,
     provenanceVerifier = verifyFrameProvenance,
 }: DemLayerOptions) {
@@ -192,6 +198,7 @@ export async function createDemLayer({
     assertSize(size)
     assertVirtualRaster(virtualRaster)
     assertShaders(shaders)
+    assertTerrainPresentation(terrainPresentation)
     if (typeof provenanceVerifier !== 'function') {
         throw new TypeError('DEM provenance verifier must be a function')
     }
@@ -256,7 +263,7 @@ export async function createDemLayer({
         passes,
         commands,
     }
-    const state = createState(size)
+    const state = createState(size, terrainPresentation)
     const pendingFeedback: PendingFeedback[] = []
     const stableIdentities = Object.freeze(stableIdentitySnapshot(graph))
     const stableIdentityFacts = identityFactSnapshot(graph)
@@ -310,6 +317,7 @@ export async function createDemLayer({
         assertCamera(camera)
         assertSameIdentities(stableIdentities, stableIdentitySnapshot(graph), 'frame')
         assertPersistentCounts(persistentBaseline, persistentFactSnapshot(runtime), 'frame')
+        const frameTerrainPresentation = state.terrainPresentation
 
         const noOpPublication = await publishChangedResidency(graph, state)
         const residencySnapshotEpoch = virtualRaster.gpu.facts().snapshotEpoch
@@ -333,7 +341,9 @@ export async function createDemLayer({
             frontier.encode(builder, frame)
             builder
                 .render(passes.lodMap, [ commands.lodMap[frame.parity] ])
-                .render(passes.terrain, [ commands.terrain[frame.parity] ])
+                .render(passes.terrain, [
+                    commands.terrain[frameTerrainPresentation][frame.parity]!,
+                ])
             feedbackRing.encode(builder, frame)
             submitted = builder.submit()
         } finally {
@@ -346,7 +356,12 @@ export async function createDemLayer({
         let provenance: readonly ProvenanceFact[] = Object.freeze([])
         let provenanceFailure: unknown
         try {
-            provenance = provenanceVerifier(submitted!, graph, frame!)
+            provenance = provenanceVerifier(
+                submitted!,
+                graph,
+                frame!,
+                frameTerrainPresentation
+            )
         } catch (error) {
             provenanceFailure = error
         }
@@ -399,7 +414,16 @@ export async function createDemLayer({
             residencySettlement: reconciliation?.settlement ?? Promise.resolve(undefined),
             requestedPageCount: reconciliation?.requestedCount ?? 0,
             needsFollowUp,
+            terrainPresentation: frameTerrainPresentation,
         })
+    }
+
+    function setTerrainPresentation(nextPresentation: DemTerrainPresentation) {
+
+        assertTerrainPresentation(nextPresentation)
+        if (state.disposed) throw new Error('DEM graph is disposed')
+        state.terrainPresentation = nextPresentation
+        return state.terrainPresentation
     }
 
     async function resize(nextSize: SurfaceSize) {
@@ -444,6 +468,7 @@ export async function createDemLayer({
     return Object.freeze({
         initialize,
         renderFrame,
+        setTerrainPresentation,
         resize,
         dispose,
         stableIdentities,
@@ -814,6 +839,12 @@ async function createPrograms(
         label: 'DEM LoD-map shader',
         sourceParts: [ frontierSource, { code: shaders.lodMap } ],
     })
+    const terrainProgram = (label: string, fragmentEntryPoint: string) => runtime.createProgram({
+        label,
+        vertex: { module: terrainShader, entryPoint: 'vMain' },
+        fragment: { module: terrainShader, entryPoint: fragmentEntryPoint },
+        layoutRequirements: [ configRequirement ],
+    })
     return {
         lodMap: runtime.createProgram({
             label: 'DEM LoD-map program',
@@ -821,12 +852,11 @@ async function createPrograms(
             fragment: { module: lodMapShader, entryPoint: 'fMain' },
             layoutRequirements: [ configRequirement ],
         }),
-        terrain: runtime.createProgram({
-            label: 'DEM terrain program',
-            vertex: { module: terrainShader, entryPoint: 'vMain' },
-            fragment: { module: terrainShader, entryPoint: 'fMain' },
-            layoutRequirements: [ configRequirement ],
-        }),
+        terrain: terrainProgram('DEM terrain program', 'fMain'),
+        tileWireframe: terrainProgram(
+            'DEM tile wireframe program',
+            'fTileWireframe'
+        ),
     }
 }
 
@@ -863,7 +893,22 @@ async function createPipelines(
             depthCompare: 'less',
         },
     })
-    return { lodMap, terrain }
+    const tileWireframe = await runtime.createRenderPipeline({
+        label: 'DEM tile wireframe pipeline',
+        program: programs.tileWireframe,
+        layout: {
+            mode: 'explicit',
+            bindLayouts: [ layouts.scene, layouts.terrainData, layouts.terrainTextures ],
+        },
+        targets: [ { format: surface.format } ],
+        primitive: { topology: 'triangle-list', cullMode: 'none' },
+        depthStencil: {
+            format: textures.depth.format,
+            depthWriteEnabled: true,
+            depthCompare: 'less',
+        },
+    })
+    return { lodMap, terrain, tileWireframe }
 }
 
 function createPasses(runtime: GPURuntime, surface: Surface, textures: Textures) {
@@ -907,6 +952,35 @@ function createCommands(
     pipelines: Pipelines
 ) {
 
+    const terrainCommands = (
+        label: string,
+        pipeline: Pipelines['terrain']
+    ) => templates.terrain.map((template, parity) => runtime.createDrawCommand({
+        label: `${label} ${parity}`,
+        pipeline,
+        bindSets: [
+            { set: bindSets.scene },
+            { set: bindSets.terrainData[parity]! },
+            { set: bindSets.terrainTextures },
+        ],
+        count: { indirect: template.drawArgument.region },
+        resources: {
+            read: currentReads([
+                template.mapMeta,
+                uniforms.config.buffer,
+                buffers.indices.buffer,
+                buffers.positions.buffer,
+                template.visibleInstances,
+                virtualRaster.gpu.pageTable,
+                virtualRaster.gpu.atlas,
+                textures.lodMap,
+                template.drawArgument.resource,
+            ]),
+            write: [],
+        },
+        whenMissing: 'throw',
+    }))
+
     return {
         lodMap: templates.lodMap.map((template, parity) => runtime.createDrawCommand({
             label: `Draw DEM LoD map ${parity}`,
@@ -927,31 +1001,13 @@ function createCommands(
             },
             whenMissing: 'throw',
         })),
-        terrain: templates.terrain.map((template, parity) => runtime.createDrawCommand({
-            label: `Draw DEM terrain ${parity}`,
-            pipeline: pipelines.terrain,
-            bindSets: [
-                { set: bindSets.scene },
-                { set: bindSets.terrainData[parity]! },
-                { set: bindSets.terrainTextures },
-            ],
-            count: { indirect: template.drawArgument.region },
-            resources: {
-                read: currentReads([
-                    template.mapMeta,
-                    uniforms.config.buffer,
-                    buffers.indices.buffer,
-                    buffers.positions.buffer,
-                    template.visibleInstances,
-                    virtualRaster.gpu.pageTable,
-                    virtualRaster.gpu.atlas,
-                    textures.lodMap,
-                    template.drawArgument.resource,
-                ]),
-                write: [],
-            },
-            whenMissing: 'throw',
-        })),
+        terrain: {
+            shaded: terrainCommands('Draw DEM terrain', pipelines.terrain),
+            'tile-wireframe': terrainCommands(
+                'Draw DEM tile wireframe',
+                pipelines.tileWireframe
+            ),
+        },
     }
 }
 
@@ -1011,11 +1067,12 @@ function frontierDecisionKey(camera: DemCameraState, residencySnapshotEpoch: num
 function verifyFrameProvenance(
     submitted: SubmittedWork,
     graph: DemGraph,
-    frame: GpuTileFrontierFrame
+    frame: GpuTileFrontierFrame,
+    terrainPresentation: DemTerrainPresentation
 ) {
 
     const lodCommand = graph.commands.lodMap[frame.parity]
-    const terrainCommand = graph.commands.terrain[frame.parity]
+    const terrainCommand = graph.commands.terrain[terrainPresentation][frame.parity]
     const lodTemplate = graph.renderTemplates.lodMap[frame.parity]
     const terrainTemplate = graph.renderTemplates.terrain[frame.parity]
     const pairs = [
@@ -1135,7 +1192,11 @@ function identityObjectsByKind(graph: DemGraph) {
         programs: Object.values(graph.programs),
         pipelines: Object.values(graph.pipelines),
         passes: Object.values(graph.passes),
-        commands: [ ...graph.commands.lodMap, ...graph.commands.terrain ],
+        commands: [
+            ...graph.commands.lodMap,
+            ...graph.commands.terrain.shaded,
+            ...graph.commands.terrain['tile-wireframe'],
+        ],
     }
 }
 
@@ -1192,12 +1253,22 @@ function graphContractSnapshot(graph: DemGraph) {
         }),
         commandIds: Object.freeze({
             drawLodMap: Object.freeze(graph.commands.lodMap.map(command => command.id)),
-            drawTerrain: Object.freeze(graph.commands.terrain.map(command => command.id)),
+            drawTerrain: Object.freeze({
+                shaded: Object.freeze(
+                    graph.commands.terrain.shaded.map(command => command.id)
+                ),
+                tileWireframe: Object.freeze(
+                    graph.commands.terrain['tile-wireframe'].map(command => command.id)
+                ),
+            }),
         }),
     })
 }
 
-function createState(size: SurfaceSize): DemState {
+function createState(
+    size: SurfaceSize,
+    terrainPresentation: DemTerrainPresentation
+): DemState {
 
     return {
         initialized: false,
@@ -1213,6 +1284,7 @@ function createState(size: SurfaceSize): DemState {
         supersededFeedbackCount: 0,
         latestFrontierFacts: undefined,
         latestFeedbackDiagnostics: Object.freeze([]),
+        terrainPresentation,
         stageActivity: {
             'frontier-compute': 0,
             'lod-map': 0,
@@ -1255,6 +1327,7 @@ function stateSnapshot(
         convergenceState: latest?.convergenceState ?? 'transitioning',
         frontierFacts: latest,
         latestFeedbackDiagnostics: state.latestFeedbackDiagnostics,
+        terrainPresentation: state.terrainPresentation,
         feedback: feedbackRing.facts(),
         stageActivity: Object.freeze({ ...state.stageActivity }),
     })
@@ -1323,6 +1396,15 @@ function assertShaders(value: DemShaders) {
 
     if (typeof value?.lodMap !== 'string' || typeof value?.terrain !== 'string') {
         throw new TypeError('DEM shaders must contain lodMap and terrain WGSL strings')
+    }
+}
+
+function assertTerrainPresentation(
+    value: unknown
+): asserts value is DemTerrainPresentation {
+
+    if (value !== 'shaded' && value !== 'tile-wireframe') {
+        throw new TypeError('DEM terrain presentation must be shaded or tile-wireframe')
     }
 }
 
