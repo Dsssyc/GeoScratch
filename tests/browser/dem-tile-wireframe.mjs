@@ -1,0 +1,647 @@
+import { spawn } from 'node:child_process'
+import { createHash } from 'node:crypto'
+import { mkdir } from 'node:fs/promises'
+import { createConnection, createServer } from 'node:net'
+import { dirname, resolve } from 'node:path'
+import process from 'node:process'
+import { fileURLToPath } from 'node:url'
+import { chromium } from 'playwright'
+
+const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
+const examplesRoot = resolve(repositoryRoot, 'examples')
+const tileServerRoot = resolve(examplesRoot, 'demLayer/tile-server')
+const viteEntry = resolve(repositoryRoot, 'node_modules/vite/bin/vite.js')
+const tileBuildEntry = resolve(tileServerRoot, '.venv/bin/dem-tile-build')
+const tileServeEntry = resolve(tileServerRoot, '.venv/bin/dem-tile-serve')
+const timeout = positiveInteger(process.env.DEM_TILE_WIREFRAME_TIMEOUT_MS, 120_000)
+const headless = process.env.GEO_VIRTUAL_RASTER_DEM_HEADLESS === '1'
+const outputDirectory = resolve(
+    process.env.DEM_TILE_WIREFRAME_OUTPUT ?? '/tmp/geoscratch-dem-tile-wireframe'
+)
+const renderingStorageKey = 'geoscratch.examples.demLayer.rendering.v1'
+const camera = Object.freeze({
+    center: Object.freeze([ 120.980697, 31.684162 ]),
+    zoom: 10,
+    pitch: 70,
+    bearing: 90,
+})
+const vitePort = await findAvailablePort()
+let tilePort = await findAvailablePort()
+while (tilePort === vitePort) tilePort = await findAvailablePort()
+const baseUrl = `http://127.0.0.1:${vitePort}`
+const tileBaseUrl = `http://127.0.0.1:${tilePort}`
+
+await mkdir(outputDirectory, { recursive: true })
+let build
+let tileServer
+let vite
+let browser
+let browserVersion
+let proof
+let fatalError
+const cleanupFailures = []
+
+try {
+    build = await runCommand(tileBuildEntry, [], tileServerRoot)
+    tileServer = startProcess(tileServeEntry, [ '--port', String(tilePort) ], tileServerRoot)
+    await waitForHttpProcess(tileServer, `${tileBaseUrl}/health`, 'DEM tile server')
+    vite = startProcess(process.execPath, [
+        viteEntry,
+        '--host',
+        '127.0.0.1',
+        '--port',
+        String(vitePort),
+        '--strictPort',
+    ], examplesRoot)
+    await waitForHttpProcess(vite, `${baseUrl}/demLayer/`, 'Vite')
+    browser = await chromium.launch({
+        channel: 'chrome',
+        headless,
+        args: [ '--enable-unsafe-webgpu' ],
+    })
+    browserVersion = await browser.version()
+    proof = await runWireframeProof(browser)
+} catch (error) {
+    fatalError = serializeError(error)
+} finally {
+    await cleanup('Chrome', async() => {
+        if (browser !== undefined) await withTimeout(browser.close(), 15_000, 'Chrome shutdown')
+    })
+    await cleanup('Vite', async() => {
+        if (vite !== undefined) await stopProcess(vite, 'Vite')
+    })
+    await cleanup('DEM tile server', async() => {
+        if (tileServer !== undefined) await stopProcess(tileServer, 'DEM tile server')
+    })
+}
+
+const processFacts = {
+    browserClosed: browser === undefined || !browser.isConnected(),
+    viteClosed: !await canConnect(vitePort),
+    tileServerClosed: !await canConnect(tilePort),
+}
+const failures = validateProof(proof, processFacts)
+if (fatalError !== undefined) failures.unshift(`browser proof failed: ${fatalError}`)
+failures.push(...cleanupFailures)
+const result = {
+    schemaVersion: 1,
+    status: failures.length === 0 ? 'passed' : 'failed',
+    headed: !headless,
+    browserVersion,
+    baseUrl,
+    tileBaseUrl,
+    outputDirectory,
+    sourceHash: parseBuildHash(build?.stdout),
+    camera,
+    proof,
+    processFacts,
+    fatalError,
+    cleanupFailures,
+    failures,
+    processOutput: failures.length === 0 ? undefined : {
+        tileServer: processOutput(tileServer),
+        vite: processOutput(vite),
+    },
+}
+process.stdout.write(`${JSON.stringify(result, null, 2)}\n`)
+if (failures.length > 0) process.exitCode = 1
+
+async function runWireframeProof(activeBrowser) {
+
+    const context = await activeBrowser.newContext({
+        viewport: { width: 1280, height: 800 },
+        deviceScaleFactor: 1,
+    })
+    const page = await context.newPage()
+    const events = observePage(page)
+    try {
+        const parameters = new URLSearchParams({
+            proof: '1',
+            cache: 'none',
+            tileServer: tileBaseUrl,
+        })
+        await page.goto(`${baseUrl}/demLayer/?${parameters}`, {
+            waitUntil: 'domcontentloaded',
+            timeout,
+        })
+        await page.locator('#GPUFrame[data-status="ready"]').waitFor({ timeout })
+        const loaded = await readFacts(page)
+        await page.evaluate(value => window.__DEM_LAYER_PROOF__.moveCamera(value), camera)
+        const baseline = await waitForStableMode(page, 'shaded', loaded.observedFrames)
+        const shadedCapture = await captureState(page, 'shaded')
+
+        await page.locator('[data-dem-control="tile-wireframe"] .tp-ckbv_w').click()
+        const wireframe = await waitForStableMode(
+            page,
+            'tile-wireframe',
+            baseline.observedFrames
+        )
+        const wireframeCapture = await captureState(page, 'tile-wireframe')
+
+        await page.locator('[data-dem-control="tile-wireframe"] .tp-ckbv_w').click()
+        const restored = await waitForStableMode(
+            page,
+            'shaded',
+            wireframe.observedFrames
+        )
+        const restoredCapture = await captureState(page, 'restored-shaded')
+        return Object.freeze({
+            url: page.url(),
+            baseline: Object.freeze({ ...baseline, capture: shadedCapture }),
+            wireframe: Object.freeze({ ...wireframe, capture: wireframeCapture }),
+            restored: Object.freeze({ ...restored, capture: restoredCapture }),
+            events,
+        })
+    } finally {
+        await context.close()
+    }
+}
+
+async function waitForStableMode(page, presentation, afterObservedFrames) {
+
+    await page.waitForFunction(({ expectedPresentation, afterFrames, expectedCamera }) => {
+        const canvas = document.querySelector('#GPUFrame')
+        if (!(canvas instanceof HTMLCanvasElement)) return false
+        const facts = canvas.dataset
+        const parse = value => {
+            try { return JSON.parse(value ?? 'null') } catch { return null }
+        }
+        const frontier = parse(facts.frontier)
+        const virtualRaster = parse(facts.virtualRaster)
+        const cameraView = parse(facts.cameraView)
+        const cameraMatches = cameraView !== null &&
+            Math.abs(cameraView.zoom - expectedCamera.zoom) < 1e-6 &&
+            Math.abs(cameraView.pitch - expectedCamera.pitch) < 1e-6 &&
+            Math.abs(cameraView.bearing - expectedCamera.bearing) < 1e-6
+        const virtualRasterIdle = virtualRaster?.residency?.stagedCount === 0 &&
+            virtualRaster?.residency?.stagingBytes === 0 &&
+            virtualRaster?.scheduler?.activeRequestCount === 0 &&
+            virtualRaster?.scheduler?.queuedRequestCount === 0 &&
+            virtualRaster?.worker?.pendingCandidateCount === 0 &&
+            virtualRaster?.worker?.system?.activeTaskCount === 0 &&
+            virtualRaster?.worker?.system?.queuedTaskCount === 0 &&
+            virtualRaster?.gpu?.stagedSnapshotEpoch === undefined
+        return facts.status === 'ready' &&
+            facts.terrainPresentation === expectedPresentation &&
+            Number(facts.observedFrames) > afterFrames &&
+            Number(facts.frames) === Number(facts.observedFrames) &&
+            Number(facts.currentPendingNativeObservations) === 0 &&
+            facts.frontierConverged === 'true' &&
+            frontier?.convergenceState === 'converged' &&
+            frontier?.demandCount === 0 &&
+            frontier?.staleGenerationCount === 0 &&
+            facts.uncapturedErrors === '0' &&
+            facts.deviceLosses === '0' &&
+            cameraMatches && virtualRasterIdle
+    }, {
+        expectedPresentation: presentation,
+        afterFrames: afterObservedFrames,
+        expectedCamera: camera,
+    }, { timeout })
+    return await readFacts(page)
+}
+
+async function readFacts(page) {
+
+    return await page.evaluate(key => {
+        const canvas = document.querySelector('#GPUFrame')
+        if (!(canvas instanceof HTMLCanvasElement)) throw new Error('DEM canvas is missing')
+        const parse = value => {
+            try { return JSON.parse(value ?? 'null') } catch { return null }
+        }
+        const checkbox = document.querySelector('[data-dem-control="tile-wireframe"] input')
+        const graphContract = parse(canvas.dataset.graphContract)
+        const frontier = parse(canvas.dataset.frontier)
+        return {
+            terrainPresentation: canvas.dataset.terrainPresentation,
+            frames: Number(canvas.dataset.frames),
+            observedFrames: Number(canvas.dataset.observedFrames),
+            stableIdentityHash: canvas.dataset.currentStableIdentityHash,
+            identityFacts: parse(canvas.dataset.currentIdentityFacts),
+            persistentFacts: parse(canvas.dataset.persistentFacts),
+            graphContract: graphContract === null ? null : {
+                terrainVertexCount: graphContract.terrainVertexCount,
+                countPath: graphContract.countPath,
+                selectionPath: graphContract.selectionPath,
+                commandIds: graphContract.commandIds,
+            },
+            frontier: frontier === null ? null : {
+                visibleInstanceCount: frontier.visibleInstanceCount,
+                levels: frontier.levels,
+                convergenceState: frontier.convergenceState,
+                demandCount: frontier.demandCount,
+                staleGenerationCount: frontier.staleGenerationCount,
+            },
+            cameraView: parse(canvas.dataset.cameraView),
+            tileWireframeChecked: checkbox instanceof HTMLInputElement
+                ? checkbox.checked
+                : undefined,
+            renderingStorage: parse(window.localStorage.getItem(key)),
+            diagnostics: {
+                uncapturedErrors: Number(canvas.dataset.uncapturedErrors),
+                deviceLosses: Number(canvas.dataset.deviceLosses),
+                incidents: Number(canvas.dataset.diagnosticIncidents),
+                bounded: canvas.dataset.diagnosticsBounded === 'true',
+            },
+        }
+    }, renderingStorageKey)
+}
+
+async function captureState(page, name) {
+
+    await page.waitForTimeout(250)
+    const pagePath = resolve(outputDirectory, `${name}.png`)
+    const canvasPath = resolve(outputDirectory, `${name}-canvas.png`)
+    const pagePng = await page.screenshot({ path: pagePath })
+    const canvasPng = await page.locator('#GPUFrame').screenshot({
+        path: canvasPath,
+        style: '#DemControlPanel { visibility: hidden !important; }',
+    })
+    return Object.freeze({
+        page: Object.freeze({
+            path: pagePath,
+            sha256: sha256(pagePng),
+            byteLength: pagePng.byteLength,
+        }),
+        canvas: Object.freeze({
+            path: canvasPath,
+            sha256: sha256(canvasPng),
+            byteLength: canvasPng.byteLength,
+        }),
+        pixels: await inspectWireframePixels(page, canvasPng),
+    })
+}
+
+async function inspectWireframePixels(page, png) {
+
+    return await page.evaluate(async(encoded) => {
+        const image = new Image()
+        image.src = `data:image/png;base64,${encoded}`
+        await image.decode()
+        const canvas = document.createElement('canvas')
+        canvas.width = image.naturalWidth
+        canvas.height = image.naturalHeight
+        const context = canvas.getContext('2d', { willReadFrequently: true })
+        if (context === null) throw new Error('Pixel inspection context is unavailable')
+        context.drawImage(image, 0, 0)
+        const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data
+        const clusters = new Map()
+        const coloredMask = new Uint8Array(canvas.width * canvas.height)
+        let coloredPixels = 0
+        let nonDarkPixels = 0
+        let transparentPixels = 0
+        for (let index = 0; index < pixels.length; index += 4) {
+            const red = pixels[index]
+            const green = pixels[index + 1]
+            const blue = pixels[index + 2]
+            const alpha = pixels[index + 3]
+            const maximum = Math.max(red, green, blue)
+            const minimum = Math.min(red, green, blue)
+            if (maximum > 20) nonDarkPixels++
+            if (alpha === 0) transparentPixels++
+            if (maximum < 80 || maximum - minimum < 20) continue
+            coloredPixels++
+            coloredMask[index / 4] = 1
+            const scale = 5 / maximum
+            const key = [ red, green, blue ]
+                .map(channel => Math.round(channel * scale))
+                .join(':')
+            clusters.set(key, (clusters.get(key) ?? 0) + 1)
+        }
+        const minimumClusterPixels = Math.max(12, Math.floor(coloredPixels * 0.0005))
+        const retainedClusters = [ ...clusters.entries() ]
+            .filter(([, count ]) => count >= minimumClusterPixels)
+            .sort((left, right) => right[1] - left[1])
+        const totalPixels = canvas.width * canvas.height
+        let colorTransitions = 0
+        let comparableEdges = 0
+        for (let y = 0; y < canvas.height; y++) {
+            for (let x = 0; x < canvas.width; x++) {
+                const index = y * canvas.width + x
+                if (x > 0) {
+                    comparableEdges++
+                    if (coloredMask[index] !== coloredMask[index - 1]) colorTransitions++
+                }
+                if (y > 0) {
+                    comparableEdges++
+                    if (coloredMask[index] !== coloredMask[index - canvas.width]) {
+                        colorTransitions++
+                    }
+                }
+            }
+        }
+        return {
+            width: canvas.width,
+            height: canvas.height,
+            coloredPixels,
+            coloredRatio: coloredPixels / totalPixels,
+            nonDarkPixels,
+            transparentPixels,
+            colorTransitions,
+            colorTransitionRatio: colorTransitions / comparableEdges,
+            colorClusterCount: retainedClusters.length,
+            leadingColorClusters: retainedClusters.slice(0, 12),
+        }
+    }, png.toString('base64'))
+}
+
+function validateProof(value, processState) {
+
+    const failures = []
+    if (value === undefined) return [ 'DEM tile wireframe proof was not produced' ]
+    const { baseline, wireframe, restored } = value
+    expect(failures,
+        baseline?.terrainPresentation === 'shaded' &&
+        baseline.tileWireframeChecked === false &&
+        wireframe?.terrainPresentation === 'tile-wireframe' &&
+        wireframe.tileWireframeChecked === true &&
+        restored?.terrainPresentation === 'shaded' &&
+        restored.tileWireframeChecked === false,
+    'checkbox and submitted terrain presentation did not complete both live switches')
+
+    expect(failures,
+        baseline?.stableIdentityHash !== undefined &&
+        baseline.stableIdentityHash === wireframe?.stableIdentityHash &&
+        wireframe.stableIdentityHash === restored?.stableIdentityHash &&
+        JSON.stringify(baseline.identityFacts) === JSON.stringify(wireframe.identityFacts) &&
+        JSON.stringify(wireframe.identityFacts) === JSON.stringify(restored.identityFacts) &&
+        baseline.identityFacts?.programs === 3 &&
+        baseline.identityFacts?.pipelines === 3 &&
+        baseline.identityFacts?.commands === 6,
+    'live presentation switching rebuilt or replaced the persistent DEM graph')
+
+    expect(failures,
+        baseline?.persistentFacts?.pipelines === wireframe?.persistentFacts?.pipelines &&
+        wireframe.persistentFacts?.pipelines === restored?.persistentFacts?.pipelines &&
+        baseline.persistentFacts?.resources === wireframe.persistentFacts?.resources &&
+        wireframe.persistentFacts?.resources === restored.persistentFacts?.resources,
+    'live presentation switching changed runtime persistent resource counts')
+
+    expect(failures,
+        baseline?.graphContract?.commandIds?.drawTerrain?.shaded?.length === 2 &&
+        baseline.graphContract.commandIds.drawTerrain.tileWireframe?.length === 2,
+    'graph contract does not expose both persistent parity command sets')
+
+    const pixels = wireframe?.capture?.pixels
+    expect(failures,
+        pixels?.coloredPixels > 2_000 &&
+        pixels.colorClusterCount >= 4 &&
+        pixels.coloredRatio > 0.002 &&
+        pixels.coloredRatio < 0.75 &&
+        pixels.colorTransitionRatio > 0.04 &&
+        pixels.nonDarkPixels > 10_000,
+    `wireframe pixels did not prove sparse multicolor tile edges: ${JSON.stringify(pixels)}`)
+
+    expect(failures,
+        baseline?.capture?.page?.byteLength > 20_000 &&
+        wireframe?.capture?.page?.byteLength > 20_000 &&
+        restored?.capture?.page?.byteLength > 20_000 &&
+        baseline.capture.canvas.sha256 !== wireframe.capture.canvas.sha256 &&
+        wireframe.capture.canvas.sha256 !== restored.capture.canvas.sha256,
+    'shaded, wireframe, and restored captures were blank or visually indistinguishable')
+
+    expect(failures,
+        wireframe?.renderingStorage?.version === 1 &&
+        wireframe.renderingStorage.tileWireframe === true &&
+        restored?.renderingStorage?.version === 1 &&
+        restored.renderingStorage.tileWireframe === false,
+    'live rendering preference was not persisted independently across both switches')
+
+    for (const [ name, state ] of Object.entries({ baseline, wireframe, restored })) {
+        expect(failures,
+            state?.diagnostics?.uncapturedErrors === 0 &&
+            state.diagnostics.deviceLosses === 0 &&
+            state.diagnostics.incidents === 0 &&
+            state.diagnostics.bounded,
+        `${name} retained a WebGPU diagnostic failure`)
+    }
+    expect(failures, unexpectedEvents(value.events).length === 0,
+        `browser emitted failures: ${JSON.stringify(unexpectedEvents(value.events))}`)
+    expect(failures,
+        processState.browserClosed && processState.viteClosed && processState.tileServerClosed,
+    'managed Chrome, Vite, or tile server remained reachable')
+    return failures
+}
+
+function expect(failures, condition, message) {
+
+    if (!condition) failures.push(message)
+}
+
+function observePage(page) {
+
+    const events = { consoleFailures: [], pageErrors: [], httpFailures: [] }
+    page.on('console', message => {
+        if (message.type() === 'error') pushBounded(events.consoleFailures, message.text())
+    })
+    page.on('pageerror', error => pushBounded(events.pageErrors, serializeError(error)))
+    page.on('response', response => {
+        if (response.status() >= 400) {
+            pushBounded(events.httpFailures, `${response.status()} ${response.url()}`)
+        }
+    })
+    return events
+}
+
+function unexpectedEvents(events) {
+
+    if (events === undefined) return [ 'missing browser event ledger' ]
+    return [ ...events.consoleFailures, ...events.pageErrors, ...events.httpFailures ]
+}
+
+function startProcess(command, arguments_, cwd) {
+
+    const child = spawn(command, arguments_, {
+        cwd,
+        env: { ...process.env, FORCE_COLOR: '0' },
+        stdio: [ 'ignore', 'pipe', 'pipe' ],
+    })
+    const state = { child, stdout: '', stderr: '', spawnError: undefined }
+    child.stdout.setEncoding('utf8')
+    child.stderr.setEncoding('utf8')
+    child.stdout.on('data', chunk => { state.stdout = appendBounded(state.stdout, chunk) })
+    child.stderr.on('data', chunk => { state.stderr = appendBounded(state.stderr, chunk) })
+    child.on('error', error => { state.spawnError = error })
+    return state
+}
+
+async function runCommand(command, arguments_, cwd) {
+
+    const state = startProcess(command, arguments_, cwd)
+    await waitForExit(state.child, timeout)
+    if (state.spawnError !== undefined) throw state.spawnError
+    if (state.child.exitCode !== 0) {
+        throw new Error(`${command} failed:\n${state.stderr}\n${state.stdout}`)
+    }
+    return { exitCode: state.child.exitCode, stdout: state.stdout, stderr: state.stderr }
+}
+
+async function waitForHttpProcess(state, url, label) {
+
+    const deadline = Date.now() + timeout
+    while (Date.now() < deadline) {
+        if (state.spawnError !== undefined) throw state.spawnError
+        if (state.child.exitCode !== null) {
+            throw new Error(`${label} exited before readiness with code ${state.child.exitCode}`)
+        }
+        try {
+            const response = await fetch(url, { signal: AbortSignal.timeout(1_000) })
+            const ready = response.ok
+            await response.body?.cancel()
+            if (ready) return
+        } catch {
+            // Managed service is still starting.
+        }
+        await delay(100)
+    }
+    throw new Error(`Timed out waiting for ${label} at ${url}`)
+}
+
+async function stopProcess(state, label) {
+
+    if (state.child.exitCode !== null || state.child.signalCode !== null) return
+    state.child.kill('SIGTERM')
+    try {
+        await waitForExit(state.child, 5_000)
+    } catch {
+        state.child.kill('SIGKILL')
+        try {
+            await waitForExit(state.child, 5_000)
+        } catch {
+            throw new Error(`${label} process ${state.child.pid} did not stop`)
+        }
+    }
+}
+
+async function waitForExit(child, milliseconds) {
+
+    if (child.exitCode !== null || child.signalCode !== null) return
+    await new Promise((resolvePromise, rejectPromise) => {
+        const timer = setTimeout(() => {
+            child.off('exit', onExit)
+            child.off('error', onError)
+            rejectPromise(new Error(`Process ${child.pid} did not exit within ${milliseconds} ms`))
+        }, milliseconds)
+        const onExit = () => {
+            clearTimeout(timer)
+            child.off('error', onError)
+            resolvePromise()
+        }
+        const onError = () => {
+            clearTimeout(timer)
+            child.off('exit', onExit)
+            resolvePromise()
+        }
+        child.once('exit', onExit)
+        child.once('error', onError)
+    })
+}
+
+async function cleanup(label, action) {
+
+    try {
+        await action()
+    } catch (error) {
+        cleanupFailures.push(`${label} cleanup failed: ${serializeError(error)}`)
+    }
+}
+
+async function findAvailablePort() {
+
+    const server = createServer()
+    await new Promise((resolvePromise, rejectPromise) => {
+        server.once('error', rejectPromise)
+        server.listen(0, '127.0.0.1', resolvePromise)
+    })
+    const address = server.address()
+    if (address === null || typeof address === 'string') throw new Error('Port selection failed')
+    await new Promise((resolvePromise, rejectPromise) => {
+        server.close(error => error === undefined ? resolvePromise() : rejectPromise(error))
+    })
+    return address.port
+}
+
+async function canConnect(port) {
+
+    return await new Promise(resolvePromise => {
+        const socket = createConnection({ host: '127.0.0.1', port })
+        const settle = connected => {
+            socket.removeAllListeners()
+            socket.destroy()
+            resolvePromise(connected)
+        }
+        socket.setTimeout(500, () => settle(false))
+        socket.once('connect', () => settle(true))
+        socket.once('error', () => settle(false))
+    })
+}
+
+function parseBuildHash(output) {
+
+    try { return JSON.parse(output).sourceHash } catch { return undefined }
+}
+
+function processOutput(state) {
+
+    if (state === undefined) return undefined
+    return {
+        pid: state.child.pid,
+        exitCode: state.child.exitCode,
+        signalCode: state.child.signalCode,
+        stdout: state.stdout,
+        stderr: state.stderr,
+    }
+}
+
+function positiveInteger(value, fallback) {
+
+    if (value === undefined) return fallback
+    const parsed = Number(value)
+    if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+        throw new TypeError(`Expected a positive integer, received ${value}`)
+    }
+    return parsed
+}
+
+function appendBounded(current, chunk) {
+
+    return `${current}${chunk}`.slice(-16_384)
+}
+
+function pushBounded(target, value) {
+
+    if (target.length < 32) target.push(value)
+}
+
+function sha256(value) {
+
+    return createHash('sha256').update(value).digest('hex')
+}
+
+function serializeError(error) {
+
+    return error instanceof Error ? error.stack ?? error.message : String(error)
+}
+
+async function withTimeout(promise, milliseconds, label) {
+
+    let timer
+    try {
+        return await Promise.race([
+            promise,
+            new Promise((resolvePromise, rejectPromise) => {
+                timer = setTimeout(
+                    () => rejectPromise(new Error(`${label} exceeded ${milliseconds} ms`)),
+                    milliseconds
+                )
+            }),
+        ])
+    } finally {
+        clearTimeout(timer)
+    }
+}
+
+function delay(milliseconds) {
+
+    return new Promise(resolvePromise => setTimeout(resolvePromise, milliseconds))
+}

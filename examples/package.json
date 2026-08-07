@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
+    "proof:dem-wireframe": "node ../tests/browser/dem-tile-wireframe.mjs",
     "serve": "vite preview",
     "typecheck": "node ../node_modules/typescript-webgpu/bin/tsc -p tsconfig.json"
   },
