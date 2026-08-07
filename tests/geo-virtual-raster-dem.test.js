@@ -29,6 +29,11 @@ import {
     serializeDemCachePanelConfig,
 } from '../examples/demLayer/dem-cache-panel-state.ts'
 import { prepareDemCachePanel } from '../examples/demLayer/dem-cache-panel.ts'
+import {
+    DEM_RENDERING_PREFERENCE_STORAGE_KEY,
+    resolveDemRenderingPreference,
+    serializeDemRenderingPreference,
+} from '../examples/demLayer/dem-rendering-preference.ts'
 import { demWebMercatorManifest as manifest } from './fixtures/dem-webmercator-manifest.js'
 
 describe('DEM WebMercator virtual raster', () => {
@@ -251,6 +256,49 @@ describe('DEM WebMercator virtual raster', () => {
             expect(unavailable.source).to.equal('url')
             expect(unavailable.storageStatus).to.equal('unavailable')
             expect(unavailable.config.policy).to.equal('disabled')
+        })
+    })
+
+    describe('DEM rendering preference', () => {
+
+        it('defaults to shaded terrain without stored state', () => {
+
+            expect(DEM_RENDERING_PREFERENCE_STORAGE_KEY).to.equal(
+                'geoscratch.examples.demLayer.rendering.v1'
+            )
+            expect(resolveDemRenderingPreference(null)).to.deep.equal({
+                preference: { tileWireframe: false },
+                storageStatus: 'missing',
+            })
+        })
+
+        it('round trips a strict versioned tile-wireframe preference', () => {
+
+            const stored = serializeDemRenderingPreference({ tileWireframe: true })
+
+            expect(stored).to.equal('{"version":1,"tileWireframe":true}')
+            expect(resolveDemRenderingPreference(stored)).to.deep.equal({
+                preference: { tileWireframe: true },
+                storageStatus: 'valid',
+            })
+        })
+
+        it('falls back safely for malformed or structurally invalid state', () => {
+
+            for (const stored of [
+                '{',
+                '{"version":2,"tileWireframe":true}',
+                '{"version":1,"tileWireframe":"yes"}',
+                '{"version":1,"tileWireframe":true,"extra":1}',
+                'null',
+            ]) {
+                expect(resolveDemRenderingPreference(stored)).to.deep.equal({
+                    preference: { tileWireframe: false },
+                    storageStatus: 'invalid',
+                })
+            }
+            expect(() => serializeDemRenderingPreference({ tileWireframe: 'yes' }))
+                .to.throw('tileWireframe')
         })
     })
 
