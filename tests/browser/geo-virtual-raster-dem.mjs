@@ -529,7 +529,10 @@ async function readFacts(page) {
 async function capture(page, name) {
 
     const path = resolve(outputDirectory, `${name}.png`)
-    const png = await page.locator('#GPUFrame').screenshot({ path })
+    const png = await page.locator('#GPUFrame').screenshot({
+        path,
+        style: '#DemCachePanel { visibility: hidden !important; }',
+    })
     return {
         path,
         hash: createHash('sha256').update(png).digest('hex'),

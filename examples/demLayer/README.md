@@ -11,6 +11,34 @@ Disk caching is disabled by default:
 http://localhost:5173/demLayer/?cache=none
 ```
 
+## Cache panel
+
+The `DEM Cache` panel in the upper-right corner configures the example without
+requiring hand-written query parameters. It exposes all supported application
+settings:
+
+- `Cache policy`: `Disabled`, `Session`, `Durable`, or `Clear on open`;
+- `Namespace`, `Maximum MiB`, `Maximum entries`, and `Persistence` under
+  `Advanced`;
+- `Apply & Reload` to validate the complete draft, save the preference, and
+  rebuild the DEM runtime from the resulting URL;
+- `Restore defaults` to remove the saved preference and cache query parameters.
+
+Edits remain a panel-only draft until `Apply & Reload` is selected. The running
+Worker, persistent cache, and GPU virtual raster are never hot-switched.
+
+The panel stores only its versioned configuration at
+`geoscratch.examples.dem.cache-panel.v1` in `localStorage`. It does not store
+tile bytes, cache metadata, entry keys, or diagnostics there. A URL containing
+any cache parameter is authoritative for that load; a saved preference is used
+only when the URL contains no cache parameters. If `localStorage` is unavailable,
+explicit URL configuration still works and the panel reports the degraded
+preference state.
+
+`Restore defaults` does not delete existing durable IndexedDB or OPFS cache
+payloads. Use the cache API's explicit invalidation or clear operation when the
+application intends to remove stored data.
+
 Persistent storage is application-configurable:
 
 ```text
