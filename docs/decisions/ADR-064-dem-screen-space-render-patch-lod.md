@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted
+Superseded by [ADR-065](ADR-065-dem-projected-grid-spacing-lod.md). The bounded GPU
+branch traversal and logical-patch lookup remain; its two-pixel error metric does not.
 
 ## Date
 

@@ -910,8 +910,10 @@ function validateNormalProof(proof, failures) {
             'dem-frame-scheduler',
             'window-resize-listener',
             'map-render-listener',
+            'dem-terrain-presentation-control',
             'dem-virtual-raster-demand',
             'pagehide-listener',
+            'dem-control-panel',
             'dem-gpu-frontier',
             'dem-virtual-raster-streaming',
             'maplibre-map',
@@ -1008,9 +1010,10 @@ function validateDemFacts(label, facts, failures, expectedStatus = 'ready') {
         contract?.dataMaximumMatrixLevel !== 10 ||
         contract?.renderMaximumMatrixLevel !== 14 ||
         contract?.renderPatches?.selectionPath !==
-            'gpu-screen-space-error-render-patches' ||
+            'gpu-projected-grid-spacing-render-patches' ||
         contract?.renderPatches?.maximumExtraLevels !== 4 ||
-        contract?.renderPatches?.refineErrorPixels !== 2 ||
+        contract?.renderPatches?.maximumCellSpanPixels !== 8 ||
+        contract?.renderPatches?.nominalPatchSpanPixels !== 512 ||
         contract?.renderPatches?.renderPatchLookupCapacity <=
             contract?.renderPatches?.maximumRenderPatches ||
         contract?.terrainVertexCount !== 24_576 ||
@@ -1021,6 +1024,30 @@ function validateDemFacts(label, facts, failures, expectedStatus = 'ready') {
     const levelRange = parseJson(facts.levelRange, `${label} data level range`, failures)
     if (!Array.isArray(levelRange) || levelRange[1] > 10) {
         failures.push(`${label} data frontier exceeded the z10 source ceiling`)
+    }
+    const renderPatchFeedback = parseJson(
+        facts.renderPatchFeedback,
+        `${label} render-patch feedback`,
+        failures
+    )
+    const renderPatchLevelRange = parseJson(
+        facts.renderPatchLevelRange,
+        `${label} render-patch level range`,
+        failures
+    )
+    const renderPatchCellSpanRange = parseJson(
+        facts.renderPatchCellSpanRange,
+        `${label} render-patch cell-span range`,
+        failures
+    )
+    if (renderPatchFeedback?.selectedPatchCount !== Number(facts.renderPatchCount) ||
+        renderPatchFeedback?.descriptorOverflowCount !== 0 ||
+        renderPatchFeedback?.lookupOverflowCount !== 0 ||
+        !Array.isArray(renderPatchLevelRange) || renderPatchLevelRange[0] < 4 ||
+        renderPatchLevelRange[1] > 14 ||
+        !Array.isArray(renderPatchCellSpanRange) || renderPatchCellSpanRange[0] < 0 ||
+        renderPatchCellSpanRange[1] > 65_535) {
+        failures.push(`${label} projected-grid render-patch feedback was inconsistent`)
     }
     if (contract?.virtualRaster?.completeImageUpload !== false ||
         contract?.virtualRaster?.crossPageFiltering !== 'logical-bilinear' ||
@@ -1110,7 +1137,11 @@ function validateFailureProof(result, failures) {
         if (proof?.runtimeEvidence !== undefined || proof?.captureReport !== undefined) {
             failures.push(`${prefix} fabricated GPU evidence before runtime acquisition`)
         }
-        validateCleanup(proof, [ 'pagehide-listener', 'maplibre-map' ], failures)
+        validateCleanup(proof, [
+            'pagehide-listener',
+            'dem-control-panel',
+            'maplibre-map',
+        ], failures)
         return
     }
 
@@ -1155,6 +1186,7 @@ function validateFailureProof(result, failures) {
     validateCleanup(proof, [
         'dem-virtual-raster-demand',
         'pagehide-listener',
+        'dem-control-panel',
         'dem-virtual-raster-streaming',
         'maplibre-map',
         'scratch-runtime',

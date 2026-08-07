@@ -93,7 +93,7 @@ describe('Geo virtual-raster Flow readiness contract', () => {
             'stitch',
             'Elevation',
             'Projection',
-            'per-patch SSE',
+            'projects each candidate AABB',
             'logical selected-patch lookup',
             'indirect',
             'Resize',

@@ -290,7 +290,7 @@ repair, OOM attribution, device-loss recovery, or an unbounded always-on trace.
 
 The DEM Layer clean cut is a closer rendering-business test than a synthetic API
 probe: MapLibre camera state drives a persistent GPU data frontier, a second bounded
-GPU screen-space-error render frontier, virtual-raster sampling, and a native indirect
+GPU projected-grid render frontier, virtual-raster sampling, and a native indirect
 terrain draw. The implementation keeps 71 Scratch identities stable across camera
 changes and Surface resize; a frame creates only a `SubmissionBuilder`, a view token,
 and bounded feedback bookkeeping.
@@ -321,7 +321,8 @@ and for an Agent reviewing it:
 
 The exercise also identifies responsibilities that correctly remain above Scratch.
 Geo owns the data-page frontier and virtual-raster contracts; the DEM example owns its
-two-pixel geometry error, `z14` ceiling, 64-sector mesh, patch hashing, and stitching.
+eight-pixel projected cell-span policy, `z14` ceiling, 64-sector mesh, patch hashing,
+and stitching.
 The map host owns camera interpretation and the normal basemap. The page lifecycle owns
 coalesced render scheduling, listener removal, late async settlement, and cleanup order.
 Visual correctness still requires a real WebGPU browser and pixel evidence; Scratch's

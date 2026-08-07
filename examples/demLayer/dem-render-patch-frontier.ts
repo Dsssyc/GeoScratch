@@ -13,8 +13,10 @@ import type {
     DispatchCommand,
     GPURuntime,
     Program,
+    ReadbackCommand,
     ShaderModule,
     SubmissionBuilder,
+    SubmittedWork,
     UploadCommand,
 } from 'geoscratch/scratch'
 import {
@@ -27,15 +29,16 @@ import type {
 
 export const DEM_MAX_RENDER_MATRIX_LEVEL = 14
 export const DEM_MAX_RENDER_EXTRA_LEVELS = 4
-export const DEM_RENDER_PATCH_REFINE_ERROR_PIXELS = 2
 export const DEM_RENDER_PATCH_TERRAIN_SECTOR_SIZE = 64
+export const DEM_RENDER_PATCH_MAXIMUM_CELL_SPAN_PIXELS = 8
+export const DEM_RENDER_PATCH_NOMINAL_SPAN_PIXELS =
+    DEM_RENDER_PATCH_TERRAIN_SECTOR_SIZE * DEM_RENDER_PATCH_MAXIMUM_CELL_SPAN_PIXELS
 
 const WORKGROUP_SIZE = 64
 const DRAW_ARGUMENT_BYTES = 16
 const DRAW_ARGUMENT_COUNT = 1
 const STATE_BYTES = 32
 const LOOKUP_ENTRY_BYTES = 8
-const WEB_MERCATOR_WORLD_WIDTH_METERS = 40_075_016
 const bufferUsage = globalThis.GPUBufferUsage ?? Object.freeze({
     COPY_DST: 0x08,
     COPY_SRC: 0x04,
@@ -71,7 +74,7 @@ const renderPatchPolicyCodec = layoutCodec({
         { name: 'terrainVertexCount', type: 'u32' },
         { name: 'renderPatchLookupCapacity', type: 'u32' },
         { name: 'terrainSectorSize', type: 'u32' },
-        { name: 'refineErrorPixels', type: 'f32' },
+        { name: 'maximumCellSpanPixels', type: 'f32' },
         { name: 'reserved', type: 'f32' },
     ],
 }, { usage: [ 'uniform', 'storage', 'readback' ] })
@@ -110,18 +113,20 @@ type ParityCommands = Readonly<{
     reset: DispatchCommand
     expand: DispatchCommand
     finalize: DispatchCommand
+    feedback: ReadbackCommand
 }>
 
 export type DemRenderPatchFrontierFacts = Readonly<{
     id: string
-    selectionPath: 'gpu-screen-space-error-render-patches'
+    selectionPath: 'gpu-projected-grid-spacing-render-patches'
     disposed: boolean
     dataMaximumMatrixLevel: number
     maximumMatrixLevel: number
     maximumExtraLevels: number
     maximumSourceTiles: number
     maximumRenderPatches: number
-    refineErrorPixels: number
+    maximumCellSpanPixels: number
+    nominalPatchSpanPixels: number
     terrainSectorSize: number
     renderPatchBytes: number
     renderPatchLookupCapacity: number
@@ -147,13 +152,49 @@ type IdentityObjects = Readonly<{
     programs: readonly Program[]
     pipelines: readonly ComputePipeline[]
     passes: readonly ComputePassSpec[]
-    commands: readonly (ClearBufferCommand | DispatchCommand)[]
+    commands: readonly (ClearBufferCommand | DispatchCommand | ReadbackCommand)[]
 }>
+
+export type DemRenderPatchSelectionFacts = Readonly<{
+    selectedPatchCount: number
+    descriptorOverflowCount: number
+    lookupOverflowCount: number
+    minimumMatrixLevel?: number
+    maximumMatrixLevel?: number
+    minimumCellSpanPixels?: number
+    maximumCellSpanPixels?: number
+    frameEpoch: number
+}>
+
+export type DemRenderPatchFeedback = Readonly<DemRenderPatchSelectionFacts & {
+    kind: 'dem-render-patch-feedback'
+    frontierId: string
+    submissionId: string
+}>
+
+export class DemRenderPatchFeedbackStaleError extends Error {
+
+    readonly code = 'DEM_RENDER_PATCH_FEEDBACK_STALE'
+
+    constructor(expectedFrameEpoch: number, actualFrameEpoch: number) {
+
+        super(
+            `DEM render-patch frame epoch is stale: expected ${expectedFrameEpoch}, ` +
+            `received ${actualFrameEpoch}`
+        )
+        this.name = 'DemRenderPatchFeedbackStaleError'
+    }
+}
 
 export type DemRenderPatchFrontier = Readonly<{
     id: string
     initialize(builder: SubmissionBuilder): SubmissionBuilder
     encode(builder: SubmissionBuilder, frame: GpuTileFrontierFrame): SubmissionBuilder
+    capture(builder: SubmissionBuilder, frame: GpuTileFrontierFrame): SubmissionBuilder
+    feedback(
+        frame: GpuTileFrontierFrame,
+        submitted: SubmittedWork
+    ): Promise<DemRenderPatchFeedback>
     renderTemplates(id: DrawTemplateId): readonly [
         DemRenderPatchRenderTemplate,
         DemRenderPatchRenderTemplate,
@@ -177,57 +218,42 @@ export type DemRenderPatchFrontierOptions = Readonly<{
     elevationRangeMeters: readonly [number, number]
     terrainVertexCount: number
     terrainSectorSize?: number
-    refineErrorPixels?: number
+    maximumCellSpanPixels?: number
     shader: string
 }>
 
 let nextRenderPatchFrontierId = 1
 
-export function demRenderPatchScreenSpaceError({
-    matrixLevel,
-    distanceMeters,
-    viewportHeight,
-    verticalFovRadians,
+export function demRenderPatchProjectedCellSpan({
+    widthPixels,
+    heightPixels,
     terrainSectorSize = DEM_RENDER_PATCH_TERRAIN_SECTOR_SIZE,
 }: Readonly<{
-    matrixLevel: number
-    distanceMeters: number
-    viewportHeight: number
-    verticalFovRadians: number
+    widthPixels: number
+    heightPixels: number
     terrainSectorSize?: number
 }>): number {
 
-    if (!Number.isInteger(matrixLevel) || matrixLevel < 0 || matrixLevel > 30) {
-        throw new TypeError('DEM render-patch matrix level must be an integer in [0, 30]')
-    }
-    if (!Number.isFinite(distanceMeters) || distanceMeters < 0) {
-        throw new TypeError('DEM render-patch distance must be finite and non-negative')
-    }
-    if (!Number.isFinite(viewportHeight) || viewportHeight <= 0) {
-        throw new TypeError('DEM render-patch viewport height must be positive and finite')
-    }
-    if (!Number.isFinite(verticalFovRadians) || verticalFovRadians <= 0 ||
-        verticalFovRadians >= Math.PI) {
-        throw new TypeError('DEM render-patch vertical FOV must be in (0, pi)')
+    if (!Number.isFinite(widthPixels) || widthPixels < 0 ||
+        !Number.isFinite(heightPixels) || heightPixels < 0) {
+        throw new TypeError('DEM render-patch projected size must be finite and non-negative')
     }
     if (!Number.isInteger(terrainSectorSize) || terrainSectorSize < 1) {
         throw new TypeError('DEM render-patch terrain sector size must be a positive integer')
     }
-    const geometricErrorMeters = WEB_MERCATOR_WORLD_WIDTH_METERS /
-        2 ** matrixLevel / terrainSectorSize
-    return geometricErrorMeters * viewportHeight /
-        (2 * Math.tan(verticalFovRadians / 2) * Math.max(distanceMeters, 1e-6))
+    return Math.sqrt(widthPixels * heightPixels) / terrainSectorSize
 }
 
 export function demRenderPatchSelectMatrixLevel(
     sourceMatrixLevel: number,
-    distanceMeters: number,
-    view: Readonly<{
-        viewportHeight: number
-        verticalFovRadians: number
-        terrainSectorSize?: number
-        refineErrorPixels?: number
+    projectedSize: Readonly<{
+        widthPixels: number
+        heightPixels: number
     }>,
+    policy: Readonly<{
+        terrainSectorSize?: number
+        maximumCellSpanPixels?: number
+    }> = {},
     options: Readonly<{
         maximumMatrixLevel?: number
         maximumExtraLevels?: number
@@ -237,9 +263,11 @@ export function demRenderPatchSelectMatrixLevel(
     if (!Number.isInteger(sourceMatrixLevel) || sourceMatrixLevel < 0) {
         throw new TypeError('DEM render-patch source matrix level must be a non-negative integer')
     }
-    if (!Number.isFinite(distanceMeters) || distanceMeters < 0) {
-        throw new TypeError('DEM render-patch distance must be finite and non-negative')
-    }
+    const sourceCellSpan = demRenderPatchProjectedCellSpan({
+        widthPixels: projectedSize?.widthPixels,
+        heightPixels: projectedSize?.heightPixels,
+        terrainSectorSize: policy.terrainSectorSize,
+    })
     const maximumMatrixLevel = options.maximumMatrixLevel ?? DEM_MAX_RENDER_MATRIX_LEVEL
     const maximumExtraLevels = options.maximumExtraLevels ?? DEM_MAX_RENDER_EXTRA_LEVELS
     if (!Number.isInteger(maximumMatrixLevel) ||
@@ -255,22 +283,84 @@ export function demRenderPatchSelectMatrixLevel(
         maximumMatrixLevel,
         sourceMatrixLevel + maximumExtraLevels
     ))
-    const refineErrorPixels = view.refineErrorPixels ??
-        DEM_RENDER_PATCH_REFINE_ERROR_PIXELS
-    if (!Number.isFinite(refineErrorPixels) || refineErrorPixels <= 0) {
-        throw new TypeError('DEM render-patch refine error must be positive and finite')
+    const maximumCellSpanPixels = policy.maximumCellSpanPixels ??
+        DEM_RENDER_PATCH_MAXIMUM_CELL_SPAN_PIXELS
+    if (!Number.isFinite(maximumCellSpanPixels) || maximumCellSpanPixels <= 0) {
+        throw new TypeError('DEM render-patch maximum cell span must be positive and finite')
     }
     let matrixLevel = sourceMatrixLevel
-    while (matrixLevel < maximumSelectedLevel && demRenderPatchScreenSpaceError({
-        matrixLevel,
-        distanceMeters,
-        viewportHeight: view.viewportHeight,
-        verticalFovRadians: view.verticalFovRadians,
-        terrainSectorSize: view.terrainSectorSize,
-    }) > refineErrorPixels) {
+    let cellSpan = sourceCellSpan
+    while (matrixLevel < maximumSelectedLevel && cellSpan > maximumCellSpanPixels) {
         matrixLevel++
+        cellSpan *= 0.5
     }
     return matrixLevel
+}
+
+export function decodeDemRenderPatchState(
+    bytes: Uint8Array,
+    options: Readonly<{
+        maximumRenderPatches: number
+        expectedFrameEpoch?: number
+    }>
+): DemRenderPatchSelectionFacts {
+
+    if (!(bytes instanceof Uint8Array) || bytes.byteLength !== STATE_BYTES) {
+        throw new TypeError(`DEM render-patch feedback must contain ${STATE_BYTES} bytes`)
+    }
+    if (!Number.isSafeInteger(options?.maximumRenderPatches) ||
+        options.maximumRenderPatches < 1) {
+        throw new TypeError('DEM render-patch feedback capacity must be positive')
+    }
+    if (options.expectedFrameEpoch !== undefined &&
+        (!Number.isSafeInteger(options.expectedFrameEpoch) || options.expectedFrameEpoch < 0)) {
+        throw new TypeError('DEM render-patch expected frame epoch must be non-negative')
+    }
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+    const word = (index: number) => view.getUint32(index * 4, true)
+    const attemptedPatchCount = word(0)
+    const descriptorOverflowCount = word(1)
+    const lookupOverflowCount = word(2)
+    const minimumMatrixLevel = word(3)
+    const maximumMatrixLevel = word(4)
+    const minimumCellSpanQ8 = word(5)
+    const maximumCellSpanQ8 = word(6)
+    const frameEpoch = word(7)
+    if (options.expectedFrameEpoch !== undefined && frameEpoch !== options.expectedFrameEpoch) {
+        throw new DemRenderPatchFeedbackStaleError(options.expectedFrameEpoch, frameEpoch)
+    }
+    const selectedPatchCount = Math.min(attemptedPatchCount, options.maximumRenderPatches)
+    const expectedOverflowCount = Math.max(
+        attemptedPatchCount - options.maximumRenderPatches,
+        0
+    )
+    if (descriptorOverflowCount !== expectedOverflowCount) {
+        throw new RangeError('DEM render-patch descriptor overflow counters disagree')
+    }
+    if (selectedPatchCount === 0) {
+        return Object.freeze({
+            selectedPatchCount,
+            descriptorOverflowCount,
+            lookupOverflowCount,
+            frameEpoch,
+        })
+    }
+    if (minimumMatrixLevel === 0xffff_ffff ||
+        minimumMatrixLevel > maximumMatrixLevel ||
+        minimumCellSpanQ8 === 0xffff_ffff ||
+        minimumCellSpanQ8 > maximumCellSpanQ8) {
+        throw new RangeError('DEM render-patch feedback ranges are invalid')
+    }
+    return Object.freeze({
+        selectedPatchCount,
+        descriptorOverflowCount,
+        lookupOverflowCount,
+        minimumMatrixLevel,
+        maximumMatrixLevel,
+        minimumCellSpanPixels: minimumCellSpanQ8 / 256,
+        maximumCellSpanPixels: maximumCellSpanQ8 / 256,
+        frameEpoch,
+    })
 }
 
 export function demRenderPatchLookupCapacity(
@@ -343,6 +433,8 @@ export async function createDemRenderPatchFrontier(
         return value
     }
     let disposed = false
+    const encodedFrames = new WeakMap<SubmissionBuilder, GpuTileFrontierFrame>()
+    const capturedBuilders = new WeakSet<SubmissionBuilder>()
 
     try {
         const policy = own(await runtime.createBuffer({
@@ -364,7 +456,7 @@ export async function createDemRenderPatchFrontier(
                 terrainVertexCount: descriptor.terrainVertexCount,
                 renderPatchLookupCapacity,
                 terrainSectorSize: descriptor.terrainSectorSize,
-                refineErrorPixels: descriptor.refineErrorPixels,
+                maximumCellSpanPixels: descriptor.maximumCellSpanPixels,
                 reserved: 0,
             }),
         }))
@@ -442,6 +534,7 @@ export async function createDemRenderPatchFrontier(
             'resetRenderPatches',
             'DEM reset render patches',
             [
+                binding(0, 'mapMeta', 'uniform', descriptor.sourceTemplates[0].mapMeta.size),
                 binding(1, 'renderPatchPolicy', 'uniform', renderPatchPolicyCodec.byteLength()),
                 binding(5, 'renderPatchState', 'storage', STATE_BYTES),
                 binding(
@@ -499,6 +592,7 @@ export async function createDemRenderPatchFrontier(
         const bindSets: BindSet[] = []
         const commands = await Promise.all(parityResources.map(async resources => {
             const resetSet = own(await runtime.createBindSet(resetKernel.layout, {
+                mapMeta: resources.source.mapMeta.region(),
                 renderPatchPolicy: policy.region({ layout: renderPatchPolicyCodec.artifact }),
                 renderPatchState: resources.state.region(),
                 drawArguments: resources.drawArguments.region(),
@@ -530,7 +624,12 @@ export async function createDemRenderPatchFrontier(
                 bindSets: [ { set: resetSet } ],
                 count: { workgroups: [ 1, 1, 1 ] },
                 resources: currentAccess(
-                    [ policy, resources.state, resources.drawArguments ],
+                    [
+                        resources.source.mapMeta,
+                        policy,
+                        resources.state,
+                        resources.drawArguments,
+                    ],
                     [ resources.state, resources.drawArguments ]
                 ),
                 whenMissing: 'throw',
@@ -572,7 +671,16 @@ export async function createDemRenderPatchFrontier(
                 ),
                 whenMissing: 'throw',
             }))
-            return Object.freeze({ clearLookup, reset, expand, finalize })
+            const feedback = own(await runtime.createReadbackCommand({
+                label: `Read DEM render-patch feedback ${resources.parity}`,
+                source: {
+                    region: resources.state.region(),
+                    contentEpoch: 'current-at-step',
+                },
+                retain: 'consume-on-read',
+                whenMissing: 'throw',
+            }))
+            return Object.freeze({ clearLookup, reset, expand, finalize, feedback })
         })) as unknown as readonly [ParityCommands, ParityCommands]
         const programs = Object.freeze([
             resetKernel.program,
@@ -641,6 +749,7 @@ export async function createDemRenderPatchFrontier(
                     parity.reset,
                     parity.expand,
                     parity.finalize,
+                    parity.feedback,
                 ]),
             ]),
         })
@@ -666,11 +775,55 @@ export async function createDemRenderPatchFrontier(
                 }
                 const selected = commands[parity]
                 builder.clear(selected.clearLookup)
-                return builder.compute(pass, [
+                builder.compute(pass, [
                     selected.reset,
                     selected.expand,
                     selected.finalize,
                 ])
+                encodedFrames.set(builder, frame)
+                return builder
+            },
+            capture(builder: SubmissionBuilder, frame: GpuTileFrontierFrame) {
+                assertActive(disposed)
+                const parity = frame?.parity
+                const encoded = encodedFrames.get(builder)
+                if (builder.runtime !== runtime || builder.isSubmitted ||
+                    (parity !== 0 && parity !== 1) ||
+                    encoded !== frame || capturedBuilders.has(builder)) {
+                    throw new TypeError(
+                        'DEM render-patch capture requires one matching encoded frame'
+                    )
+                }
+                capturedBuilders.add(builder)
+                return builder.readback(commands[parity].feedback)
+            },
+            async feedback(frame: GpuTileFrontierFrame, submitted: SubmittedWork) {
+                assertActive(disposed)
+                const parity = frame?.parity
+                if ((parity !== 0 && parity !== 1) ||
+                    frame.frontierId !== descriptor.sourceTemplates[parity].frontierId ||
+                    submitted?.runtime !== runtime) {
+                    throw new TypeError(
+                        'DEM render-patch feedback requires an owned frame submission'
+                    )
+                }
+                const command = commands[parity].feedback
+                if (!submitted.readbacks.some(link => link.commandId === command.id)) {
+                    throw new TypeError(
+                        'DEM render-patch feedback submission does not contain its readback'
+                    )
+                }
+                const bytes = await command.result({ after: submitted }).toBytes()
+                const facts = decodeDemRenderPatchState(bytes, {
+                    maximumRenderPatches,
+                    expectedFrameEpoch: frame.frameEpoch,
+                })
+                return Object.freeze({
+                    kind: 'dem-render-patch-feedback' as const,
+                    frontierId: id,
+                    submissionId: submitted.id,
+                    ...facts,
+                })
             },
             renderTemplates(templateId: DrawTemplateId) {
                 assertActive(disposed)
@@ -692,14 +845,16 @@ export async function createDemRenderPatchFrontier(
             facts() {
                 return Object.freeze({
                     id,
-                    selectionPath: 'gpu-screen-space-error-render-patches' as const,
+                    selectionPath: 'gpu-projected-grid-spacing-render-patches' as const,
                     disposed,
                     dataMaximumMatrixLevel: descriptor.dataMaximumMatrixLevel,
                     maximumMatrixLevel: descriptor.renderMaximumMatrixLevel,
                     maximumExtraLevels: descriptor.maximumExtraLevels,
                     maximumSourceTiles: descriptor.maximumSourceTiles,
                     maximumRenderPatches,
-                    refineErrorPixels: descriptor.refineErrorPixels,
+                    maximumCellSpanPixels: descriptor.maximumCellSpanPixels,
+                    nominalPatchSpanPixels: descriptor.terrainSectorSize *
+                        descriptor.maximumCellSpanPixels,
                     terrainSectorSize: descriptor.terrainSectorSize,
                     renderPatchBytes,
                     renderPatchLookupCapacity,
@@ -718,6 +873,7 @@ export async function createDemRenderPatchFrontier(
                             commands[resources.parity].reset.id,
                             commands[resources.parity].expand.id,
                             commands[resources.parity].finalize.id,
+                            commands[resources.parity].feedback.id,
                         ]),
                     }))),
                 })
@@ -813,8 +969,8 @@ function validateOptions(
     const maximumExtraLevels = options.maximumExtraLevels ?? DEM_MAX_RENDER_EXTRA_LEVELS
     const terrainSectorSize = options.terrainSectorSize ??
         DEM_RENDER_PATCH_TERRAIN_SECTOR_SIZE
-    const refineErrorPixels = options.refineErrorPixels ??
-        DEM_RENDER_PATCH_REFINE_ERROR_PIXELS
+    const maximumCellSpanPixels = options.maximumCellSpanPixels ??
+        DEM_RENDER_PATCH_MAXIMUM_CELL_SPAN_PIXELS
     if (runtime === undefined || typeof runtime.createBuffer !== 'function') {
         throw new TypeError('DEM render-patch frontier requires GPURuntime')
     }
@@ -851,8 +1007,8 @@ function validateOptions(
         options.elevationRangeMeters[0] > options.elevationRangeMeters[1]) {
         throw new TypeError('DEM render-patch elevation range is invalid')
     }
-    if (!Number.isFinite(refineErrorPixels) || refineErrorPixels <= 0) {
-        throw new TypeError('DEM render-patch refine error must be positive and finite')
+    if (!Number.isFinite(maximumCellSpanPixels) || maximumCellSpanPixels <= 0) {
+        throw new TypeError('DEM render-patch maximum cell span must be positive and finite')
     }
     if (typeof options.shader !== 'string' || options.shader.trim() === '') {
         throw new TypeError('DEM render-patch shader source is required')
@@ -863,7 +1019,7 @@ function validateOptions(
         renderMaximumMatrixLevel,
         maximumExtraLevels,
         terrainSectorSize,
-        refineErrorPixels,
+        maximumCellSpanPixels,
     })
 }
 

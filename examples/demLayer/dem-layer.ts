@@ -38,12 +38,14 @@ import type {
 import {
     DEM_MAX_RENDER_EXTRA_LEVELS,
     DEM_MAX_RENDER_MATRIX_LEVEL,
-    DEM_RENDER_PATCH_REFINE_ERROR_PIXELS,
+    DEM_RENDER_PATCH_MAXIMUM_CELL_SPAN_PIXELS,
     DEM_RENDER_PATCH_TERRAIN_SECTOR_SIZE,
+    DemRenderPatchFeedbackStaleError,
     createDemRenderPatchFrontier,
     demRenderPatchWgslModule,
 } from './dem-render-patch-frontier.ts'
 import type {
+    DemRenderPatchFeedback,
     DemRenderPatchFrontier,
 } from './dem-render-patch-frontier.ts'
 
@@ -146,6 +148,7 @@ type DemState = {
     staleFeedbackCount: number
     supersededFeedbackCount: number
     latestFrontierFacts?: GpuTileFrontierFacts
+    latestRenderPatchFeedback?: DemRenderPatchFeedback
     latestFeedbackDiagnostics: readonly unknown[]
     terrainPresentation: DemTerrainPresentation
     stageActivity: {
@@ -183,6 +186,7 @@ type PendingFeedback = Readonly<{
 type ConsumedFeedback = Readonly<{
     decisionKey: string
     feedback?: VirtualRasterGpuFeedbackBatch
+    renderPatchFeedback?: DemRenderPatchFeedback
 }>
 
 export const DEM_STAGE_ORDER = Object.freeze([
@@ -239,7 +243,7 @@ export async function createDemLayer({
         elevationRangeMeters: terrainElevationRange(virtualRaster),
         terrainVertexCount: geometry.vertexCount,
         terrainSectorSize: TERRAIN_SECTOR_SIZE,
-        refineErrorPixels: DEM_RENDER_PATCH_REFINE_ERROR_PIXELS,
+        maximumCellSpanPixels: DEM_RENDER_PATCH_MAXIMUM_CELL_SPAN_PIXELS,
         shader: shaders.renderPatch,
     })
     const renderTemplates = createRenderTemplates(renderPatchFrontier)
@@ -382,6 +386,7 @@ export async function createDemLayer({
             builder.render(passes.terrain, [
                 commands.terrain[frameTerrainPresentation][frame.parity]!,
             ])
+            renderPatchFrontier.capture(builder, frame)
             feedbackRing.encode(builder, frame)
             submitted = builder.submit()
         } finally {
@@ -414,6 +419,9 @@ export async function createDemLayer({
             decisionKey,
         }))
         const consumed = await consumeReadyFeedback(graph, pendingFeedback, state)
+        if (consumed?.renderPatchFeedback !== undefined) {
+            state.latestRenderPatchFeedback = consumed.renderPatchFeedback
+        }
         const feedback = consumed?.decisionKey === decisionKey
             ? consumed.feedback
             : undefined
@@ -448,6 +456,7 @@ export async function createDemLayer({
             observation,
             provenance,
             feedback,
+            renderPatchFeedback: consumed?.renderPatchFeedback,
             reconciliation,
             residencySettlement: reconciliation?.settlement ?? Promise.resolve(undefined),
             requestedPageCount: reconciliation?.requestedCount ?? 0,
@@ -1012,15 +1021,31 @@ async function consumeReadyFeedback(
 
     if (pending.length < 2) return undefined
     const ready = pending.shift()!
-    try {
-        const feedback = await graph.feedbackRing.feedback(ready.frame, ready.submitted)
-        return Object.freeze({ decisionKey: ready.decisionKey, feedback })
-    } catch (error) {
-        const code = error instanceof GeoDiagnosticError ? error.diagnostic.code : undefined
-        if (code !== 'GEO_GPU_TILE_FEEDBACK_STALE') throw error
+    const [ frontierResult, renderPatchResult ] = await Promise.allSettled([
+        graph.feedbackRing.feedback(ready.frame, ready.submitted),
+        graph.renderPatchFrontier.feedback(ready.frame, ready.submitted),
+    ])
+    let feedback: VirtualRasterGpuFeedbackBatch | undefined
+    if (frontierResult.status === 'fulfilled') {
+        feedback = frontierResult.value
+    } else {
+        const code = frontierResult.reason instanceof GeoDiagnosticError
+            ? frontierResult.reason.diagnostic.code
+            : undefined
+        if (code !== 'GEO_GPU_TILE_FEEDBACK_STALE') throw frontierResult.reason
         state.staleFeedbackCount++
-        return Object.freeze({ decisionKey: ready.decisionKey })
     }
+    let renderPatchFeedback: DemRenderPatchFeedback | undefined
+    if (renderPatchResult.status === 'fulfilled') {
+        renderPatchFeedback = renderPatchResult.value
+    } else if (!(renderPatchResult.reason instanceof DemRenderPatchFeedbackStaleError)) {
+        throw renderPatchResult.reason
+    }
+    return Object.freeze({
+        decisionKey: ready.decisionKey,
+        feedback,
+        renderPatchFeedback,
+    })
 }
 
 function frontierDecisionKey(camera: DemCameraState, residencySnapshotEpoch: number): string {
@@ -1261,6 +1286,7 @@ function createState(
         staleFeedbackCount: 0,
         supersededFeedbackCount: 0,
         latestFrontierFacts: undefined,
+        latestRenderPatchFeedback: undefined,
         latestFeedbackDiagnostics: Object.freeze([]),
         terrainPresentation,
         stageActivity: {
@@ -1278,6 +1304,7 @@ function stateSnapshot(
 ) {
 
     const latest = state.latestFrontierFacts
+    const renderPatches = state.latestRenderPatchFeedback
     return Object.freeze({
         initialized: state.initialized,
         disposed: state.disposed,
@@ -1302,6 +1329,20 @@ function stateSnapshot(
             latest?.maximumSelectedMatrixLevel,
         ]),
         maximumObservedSse: latest?.maximumObservedSse ?? 0,
+        renderPatchCount: renderPatches?.selectedPatchCount ?? 0,
+        renderPatchLevelRange: Object.freeze([
+            renderPatches?.minimumMatrixLevel,
+            renderPatches?.maximumMatrixLevel,
+        ]),
+        renderPatchCellSpanRange: Object.freeze([
+            renderPatches?.minimumCellSpanPixels,
+            renderPatches?.maximumCellSpanPixels,
+        ]),
+        renderPatchDescriptorOverflowCount:
+            renderPatches?.descriptorOverflowCount ?? 0,
+        renderPatchLookupOverflowCount: renderPatches?.lookupOverflowCount ?? 0,
+        renderPatchFrameEpoch: renderPatches?.frameEpoch,
+        renderPatchFeedback: renderPatches,
         convergenceState: latest?.convergenceState ?? 'transitioning',
         frontierFacts: latest,
         latestFeedbackDiagnostics: state.latestFeedbackDiagnostics,

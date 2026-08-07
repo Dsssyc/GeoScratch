@@ -4,9 +4,9 @@ struct DemRenderPatchState {
     lookupOverflowCount: atomic<u32>,
     minimumMatrixLevel: atomic<u32>,
     maximumMatrixLevel: atomic<u32>,
-    reserved0: atomic<u32>,
-    reserved1: atomic<u32>,
-    reserved2: atomic<u32>,
+    minimumCellSpanQ8: atomic<u32>,
+    maximumCellSpanQ8: atomic<u32>,
+    frameEpoch: atomic<u32>,
 };
 
 struct DemRenderPatchAtomicLookupEntry {
@@ -177,27 +177,41 @@ fn patchVisible(bounds: DemRenderPatchBounds) -> bool {
     return true;
 }
 
-fn intervalDistance(minimum: f32, maximum: f32) -> f32 {
-    if (0.0f < minimum) { return minimum; }
-    if (0.0f > maximum) { return -maximum; }
-    return 0.0f;
-}
-
-fn distanceToAabb(bounds: DemRenderPatchBounds) -> f32 {
-    let delta = vec3f(
-        intervalDistance(bounds.minimum.x, bounds.maximum.x),
-        intervalDistance(bounds.minimum.y, bounds.maximum.y),
-        intervalDistance(bounds.minimum.z, bounds.maximum.z),
+fn patchBoundsCorner(bounds: DemRenderPatchBounds, index: u32) -> vec3f {
+    return vec3f(
+        select(bounds.minimum.x, bounds.maximum.x, (index & 1u) != 0u),
+        select(bounds.minimum.y, bounds.maximum.y, (index & 2u) != 0u),
+        select(bounds.minimum.z, bounds.maximum.z, (index & 4u) != 0u),
     );
-    return length(delta);
 }
 
-fn screenSpaceError(matrixLevel: u32, bounds: DemRenderPatchBounds) -> f32 {
-    let distance = max(distanceToAabb(bounds), 1e-6f);
-    let tileWidthMeters = ldexp(WEB_MERCATOR_WORLD_WIDTH_METERS, -i32(matrixLevel));
-    let geometricErrorMeters = tileWidthMeters / f32(renderPatchPolicy.terrainSectorSize);
-    let denominator = 2.0f * tan(mapMeta.verticalFovRadians * 0.5f) * distance;
-    return geometricErrorMeters * mapMeta.viewport.y / denominator;
+fn projectedCellSpanPixels(bounds: DemRenderPatchBounds) -> f32 {
+    var minimumNdc = vec2f(1e20f);
+    var maximumNdc = vec2f(-1e20f);
+    for (var index = 0u; index < 8u; index += 1u) {
+        let clip = mapMeta.clipFromRelativeWorld * vec4f(
+            patchBoundsCorner(bounds, index),
+            1.0f,
+        );
+        if (clip.w <= 1e-5f) {
+            return 65535.0f;
+        }
+        let ndc = clip.xy / clip.w;
+        minimumNdc = min(minimumNdc, ndc);
+        maximumNdc = max(maximumNdc, ndc);
+    }
+    let clippedMinimum = clamp(minimumNdc, vec2f(-1.0f), vec2f(1.0f));
+    let clippedMaximum = clamp(maximumNdc, vec2f(-1.0f), vec2f(1.0f));
+    let projectedSize = max(
+        (clippedMaximum - clippedMinimum) * mapMeta.viewport * 0.5f,
+        vec2f(0.0f),
+    );
+    return sqrt(projectedSize.x * projectedSize.y) /
+        f32(renderPatchPolicy.terrainSectorSize);
+}
+
+fn cellSpanQ8(cellSpanPixels: f32) -> u32 {
+    return u32(round(clamp(cellSpanPixels, 0.0f, 65535.0f) * 256.0f));
 }
 
 fn insertRenderPatchLookup(
@@ -231,6 +245,7 @@ fn emitRenderPatch(
     matrixLevel: u32,
     tileRow: u32,
     tileCol: u32,
+    cellSpanPixels: f32,
 ) {
     let outputIndex = atomicAdd(&renderPatchState.count, 1u);
     if (outputIndex >= renderPatchPolicy.maximumRenderPatches) {
@@ -252,6 +267,9 @@ fn emitRenderPatch(
     }
     atomicMin(&renderPatchState.minimumMatrixLevel, matrixLevel);
     atomicMax(&renderPatchState.maximumMatrixLevel, matrixLevel);
+    let quantizedCellSpan = cellSpanQ8(cellSpanPixels);
+    atomicMin(&renderPatchState.minimumCellSpanQ8, quantizedCellSpan);
+    atomicMax(&renderPatchState.maximumCellSpanQ8, quantizedCellSpan);
 }
 
 @compute @workgroup_size(1)
@@ -261,9 +279,9 @@ fn resetRenderPatches() {
     atomicStore(&renderPatchState.lookupOverflowCount, 0u);
     atomicStore(&renderPatchState.minimumMatrixLevel, 0xffffffffu);
     atomicStore(&renderPatchState.maximumMatrixLevel, 0u);
-    atomicStore(&renderPatchState.reserved0, 0u);
-    atomicStore(&renderPatchState.reserved1, 0u);
-    atomicStore(&renderPatchState.reserved2, 0u);
+    atomicStore(&renderPatchState.minimumCellSpanQ8, 0xffffffffu);
+    atomicStore(&renderPatchState.maximumCellSpanQ8, 0u);
+    atomicStore(&renderPatchState.frameEpoch, mapMeta.frameEpoch);
     drawArguments[0] = renderPatchPolicy.terrainVertexCount;
     drawArguments[1] = 0u;
     drawArguments[2] = 0u;
@@ -298,8 +316,9 @@ fn expandRenderPatches(@builtin(global_invocation_id) globalId: vec3u) {
         let bounds = patchBounds(matrixLevel, tileRow, tileCol);
         if (!patchVisible(bounds)) { return; }
 
+        let cellSpanPixels = projectedCellSpanPixels(bounds);
         let refine = depth < availableDepth &&
-            screenSpaceError(matrixLevel, bounds) > renderPatchPolicy.refineErrorPixels;
+            cellSpanPixels > renderPatchPolicy.maximumCellSpanPixels;
         if (refine) { continue; }
 
         let duplicateMask = (1u << remainingBits) - 1u;
@@ -307,7 +326,7 @@ fn expandRenderPatches(@builtin(global_invocation_id) globalId: vec3u) {
             (terminalCol & duplicateMask) != 0u) {
             return;
         }
-        emitRenderPatch(source, matrixLevel, tileRow, tileCol);
+        emitRenderPatch(source, matrixLevel, tileRow, tileCol, cellSpanPixels);
         return;
     }
 }

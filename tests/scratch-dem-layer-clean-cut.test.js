@@ -134,7 +134,7 @@ async function createTestVirtualRaster(runtime) {
 
 describe('DEM Layer clean cut', () => {
 
-    it('separates the bounded data frontier from distance-adaptive render patches', () => {
+    it('separates the bounded data frontier from projected-grid render patches', () => {
 
         const layerSource = read('examples', 'demLayer', 'dem-layer.ts')
         const renderPatchSource = read(
@@ -152,21 +152,33 @@ describe('DEM Layer clean cut', () => {
 
         expect(layerSource).to.include('createDemRenderPatchFrontier(')
         expect(layerSource).to.include('renderPatchFrontier.encode(builder, frame)')
+        expect(layerSource).to.include('renderPatchFrontier.capture(builder, frame)')
         expect(layerSource).to.include("'render-patch-compute'")
         expect(renderPatchSource).to.include('DEM_MAX_RENDER_MATRIX_LEVEL = 14')
         expect(renderPatchSource).to.include('DEM_MAX_RENDER_EXTRA_LEVELS = 4')
         expect(renderPatchSource).to.include('dataMaximumMatrixLevel')
         expect(renderPatchSource).to.include('renderMaximumMatrixLevel')
-        expect(renderPatchSource).to.include('refineErrorPixels')
+        expect(renderPatchSource).to.include('maximumCellSpanPixels')
+        expect(renderPatchSource).to.include('DEM_RENDER_PATCH_MAXIMUM_CELL_SPAN_PIXELS = 8')
+        expect(renderPatchSource).to.include('DEM_RENDER_PATCH_NOMINAL_SPAN_PIXELS')
+        expect(renderPatchSource).to.include('decodeDemRenderPatchState')
+        expect(renderPatchSource).to.include('createReadbackCommand')
         expect(renderPatchSource).to.include('renderPatchLookupCapacity')
         expect(renderPatchShader).to.include('source.samplingLevel')
-        expect(renderPatchShader).to.include('screenSpaceError')
-        expect(renderPatchShader).to.include('distanceToAabb')
+        expect(renderPatchShader).to.include('projectedCellSpanPixels')
+        expect(renderPatchShader).to.include('clipFromRelativeWorld')
+        expect(renderPatchShader).to.include('minimumCellSpanQ8')
+        expect(renderPatchShader).to.include('frameEpoch')
+        expect(renderPatchShader).not.to.include('screenSpaceError')
+        expect(renderPatchShader).not.to.include('distanceToAabb')
+        expect(renderPatchShader).not.to.include('geometricErrorMeters')
         expect(renderPatchShader).to.include('insertRenderPatchLookup')
         expect(renderPatchShader).not.to.include('targetMatrixLevel')
         expect(renderPatchShader).not.to.include('mapMeta.zoomHint')
         expect(renderPatchShader).to.include('atomicAdd(&renderPatchState.count')
         expect(renderPatchShader).to.include('drawArguments[1] = renderPatchCount')
+        expect(layerSource).to.include('latestRenderPatchFeedback')
+        expect(layerSource).to.include('renderPatchCellSpanRange')
         expect(terrainShader).to.include('fn renderPatchLookup(')
         expect(terrainShader).to.include('fn neighboringPatch(')
         expect(terrainShader).to.include('fn snapEdgeCoordinate(')
@@ -632,7 +644,7 @@ describe('DEM Layer clean cut', () => {
             programs: 5,
             pipelines: 5,
             passes: 2,
-            commands: 18,
+            commands: 20,
         })
         expect(graph.persistentFacts()).to.deep.equal(initialPersistentFacts)
 
@@ -667,19 +679,21 @@ describe('DEM Layer clean cut', () => {
             renderMaximumMatrixLevel: 14,
         })
         expect(graph.contractFacts().renderPatches).to.deep.include({
-            selectionPath: 'gpu-screen-space-error-render-patches',
+            selectionPath: 'gpu-projected-grid-spacing-render-patches',
             maximumExtraLevels: 4,
             maximumMatrixLevel: 14,
             dataMaximumMatrixLevel: 10,
-            refineErrorPixels: 2,
+            maximumCellSpanPixels: 8,
+            nominalPatchSpanPixels: 512,
             terrainSectorSize: 64,
         })
         expect(graph.contractFacts().renderPatches.renderPatchLookupCapacity)
             .to.be.greaterThan(graph.contractFacts().renderPatches.maximumRenderPatches)
-        expect(fake.calls.maps).to.have.length(2)
-        expect(fake.calls.maps.every(mapping => (
+        expect(fake.calls.maps).to.have.length(4)
+        expect(fake.calls.maps.filter(mapping => (
             mapping.size === graph.contractFacts().frontier.feedbackOutput.layout.byteLength
-        ))).to.equal(true)
+        ))).to.have.length(2)
+        expect(fake.calls.maps.filter(mapping => mapping.size === 32)).to.have.length(2)
 
         graph.dispose()
         expect(() => graph.setTerrainPresentation('tile-wireframe'))

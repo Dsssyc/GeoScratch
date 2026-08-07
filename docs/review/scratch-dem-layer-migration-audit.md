@@ -2,15 +2,16 @@
 
 ## Current Architecture Supersession
 
-As of 2026-08-07, ADR-064 supersedes ADR-063's integer-zoom render selection while
-retaining its separation of the `z4..z10` data-page frontier from the `z4..z14`
-terrain render-patch frontier. The data frontier remains the only residency, request,
-cache, and fallback authority. An example-owned compute stage independently stops each
-bounded descendant path when its camera-distance screen-space error reaches two pixels,
-then writes one terrain indirect argument and a global logical-patch lookup. Terrain
+As of 2026-08-07, ADR-065 corrects ADR-064's render metric while retaining ADR-063's
+separation of the `z4..z10` data-page frontier from the `z4..z14` terrain render-patch
+frontier. The data frontier remains the only residency, request, cache, and fallback
+authority. An example-owned compute stage projects each bounded descendant AABB and
+stops when the 64-cell mesh reaches an eight-pixel geometric-mean cell span, then
+writes one terrain indirect argument and a global logical-patch lookup. Terrain
 stitching resolves selected neighbors from `(matrixLevel, tileRow, tileCol)` rather
 than a finite source-domain LoD texture. See
-[ADR-064](../decisions/ADR-064-dem-screen-space-render-patch-lod.md).
+[ADR-065](../decisions/ADR-065-dem-projected-grid-spacing-lod.md). ADR-064's earlier
+two-pixel horizontal-spacing metric is historical and is not the current implementation.
 
 As of 2026-08-06, ADR-061 replaced the CPU selector and CPU-authored indirect-count
 path described in the historical source-parity matrix below. The current DEM owns no
@@ -25,17 +26,19 @@ frontier audit.
 
 The 2026-08-07 real Chrome/WebGPU gate holds the camera at pitch 70 and bearing 90.
 The converged data frontier remains within levels 9..10 while the wireframe shows
-distance-adaptive render patches spanning the same view. Chrome reports zero uncaptured
-GPU errors, device losses, diagnostic incidents, console failures, or page errors.
+21 perspective-aware render patches across levels 10..11 with projected cell spans
+2.30..7.38 pixels. Chrome reports zero descriptor or lookup overflow, uncaptured GPU
+errors, device losses, diagnostic incidents, console failures, or page errors.
 
-The current example graph publishes 71 stable identities: 21 resources, four uploads,
-six BindLayouts, 10 BindSets, five Programs, five pipelines, two passes, and 18
+The current example graph publishes 73 stable identities: 21 resources, four uploads,
+six BindLayouts, 10 BindSets, five Programs, five pipelines, two passes, and 20
 commands. The frame sequence is now:
 
 1. data frontier compute;
-2. render-patch lookup clear, SSE selection/culling, and indirect finalization compute;
+2. render-patch lookup clear, projected-grid selection/culling, and indirect
+   finalization compute;
 3. terrain indirect draw from the selected render patches;
-4. bounded data-frontier feedback.
+4. bounded data-frontier and render-patch diagnostic feedback.
 
 ## Audit Status
 

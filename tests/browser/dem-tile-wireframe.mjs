@@ -194,6 +194,7 @@ async function waitForStableMode(
             try { return JSON.parse(value ?? 'null') } catch { return null }
         }
         const frontier = parse(facts.frontier)
+        const renderPatches = parse(facts.renderPatchFeedback)
         const virtualRaster = parse(facts.virtualRaster)
         const cameraView = parse(facts.cameraView)
         const cameraMatches = cameraView !== null &&
@@ -217,6 +218,9 @@ async function waitForStableMode(
             frontier?.convergenceState === 'converged' &&
             frontier?.demandCount === 0 &&
             frontier?.staleGenerationCount === 0 &&
+            renderPatches?.selectedPatchCount > 0 &&
+            renderPatches?.descriptorOverflowCount === 0 &&
+            renderPatches?.lookupOverflowCount === 0 &&
             facts.uncapturedErrors === '0' &&
             facts.deviceLosses === '0' &&
             cameraMatches && virtualRasterIdle
@@ -239,6 +243,7 @@ async function readFacts(page) {
         const checkbox = document.querySelector('[data-dem-control="tile-wireframe"] input')
         const graphContract = parse(canvas.dataset.graphContract)
         const frontier = parse(canvas.dataset.frontier)
+        const renderPatchFeedback = parse(canvas.dataset.renderPatchFeedback)
         return {
             terrainPresentation: canvas.dataset.terrainPresentation,
             frames: Number(canvas.dataset.frames),
@@ -264,6 +269,17 @@ async function readFacts(page) {
             },
             cameraView: parse(canvas.dataset.cameraView),
             dataLevelRange: parse(canvas.dataset.levelRange),
+            renderPatchCount: Number(canvas.dataset.renderPatchCount),
+            renderPatchLevelRange: parse(canvas.dataset.renderPatchLevelRange),
+            renderPatchCellSpanRange: parse(canvas.dataset.renderPatchCellSpanRange),
+            renderPatchDescriptorOverflowCount: Number(
+                canvas.dataset.renderPatchDescriptorOverflowCount
+            ),
+            renderPatchLookupOverflowCount: Number(
+                canvas.dataset.renderPatchLookupOverflowCount
+            ),
+            renderPatchFrameEpoch: Number(canvas.dataset.renderPatchFrameEpoch),
+            renderPatchFeedback,
             tileWireframeChecked: checkbox instanceof HTMLInputElement
                 ? checkbox.checked
                 : undefined,
@@ -398,7 +414,7 @@ function validateProof(value, processState) {
         JSON.stringify(wireframe.identityFacts) === JSON.stringify(restored.identityFacts) &&
         baseline.identityFacts?.programs === 5 &&
         baseline.identityFacts?.pipelines === 5 &&
-        baseline.identityFacts?.commands === 18,
+        baseline.identityFacts?.commands === 20,
     'live presentation switching rebuilt or replaced the persistent DEM graph')
 
     expect(failures,
@@ -412,6 +428,7 @@ function validateProof(value, processState) {
         baseline?.graphContract?.commandIds?.drawTerrain?.shaded?.length === 2 &&
         baseline.graphContract.commandIds.drawTerrain.tileWireframe?.length === 2 &&
         baseline.graphContract.commandIds.renderPatches?.length === 2 &&
+        baseline.graphContract.commandIds.renderPatches.every(ids => ids.length === 5) &&
         baseline.graphContract.dataMaximumMatrixLevel === 10 &&
         baseline.graphContract.renderMaximumMatrixLevel === 14 &&
         baseline.graphContract.renderPatches?.maximumExtraLevels === 4,
@@ -426,8 +443,9 @@ function validateProof(value, processState) {
     const requestedDataLevels = value.events?.tileRequestLevels ?? []
     expect(failures,
         baseline.graphContract?.renderPatches?.selectionPath ===
-            'gpu-screen-space-error-render-patches' &&
-        baseline.graphContract.renderPatches.refineErrorPixels === 2 &&
+            'gpu-projected-grid-spacing-render-patches' &&
+        baseline.graphContract.renderPatches.maximumCellSpanPixels === 8 &&
+        baseline.graphContract.renderPatches.nominalPatchSpanPixels === 512 &&
         baseline.graphContract.renderPatches.renderPatchLookupCapacity >
             baseline.graphContract.renderPatches.maximumRenderPatches &&
         refinementDataLevels.every(level => Number.isInteger(level) && level <= 10) &&
@@ -438,6 +456,46 @@ function validateProof(value, processState) {
         refinementDataLevels,
         refinementHashes,
         requestedDataLevels,
+    })}`)
+
+    const patchSamples = [ baseline, wireframe, ...(refinement ?? []), restored ]
+    expect(failures,
+        patchSamples.every(sample => (
+            Number.isSafeInteger(sample?.renderPatchCount) &&
+            sample.renderPatchCount > 0 &&
+            sample.renderPatchCount <=
+                baseline.graphContract.renderPatches.maximumRenderPatches &&
+            sample.renderPatchFeedback?.selectedPatchCount === sample.renderPatchCount &&
+            sample.renderPatchDescriptorOverflowCount === 0 &&
+            sample.renderPatchLookupOverflowCount === 0 &&
+            sample.renderPatchFeedback?.frameEpoch === sample.renderPatchFrameEpoch &&
+            Array.isArray(sample.renderPatchLevelRange) &&
+            sample.renderPatchLevelRange[0] >= 4 &&
+            sample.renderPatchLevelRange[1] <= 14 &&
+            Array.isArray(sample.renderPatchCellSpanRange) &&
+            sample.renderPatchCellSpanRange[0] >= 0 &&
+            sample.renderPatchCellSpanRange[1] <= 65_535
+        )),
+    `render-patch feedback was missing, stale, or overflowed: ${JSON.stringify(
+        patchSamples.map(sample => ({
+            count: sample?.renderPatchCount,
+            levels: sample?.renderPatchLevelRange,
+            cellSpans: sample?.renderPatchCellSpanRange,
+            descriptorOverflow: sample?.renderPatchDescriptorOverflowCount,
+            lookupOverflow: sample?.renderPatchLookupOverflowCount,
+            frameEpoch: sample?.renderPatchFrameEpoch,
+        }))
+    )}`)
+
+    expect(failures,
+        wireframe?.renderPatchCount <= 64 &&
+        wireframe.renderPatchLevelRange?.[0] >= 9 &&
+        wireframe.renderPatchLevelRange?.[1] <= 11 &&
+        wireframe.renderPatchCellSpanRange?.[1] <= 8,
+    `zoom-10 pitched geometry remained over-dense: ${JSON.stringify({
+        count: wireframe?.renderPatchCount,
+        levels: wireframe?.renderPatchLevelRange,
+        cellSpans: wireframe?.renderPatchCellSpanRange,
     })}`)
 
     const pixels = wireframe?.capture?.pixels

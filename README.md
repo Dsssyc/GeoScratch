@@ -84,7 +84,7 @@ Scratch Cache, transfers pages into a finite atlas, and samples them logically i
 the vertex shader with cross-page filtering and parent fallback. The source PNG is
 only an offline COG build input; the browser has no full-image or legacy-tile
 fallback. Raster residency remains capped by source detail while a separate GPU
-screen-space-error frontier selects distance-adaptive terrain patches and resolves
+projected-grid frontier selects perspective-aware terrain patches and resolves
 mesh-stitching neighbors through global logical tile identity.
 
 ## Scratch Persistent Cache

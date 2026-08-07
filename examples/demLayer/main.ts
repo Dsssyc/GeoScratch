@@ -476,6 +476,21 @@ function publishFrameFacts({
     canvas.dataset.budgetLimitedCount = String(state.budgetLimitedCount)
     canvas.dataset.levelRange = JSON.stringify(state.levelRange)
     canvas.dataset.maximumObservedSse = String(state.maximumObservedSse)
+    canvas.dataset.renderPatchCount = String(state.renderPatchCount)
+    canvas.dataset.renderPatchLevelRange = JSON.stringify(state.renderPatchLevelRange)
+    canvas.dataset.renderPatchCellSpanRange = JSON.stringify(
+        state.renderPatchCellSpanRange
+    )
+    canvas.dataset.renderPatchDescriptorOverflowCount = String(
+        state.renderPatchDescriptorOverflowCount
+    )
+    canvas.dataset.renderPatchLookupOverflowCount = String(
+        state.renderPatchLookupOverflowCount
+    )
+    canvas.dataset.renderPatchFrameEpoch = String(state.renderPatchFrameEpoch ?? '')
+    canvas.dataset.renderPatchFeedback = JSON.stringify(
+        state.renderPatchFeedback ?? null
+    )
     canvas.dataset.convergenceState = state.convergenceState
     canvas.dataset.readbackInFlightCount = String(state.readbackInFlightCount)
     canvas.dataset.staleFeedbackCount = String(state.staleFeedbackCount)
