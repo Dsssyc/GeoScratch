@@ -11,11 +11,19 @@ Disk caching is disabled by default:
 http://localhost:5173/demLayer/?cache=none
 ```
 
-## Cache panel
+## DEM controls
 
-The `DEM Cache` panel in the upper-right corner configures the example without
-requiring hand-written query parameters. It exposes all supported application
-settings:
+The `DEM Layer` panel in the upper-right corner contains live rendering controls
+and cache configuration.
+
+The `Rendering` folder exposes `Tile wireframe`. It switches immediately to the
+already-created diagnostic pipeline: each logical `(level, row, column)` tile
+receives a stable pseudo-random color and only the post-stitch triangle edges are
+drawn. The setting is stored independently at
+`geoscratch.examples.demLayer.rendering.v1` in `localStorage`; it does not reload
+the page, alter cache query parameters, or rebuild the virtual raster.
+
+The `Cache` folder exposes all supported application cache settings:
 
 - `Cache policy`: `Disabled`, `Session`, `Durable`, or `Clear on open`;
 - `Namespace`, `Maximum MiB`, `Maximum entries`, and `Persistence` under

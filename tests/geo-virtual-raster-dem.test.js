@@ -28,7 +28,7 @@ import {
     resolveDemCachePanelConfig,
     serializeDemCachePanelConfig,
 } from '../examples/demLayer/dem-cache-panel-state.ts'
-import { prepareDemCachePanel } from '../examples/demLayer/dem-cache-panel.ts'
+import { prepareDemControlPanel } from '../examples/demLayer/dem-control-panel.ts'
 import {
     DEM_RENDERING_PREFERENCE_STORAGE_KEY,
     resolveDemRenderingPreference,
@@ -226,7 +226,7 @@ describe('DEM WebMercator virtual raster', () => {
             const available = fakeStorage({
                 [DEM_CACHE_PANEL_STORAGE_KEY]: stored,
             })
-            const restored = prepareDemCachePanel({
+            const restored = prepareDemControlPanel({
                 parameters: new URLSearchParams('proof=1'),
                 storage: available.storage,
             })
@@ -237,7 +237,7 @@ describe('DEM WebMercator virtual raster', () => {
             expect(restored.parameters.get('cacheLifecycle')).to.equal('session')
 
             available.storage.setItem(DEM_CACHE_PANEL_STORAGE_KEY, '{')
-            const damaged = prepareDemCachePanel({
+            const damaged = prepareDemControlPanel({
                 parameters: new URLSearchParams(),
                 storage: available.storage,
             })
@@ -245,7 +245,7 @@ describe('DEM WebMercator virtual raster', () => {
             expect(damaged.storageStatus).to.equal('invalid')
             expect(available.storage.getItem(DEM_CACHE_PANEL_STORAGE_KEY)).to.equal(null)
 
-            const unavailable = prepareDemCachePanel({
+            const unavailable = prepareDemControlPanel({
                 parameters: new URLSearchParams('cache=none'),
                 storage: {
                     getItem: () => null,

@@ -1,4 +1,4 @@
-#DemCachePanel {
+#DemControlPanel {
     --tp-base-background-color: hsla(216, 18%, 12%, 0.96);
     --tp-base-shadow-color: hsla(220, 30%, 2%, 0.42);
     --tp-button-background-color: hsl(180, 32%, 29%);
@@ -28,26 +28,26 @@
     pointer-events: auto;
 }
 
-#DemCachePanel:empty {
+#DemControlPanel:empty {
     display: none;
 }
 
-#DemCachePanel [data-dem-cache-control="status"] input,
-#DemCachePanel [data-dem-cache-control="preference"] input {
+#DemControlPanel [data-dem-control="status"] input,
+#DemControlPanel [data-dem-control="preference"] input {
     font-size: 10px;
 }
 
-#DemCachePanel [data-dem-cache-control="apply"] button {
+#DemControlPanel [data-dem-control="apply"] button {
     font-weight: 650;
 }
 
-#DemCachePanel [data-dem-cache-control="reset"] button {
+#DemControlPanel [data-dem-control="reset"] button {
     border: 1px solid hsla(210, 12%, 68%, 0.22);
     background: transparent;
 }
 
 @media (max-width: 640px) {
-    #DemCachePanel {
+    #DemControlPanel {
         top: 8px;
         right: 8px;
         width: min(304px, calc(100vw - 16px));

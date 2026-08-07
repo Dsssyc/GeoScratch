@@ -18,7 +18,7 @@ import {
     createDemVirtualRasterRuntime,
     fetchDemVirtualRasterManifest,
 } from './dem-virtual-raster.ts'
-import { prepareDemCachePanel } from './dem-cache-panel.ts'
+import { prepareDemControlPanel } from './dem-control-panel.ts'
 import { readDemCachePolicy } from './dem-cache-policy.ts'
 import type { DemCachePolicy } from './dem-tile-protocol.ts'
 import lodMapShader from './shaders/lod-map.wgsl?raw'
@@ -68,7 +68,7 @@ declare global {
 }
 
 const canvas = document.getElementById('GPUFrame') as HTMLCanvasElement
-const cachePanelContainer = document.getElementById('DemCachePanel') as HTMLElement
+const controlPanelContainer = document.getElementById('DemControlPanel') as HTMLElement
 const FAILURE_RUNTIME_EVIDENCE_MAX_BYTES = 512 * 1024
 const FAILURE_CAPTURE_BOUNDS = Object.freeze({
     maxOperations: 1,
@@ -81,10 +81,10 @@ const FAILURE_SCENARIOS = Object.freeze([
     'after-map-acquisition',
     'invalid-terrain-shader-wgsl',
 ])
-const preparedCachePanel = prepareDemCachePanel({
+const preparedControlPanel = prepareDemControlPanel({
     parameters: new URLSearchParams(window.location.search),
 })
-const parameters = preparedCachePanel.parameters
+const parameters = preparedControlPanel.parameters
 const proofMode = parameters.get('proof') === '1'
 const tileServerUrl = parameters.get('tileServer') ?? 'http://127.0.0.1:8787'
 const cachePolicy = readDemCachePolicy(parameters)
@@ -101,10 +101,16 @@ const failureConfiguration = Object.freeze({
         : undefined,
 })
 const pageLifetime = createDemLifecycle()
-const cachePanel = preparedCachePanel.mount({
-    container: cachePanelContainer,
+let tileWireframeEnabled = preparedControlPanel.renderingPreference.tileWireframe
+let applyTerrainPresentation: ((enabled: boolean) => void) | undefined
+const controlPanel = preparedControlPanel.mount({
+    container: controlPanelContainer,
     location: window.location,
     compact: window.matchMedia('(max-width: 640px)').matches,
+    onTileWireframeChange(enabled) {
+        tileWireframeEnabled = enabled
+        applyTerrainPresentation?.(enabled)
+    },
 })
 const failureProof = createFailureProofController(failureConfiguration)
 let pageSettlement: PageSettlement | undefined
@@ -114,7 +120,7 @@ const handlePageHide = () => {
 }
 
 window.addEventListener('pagehide', handlePageHide, { once: true })
-pageLifetime.deferStop({ label: 'dem-cache-panel', run: cachePanel.dispose })
+pageLifetime.deferStop({ label: 'dem-control-panel', run: controlPanel.dispose })
 pageLifetime.deferStop({
     label: 'pagehide-listener',
     run: () => window.removeEventListener('pagehide', handlePageHide),
@@ -194,6 +200,7 @@ async function main(lifetime: DemLifecycle, proof: FailureProofController) {
         virtualRaster,
         size: initialSize,
         shaders: { lodMap: lodMapShader, terrain: terrainShader },
+        terrainPresentation: tileWireframeEnabled ? 'tile-wireframe' : 'shaded',
         failureProof: proof,
     })
     lifetime.deferRelease({ label: 'dem-gpu-frontier', run: graph.dispose })
@@ -237,6 +244,16 @@ async function main(lifetime: DemLifecycle, proof: FailureProofController) {
         animationFrame = requestAnimationFrame(render)
         frameWorkScheduled++
     }
+
+    applyTerrainPresentation = enabled => {
+        graph.setTerrainPresentation(enabled ? 'tile-wireframe' : 'shaded')
+        requestRender()
+    }
+    graph.setTerrainPresentation(tileWireframeEnabled ? 'tile-wireframe' : 'shaded')
+    lifetime.deferStop({
+        label: 'dem-terrain-presentation-control',
+        run: () => { applyTerrainPresentation = undefined },
+    })
 
     const handleMapRender = () => {
         convergenceFollowUps = 0
@@ -404,8 +421,9 @@ function publishGraphFacts(runtime: GPURuntime, graph: DemLayer) {
     canvas.dataset.cachePersistenceRequested = cachePolicy.mode === 'persistent'
         ? String(cachePolicy.requestPersistence)
         : 'false'
-    canvas.dataset.cachePanelSource = preparedCachePanel.source
-    canvas.dataset.cachePanelStorageStatus = preparedCachePanel.storageStatus
+    canvas.dataset.cachePanelSource = preparedControlPanel.source
+    canvas.dataset.cachePanelStorageStatus = preparedControlPanel.storageStatus
+    canvas.dataset.renderingStorageStatus = preparedControlPanel.renderingStorageStatus
     canvas.dataset.maxPhysicalPages = String(maxPhysicalPages)
 }
 
@@ -467,6 +485,7 @@ function publishFrameFacts({
     canvas.dataset.frontier = JSON.stringify(state.frontierFacts ?? null)
     canvas.dataset.frontierDiagnostics = JSON.stringify(state.latestFeedbackDiagnostics)
     canvas.dataset.frontierConverged = String(state.convergenceState === 'converged')
+    canvas.dataset.terrainPresentation = state.terrainPresentation
     canvas.dataset.cameraView = JSON.stringify(latestCamera === undefined ? null : {
         center: latestCamera.center,
         zoom: latestCamera.zoomHint,

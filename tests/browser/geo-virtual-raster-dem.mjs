@@ -531,7 +531,7 @@ async function capture(page, name) {
     const path = resolve(outputDirectory, `${name}.png`)
     const png = await page.locator('#GPUFrame').screenshot({
         path,
-        style: '#DemCachePanel { visibility: hidden !important; }',
+        style: '#DemControlPanel { visibility: hidden !important; }',
     })
     return {
         path,

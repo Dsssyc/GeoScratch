@@ -19,6 +19,7 @@ const outputDirectory = resolve(
     process.env.DEM_CACHE_PANEL_OUTPUT ?? '/tmp/geoscratch-dem-cache-panel'
 )
 const storageKey = 'geoscratch.examples.dem.cache-panel.v1'
+const renderingStorageKey = 'geoscratch.examples.demLayer.rendering.v1'
 const namespace = `geoscratch-dem-panel-proof-${Date.now()}`
 const vitePort = await findAvailablePort()
 let tilePort = await findAvailablePort()
@@ -119,27 +120,40 @@ async function runDesktopProof(activeBrowser) {
         const initialLayout = await inspectLayout(page)
         const initialCapture = await capture(page, 'desktop-default')
 
-        await page.locator('[data-dem-cache-control="policy"] select')
+        await page.locator('[data-dem-control="tile-wireframe"] .tp-ckbv_w').click()
+        await page.locator('#GPUFrame[data-terrain-presentation="tile-wireframe"]')
+            .waitFor({ timeout })
+        const wireframe = await readState(page)
+
+        await page.reload({ waitUntil: 'domcontentloaded', timeout })
+        await waitForReady(page)
+        const wireframeRestored = await readState(page)
+        await page.locator('[data-dem-control="tile-wireframe"] .tp-ckbv_w').click()
+        await page.locator('#GPUFrame[data-terrain-presentation="shaded"]')
+            .waitFor({ timeout })
+        const shadedRestored = await readState(page)
+
+        await page.locator('[data-dem-control="policy"] select')
             .selectOption({ label: 'Durable' })
-        await page.locator('#DemCachePanel[data-cache-dirty="true"]').waitFor({ timeout })
-        await page.locator('[data-dem-cache-control="advanced"] > button').click()
+        await page.locator('#DemControlPanel[data-cache-dirty="true"]').waitFor({ timeout })
+        await page.locator('[data-dem-control="advanced"] > button').click()
         await replaceInput(page, 'namespace', namespace)
         await replaceInput(page, 'max-mib', '256')
         await replaceInput(page, 'max-entries', '4096')
-        await page.locator('[data-dem-cache-control="persistence"] select')
+        await page.locator('[data-dem-control="persistence"] select')
             .selectOption({ label: 'Request' })
-        await page.locator('#DemCachePanel[data-cache-valid="true"][data-cache-dirty="true"]')
+        await page.locator('#DemControlPanel[data-cache-valid="true"][data-cache-dirty="true"]')
             .waitFor({ timeout })
         const draft = await readState(page)
         const expandedLayout = await inspectLayout(page)
 
         await Promise.all([
             page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout }),
-            page.locator('[data-dem-cache-control="apply"] button').click(),
+            page.locator('[data-dem-control="apply"] button').click(),
         ])
         await waitForReady(page)
         const applied = await readState(page)
-        await page.locator('[data-dem-cache-control="advanced"] > button').click()
+        await page.locator('[data-dem-control="advanced"] > button').click()
         const appliedCapture = await capture(page, 'desktop-applied')
 
         await page.goto(demUrl(), { waitUntil: 'domcontentloaded', timeout })
@@ -152,12 +166,15 @@ async function runDesktopProof(activeBrowser) {
 
         await Promise.all([
             page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout }),
-            page.locator('[data-dem-cache-control="reset"] button').click(),
+            page.locator('[data-dem-control="reset"] button').click(),
         ])
         await waitForReady(page)
         const reset = await readState(page)
         return {
             initial,
+            wireframe,
+            wireframeRestored,
+            shadedRestored,
             draft,
             applied,
             restored,
@@ -240,7 +257,7 @@ function demUrl(cacheQuery = '') {
 
 async function waitForReady(page) {
 
-    await page.locator('#DemCachePanel[data-cache-valid="true"]').waitFor({ timeout })
+    await page.locator('#DemControlPanel[data-cache-valid="true"]').waitFor({ timeout })
     await page.locator('#GPUFrame[data-status="ready"]').waitFor({ timeout })
     await page.waitForFunction(() => {
         const canvas = document.querySelector('#GPUFrame')
@@ -250,42 +267,49 @@ async function waitForReady(page) {
 
 async function replaceInput(page, control, value) {
 
-    const input = page.locator(`[data-dem-cache-control="${control}"] input`)
+    const input = page.locator(`[data-dem-control="${control}"] input`)
     await input.fill(value)
     await input.blur()
 }
 
 async function readState(page, options = {}) {
 
-    return await page.evaluate(({ key, includeStorage }) => {
-        const panel = document.querySelector('#DemCachePanel')
+    return await page.evaluate(({ cacheKey, renderingKey, includeStorage }) => {
+        const panel = document.querySelector('#DemControlPanel')
         const canvas = document.querySelector('#GPUFrame')
         const value = selector => document.querySelector(selector)?.value
         const disabled = selector => document.querySelector(selector)?.disabled
         return {
             url: window.location.href,
-            storage: includeStorage ? window.localStorage.getItem(key) : undefined,
+            storage: includeStorage ? window.localStorage.getItem(cacheKey) : undefined,
+            renderingStorage: includeStorage
+                ? window.localStorage.getItem(renderingKey)
+                : undefined,
             panel: panel === null ? undefined : { ...panel.dataset },
+            panelText: panel?.textContent,
             controls: {
-                policy: value('[data-dem-cache-control="policy"] select'),
-                state: value('[data-dem-cache-control="status"] input'),
-                preference: value('[data-dem-cache-control="preference"] input'),
-                namespace: value('[data-dem-cache-control="namespace"] input'),
-                maxMiB: value('[data-dem-cache-control="max-mib"] input'),
-                maxEntries: value('[data-dem-cache-control="max-entries"] input'),
-                persistence: value('[data-dem-cache-control="persistence"] select'),
+                tileWireframe: document.querySelector(
+                    '[data-dem-control="tile-wireframe"] input'
+                )?.checked,
+                policy: value('[data-dem-control="policy"] select'),
+                state: value('[data-dem-control="status"] input'),
+                preference: value('[data-dem-control="preference"] input'),
+                namespace: value('[data-dem-control="namespace"] input'),
+                maxMiB: value('[data-dem-control="max-mib"] input'),
+                maxEntries: value('[data-dem-control="max-entries"] input'),
+                persistence: value('[data-dem-control="persistence"] select'),
                 advancedDisabled: [
-                    disabled('[data-dem-cache-control="namespace"] input'),
-                    disabled('[data-dem-cache-control="max-mib"] input'),
-                    disabled('[data-dem-cache-control="max-entries"] input'),
-                    disabled('[data-dem-cache-control="persistence"] select'),
+                    disabled('[data-dem-control="namespace"] input'),
+                    disabled('[data-dem-control="max-mib"] input'),
+                    disabled('[data-dem-control="max-entries"] input'),
+                    disabled('[data-dem-control="persistence"] select'),
                 ],
-                applyDisabled: disabled('[data-dem-cache-control="apply"] button'),
+                applyDisabled: disabled('[data-dem-control="apply"] button'),
                 applyTabIndex: document.querySelector(
-                    '[data-dem-cache-control="apply"] button'
+                    '[data-dem-control="apply"] button'
                 )?.tabIndex,
                 resetTabIndex: document.querySelector(
-                    '[data-dem-cache-control="reset"] button'
+                    '[data-dem-control="reset"] button'
                 )?.tabIndex,
             },
             runtime: canvas === null ? undefined : {
@@ -298,18 +322,25 @@ async function readState(page, options = {}) {
                 cachePersistenceRequested: canvas.dataset.cachePersistenceRequested,
                 cachePanelSource: canvas.dataset.cachePanelSource,
                 cachePanelStorageStatus: canvas.dataset.cachePanelStorageStatus,
+                terrainPresentation: canvas.dataset.terrainPresentation,
+                stableIdentityHash: canvas.dataset.currentStableIdentityHash,
+                persistentFacts: JSON.parse(canvas.dataset.persistentFacts ?? 'null'),
                 uncapturedErrors: canvas.dataset.uncapturedErrors,
                 deviceLosses: canvas.dataset.deviceLosses,
                 diagnosticIncidents: canvas.dataset.diagnosticIncidents,
             },
         }
-    }, { key: storageKey, includeStorage: options.includeStorage ?? true })
+    }, {
+        cacheKey: storageKey,
+        renderingKey: renderingStorageKey,
+        includeStorage: options.includeStorage ?? true,
+    })
 }
 
 async function inspectLayout(page) {
 
     return await page.evaluate(() => {
-        const panel = document.querySelector('#DemCachePanel')
+        const panel = document.querySelector('#DemControlPanel')
         if (panel === null) return undefined
         const bounds = panel.getBoundingClientRect()
         const visibleControls = [ ...panel.querySelectorAll('button, input, select') ]
@@ -328,7 +359,7 @@ async function inspectLayout(page) {
                     rect.left < -1 || rect.right > window.innerWidth + 1 ||
                     rect.top < -1 || rect.bottom > window.innerHeight + 1
             })
-            .map(element => element.closest('[data-dem-cache-control]')?.dataset.demCacheControl ??
+            .map(element => element.closest('[data-dem-control]')?.dataset.demControl ??
                 element.tagName.toLowerCase())
         return {
             viewport: { width: window.innerWidth, height: window.innerHeight },
@@ -369,12 +400,41 @@ function validateProof(value, processState) {
     expect(failures, desktop?.initial?.panel?.cachePolicy === 'disabled' &&
         desktop.initial.panel.cacheSource === 'default' &&
         desktop.initial.panel.cacheStorageStatus === 'missing' &&
+        desktop.initial.panel.renderingStorageStatus === 'missing' &&
+        desktop.initial.panel.wireframeEnabled === 'false' &&
         desktop.initial.panel.cacheDirty === 'false' &&
+        desktop.initial.panelText?.includes('DEM Layer') &&
+        desktop.initial.panelText?.includes('Rendering') &&
+        desktop.initial.panelText?.includes('Cache') &&
+        desktop.initial.controls.tileWireframe === false &&
         desktop.initial.controls.policy === 'Disabled' &&
         desktop.initial.controls.advancedDisabled.every(Boolean) &&
         desktop.initial.runtime.cacheMode === 'none' &&
-        desktop.initial.runtime.cacheLifecycle === 'none',
+        desktop.initial.runtime.cacheLifecycle === 'none' &&
+        desktop.initial.runtime.terrainPresentation === 'shaded',
     'bare URL did not start from the disabled default')
+
+    const wireframePreference = parseJson(desktop?.wireframe?.renderingStorage)
+    expect(failures, desktop?.wireframe?.url === desktop.initial.url &&
+        desktop.wireframe.panel.wireframeEnabled === 'true' &&
+        desktop.wireframe.panel.renderingStorageStatus === 'valid' &&
+        desktop.wireframe.controls.tileWireframe === true &&
+        desktop.wireframe.runtime.terrainPresentation === 'tile-wireframe' &&
+        desktop.wireframe.runtime.stableIdentityHash ===
+            desktop.initial.runtime.stableIdentityHash &&
+        desktop.wireframe.runtime.persistentFacts?.pipelines ===
+            desktop.initial.runtime.persistentFacts?.pipelines &&
+        wireframePreference?.version === 1 &&
+        wireframePreference.tileWireframe === true,
+    'tile wireframe did not switch live without navigation or graph rebuild')
+
+    expect(failures, desktop?.wireframeRestored?.controls?.tileWireframe === true &&
+        desktop.wireframeRestored.panel.renderingStorageStatus === 'valid' &&
+        desktop.wireframeRestored.runtime.terrainPresentation === 'tile-wireframe' &&
+        desktop.shadedRestored.controls.tileWireframe === false &&
+        desktop.shadedRestored.runtime.terrainPresentation === 'shaded' &&
+        parseJson(desktop.shadedRestored.renderingStorage)?.tileWireframe === false,
+    'tile wireframe preference did not restore and switch back independently')
 
     expect(failures, desktop?.draft?.panel?.cachePolicy === 'durable' &&
         desktop.draft.panel.cacheDirty === 'true' &&
@@ -441,6 +501,9 @@ function validateProof(value, processState) {
 
     for (const [ name, state ] of Object.entries({
         initial: desktop?.initial,
+        wireframe: desktop?.wireframe,
+        wireframeRestored: desktop?.wireframeRestored,
+        shadedRestored: desktop?.shadedRestored,
         draft: desktop?.draft,
         applied: desktop?.applied,
         restored: desktop?.restored,
@@ -465,6 +528,7 @@ function validateProof(value, processState) {
         mobile.state.runtime.cacheMode === 'none',
     'mobile panel did not preserve default cache semantics')
     expect(failures, unavailableStorage?.state?.panel?.cacheStorageStatus === 'unavailable' &&
+        unavailableStorage.state.panel.renderingStorageStatus === 'unavailable' &&
         unavailableStorage.state.controls.preference === 'Local preference unavailable' &&
         unavailableStorage.state.runtime.cacheMode === 'persistent' &&
         unavailableStorage.state.runtime.cacheLifecycle === 'session' &&
