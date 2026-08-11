@@ -3,7 +3,8 @@
 ## Status
 
 Accepted; extends ADR-065 with a global frame budget. Amended after the rapid-camera
-transition regression described below.
+transition regression and the local refinement pulse described below. ADR-068 adds a
+correctness-owned balance pass after this ADR's budget-selected cut.
 
 ## Date
 
@@ -48,6 +49,12 @@ maximum-elevation horizontal planes. The larger projected footprint wins. The
 vertical span of a conservative terrain AABB therefore cannot masquerade as
 horizontal patch coverage when the camera is pitched.
 
+The footprint polygon is clipped against WebGPU's homogeneous near plane
+(`clip.z >= 0`) before perspective division. Edges crossing that plane contribute
+their intersection points. A corner behind the eye is not converted into an
+arbitrary maximum footprint: that discontinuity previously made the measured span
+jump from about 8 pixels to the `65535` diagnostic ceiling over a narrow zoom range.
+
 ### Select a complete cut from measured GPU counts
 
 The fixed four-level candidate tree is evaluated at 17 quarter-level bias steps:
@@ -78,10 +85,32 @@ previous choice is retained only when its current count is within 75% through 10
 of the budget and it is no more than one quarter-step coarser than the newly desired
 cut.
 
+### Keep each local refinement decision temporally stable
+
+Global budget hysteresis cannot stabilize a single distant patch whose projected
+footprint briefly crosses the local threshold. The two existing parity lookup
+buffers therefore also form a GPU-resident history: each frame reads the opposite
+parity's final balanced cut while writing its own.
+
+For a nominal threshold `T`, a patch that was terminal in the previous cut remains
+terminal until its footprint exceeds:
+
+```text
+T * 2^(1 / 4)
+```
+
+A previously refined patch remains refined until its parent footprint falls to
+`T`. This one-quarter-level band separates the refine and coarsen boundaries without
+delaying a newly visible patch or requiring descendant scans. Trial counting and
+final emission use the same history-aware threshold, so the budget still describes
+the cut that is actually emitted. Both lookup buffers are explicitly cleared during
+frontier initialization to make the first frame valid under Scratch's resource
+readiness model.
+
 The persistent compute order is:
 
 ```text
-reset -> count 17 trials -> select -> emit -> finalize indirect draw
+reset -> count 17 trials -> select -> emit -> balance -> validate -> finalize indirect draw
 ```
 
 The CPU uploads camera metadata but neither traverses the patch tree nor reads a
@@ -105,11 +134,16 @@ source-page floor.
   CPU estimate with directly measured GPU candidate cuts.
 - Local projected quality, global working-set control, and raster residency remain
   separate authorities.
+- The visual-density budget applies to the emitted complete cut. ADR-068 reports
+  level-difference-one balance splits as explicit correctness overhead rather than
+  truncating them into holes.
 - The frame graph adds persistent count and selection kernels but no per-frame GPU
   objects, host-authored instance list, or control readback.
-- Diagnostics expose baseline and frame budgets, requested and selected counts,
+- Local temporal stability reuses the existing parity lookup allocations; it adds
+  no CPU traversal, GPU readback, persistent buffer, or per-frame command.
+- Diagnostics expose baseline and frame budgets, requested, unbalanced, and final counts,
   minimum-trial and source-root counts, selected bias, level range, and both
-  overflow counters.
+  overflow counters, plus balance splits and maximum adjacent level delta.
 - Coarsening below every available complete cut would require a separate render-root
   authority capable of merging source pages while preserving virtual-raster sampling;
   this ADR does not hide that as an achieved property.
@@ -131,6 +165,13 @@ Their pitch-adjusted budgets were 18, 25, and 27 respectively. A 390 by 844,
 
 The wireframe gate confirms distinct stable tile colors, post-stitch triangle
 edges, mixed geometry levels at `z14`, and complete viewport coverage.
+
+The pitched-motion gate fixes the source frontier and samples `z10.02`, `z10.04`,
+and `z10.06`. Before this amendment the render cut pulsed from 18 `z10` patches to
+19 `z10/z11` patches and immediately back to 18 `z10` patches. The same gate also
+samples `z13.66`, `z13.70`, and `z13.84`; no projected span may reach the former
+`65535` near-plane sentinel. Both checks run in Chrome WebGPU with zero pending
+demands, overflow counters, console errors, diagnostic incidents, or device loss.
 
 The amended rapid-camera gate executes 84 continuous center, zoom, pitch, and
 bearing changes, including a pitched-to-top-down return. It remains `ready` with

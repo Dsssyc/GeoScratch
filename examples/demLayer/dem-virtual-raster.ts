@@ -4,21 +4,26 @@ import type {
 } from 'geoscratch/scratch'
 import {
     GeoDiagnosticError,
-    TileMatrixCoverage,
+    ViewDemandProducer,
     VirtualRasterRequestScheduler,
     VirtualRasterResidency,
     WebMercatorQuad,
     createGeoDiagnostic,
     createVirtualRasterGpuState,
+    geoField,
     tileMatrixCoverage,
+    tiledFieldRepresentation,
     virtualRasterDemandSet,
+    virtualRasterDemandSetFromViewDemands,
     virtualRasterPlane,
     virtualRasterTileAddressSpace,
+    webMercatorPlanarTileSpatialProfile,
     webMercatorQuadAddressCodec,
 } from 'geoscratch/geo'
 import type {
     GpuTileFrontierDemand,
     GpuTileFrontierRetirement,
+    GeoViewSnapshot,
     VirtualRasterGpuState,
     VirtualRasterGpuFeedbackBatch,
     VirtualRasterGpuUpdate,
@@ -38,7 +43,7 @@ import type { DemCachePolicy } from './dem-tile-protocol.ts'
 
 type NumberSequence = ArrayLike<number> & Iterable<number>
 
-export type DemTileMatrixLimit = Readonly<{
+type DemTileMatrixLimit = Readonly<{
     matrixId: string
     minTileRow: number
     maxTileRow: number
@@ -46,7 +51,7 @@ export type DemTileMatrixLimit = Readonly<{
     maxTileCol: number
 }>
 
-export type DemVirtualRasterManifest = Readonly<{
+type DemVirtualRasterManifest = Readonly<{
     schemaVersion: 2
     sourceHash: string
     contentVersion: string
@@ -100,19 +105,9 @@ export type DemVirtualRasterManifest = Readonly<{
     }>
 }>
 
-export type DemVirtualRasterModel = ReturnType<typeof createDemVirtualRasterModel>
+type DemVirtualRasterModel = ReturnType<typeof createDemVirtualRasterModel>
 
-export type DemStitchInput = Readonly<{
-    x: number
-    y: number
-    ownLevel: number
-    leftLevel: number
-    rightLevel: number
-    bottomLevel: number
-    topLevel: number
-}>
-
-export type DemVirtualRasterRuntimeOptions = Readonly<{
+type DemVirtualRasterRuntimeOptions = Readonly<{
     runtime: GPURuntime
     manifest: DemVirtualRasterManifest
     tileServerUrl: string
@@ -126,21 +121,22 @@ export type DemVirtualRasterRuntimeOptions = Readonly<{
     maxHistory?: number
 }>
 
-export type DemVirtualRasterPublication = Readonly<{
+type DemVirtualRasterPublication = Readonly<{
     snapshotEpoch: number
     changed: boolean
     update: VirtualRasterGpuUpdate
     publication: VirtualRasterPublication
 }>
 
-export type DemVirtualRasterDemandAdapterOptions = Readonly<{
+type DemVirtualRasterDemandAdapterOptions = Readonly<{
     model: DemVirtualRasterModel
     residency: VirtualRasterResidency
     scheduler: VirtualRasterRequestScheduler
+    viewDemandProducer: ViewDemandProducer
     maxPhysicalPages: number
 }>
 
-export type DemVirtualRasterFeedbackReconciliation = Readonly<{
+type DemVirtualRasterFeedbackReconciliation = Readonly<{
     generation: number
     requestedCount: number
     retainedCount: number
@@ -154,7 +150,7 @@ export type DemVirtualRasterFeedbackReconciliation = Readonly<{
     }>>
 }>
 
-export type DemVirtualRasterDemandAdapterFacts = Readonly<{
+type DemVirtualRasterDemandAdapterFacts = Readonly<{
     disposed: boolean
     generation: number
     lastDecisionFrameEpoch: number
@@ -165,12 +161,10 @@ export type DemVirtualRasterDemandAdapterFacts = Readonly<{
 }>
 
 export const DEM_WEB_MERCATOR_COORDINATE_BITS = 40
-export const DEM_DEFAULT_PHYSICAL_PAGES = 18
-export const DEM_DEFAULT_HISTORY = 64
-export const DEM_DEFAULT_MAX_REQUESTS = 24
+const DEM_DEFAULT_PHYSICAL_PAGES = 18
+const DEM_DEFAULT_HISTORY = 64
+const DEM_DEFAULT_MAX_REQUESTS = 24
 
-const DEM_FINEST_HEIGHT_GEOMETRY_LEVEL = 12
-const DEM_MAX_HEIGHT_LEVEL = 3
 const DEM_TILE_SIZE = 256
 const DEM_CACHE_SCHEMA_VERSION = 2
 
@@ -252,6 +246,7 @@ export function createDemVirtualRasterModel(manifest: DemVirtualRasterManifest) 
         coverage,
         coordinateBits: DEM_WEB_MERCATOR_COORDINATE_BITS,
     })
+    const spatialProfile = webMercatorPlanarTileSpatialProfile({ addressCodec })
     const plane = virtualRasterPlane({
         id: `dem-height.${parsed.contentVersion}`,
         addressSpace,
@@ -263,6 +258,23 @@ export function createDemVirtualRasterModel(manifest: DemVirtualRasterManifest) 
         scale: parsed.scale,
         offset: parsed.offset,
         auxiliaryAxes: [ { name: 'tile-matrix', value: 'explicit-WebMercatorQuad' } ],
+    })
+    const field = geoField({
+        id: `dem-height.${parsed.contentVersion}`,
+        domain: addressCodec.positionCodec.domain,
+        kind: 'scalar',
+        channels: 1,
+        sampleType: 'unorm8',
+        unit: 'm',
+        ...(parsed.nodata === null ? {} : { noData: parsed.nodata }),
+        interpolation: 'linear',
+    })
+    const representation = tiledFieldRepresentation({
+        id: `dem-height.WebMercatorQuad.${parsed.contentVersion}`,
+        field,
+        plane,
+        spatialProfile,
+        sourceRevision: parsed.contentVersion,
     })
     const safetyLimit = coverage.limit(parsed.tileMatrixSet.minTileMatrix)!
     const safetyCoverPages: VirtualRasterPageIdentity[] = []
@@ -280,8 +292,10 @@ export function createDemVirtualRasterModel(manifest: DemVirtualRasterManifest) 
         coverage,
         addressSpace,
         addressCodec,
+        spatialProfile,
+        field,
+        representation,
         plane,
-        rootPage: addressSpace.rootPage(),
         safetyCoverPages: Object.freeze(safetyCoverPages),
     })
 }
@@ -297,6 +311,7 @@ export function createDemVirtualRasterDemandAdapter({
     model,
     residency,
     scheduler,
+    viewDemandProducer,
     maxPhysicalPages,
 }: DemVirtualRasterDemandAdapterOptions) {
 
@@ -304,7 +319,9 @@ export function createDemVirtualRasterDemandAdapter({
         scheduler.residency !== residency || !positiveInteger(maxPhysicalPages) ||
         maxPhysicalPages > residency.maxPhysicalPages ||
         model.safetyCoverPages.length > maxPhysicalPages ||
-        model.safetyCoverPages.length > scheduler.maxRequests) {
+        model.safetyCoverPages.length > scheduler.maxRequests ||
+        viewDemandProducer?.kind !== 'view-demand-producer' ||
+        viewDemandProducer.maxDemands > scheduler.maxRequests) {
         throwDemGpuFeedbackInvalid(
             model,
             'DEM GPU demand requires one matching scheduler/residency owner and budgets that contain the complete safety cover.',
@@ -312,6 +329,7 @@ export function createDemVirtualRasterDemandAdapter({
                 maxPhysicalPages,
                 residencyMaxPhysicalPages: residency.maxPhysicalPages,
                 schedulerMaxRequests: scheduler.maxRequests,
+                viewDemandMaximum: viewDemandProducer?.maxDemands,
                 safetyCoverPageCount: model.safetyCoverPages.length,
             }
         )
@@ -351,7 +369,8 @@ export function createDemVirtualRasterDemandAdapter({
     }
 
     function reconcileFeedback(
-        feedback: VirtualRasterGpuFeedbackBatch
+        feedback: VirtualRasterGpuFeedbackBatch,
+        view: GeoViewSnapshot
     ): DemVirtualRasterFeedbackReconciliation {
 
         assertActive()
@@ -363,6 +382,22 @@ export function createDemVirtualRasterDemandAdapter({
             ringId,
             frontierId
         )
+        if (view?.kind !== 'geo-view-snapshot' ||
+            view.frameEpoch !== feedback.frameEpoch ||
+            view.residencySnapshotEpoch !== feedback.residencySnapshotEpoch) {
+            return throwDemGpuFeedbackInvalid(
+                model,
+                'DEM GPU feedback must be lowered against the exact Geo view that produced it.',
+                {
+                    feedbackFrameEpoch: feedback.frameEpoch,
+                    feedbackResidencySnapshotEpoch: feedback.residencySnapshotEpoch,
+                    viewKind: view?.kind,
+                    viewId: view?.id,
+                    viewFrameEpoch: view?.frameEpoch,
+                    viewResidencySnapshotEpoch: view?.residencySnapshotEpoch,
+                }
+            )
+        }
         ringId ??= feedback.ringId
         frontierId ??= feedback.frontierId
         lastDecisionFrameEpoch = feedback.frameEpoch
@@ -397,11 +432,20 @@ export function createDemVirtualRasterDemandAdapter({
             transitions.delete(retirement.page.key)
         }
         const demandGeneration = ++generation
-        const requested = canonical.demands.map(demand => gpuPageDemand(
-            demand,
-            demandGeneration,
-            feedback.frameEpoch
-        ))
+        const viewDemands = viewDemandProducer.produce({
+            view,
+            generation: demandGeneration,
+            demands: canonical.demands.map(demand => Object.freeze({
+                page: demand.page,
+                priority: Object.freeze({
+                    class: 'user-visible' as const,
+                    score: demand.priority,
+                }),
+                intent: 'refinement' as const,
+                reason: `gpu-frontier:${feedback.frameEpoch}`,
+            })),
+        })
+        const requested = virtualRasterDemandSetFromViewDemands(viewDemands).demands
         activeDemandKeys = new Set([
             ...safetyKeys,
             ...requested.map(demand => demand.page.key),
@@ -627,10 +671,15 @@ export async function createDemVirtualRasterRuntime({
         maxRequests,
         maxHistory,
     })
+    const viewDemandProducer = new ViewDemandProducer({
+        id: `dem-view-demand.${model.addressSpace.id}`,
+        maxDemands: maxRequests,
+    })
     const demandAdapter = createDemVirtualRasterDemandAdapter({
         model,
         residency,
         scheduler,
+        viewDemandProducer,
         maxPhysicalPages,
     })
     let demandStopped = false
@@ -727,6 +776,7 @@ export async function createDemVirtualRasterRuntime({
         residency,
         gpu: gpuState,
         scheduler,
+        viewDemandProducer,
         residencyLease: demandAdapter.lease,
         executor: requestExecutor,
         initialize,
@@ -754,65 +804,6 @@ export async function createDemVirtualRasterRuntime({
             gpu: gpuState.facts(),
         }),
     })
-}
-
-export function demHeightSamplingLevel(geometryLevel: number): number {
-
-    if (!nonNegativeInteger(geometryLevel)) {
-        throw new TypeError('DEM geometry level must be a non-negative integer')
-    }
-    return clamp(
-        DEM_FINEST_HEIGHT_GEOMETRY_LEVEL - geometryLevel,
-        0,
-        DEM_MAX_HEIGHT_LEVEL
-    )
-}
-
-export function resolveDemStitchedGrid(input: DemStitchInput) {
-
-    for (const name of [ 'x', 'y', 'ownLevel', 'leftLevel', 'rightLevel', 'bottomLevel', 'topLevel' ] as const) {
-        if (!nonNegativeInteger(input[name])) {
-            throw new TypeError(`DEM stitch ${name} must be a non-negative integer`)
-        }
-    }
-    if (input.x > 64 || input.y > 64) {
-        throw new RangeError('DEM stitch grid coordinate must be inside the 64-sector mesh')
-    }
-    let x = input.x
-    let y = input.y
-    let heightSamplingLevel = demHeightSamplingLevel(input.ownLevel)
-    if (x === 0) {
-        heightSamplingLevel = Math.max(heightSamplingLevel, demHeightSamplingLevel(input.leftLevel))
-        if (input.leftLevel < input.ownLevel && y % 2 === 1) y++
-    }
-    if (x === 64) {
-        heightSamplingLevel = Math.max(heightSamplingLevel, demHeightSamplingLevel(input.rightLevel))
-        if (input.rightLevel < input.ownLevel && y % 2 === 1) y++
-    }
-    if (y === 0) {
-        heightSamplingLevel = Math.max(heightSamplingLevel, demHeightSamplingLevel(input.bottomLevel))
-        if (input.bottomLevel < input.ownLevel && x % 2 === 1) x++
-    }
-    if (y === 64) {
-        heightSamplingLevel = Math.max(heightSamplingLevel, demHeightSamplingLevel(input.topLevel))
-        if (input.topLevel < input.ownLevel && x % 2 === 1) x++
-    }
-    return Object.freeze({ x, y, heightSamplingLevel })
-}
-
-export function canonicalDemCoordinateQuanta(
-    codec: WebMercatorQuadAddressCodec,
-    bounds: NumberSequence,
-    grid: Readonly<{ x: number; y: number }>
-): readonly [bigint, bigint] {
-
-    assertCanonicalGrid(bounds, grid)
-    const minimum = canonicalEndpointQuanta(codec, [ bounds[0], bounds[1] ])
-    const maximum = canonicalEndpointQuanta(codec, [ bounds[2], bounds[3] ])
-    return Object.freeze([
-        interpolateBigInt(minimum[0], maximum[0], grid.x, 64),
-        interpolateBigInt(minimum[1], maximum[1], grid.y, 64),
-    ])
 }
 
 export function demVirtualRasterWgslModule(model: DemVirtualRasterModel): string {
@@ -1098,22 +1089,6 @@ function safetyDemand(
     )
 }
 
-function gpuPageDemand(
-    demand: GpuTileFrontierDemand,
-    generation: number,
-    frameEpoch: number
-): VirtualRasterPageDemand {
-
-    return pageDemand(
-        demand.page,
-        generation,
-        'user-visible',
-        demand.priority,
-        `gpu-frontier:${frameEpoch}`,
-        'required'
-    )
-}
-
 function canonicalDemGpuFeedback(
     model: DemVirtualRasterModel,
     feedback: VirtualRasterGpuFeedbackBatch,
@@ -1259,26 +1234,6 @@ function coveredTexel(
     return edge === 'minimum'
         ? Math.ceil(pixelCoordinate - 0.5)
         : Math.floor(pixelCoordinate - 0.5)
-}
-
-function assertCanonicalGrid(
-    bounds: NumberSequence,
-    grid: Readonly<{ x: number; y: number }>
-): void {
-
-    if (!isFiniteTuple(bounds, 4) || !nonNegativeInteger(grid.x) ||
-        !nonNegativeInteger(grid.y) || grid.x > 64 || grid.y > 64) {
-        throw new TypeError('DEM canonical grid input is invalid')
-    }
-    assertOrderedBounds(bounds, 'DEM canonical bounds')
-}
-
-function interpolateBigInt(minimum: bigint, maximum: bigint, index: number, count: number): bigint {
-
-    const delta = maximum - minimum
-    const quotient = delta / BigInt(count)
-    const remainder = delta - quotient * BigInt(count)
-    return minimum + quotient * BigInt(index) + remainder * BigInt(index) / BigInt(count)
 }
 
 function assertOrderedBounds(value: NumberSequence, name: string): void {

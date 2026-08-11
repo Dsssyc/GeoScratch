@@ -6,13 +6,18 @@ import {
     VirtualRasterSnapshot,
     VirtualRasterResidency,
     WebMercatorQuad,
+    createGeoViewSnapshot,
     createVirtualRasterGpuState,
     gpuTileFrontierPolicy,
     gpuTileFrontierRenderWgslModule,
     ownedVirtualRasterPagePayload,
+    planarTileSpatialProfile,
+    regularQuadTileTopology,
     tileMatrixCoverage,
+    tileMatrixSet,
     virtualRasterPlane,
     virtualRasterTileAddressSpace,
+    webMercatorPlanarTileSpatialProfile,
     webMercatorQuadAddressCodec,
 } from 'geoscratch/geo'
 import {
@@ -99,6 +104,7 @@ function createFixture(options = {}) {
         coverage,
     })
     const addressCodec = webMercatorQuadAddressCodec({ coverage })
+    const spatialProfile = webMercatorPlanarTileSpatialProfile({ addressCodec })
     const policy = gpuTileFrontierPolicy({
         refineErrorPixels: 2,
         coarsenErrorPixels: 1,
@@ -132,13 +138,14 @@ function createFixture(options = {}) {
     }
     const descriptor = {
         gpuState: { addressSpace, maxPhysicalPages: 128 },
-        addressCodec,
+        spatialProfile,
         policy,
         levelMetrics,
         roots,
         drawTemplates: [ { id: 'terrain', vertexCount: 6 } ],
     }
-    const view = {
+    const view = createGeoViewSnapshot({
+        id: 'frontier-fixture-view',
         clipFromRelativeWorld: [
             1 / HALF_WORLD, 0, 0, 0,
             0, 1 / HALF_WORLD, 0, 0,
@@ -154,7 +161,7 @@ function createFixture(options = {}) {
         zoomHint: 2,
         frameEpoch: 10,
         residencySnapshotEpoch: SNAPSHOT_EPOCH,
-    }
+    })
 
     function page(matrixLevel, tileRow, tileCol) {
 
@@ -380,6 +387,161 @@ async function expectGpuFrontierDiagnostic(action, expectedCode) {
 }
 
 describe('Geo GPU tile frontier contracts and reference oracle', () => {
+
+    it('refines and compacts both roots of a 2 x 1 planar root forest', () => {
+
+        const matrixSet = tileMatrixSet({
+            id: 'frontier-two-root-planar',
+            crs: 'test:planar',
+            orderedAxes: [ 'x', 'y' ],
+            boundingBox: {
+                crs: 'test:planar',
+                lowerCorner: [ -180, -90 ],
+                upperCorner: [ 180, 90 ],
+            },
+            tileMatrices: [
+                {
+                    id: 'root', scaleDenominator: 1, cellSize: 180 / 256,
+                    pointOfOrigin: [ -180, 90 ], cornerOfOrigin: 'topLeft',
+                    tileWidth: 256, tileHeight: 256, matrixWidth: 2, matrixHeight: 1,
+                },
+                {
+                    id: 'child', scaleDenominator: 0.5, cellSize: 90 / 256,
+                    pointOfOrigin: [ -180, 90 ], cornerOfOrigin: 'topLeft',
+                    tileWidth: 256, tileHeight: 256, matrixWidth: 4, matrixHeight: 2,
+                },
+            ],
+        })
+        const coverage = tileMatrixCoverage({
+            tileMatrixSet: matrixSet,
+            limits: [
+                { matrixId: 'root', minTileRow: 0, maxTileRow: 0, minTileCol: 0, maxTileCol: 1 },
+                { matrixId: 'child', minTileRow: 0, maxTileRow: 1, minTileCol: 0, maxTileCol: 3 },
+            ],
+        })
+        const addressSpace = virtualRasterTileAddressSpace({ id: 'two-root-frontier', coverage })
+        const spatialProfile = planarTileSpatialProfile({
+            id: 'two-root-planar',
+            topology: regularQuadTileTopology({ id: 'two-root', tileMatrixSet: matrixSet }),
+            coverage,
+        })
+        const roots = [
+            addressSpace.pageFromTile({ matrixId: 'root', tileRow: 0, tileCol: 0 }),
+            addressSpace.pageFromTile({ matrixId: 'root', tileRow: 0, tileCol: 1 }),
+        ]
+        const descriptor = {
+            gpuState: { addressSpace, maxPhysicalPages: 16 },
+            spatialProfile,
+            policy: gpuTileFrontierPolicy({
+                refineErrorPixels: 2,
+                coarsenErrorPixels: 1,
+                minimumMatrixLevel: 0,
+                maximumMatrixLevel: 1,
+                maximumActiveTiles: 16,
+                maximumDemands: 16,
+                transitionReservePages: 8,
+                invisibleGraceFrames: 1,
+            }),
+            levelMetrics: [
+                {
+                    matrixLevel: 0,
+                    minimumElevationMeters: 0,
+                    maximumElevationMeters: 100,
+                    geometricErrorMeters: 1_000,
+                },
+                {
+                    matrixLevel: 1,
+                    minimumElevationMeters: 0,
+                    maximumElevationMeters: 100,
+                    geometricErrorMeters: 0,
+                },
+            ],
+            roots,
+            drawTemplates: [ { id: 'terrain', vertexCount: 6 } ],
+        }
+        const children = roots.flatMap(root => spatialProfile.coveredChildren(root.tile)
+            .map(tile => addressSpace.pageFromTile(tile)))
+        const residentPages = [ ...roots, ...children ].map((page, index) => ({
+            page,
+            compactIndex: coverage.index(page.tile),
+            physicalSlot: index,
+            generation: 1,
+            contentEpoch: 1,
+            residencySnapshotEpoch: 1,
+        }))
+        const currentFrontier = residentPages.slice(0, roots.length).map(resident => ({
+            ...resident,
+            previousLodState: 'retain',
+            lastVisibleFrame: 0,
+            lastDemandFrame: 0,
+            childDemandMask: 0,
+        })).reverse()
+        const refined = evaluateGpuTileFrontierReference({
+            descriptor,
+            view: createGeoViewSnapshot({
+                id: 'two-root-frontier-view',
+                clipFromRelativeWorld: [
+                    1 / 180, 0, 0, 0,
+                    0, 1 / 90, 0, 0,
+                    0, 0, 0, 0,
+                    0, 0, 0.5, 1,
+                ],
+                cameraHigh: [ 0, 0, 1000 ],
+                cameraLow: [ 0, 0, 0 ],
+                viewport: [ 1024, 512 ],
+                verticalFovRadians: Math.PI / 2,
+                cameraLatitudeRadians: 0,
+                cameraPitchRadians: 0,
+                zoomHint: 0,
+                frameEpoch: 1,
+                residencySnapshotEpoch: 1,
+            }),
+            currentFrontier,
+            residentPages,
+        })
+
+        expect(keys(refined.nextFrontier)).to.deep.equal(children.map(child => child.key))
+        expect(keys(refined.visible)).to.deep.equal(children.map(child => child.key))
+        expect(refined.facts).to.deep.include({
+            activeFrontierCount: 8,
+            visibleInstanceCount: 8,
+            refineCandidateCount: 2,
+            convergenceState: 'transitioning',
+        })
+
+        const compacted = evaluateGpuTileFrontierReference({
+            descriptor,
+            view: createGeoViewSnapshot({
+                id: 'two-root-frontier-far-view',
+                clipFromRelativeWorld: [
+                    1 / 180, 0, 0, 0,
+                    0, 1 / 90, 0, 0,
+                    0, 0, 0, 0,
+                    0, 0, 0.5, 1,
+                ],
+                cameraHigh: [ 0, 0, 1_000_000_000 ],
+                cameraLow: [ 0, 0, 0 ],
+                viewport: [ 1024, 512 ],
+                verticalFovRadians: Math.PI / 2,
+                cameraLatitudeRadians: 0,
+                cameraPitchRadians: 0,
+                zoomHint: 0,
+                frameEpoch: 2,
+                residencySnapshotEpoch: 1,
+            }),
+            currentFrontier: refined.nextFrontier,
+            residentPages,
+        })
+
+        expect(keys(compacted.nextFrontier)).to.deep.equal(roots.map(root => root.key))
+        expect(keys(compacted.visible)).to.deep.equal(roots.map(root => root.key))
+        expect(compacted.facts).to.deep.include({
+            activeFrontierCount: 2,
+            visibleInstanceCount: 2,
+            coarsenCandidateCount: 2,
+            convergenceState: 'transitioning',
+        })
+    })
 
     it('locks the validated descriptor against own and prototype shadowing', async() => {
 
@@ -656,7 +818,7 @@ describe('Geo GPU tile frontier contracts and reference oracle', () => {
         const fixture = await createGpuResourceGraphFixture()
         const descriptor = {
             gpuState: fixture.gpuState,
-            addressCodec: fixture.descriptor.addressCodec,
+            spatialProfile: fixture.descriptor.spatialProfile,
             policy: { ...fixture.descriptor.policy },
             levelMetrics: fixture.descriptor.levelMetrics.map(metric => ({ ...metric })),
             roots: [ ...fixture.descriptor.roots ],
@@ -676,7 +838,7 @@ describe('Geo GPU tile frontier contracts and reference oracle', () => {
         const frontier = await creating
 
         expect(frontier.descriptor.gpuState).to.equal(fixture.gpuState)
-        expect(frontier.descriptor.addressCodec).to.equal(fixture.descriptor.addressCodec)
+        expect(frontier.descriptor.spatialProfile).to.equal(fixture.descriptor.spatialProfile)
         expect(frontier.descriptor.policy.refineErrorPixels).to.equal(expected.refineErrorPixels)
         expect(frontier.descriptor.levelMetrics[0].geometricErrorMeters)
             .to.equal(expected.geometricErrorMeters)
@@ -1011,7 +1173,7 @@ describe('Geo GPU tile frontier contracts and reference oracle', () => {
         fixture.runtime.dispose()
     })
 
-    it('packs camera x and y through the address codec wide-fixed ABI', async() => {
+    it('packs camera x and y through the spatial profile wide-fixed ABI', async() => {
 
         const fixture = await createGpuResourceGraphFixture()
         const frontier = await GpuTileFrontier.create(fixture.runtime, fixture.descriptor)
@@ -1028,14 +1190,14 @@ describe('Geo GPU tile frontier contracts and reference oracle', () => {
             access.viewCommand.data.byteOffset,
             access.viewCommand.data.byteLength
         )).toArray()[0]
-        const fixed = fixture.descriptor.addressCodec.fromProjected([
+        const fixed = fixture.descriptor.spatialProfile.encodeCamera([
             view.cameraHigh[0] + view.cameraLow[0],
             view.cameraHigh[1] + view.cameraLow[1],
-        ]).fixed.limbs
+        ])
 
         expect(packed).to.deep.include({
-            cameraFixedLow: [ fixed[0].low, fixed[1].low ],
-            cameraFixedHigh: [ fixed[0].high, fixed[1].high ],
+            cameraFixedLow: fixed.low,
+            cameraFixedHigh: fixed.high,
         })
         expect(packed).not.to.have.property('cameraMercatorHigh')
         expect(packed).not.to.have.property('cameraMercatorLow')
@@ -1308,10 +1470,18 @@ describe('Geo GPU tile frontier contracts and reference oracle', () => {
 
         expect(generated).to.include('fn boundaryQuanta(')
         expect(generated).to.include('fn relativeQuantaMeters(')
-        expect(generated).to.include('let west = boundaryQuanta(column, matrixLevel);')
-        expect(generated).to.include('let east = boundaryQuanta(column + 1u, matrixLevel);')
-        expect(generated).to.include('let north = boundaryQuanta(row, matrixLevel);')
-        expect(generated).to.include('let south = boundaryQuanta(row + 1u, matrixLevel);')
+        expect(generated).to.include(
+            'let west = boundaryQuanta(column, matrixLevel, FRONTIER_ROOT_COLUMN_BITS);'
+        )
+        expect(generated).to.include(
+            'let east = boundaryQuanta(column + 1u, matrixLevel, FRONTIER_ROOT_COLUMN_BITS);'
+        )
+        expect(generated).to.include(
+            'let north = boundaryQuanta(row, matrixLevel, FRONTIER_ROOT_ROW_BITS);'
+        )
+        expect(generated).to.include(
+            'let south = boundaryQuanta(row + 1u, matrixLevel, FRONTIER_ROOT_ROW_BITS);'
+        )
         expect(generated).to.include('mapMeta.cameraFixedLow.x')
         expect(generated).to.include('mapMeta.cameraFixedHigh.x')
         expect(generated).to.include('mapMeta.cameraFixedLow.y')
@@ -1445,6 +1615,30 @@ describe('Geo GPU tile frontier contracts and reference oracle', () => {
     it('requires ordered metrics, a complete root set, and u32-packed values', () => {
 
         const fixture = createFixture()
+        expectFrontierInvalid(() => evaluateGpuTileFrontierReference({
+            descriptor: {
+                ...fixture.descriptor,
+                spatialProfile: {
+                    ...fixture.descriptor.spatialProfile,
+                    kind: 'forged-profile',
+                },
+            },
+            view: fixture.view,
+            currentFrontier: [],
+            residentPages: [],
+        }))
+        expectFrontierInvalid(() => evaluateGpuTileFrontierReference({
+            descriptor: {
+                ...fixture.descriptor,
+                spatialProfile: {
+                    ...fixture.descriptor.spatialProfile,
+                    path: undefined,
+                },
+            },
+            view: fixture.view,
+            currentFrontier: [],
+            residentPages: [],
+        }))
         expectFrontierInvalid(() => evaluateGpuTileFrontierReference({
             descriptor: {
                 ...fixture.descriptor,

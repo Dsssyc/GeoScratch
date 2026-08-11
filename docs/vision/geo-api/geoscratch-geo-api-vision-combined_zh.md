@@ -1206,6 +1206,23 @@ Diagnostics 应定位到 candidate、feature、domain、layout product 或 rende
 
 `geo` 必须把瓦片遍历、LoD、数据流式加载、GPU 驻留和缓存预算作为显式系统。它们不能藏在 layer 或 material 内部，也不能表现为每个 tile 一个渲染对象的任意生命周期。
 
+## 2026-08-08 实现修订：topology、spatial profile 与 view demand
+
+ADR-067 已将当前 GPU frontier 从 WebMercator 裸 codec clean-cut 迁移到
+`TileTopology + TileSpatialProfile(planar)`。regular topology 支持 finite multi-root
+forest，并以 root ordinal 作为 canonical path 首段；真实 `2 x 1` root forest 已通过
+CPU oracle。`GeoViewSnapshot` 以不可变 frame/residency epoch 事实进入 frontier，GPU
+反馈先生成带 view provenance 的 bounded demand，再显式降低到 Virtual Raster scheduler。
+
+`GeoField`、`TiledFieldRepresentation` 和 `MapFieldLayer` 分别表示数据语义、物理瓦片
+表示和平面 presentation。layer 不拥有 cache、Worker、scheduler、runtime、atlas 或
+pipeline。下文早期 draft 中单一 `TileState`/`SourceScheduler` 代码块只保留为历史设计
+草图；它不覆盖 ADR-055 至 ADR-067 已冻结的正交 authority 和 publication 模型。
+
+当前 spatial profile 只承诺 planar AABB 与 fixed-coordinate WGSL。多 root 是 globe 的
+必要条件而非充分条件；curved bounds、ellipsoid precision、horizon/occlusion、globe
+SSE 和专用 WGSL evaluator 仍需独立设计与验证。
+
 核心原则:
 
 ```text

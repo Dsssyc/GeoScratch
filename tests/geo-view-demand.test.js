@@ -1,0 +1,187 @@
+import { expect } from 'chai'
+import {
+    GeoDiagnosticError,
+    ViewDemandProducer,
+    WebMercatorQuad,
+    createGeoViewAdapter,
+    createGeoViewSnapshot,
+    tileMatrixCoverage,
+    virtualRasterDemandSetFromViewDemands,
+    virtualRasterTileAddressSpace,
+} from 'geoscratch/geo'
+
+function view(overrides = {}) {
+
+    return createGeoViewSnapshot({
+        id: 'map-view',
+        clipFromRelativeWorld: [
+            1, 0, 0, 0,
+            0, 1, 0, 0,
+            0, 0, 1, 0,
+            0, 0, 0, 1,
+        ],
+        cameraHigh: [ 1000, 2000, 100 ],
+        cameraLow: [ 0.25, -0.5, 0.125 ],
+        viewport: [ 1280, 720 ],
+        verticalFovRadians: Math.PI / 3,
+        cameraLatitudeRadians: 0.5,
+        cameraPitchRadians: 0.7,
+        zoomHint: 10,
+        frameEpoch: 9,
+        residencySnapshotEpoch: 4,
+        ...overrides,
+    })
+}
+
+function pages() {
+
+    const coverage = tileMatrixCoverage({
+        tileMatrixSet: WebMercatorQuad,
+        limits: [
+            { matrixId: '1', minTileRow: 0, maxTileRow: 1, minTileCol: 0, maxTileCol: 1 },
+        ],
+    })
+    const addressSpace = virtualRasterTileAddressSpace({ id: 'view-demand', coverage })
+    return [
+        addressSpace.pageFromTile({ matrixId: '1', tileRow: 0, tileCol: 0 }),
+        addressSpace.pageFromTile({ matrixId: '1', tileRow: 0, tileCol: 1 }),
+        addressSpace.pageFromTile({ matrixId: '1', tileRow: 1, tileCol: 0 }),
+    ]
+}
+
+describe('Geo view snapshots and demand', () => {
+
+    it('defensively snapshots mutable camera facts', () => {
+
+        const matrix = [
+            1, 0, 0, 0,
+            0, 1, 0, 0,
+            0, 0, 1, 0,
+            0, 0, 0, 1,
+        ]
+        const cameraHigh = [ 1, 2, 3 ]
+        const snapshot = view({ clipFromRelativeWorld: matrix, cameraHigh })
+        matrix[0] = 99
+        cameraHigh[0] = 99
+
+        expect(snapshot.kind).to.equal('geo-view-snapshot')
+        expect(snapshot.clipFromRelativeWorld[0]).to.equal(1)
+        expect(snapshot.cameraHigh[0]).to.equal(1)
+        expect(Object.isFrozen(snapshot)).to.equal(true)
+        expect(Object.isFrozen(snapshot.clipFromRelativeWorld)).to.equal(true)
+        expect(Object.isFrozen(snapshot.cameraHigh)).to.equal(true)
+    })
+
+    it('rejects non-finite or dimensionally invalid view facts with a Geo diagnostic', () => {
+
+        expect(() => view({ viewport: [ 1280, 0 ] })).to.throw(GeoDiagnosticError)
+        expect(() => view({ verticalFovRadians: Math.PI })).to.throw(GeoDiagnosticError)
+        expect(() => view({ clipFromRelativeWorld: [ 1, 2 ] })).to.throw(GeoDiagnosticError)
+    })
+
+    it('captures its adapter implementation and rejects forged view-shaped objects', () => {
+
+        const descriptor = {
+            id: 'captured-adapter',
+            read: () => view({ id: 'original-view' }),
+        }
+        const adapter = createGeoViewAdapter(descriptor)
+        descriptor.read = () => view({ id: 'mutated-view' })
+
+        expect(adapter.read(undefined).id).to.equal('original-view')
+        expect(() => createGeoViewAdapter({
+            id: 'forged-adapter',
+            read: () => ({ kind: 'geo-view-snapshot' }),
+        }).read(undefined)).to.throw(GeoDiagnosticError)
+    })
+
+    it('adds view provenance, deduplicates by priority, and applies a hard demand bound', () => {
+
+        const [ first, second, third ] = pages()
+        const producer = new ViewDemandProducer({ id: 'map-demand', maxDemands: 2 })
+        const demandSet = producer.produce({
+            view: view(),
+            generation: 12,
+            demands: [
+                {
+                    page: first,
+                    priority: { class: 'user-visible', score: 10 },
+                    intent: 'refinement',
+                    reason: 'initial-refine',
+                },
+                {
+                    page: first,
+                    priority: { class: 'critical', score: 1 },
+                    intent: 'coverage',
+                    reason: 'cover-hole',
+                },
+                {
+                    page: second,
+                    priority: { class: 'background', score: 100 },
+                    intent: 'prefetch',
+                    reason: 'guard-band',
+                },
+                {
+                    page: third,
+                    priority: { class: 'user-visible', score: 20 },
+                    intent: 'refinement',
+                    reason: 'higher-sse',
+                },
+            ],
+        })
+
+        expect(demandSet.kind).to.equal('view-tile-demand-set')
+        expect(demandSet.demands.map(demand => demand.page.key)).to.deep.equal([
+            first.key,
+            third.key,
+        ])
+        expect(demandSet.demands[0]).to.deep.include({
+            generation: 12,
+            intent: 'coverage',
+            reason: 'cover-hole',
+        })
+        expect(demandSet.demands[0].source).to.deep.equal({
+            kind: 'view',
+            producerId: 'map-demand',
+            viewId: 'map-view',
+            frameEpoch: 9,
+            residencySnapshotEpoch: 4,
+        })
+        expect(producer).not.to.have.any.keys('scheduler', 'worker', 'cache', 'runtime')
+    })
+
+    it('lowers view intent to Virtual Raster usage explicitly', () => {
+
+        const [ required, prefetched ] = pages()
+        const producer = new ViewDemandProducer({ id: 'map-demand', maxDemands: 4 })
+        const viewDemands = producer.produce({
+            view: view(),
+            generation: 13,
+            demands: [
+                {
+                    page: required,
+                    priority: { class: 'critical', score: 1 },
+                    intent: 'coverage',
+                    reason: 'visible-cover',
+                },
+                {
+                    page: prefetched,
+                    priority: { class: 'background', score: 1 },
+                    intent: 'prefetch',
+                    reason: 'view-guard-band',
+                },
+            ],
+        })
+        const lowered = virtualRasterDemandSetFromViewDemands(viewDemands)
+
+        expect(lowered.kind).to.equal('virtual-raster-demand-set')
+        expect(lowered.demands.map(demand => demand.usage)).to.deep.equal([
+            'required',
+            'prefetch',
+        ])
+        expect(lowered.demands.map(demand => demand.reason)).to.deep.equal([
+            'visible-cover',
+            'view-guard-band',
+        ])
+    })
+})

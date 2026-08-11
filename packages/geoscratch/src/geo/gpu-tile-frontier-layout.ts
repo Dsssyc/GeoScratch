@@ -1,6 +1,7 @@
 import { layoutCodec, type LayoutArtifact, type LayoutCodec } from '../scratch/index.js'
 import { throwGeoDiagnostic } from './diagnostics.js'
-import type { WebMercatorQuadAddressCodec } from './web-mercator-quad.js'
+import type { GeoViewSnapshot } from './geo-view.js'
+import type { TileSpatialProfile } from './tile-spatial-profile.js'
 import type { VirtualRasterGpuState } from './virtual-raster-gpu.js'
 import type { VirtualRasterPageIdentity } from './virtual-raster.js'
 
@@ -15,18 +16,7 @@ export type GpuTileFrontierPolicy = Readonly<{
     invisibleGraceFrames: number
 }>
 
-export type GpuTileFrontierView = Readonly<{
-    clipFromRelativeWorld: ArrayLike<number>
-    cameraHigh: readonly [number, number, number]
-    cameraLow: readonly [number, number, number]
-    viewport: readonly [number, number]
-    verticalFovRadians: number
-    cameraLatitudeRadians: number
-    cameraPitchRadians: number
-    zoomHint: number
-    frameEpoch: number
-    residencySnapshotEpoch: number
-}>
+export type GpuTileFrontierView = GeoViewSnapshot
 
 export type GpuTileFrontierLevelMetric = Readonly<{
     matrixLevel: number
@@ -44,7 +34,7 @@ export type GpuTileFrontierDrawTemplate = Readonly<{
 
 export type GpuTileFrontierDescriptor = Readonly<{
     gpuState: VirtualRasterGpuState
-    addressCodec: WebMercatorQuadAddressCodec
+    spatialProfile: TileSpatialProfile
     policy: GpuTileFrontierPolicy
     levelMetrics: readonly GpuTileFrontierLevelMetric[]
     roots: readonly VirtualRasterPageIdentity[]
@@ -99,42 +89,25 @@ export type GpuTileFrontierRenderWgslModule = Readonly<{
 }>
 
 export function compareGpuTileFrontierPathOrder(
+    spatialProfile: TileSpatialProfile,
     left: Pick<VirtualRasterPageIdentity, 'tile'>,
     right: Pick<VirtualRasterPageIdentity, 'tile'>
 ): number {
 
     const leftTile = frontierPathTile(left)
     const rightTile = frontierPathTile(right)
-    const commonDepth = Math.min(leftTile.matrixLevel, rightTile.matrixLevel)
-    for (let depth = 0; depth < commonDepth; depth++) {
-        const leftShift = leftTile.matrixLevel - depth - 1
-        const rightShift = rightTile.matrixLevel - depth - 1
-        const leftChild = pathChildOrdinal(
-            leftTile.tileRow,
-            leftTile.tileCol,
-            leftShift
-        )
-        const rightChild = pathChildOrdinal(
-            rightTile.tileRow,
-            rightTile.tileCol,
-            rightShift
-        )
-        if (leftChild !== rightChild) return leftChild - rightChild
-    }
-    return leftTile.matrixLevel - rightTile.matrixLevel
+    return spatialProfile.comparePath(leftTile, rightTile)
 }
 
 export function gpuTileFrontierPathIsPrefix(
+    spatialProfile: TileSpatialProfile,
     prefix: Pick<VirtualRasterPageIdentity, 'tile'>,
     candidate: Pick<VirtualRasterPageIdentity, 'tile'>
 ): boolean {
 
     const prefixTile = frontierPathTile(prefix)
     const candidateTile = frontierPathTile(candidate)
-    if (prefixTile.matrixLevel > candidateTile.matrixLevel) return false
-    const shift = candidateTile.matrixLevel - prefixTile.matrixLevel
-    return Math.floor(candidateTile.tileRow / 2 ** shift) === prefixTile.tileRow &&
-        Math.floor(candidateTile.tileCol / 2 ** shift) === prefixTile.tileCol
+    return spatialProfile.isPathPrefix(prefixTile, candidateTile)
 }
 
 type FrontierLayout = Readonly<{
@@ -355,14 +328,15 @@ export function validateGpuTileFrontierDescriptor(
             descriptor: 'GpuTileFrontierDescriptor',
         }, descriptor)
     }
+    validateSpatialProfile(descriptor.spatialProfile)
     const addressSpace = descriptor.gpuState?.addressSpace
-    const coverage = descriptor.addressCodec?.coverage
+    const coverage = descriptor.spatialProfile?.coverage
     if (addressSpace?.kind !== 'virtual-raster-address-space' ||
         addressSpace.tileCoverage === undefined ||
         coverage === undefined ||
         addressSpace.tileCoverage !== coverage) {
         return invalidFrontier(
-            'GPU tile frontier GPU state and WebMercatorQuad codec must share one tile coverage.',
+            'GPU tile frontier GPU state and spatial profile must share one tile coverage.',
             { addressSpace: 'tile-backed VirtualRasterAddressSpace', coverage: 'same object' },
             {
                 addressSpaceKind: addressSpace?.kind,
@@ -379,9 +353,63 @@ export function validateGpuTileFrontierDescriptor(
         )
     }
     gpuTileFrontierPolicy(descriptor.policy)
+    const profileMaximumMatrixLevel = descriptor.spatialProfile.topology
+        .tileMatrixSet.tileMatrices.length - 1
+    const encoding = descriptor.spatialProfile.frontierEncoding
+    if (descriptor.policy.minimumMatrixLevel > profileMaximumMatrixLevel ||
+        descriptor.policy.maximumMatrixLevel > profileMaximumMatrixLevel ||
+        descriptor.policy.maximumMatrixLevel + encoding.rootColumnBits >
+            encoding.coordinateBits ||
+        descriptor.policy.maximumMatrixLevel + encoding.rootRowBits >
+            encoding.coordinateBits) {
+        return invalidFrontier(
+            'GPU tile frontier matrix levels must fit the spatial profile and its fixed-coordinate encoding.',
+            {
+                maximumMatrixLevel: profileMaximumMatrixLevel,
+                maximumColumnEncodingLevel:
+                    encoding.coordinateBits - encoding.rootColumnBits,
+                maximumRowEncodingLevel: encoding.coordinateBits - encoding.rootRowBits,
+            },
+            descriptor.policy
+        )
+    }
     validateLevelMetrics(descriptor)
     validateRoots(descriptor)
     validateDrawTemplates(descriptor.drawTemplates)
+}
+
+function validateSpatialProfile(profile: TileSpatialProfile): void {
+
+    const encoding = profile?.frontierEncoding
+    const validTuple = (value: unknown): value is readonly [number, number] =>
+        Array.isArray(value) && value.length === 2 &&
+        value.every(item => Number.isFinite(item) && item > 0)
+    if (profile?.kind !== 'tile-spatial-profile' || profile.coordinateFrame !== 'planar' ||
+        profile.topology?.kind !== 'tile-topology' ||
+        profile.coverage?.tileMatrixSet !== profile.topology.tileMatrixSet ||
+        !Number.isSafeInteger(profile.coordinateBits) ||
+        profile.coordinateBits < 32 || profile.coordinateBits > 52 ||
+        encoding?.coordinateBits !== profile.coordinateBits ||
+        !Number.isSafeInteger(encoding.rootColumnBits) || encoding.rootColumnBits < 0 ||
+        !Number.isSafeInteger(encoding.rootRowBits) || encoding.rootRowBits < 0 ||
+        !validTuple(encoding.quantumMeters) || !validTuple(encoding.highLimbMeters) ||
+        typeof profile.matrixLevel !== 'function' || typeof profile.matrixId !== 'function' ||
+        typeof profile.tileBounds !== 'function' || typeof profile.normalizedBounds !== 'function' ||
+        typeof profile.parent !== 'function' || typeof profile.children !== 'function' ||
+        typeof profile.coveredChildren !== 'function' || typeof profile.path !== 'function' ||
+        typeof profile.comparePath !== 'function' ||
+        typeof profile.isPathPrefix !== 'function' || typeof profile.encodeCamera !== 'function') {
+        return invalidFrontier(
+            'GPU tile frontier requires one complete planar TileSpatialProfile.',
+            {
+                kind: 'tile-spatial-profile',
+                coordinateFrame: 'planar',
+                topologyCoverage: 'same TileMatrixSet object',
+                frontierEncoding: 'finite positive two-axis fixed-coordinate facts',
+            },
+            profile
+        )
+    }
 }
 
 function layoutFacts(codec: LayoutCodec): FrontierLayout {
@@ -429,13 +457,15 @@ function validateLevelMetrics(descriptor: GpuTileFrontierDescriptor): void {
 
 function validateRoots(descriptor: GpuTileFrontierDescriptor): void {
 
-    const matrixId = String(descriptor.policy.minimumMatrixLevel)
-    const minimumLimit = descriptor.addressCodec.coverage.limit(matrixId)
+    const matrixId = descriptor.spatialProfile.matrixId(
+        descriptor.policy.minimumMatrixLevel
+    )
+    const minimumLimit = descriptor.spatialProfile.coverage.limit(matrixId)
     if (minimumLimit === undefined) {
         return invalidFrontier(
             'GPU tile frontier minimum matrix level must exist in its finite coverage.',
             { matrixId },
-            { limits: descriptor.addressCodec.coverage.limits }
+            { limits: descriptor.spatialProfile.coverage.limits }
         )
     }
     const width = minimumLimit.maxTileCol - minimumLimit.minTileCol + 1
@@ -490,35 +520,24 @@ function validateRoots(descriptor: GpuTileFrontierDescriptor): void {
 
 function frontierPathTile(
     page: Pick<VirtualRasterPageIdentity, 'tile'>
-): Readonly<{ matrixLevel: number, tileRow: number, tileCol: number }> {
+): NonNullable<VirtualRasterPageIdentity['tile']> {
 
     const tile = page.tile
     if (tile === undefined) {
         return invalidFrontier(
             'GPU tile frontier path ordering requires tile-backed pages.',
-            { tile: 'WebMercatorQuad tile' },
+            { tile: 'tile-backed page identity' },
             page
         )
     }
-    const matrixLevel = Number(tile.matrixId)
-    const tileRow = tile.tileRow
-    const tileCol = tile.tileCol
-    if (!u32(matrixLevel) || !u32(tileRow) || !u32(tileCol)) {
+    if (!u32(tile.tileRow) || !u32(tile.tileCol)) {
         return invalidFrontier(
             'GPU tile frontier path ordering requires u32 tile coordinates.',
-            { matrixLevel: 'u32', tileRow: 'u32', tileCol: 'u32' },
+            { tileRow: 'u32', tileCol: 'u32' },
             tile
         )
     }
-    return { matrixLevel, tileRow, tileCol }
-}
-
-function pathChildOrdinal(tileRow: number, tileCol: number, shift: number): number {
-
-    const scale = 2 ** shift
-    const rowBit = Math.floor(tileRow / scale) % 2
-    const colBit = Math.floor(tileCol / scale) % 2
-    return rowBit * 2 + colBit
+    return tile
 }
 
 function validateDrawTemplates(templates: readonly GpuTileFrontierDrawTemplate[]): void {

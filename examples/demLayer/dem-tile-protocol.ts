@@ -21,7 +21,7 @@ export type DemCachePolicy =
         lifecycle: PersistentCacheLifecycle
     }>
 
-export type DemTileCacheConfiguration =
+type DemTileCacheConfiguration =
     | Readonly<{ mode: 'none' }>
     | Readonly<{
         mode: 'persistent'

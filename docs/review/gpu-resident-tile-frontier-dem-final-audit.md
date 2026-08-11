@@ -145,3 +145,54 @@ dense-versus-sparse page-table redesign for much larger address spaces, remain
 separate Geo architecture work. Globe traversal, occlusion, editable terrain,
 per-page residual-error generation, Flow LoD, and generalized scene scheduling are
 also outside this terminated goal and were not silently absorbed into it.
+
+## 2026-08-08 Geo Composition Extension
+
+本节记录在上述 DEM frontier 验收之后完成的通用 Geo 抽象，不改写前述历史 commit
+区间和当时的测试数字。
+
+### 结论
+
+本轮范围内没有遗留失败项。DEM 已真实迁移到公开的 `TileTopology`、
+`TileSpatialProfile`、`GeoViewSnapshot`、`ViewDemandProducer`、`GeoField`、
+`TiledFieldRepresentation` 和 `MapFieldLayer`，不是仅在测试中构造的占位接口。
+
+- `GpuTileFrontierDescriptor` clean-cut 改为接收 `spatialProfile`；CPU oracle、WGSL、
+  feedback canonicalization 和 camera fixed encoding 不再直接依赖 WebMercator；
+- regular quadtree topology 已用真实 `2 x 1` root forest 证明两个根的 bounds、路径、
+  split 和 compact 互不混淆；
+- DEM 的 MapLibre 事实只停留在 example adapter 内，每帧产生防御性复制、不可变且带
+  frame/residency epoch 的 view snapshot；
+- 延迟 GPU feedback 与产生它的原始 snapshot 一起保留，epoch 不一致会在修改
+  generation/request 状态前失败；
+- GPU feedback 先成为带 provenance 的 coverage/refinement/prefetch view demand，再由
+  显式 adapter 降为 Virtual Raster scheduler demand；
+- field 语义、tiled physical representation 和 map presentation 已分离；layer 不拥有
+  cache、Worker、network、scheduler、residency、atlas、runtime 或 submission。
+
+### 当前验证
+
+| 门禁 | 结果 |
+| --- | --- |
+| Geo/frontier/DEM focused tests | `123 passing` |
+| 公共导出和结构审计 focused tests | `7 passing, 1 pending` |
+| `npm test -- --reporter dot` | `1398 passing, 2 pending` |
+| `npm run typecheck` | 通过 package、repository、examples 和 WebGPU 类型检查 |
+| `npm run build` | 通过 package 与 Vite production build；仅保留既有 chunk-size advisory |
+| `git diff --check` | 通过 |
+
+Dedicated headless Chrome `151.0.7922.77` 使用 Apple `metal-3` WebGPU adapter 完成
+12 个相机场景、84 步快速相机变化、resize 以及两个失败注入场景，最终
+`status: passed`。正常路径的 console、page、request 和 HTTP failure 均为 0；387 个
+frame work 全部完成，dispose 后 native observation 和 effectful submitted work 均为 0。
+800x600 resize 截图非空，terrain 横向覆盖率为 1，像素 SHA-256 为
+`aecf2d4f3b345ac37adb552f9bf2346380b4bca72c1f9161bbc22a7205cc91c7`。Chrome、Vite
+和 tile server 均已关闭。
+
+### 明确剩余边界
+
+`2 x 1` 证明的是多根 topology 与 planar profile 已从单根 WebMercator 假设中解耦，
+不等于 globe 已实现。真正的 globe 仍需单独设计并验证 curved tile bounds、ellipsoid
+relative precision、horizon/frustum culling、globe SSE 与对应 WGSL lowering。simulation
+和 editor 需求也仍应作为可组合 producer 进入同一 demand 边界，不能被 screen view
+冒充。上述项目均不属于本轮完成声明。

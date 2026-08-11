@@ -110,12 +110,14 @@ async function runProof({ scratchUrl, geoUrl, referenceUrl, layoutUrl, testAcces
         VirtualRasterGpuFeedbackRing,
         VirtualRasterResidency,
         WebMercatorQuad,
+        createGeoViewSnapshot,
         createVirtualRasterGpuState,
         gpuTileFrontierPolicy,
         ownedVirtualRasterPagePayload,
         tileMatrixCoverage,
         virtualRasterPlane,
         virtualRasterTileAddressSpace,
+        webMercatorPlanarTileSpatialProfile,
         webMercatorQuadAddressCodec,
     } = await import(geoUrl)
     const { evaluateGpuTileFrontierReference } = await import(referenceUrl)
@@ -1518,6 +1520,7 @@ async function runProof({ scratchUrl, geoUrl, referenceUrl, layoutUrl, testAcces
             coverage,
         })
         const addressCodec = webMercatorQuadAddressCodec({ coverage })
+        const spatialProfile = webMercatorPlanarTileSpatialProfile({ addressCodec })
         const plane = virtualRasterPlane({
             id: `browser-frontier-height-${options.id}`,
             addressSpace,
@@ -1545,6 +1548,7 @@ async function runProof({ scratchUrl, geoUrl, referenceUrl, layoutUrl, testAcces
             coverage,
             addressSpace,
             addressCodec,
+            spatialProfile,
             plane,
             residency,
             gpuState,
@@ -1559,7 +1563,7 @@ async function runProof({ scratchUrl, geoUrl, referenceUrl, layoutUrl, testAcces
 
         return await GpuTileFrontier.create(runtime, {
             gpuState: env.gpuState,
-            addressCodec: env.addressCodec,
+            spatialProfile: env.spatialProfile,
             policy: gpuTileFrontierPolicy({
                 refineErrorPixels: env.refineErrorPixels,
                 coarsenErrorPixels: env.coarsenErrorPixels,
@@ -2186,7 +2190,8 @@ fn capture(@builtin(global_invocation_id) id: vec3u) {
     function orthographicView(options) {
 
         const [ cameraHigh, cameraLow ] = splitVector(options.camera)
-        return {
+        return createGeoViewSnapshot({
+            id: `browser-orthographic-view-${options.frameEpoch}`,
             clipFromRelativeWorld: new Float32Array([
                 1 / options.xHalfExtent, 0, 0, 0,
                 0, 1 / options.yHalfExtent, 0, 0,
@@ -2202,7 +2207,7 @@ fn capture(@builtin(global_invocation_id) id: vec3u) {
             zoomHint: options.zoomHint,
             frameEpoch: options.frameEpoch,
             residencySnapshotEpoch: options.snapshotEpoch,
-        }
+        })
     }
 
     function perspectiveView(options) {
@@ -2221,7 +2226,8 @@ fn capture(@builtin(global_invocation_id) id: vec3u) {
         )
         const [ cameraHigh, cameraLow ] = splitVector(options.camera)
         const directionLength = Math.hypot(...options.direction)
-        return {
+        return createGeoViewSnapshot({
+            id: `browser-perspective-view-${options.frameEpoch}`,
             clipFromRelativeWorld: mat4.multiply(projection, viewMatrix),
             cameraHigh,
             cameraLow,
@@ -2235,7 +2241,7 @@ fn capture(@builtin(global_invocation_id) id: vec3u) {
             zoomHint: options.zoomHint,
             frameEpoch: options.frameEpoch,
             residencySnapshotEpoch: options.snapshotEpoch,
-        }
+        })
     }
 
     function splitVector(values) {

@@ -28,6 +28,14 @@ Use ES module imports/exports and route public API through the explicit `scratch
 
 Mocha and Chai are available for tests. Add tests as `tests/*.test.js`, import Scratch and public API checks from `geoscratch` or its public subpaths, and keep browser/WebGPU-only behavior separated from Node-compatible unit checks. Run `npm test` before submitting. For rendering or shader changes, also run `npm run dev` and manually verify the affected example in a WebGPU-capable browser.
 
+## Browser Debugging Etiquette
+
+Do not disrupt the user's primary display or active browser while testing frontend behavior. Use headless browser automation by default for DOM, network, lifecycle, and non-visual checks. Use a headed browser only when native WebGPU behavior or visual rendering cannot be verified correctly in headless mode.
+
+When headed Chrome is required on macOS, first discover the active display bounds and select a non-main display. Launch a dedicated debug Chrome instance in the background with an isolated temporary `--user-data-dir`, a dedicated remote-debugging port, and `--window-position` / `--window-size` values that place the entire window on that non-main display; use a non-activating launcher such as `open -g`, then connect Playwright through CDP. Do not use a direct headed Playwright launch when it can activate a foreground window. Do not activate, navigate, resize, move, or close the user's existing Chrome windows or tabs. Close only the dedicated debug instance created by the agent.
+
+If no non-main display is connected, or display placement and non-activation cannot be confirmed, do not launch a headed browser automatically. Stay headless and report the visual-verification limitation unless the user explicitly asks to open a foreground browser. Opening a page for the user's own inspection is also subject to this rule: prefer a background-opened tab/window on the non-main display and never steal keyboard focus from the user's current application.
+
 ## Commit & Pull Request Guidelines
 
 Existing history uses short imperative subjects, often one line, with occasional PR references such as `Update implementation of flow layer (#2)`. Prefer concise but specific messages, for example `Update terrain layer LOD` instead of `update`. After each verified phase of work, create a commit before starting the next phase so the repository keeps clear rollback checkpoints. Pull requests should describe the changed module or example, list verification commands run, link related issues, and include screenshots or screen recordings for visible rendering changes.

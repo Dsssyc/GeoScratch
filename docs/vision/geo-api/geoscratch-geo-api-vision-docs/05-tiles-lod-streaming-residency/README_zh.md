@@ -1,7 +1,7 @@
 # Tiles、LoD、Streaming 与 Residency
 
-状态: Vision draft，当前基础契约由 ADR-055、ADR-056、ADR-058 和 ADR-059 冻结
-日期: 2026-08-06
+状态: Vision draft，当前基础契约由 ADR-055、ADR-056、ADR-058、ADR-059、ADR-061 和 ADR-067 冻结
+日期: 2026-08-08
 
 ## 决策
 
@@ -42,6 +42,35 @@ camera/map metadata upload
 
 这里不是把整个网络瓦片树移入 GPU。GPU 只遍历有限 active frontier 和已确认的
 residency metadata；CPU 不再逐帧生成 visible node 数组或 indirect count。
+
+## 已实现的 topology、spatial profile 与 view demand 边界
+
+ADR-067 将标准瓦片身份之上的层次关系、空间求值和业务需求进一步拆开：
+
+```text
+GeoViewSnapshot
+    -> TileTopology + TileSpatialProfile(planar)
+    -> GpuTileFrontier
+    -> ViewDemandProducer
+    -> VirtualRasterRequestScheduler
+```
+
+- `TileTopology` 表达 finite root forest、parent/children、root-aware canonical path
+  和 matrix-normalized bounds。regular quadtree 已通过真实 `2 x 1` level-zero root
+  forest 验证，不再假定整个世界只有一颗根瓦片。
+- `TileSpatialProfile` 当前明确只接受 `coordinateFrame: 'planar'`，负责 tile bounds、
+  camera fixed encoding 与 frontier WGSL 所需的两轴量化事实。WebMercator 是其中一个
+  profile，不再是 frontier descriptor 的硬编码输入。
+- `GeoViewSnapshot` 是带 frame/residency epoch 的不可变相机事实。平台 adapter
+  可以来自 MapLibre、Mapbox 或独立 controller；frontier 不读取平台私有 transform。
+- GPU feedback 先成为带 view provenance 的 bounded `ViewTileDemandSet`，再显式降低为
+  Virtual Raster demand。view producer 不拥有 Worker、cache、scheduler 或 residency。
+- `GeoField`、`TiledFieldRepresentation` 与 `MapFieldLayer` 分别表达数据语义、物理瓦片
+  表示和平面地图组合；layer 不创建 runtime、atlas、cache、Worker 或 pipeline。
+
+当前 2×1 proof 只证明多根平面层次结构。globe 仍必须另行实现和审核 curved bounds、
+ellipsoid-relative precision、horizon/occlusion、SSE 与专用 WGSL spatial evaluator；
+不得把“支持多 root”误报为“已支持 globe”。
 
 ## 冻结的所有权边界
 
@@ -266,6 +295,8 @@ dispatch/draw、submission authority、三槽 bounded readback、current-at-step
 [设计文档](../../../../superpowers/specs/2026-08-06-gpu-resident-tile-frontier-dem-design.md)
 和
 [实现计划](../../../../superpowers/plans/2026-08-06-gpu-resident-tile-frontier-dem.md)。
+Topology/profile/view/field 的 clean cut 见
+[ADR-067](../../../../decisions/ADR-067-geo-view-field-tile-spatial-profile.md)。
 
 ## 非目标
 

@@ -1,22 +1,21 @@
 import { expect } from 'chai'
 import {
     GeoDiagnosticError,
+    ViewDemandProducer,
     VirtualRasterRequestScheduler,
     VirtualRasterResidency,
+    createGeoViewSnapshot,
     ownedVirtualRasterPagePayload,
     prepareVirtualRasterPageTransfer,
 } from 'geoscratch/geo'
 import {
     DEM_WEB_MERCATOR_COORDINATE_BITS,
-    canonicalDemCoordinateQuanta,
     createDemVirtualRasterDemandAdapter,
     createDemVirtualRasterModel,
-    demHeightSamplingLevel,
     demTileUrl,
     demVirtualRasterWgslModule,
     fetchDemVirtualRasterManifest,
     parseDemVirtualRasterManifest,
-    resolveDemStitchedGrid,
 } from '../examples/demLayer/dem-virtual-raster.ts'
 import { DemPhaseBudget } from '../examples/demLayer/dem-phase-budget.ts'
 import { readDemCachePolicy } from '../examples/demLayer/dem-cache-policy.ts'
@@ -443,10 +442,21 @@ describe('DEM WebMercator virtual raster', () => {
         expect(model.addressSpace.levelCount).to.equal(7)
         expect(model.addressSpace.matrixId(0)).to.equal('10')
         expect(model.addressSpace.matrixId(6)).to.equal('4')
-        expect(model.rootPage).to.deep.include({ key: '4/6/13', level: 6 })
         expect(model.safetyCoverPages.map(page => page.key)).to.deep.equal([ '4/6/13' ])
         expect(model.addressCodec.coordinateBits).to.equal(DEM_WEB_MERCATOR_COORDINATE_BITS)
         expect(model.addressCodec.quantumMeters).to.be.lessThan(0.001)
+        expect(model.spatialProfile.coverage).to.equal(model.coverage)
+        expect(model.representation.field).to.equal(model.field)
+        expect(model.representation.plane).to.equal(model.plane)
+        expect(model.representation.spatialProfile).to.equal(model.spatialProfile)
+        expect(model.field).to.deep.include({
+            kind: 'geo-field',
+            fieldKind: 'scalar',
+            channels: 1,
+            sampleType: 'unorm8',
+            unit: 'm',
+            interpolation: 'linear',
+        })
         expect(model.plane).to.deep.include({
             fieldKind: 'scalar',
             channels: 1,
@@ -473,7 +483,10 @@ describe('DEM WebMercator virtual raster', () => {
             ]
         )
 
-        const first = fixture.adapter.reconcileFeedback(firstFeedback)
+        const first = fixture.adapter.reconcileFeedback(
+            firstFeedback,
+            viewAt(firstFeedback)
+        )
         expect(first).to.deep.include({ requestedCount: 1, retainedCount: 0, retiredCount: 0 })
         expect(fixture.executor.requests.get(child.key).demand.priority).to.deep.equal({
             class: 'user-visible',
@@ -482,11 +495,15 @@ describe('DEM WebMercator virtual raster', () => {
         expect(fixture.adapter.lease.facts().retainedPages.map(page => page.pageKey))
             .to.include.members(fixture.model.safetyCoverPages.map(page => page.key))
 
-        const second = fixture.adapter.reconcileFeedback(feedbackAt(
+        const secondFeedback = feedbackAt(
             8,
             fixture.acknowledgedSnapshotEpoch(),
             []
-        ))
+        )
+        const second = fixture.adapter.reconcileFeedback(
+            secondFeedback,
+            viewAt(secondFeedback)
+        )
         expect(second.generation).to.be.greaterThan(first.generation)
         expect(fixture.scheduler.inspect().activeRequestCount).to.equal(0)
         expect(fixture.executor.requests.get(child.key).cancelled).to.equal(true)
@@ -494,7 +511,7 @@ describe('DEM WebMercator virtual raster', () => {
 
         let staleFailure
         try {
-            fixture.adapter.reconcileFeedback(firstFeedback)
+            fixture.adapter.reconcileFeedback(firstFeedback, viewAt(firstFeedback))
         } catch (error) {
             staleFailure = error
         }
@@ -519,11 +536,12 @@ describe('DEM WebMercator virtual raster', () => {
         const foreign = Object.freeze({ ...child, addressSpaceId: 'foreign.raster' })
         let failure
         try {
-            fixture.adapter.reconcileFeedback(feedbackAt(
+            const feedback = feedbackAt(
                 3,
                 fixture.acknowledgedSnapshotEpoch(),
                 [ { ...gpuDemand(fixture, child, parent, 1), page: foreign } ]
-            ))
+            )
+            fixture.adapter.reconcileFeedback(feedback, viewAt(feedback))
         } catch (error) {
             failure = error
         }
@@ -552,11 +570,15 @@ describe('DEM WebMercator virtual raster', () => {
             tileCol: 53,
         })
         const parentEntry = fixture.residency.currentSnapshot.resolve(parent)
-        const demanded = fixture.adapter.reconcileFeedback(feedbackAt(
+        const demandedFeedback = feedbackAt(
             10,
             fixture.acknowledgedSnapshotEpoch(),
             [ gpuDemand(fixture, child, parent, 50) ]
-        ))
+        )
+        const demanded = fixture.adapter.reconcileFeedback(
+            demandedFeedback,
+            viewAt(demandedFeedback)
+        )
         expect(demanded.retainedCount).to.equal(1)
         expect(fixture.adapter.lease.facts().retainedPages).to.deep.include({
             pageKey: parent.key,
@@ -573,12 +595,16 @@ describe('DEM WebMercator virtual raster', () => {
             generation: pendingChild.generation,
         })
 
-        const beforeAcknowledgement = fixture.adapter.reconcileFeedback(feedbackAt(
+        const beforeAcknowledgementFeedback = feedbackAt(
             11,
             fixture.acknowledgedSnapshotEpoch(),
             [],
             [ gpuRetirement(parent, parentEntry, 11, fixture.acknowledgedSnapshotEpoch()) ]
-        ))
+        )
+        const beforeAcknowledgement = fixture.adapter.reconcileFeedback(
+            beforeAcknowledgementFeedback,
+            viewAt(beforeAcknowledgementFeedback)
+        )
         expect(beforeAcknowledgement.retiredCount).to.equal(0)
         expect(fixture.adapter.lease.facts().retainedPages).to.deep.include({
             pageKey: parent.key,
@@ -596,11 +622,15 @@ describe('DEM WebMercator virtual raster', () => {
             generation: parentEntry.generation,
         })
 
-        const retried = fixture.adapter.reconcileFeedback(feedbackAt(
+        const retriedFeedback = feedbackAt(
             12,
             fixture.acknowledgedSnapshotEpoch(),
             [ gpuDemand(fixture, child, parent, 60) ]
-        ))
+        )
+        const retried = fixture.adapter.reconcileFeedback(
+            retriedFeedback,
+            viewAt(retriedFeedback)
+        )
         fixture.executor.requests.get(child.key).resolve(transfer(child, 32))
         await retried.settlement
         const acknowledgedPublication = fixture.scheduler.publish()
@@ -608,12 +638,16 @@ describe('DEM WebMercator virtual raster', () => {
         await acknowledgedPublication.acknowledge()
         fixture.adapter.acknowledgePublication(acknowledgedPublication)
 
-        const retired = fixture.adapter.reconcileFeedback(feedbackAt(
+        const retiredFeedback = feedbackAt(
             13,
             fixture.acknowledgedSnapshotEpoch(),
             [],
             [ gpuRetirement(parent, parentEntry, 13, fixture.acknowledgedSnapshotEpoch()) ]
-        ))
+        )
+        const retired = fixture.adapter.reconcileFeedback(
+            retiredFeedback,
+            viewAt(retiredFeedback)
+        )
         expect(retired.retiredCount).to.equal(1)
         expect(fixture.adapter.lease.facts().retainedPages).not.to.deep.include({
             pageKey: parent.key,
@@ -623,6 +657,21 @@ describe('DEM WebMercator virtual raster', () => {
             pageKey: child.key,
             generation: acknowledgedPublication.snapshot.resolve(child).generation,
         })
+        await fixture.dispose()
+    })
+
+    it('rejects GPU feedback that does not belong to the supplied Geo view snapshot', async() => {
+
+        const fixture = await createGpuDemandFixture()
+        const feedback = feedbackAt(7, fixture.acknowledgedSnapshotEpoch(), [])
+        const mismatchedView = createGeoViewSnapshot({
+            ...viewDescriptorAt(feedback),
+            frameEpoch: feedback.frameEpoch + 1,
+        })
+
+        expect(() => fixture.adapter.reconcileFeedback(feedback, mismatchedView))
+            .to.throw(GeoDiagnosticError)
+        expect(fixture.scheduler.inspect().generation).to.equal(1)
         await fixture.dispose()
     })
 
@@ -660,7 +709,6 @@ describe('DEM WebMercator virtual raster', () => {
             '4/7/12',
             '4/7/13',
         ])
-        expect(model.rootPage.key).to.equal('4/6/12')
     })
 
     it('bypasses stale browser cache when fetching the mutable manifest endpoint', async() => {
@@ -686,56 +734,6 @@ describe('DEM WebMercator virtual raster', () => {
         expect(requestedUrl).to.equal('http://127.0.0.1:8787/manifest.json')
         expect(requestOptions.cache).to.equal('no-store')
         expect(result.contentVersion).to.equal(manifest.contentVersion)
-    })
-
-    it('stitches first and then derives one shared wide-fixed canonical coordinate', () => {
-
-        const model = createDemVirtualRasterModel(parseDemVirtualRasterManifest(manifest))
-        const fineGrid = resolveDemStitchedGrid({
-            x: 0,
-            y: 31,
-            ownLevel: 10,
-            leftLevel: 9,
-            rightLevel: 10,
-            bottomLevel: 10,
-            topLevel: 10,
-        })
-        expect(fineGrid).to.deep.equal({ x: 0, y: 32, heightSamplingLevel: 3 })
-
-        const coarseBounds = [ 120.0, 31.0, 121.0, 32.0 ]
-        const fineBounds = [ 121.0, 31.0, 121.5, 31.5 ]
-        const coarseEdge = canonicalDemCoordinateQuanta(
-            model.addressCodec,
-            coarseBounds,
-            { x: 64, y: 16 }
-        )
-        const fineEdge = canonicalDemCoordinateQuanta(
-            model.addressCodec,
-            fineBounds,
-            { x: 0, y: 32 }
-        )
-
-        expect(coarseEdge).to.deep.equal(fineEdge)
-        expect(coarseEdge.every(value => typeof value === 'bigint')).to.equal(true)
-    })
-
-    it('selects a common coarser height matrix on mixed-LoD edges', () => {
-
-        expect(demHeightSamplingLevel(9)).to.equal(3)
-        expect(demHeightSamplingLevel(10)).to.equal(2)
-        expect(demHeightSamplingLevel(11)).to.equal(1)
-        expect(demHeightSamplingLevel(12)).to.equal(0)
-        expect(demHeightSamplingLevel(14)).to.equal(0)
-        const stitched = resolveDemStitchedGrid({
-            x: 64,
-            y: 17,
-            ownLevel: 11,
-            leftLevel: 11,
-            rightLevel: 9,
-            bottomLevel: 11,
-            topLevel: 11,
-        })
-        expect(stitched.heightSamplingLevel).to.equal(3)
     })
 
     it('emits direct fixed-Mercator sampling without persistent per-node addresses', () => {
@@ -810,10 +808,15 @@ async function createGpuDemandFixture({ maxPhysicalPages = 6 } = {}) {
         maxRequests: 24,
         maxHistory: 16,
     })
+    const viewDemandProducer = new ViewDemandProducer({
+        id: 'dem-test-view-demand',
+        maxDemands: scheduler.maxRequests,
+    })
     const adapter = createDemVirtualRasterDemandAdapter({
         model,
         residency,
         scheduler,
+        viewDemandProducer,
         maxPhysicalPages,
     })
     const initialization = adapter.initialize()
@@ -851,6 +854,33 @@ async function createGpuDemandFixture({ maxPhysicalPages = 6 } = {}) {
             adapter.dispose()
             residency.dispose()
         },
+    }
+}
+
+function viewAt(feedback) {
+
+    return createGeoViewSnapshot(viewDescriptorAt(feedback))
+}
+
+function viewDescriptorAt(feedback) {
+
+    return {
+        id: 'dem-test-view',
+        clipFromRelativeWorld: [
+            1, 0, 0, 0,
+            0, 1, 0, 0,
+            0, 0, 1, 0,
+            0, 0, 0, 1,
+        ],
+        cameraHigh: [ 0, 0, 1 ],
+        cameraLow: [ 0, 0, 0 ],
+        viewport: [ 1280, 800 ],
+        verticalFovRadians: 1,
+        cameraLatitudeRadians: 0,
+        cameraPitchRadians: 0,
+        zoomHint: 5,
+        frameEpoch: feedback.frameEpoch,
+        residencySnapshotEpoch: feedback.residencySnapshotEpoch,
     }
 }
 

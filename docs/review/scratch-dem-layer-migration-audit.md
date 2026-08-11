@@ -6,11 +6,13 @@ As of 2026-08-07, ADR-065 corrects ADR-064's render metric while retaining ADR-0
 separation of the `z4..z10` data-page frontier from the `z4..z14` terrain render-patch
 frontier. The data frontier remains the only residency, request, cache, and fallback
 authority. An example-owned compute stage projects each bounded descendant AABB and
-stops when the 64-cell mesh reaches an eight-pixel geometric-mean cell span, then
-writes one terrain indirect argument and a global logical-patch lookup. Terrain
+stops when the 64-cell mesh reaches an eight-pixel geometric-mean cell span, balances
+the final cut to an adjacent level difference of at most one, then writes one terrain
+indirect argument and a global logical-patch lookup. Terrain
 stitching resolves selected neighbors from `(matrixLevel, tileRow, tileCol)` rather
 than a finite source-domain LoD texture. See
-[ADR-065](../decisions/ADR-065-dem-projected-grid-spacing-lod.md). ADR-064's earlier
+[ADR-065](../decisions/ADR-065-dem-projected-grid-spacing-lod.md) and
+[ADR-068](../decisions/ADR-068-dem-balanced-render-patch-cut.md). ADR-064's earlier
 two-pixel horizontal-spacing metric is historical and is not the current implementation.
 
 As of 2026-08-06, ADR-061 replaced the CPU selector and CPU-authored indirect-count
@@ -24,19 +26,20 @@ frontier audit.
 
 ### Current Render-Patch Verification
 
-The 2026-08-07 real Chrome/WebGPU gate holds the camera at pitch 70 and bearing 90.
-The converged data frontier remains within levels 9..10 while the wireframe shows
-21 perspective-aware render patches across levels 10..11 with projected cell spans
-2.30..7.38 pixels. Chrome reports zero descriptor or lookup overflow, uncaptured GPU
+The 2026-08-09 real Chrome/WebGPU gate holds the camera at pitch 70 and bearing 90.
+The converged data frontier remains within levels 9..10. At pitched zoom 14, the
+wireframe's 25-patch projected-grid cut receives three topology splits and produces
+34 balanced render patches across levels 10..14. The final maximum adjacent level
+delta is one. Chrome reports zero descriptor or lookup overflow, uncaptured GPU
 errors, device losses, diagnostic incidents, console failures, or page errors.
 
-The current example graph publishes 73 stable identities: 21 resources, four uploads,
-six BindLayouts, 10 BindSets, five Programs, five pipelines, two passes, and 20
+The current example graph publishes 116 stable identities: 25 resources, four uploads,
+11 BindLayouts, 20 BindSets, 10 Programs, 10 pipelines, two passes, and 34
 commands. The frame sequence is now:
 
 1. data frontier compute;
-2. render-patch lookup clear, projected-grid selection/culling, and indirect
-   finalization compute;
+2. render-patch lookup clear, projected-grid selection/culling, bounded balance,
+   final-cut validation, and indirect finalization compute;
 3. terrain indirect draw from the selected render patches;
 4. bounded data-frontier and render-patch diagnostic feedback.
 
@@ -96,7 +99,7 @@ current-contract change is enumerated.
 | Fixed LoD map 512 by 256 | Yes | Legacy Texture | Logical render-patch hash keyed by standard tile identity | Replaced and removed | Two parity lookup buffers avoid source-extent texel aliasing | Pitched global-identity wireframe proof | Hash capacity remains explicitly bounded |
 | DEM texture | Yes | Worker-backed image loader | Page-owned ImageBitmap then graph texture/upload | Preserved | PNG payload SHA-256 `aa7a584830f198772d242df1ce1ae47e21b2bdc85bfc1f97101af8be986c57e1` | Initialization upload observed before close | No mip chain added |
 | `lodMapShader` | Yes | Library terrain shader module | Render-patch compute and terrain lookup functions | Replaced and removed | No `lod-map.wgsl`, texture, program, pipeline, pass, or command remains | Terrain executes directly after compute | Logical lookup is the only adjacency authority |
-| `terrainMeshShader` active path | Yes | Library terrain shader module | `shaders/terrain-mesh.wgsl` | Preserved and strengthened | High-precision position/elevation path remains; neighbor lookup and arbitrary bounded level-delta snapping replace LoD-texture sampling | Terrain pixels are nonblank and pitched wireframe exposes adaptive patches | Active depth and grayscale behavior remain unchanged |
+| `terrainMeshShader` active path | Yes | Library terrain shader module | `shaders/terrain-mesh.wgsl` | Preserved and strengthened | High-precision position/elevation path remains; the final cut is level-difference-one balanced, while bounded edge snapping remains defensive | Terrain pixels are nonblank and pitched wireframe exposes balanced adaptive patches | Active depth and grayscale behavior remain unchanged |
 | `lastShader` | No | Export-only dead accumulation | None | Removed | No terrain import or pass referenced it | Not applicable | Hello GAW owns a different example-local shader with the same generic name |
 | `terrainMeshLineShader` and line pipeline | No | `LocalTerrain`, gated by constant `asLine = 0` | None | Removed | No setter/control changed `asLine`; reachable getter selected mesh pipeline | Proof exercises only reachable mesh path | Line visualization is not preserved |
 | Border image | No | Image loader only | None | Removed | Loaded but absent from every BindSet | Not applicable | None |

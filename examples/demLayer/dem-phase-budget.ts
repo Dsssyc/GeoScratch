@@ -5,13 +5,13 @@ import type {
 
 export type DemWorkerPhase = 'network' | 'decode'
 
-export type DemPhaseBudgetDescriptor = Readonly<{
+type DemPhaseBudgetDescriptor = Readonly<{
     maxNetworkRequests: number
     maxDecodeTasks: number
     maxQueuedTasks: number
 }>
 
-export type DemPhaseBudgetLaneFacts = Readonly<{
+type DemPhaseBudgetLaneFacts = Readonly<{
     limit: number
     activeCount: number
     queuedCount: number

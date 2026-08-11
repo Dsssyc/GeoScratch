@@ -80,14 +80,14 @@ export function createDemLifecycle() {
         return (error as { code?: unknown } | null | undefined)?.code === 'DEM_LIFECYCLE_STOPPED'
     }
 
-    function assertActive(action: string) {
+    function assertActive() {
 
         if (state !== 'active') throw lifecycleStopError()
     }
 
     function ownMap(value: DemMap) {
 
-        assertActive('own MapLibre map')
+        assertActive()
         if (value === undefined || value === null) throw new TypeError('MapLibre map must be defined')
         if (map !== undefined) throw new Error('DEM map ownership is already established')
         map = value
@@ -96,7 +96,7 @@ export function createDemLifecycle() {
 
     function ownRuntime(value: GPURuntime) {
 
-        assertActive('own Scratch runtime')
+        assertActive()
         if (value === undefined || value === null) throw new TypeError('Scratch runtime must be defined')
         if (runtime !== undefined) throw new Error('DEM runtime ownership is already established')
         runtime = value
@@ -105,11 +105,10 @@ export function createDemLifecycle() {
 
     function registerAction(
         actions: StopAction[],
-        actionName: string,
         { label, run }: { label: string; run: LifecycleActionRun }
     ) {
 
-        assertActive(`register ${actionName} action`)
+        assertActive()
         if (typeof label !== 'string' || label.length === 0) {
             throw new TypeError('DEM stop action label must be a non-empty string')
         }
@@ -132,17 +131,17 @@ export function createDemLifecycle() {
 
     function deferStop(action: { label: string; run: LifecycleActionRun }) {
 
-        return registerAction(stopActions, 'stop', action)
+        return registerAction(stopActions, action)
     }
 
     function deferRelease(action: { label: string; run: LifecycleActionRun }) {
 
-        return registerAction(releaseActions, 'release', action)
+        return registerAction(releaseActions, action)
     }
 
     function track<T>(observation: T | PromiseLike<T>, label = 'submitted-work'): Promise<T> {
 
-        assertActive('track work')
+        if (state === 'disposed') throw lifecycleStopError()
         if (typeof label !== 'string' || label.length === 0) {
             throw new TypeError('DEM observation label must be a non-empty string')
         }
@@ -155,7 +154,9 @@ export function createDemLifecycle() {
             settlement: promise.then<ObservationSettlement, ObservationSettlement>(
                 value => ({ status: 'fulfilled', value }),
                 (error: unknown) => ({ status: 'rejected', error })
-            ).finally(() => pendingObservations.delete(id)),
+            ).finally(() => {
+                if (state === 'active') pendingObservations.delete(id)
+            }),
         }
         pendingObservations.set(id, entry)
         return promise
@@ -165,7 +166,7 @@ export function createDemLifecycle() {
         acquisition: GPURuntime | PromiseLike<GPURuntime>
     ): Promise<GPURuntime> {
 
-        assertActive('acquire Scratch runtime')
+        assertActive()
         const guarded = Promise.resolve(acquisition).then(async value => {
             if (state !== 'active') {
                 await recordAction('release', 'late-scratch-runtime', () => value.dispose())
@@ -208,6 +209,7 @@ export function createDemLifecycle() {
         const settlements = await Promise.all(entries.map(entry => entry.settlement))
         for (let index = 0; index < settlements.length; index++) {
             const settlement = settlements[index]
+            pendingObservations.delete(entries[index].id)
             if (
                 settlement.status !== 'rejected' ||
                 isStopError(settlement.error) ||
@@ -232,7 +234,7 @@ export function createDemLifecycle() {
     async function disposeOnce(pendingAtDisposal: readonly ObservationEntry[]) {
 
         await runActions(stopActions, 'stop')
-        await settle(pendingAtDisposal)
+        await drain()
         await runActions(releaseActions, 'release')
 
         if (map !== undefined) await recordAction('release', 'maplibre-map', () => map!.remove())

@@ -8,6 +8,7 @@ import {
     GpuTileFrontier,
     MercatorCoordinate,
     TileMatrixCoverage,
+    ViewDemandProducer,
     WebMercatorQuad,
     WebMercatorQuadAddressCodec,
     WideFixedCodec,
@@ -16,21 +17,30 @@ import {
     VirtualRasterResidency,
     cellLocalF32Codec,
     coordinateDomain,
+    createGeoViewAdapter,
+    createGeoViewSnapshot,
+    geoField,
     gpuTileFrontierPolicy,
     gpuTileFrontierRenderWgslModule,
     localVector,
+    mapFieldLayer,
     ownedVirtualRasterPagePayload,
     surfaceDomain,
     tileMatrixCoverage,
+    tiledFieldRepresentation,
     wideFixedCodec,
     virtualRasterAccessor,
     virtualRasterAddressSpace,
     virtualRasterPlane,
     virtualRasterSamplingProfile,
     virtualRasterTileAddressSpace,
+    webMercatorPlanarTileSpatialProfile,
     webMercatorQuadAddressCodec,
     type CellLocalPosition,
     type CoordinateDomain,
+    type GeoField,
+    type GeoViewAdapter,
+    type GeoViewSnapshot,
     type GpuTileFrontierDescriptor,
     type GpuTileFrontierDemand,
     type GpuTileFrontierCoreFacts,
@@ -48,7 +58,10 @@ import {
     type GpuTileFrontierView,
     type GpuTileFrontierViewToken,
     type GpuTileFrontierRetirement,
+    type MapFieldLayer,
     type PositionPrecisionFacts,
+    type TileSpatialProfile,
+    type TiledFieldRepresentation,
     type WideFixedPosition,
     type WebMercatorQuadPosition,
     type VirtualRasterPageIdentity,
@@ -57,6 +70,7 @@ import {
     type VirtualRasterGpuFeedbackRingFacts,
     type VirtualRasterGpuFeedbackSlotFacts,
     type VirtualRasterSample,
+    type ViewTileDemandSet,
 } from 'geoscratch/geo'
 import { plane, sphere } from 'geoscratch/scratch'
 
@@ -268,6 +282,76 @@ const typedFrontierAddressSpace = virtualRasterTileAddressSpace({
     id: 'typed-frontier-raster',
     coverage: typedTileCoverage,
 })
+const typedFrontierSpatialProfile: TileSpatialProfile =
+    webMercatorPlanarTileSpatialProfile({ addressCodec: typedWebMercatorCodec })
+const typedFrontierPlane = virtualRasterPlane({
+    id: 'typed-frontier-height-plane',
+    addressSpace: typedFrontierAddressSpace,
+    kind: 'scalar',
+    channels: 1,
+    sampleType: 'unorm8',
+    gpuFormat: 'r8unorm',
+})
+const typedGeoField: GeoField = geoField({
+    id: 'typed-height-field',
+    domain: typedWebMercatorCodec.positionCodec.domain,
+    kind: 'scalar',
+    channels: 1,
+    sampleType: 'unorm8',
+    unit: 'm',
+    interpolation: 'linear',
+})
+const typedTiledField: TiledFieldRepresentation = tiledFieldRepresentation({
+    id: 'typed-height-field-wmq',
+    field: typedGeoField,
+    plane: typedFrontierPlane,
+    spatialProfile: typedFrontierSpatialProfile,
+    sourceRevision: 'typed-v1',
+})
+const typedViewAdapter: GeoViewAdapter<{ frameEpoch: number }> = createGeoViewAdapter({
+    id: 'typed-view-adapter',
+    read: ({ frameEpoch }) => createGeoViewSnapshot({
+        id: 'typed-view',
+        clipFromRelativeWorld: new Float32Array(16),
+        cameraHigh: [ 0, 0, 0 ],
+        cameraLow: [ 0, 0, 0 ],
+        viewport: [ 1920, 1080 ],
+        verticalFovRadians: 1,
+        cameraLatitudeRadians: 0,
+        cameraPitchRadians: 0,
+        zoomHint: 0,
+        frameEpoch,
+        residencySnapshotEpoch: 0,
+    }),
+})
+const typedViewSnapshot: GeoViewSnapshot = typedViewAdapter.read({ frameEpoch: 1 })
+const typedViewDemandProducer = new ViewDemandProducer({
+    id: 'typed-view-demand',
+    maxDemands: 8,
+})
+const typedViewDemands: ViewTileDemandSet = typedViewDemandProducer.produce({
+    view: typedViewSnapshot,
+    generation: 1,
+    demands: [ {
+        page: typedFrontierAddressSpace.rootPage(),
+        priority: { class: 'user-visible', score: 1 },
+        intent: 'coverage',
+        reason: 'typed-view-coverage',
+    } ],
+})
+const typedMapField: MapFieldLayer<{ frameEpoch: number }> = mapFieldLayer({
+    id: 'typed-map-field',
+    field: typedGeoField,
+    representation: typedTiledField,
+    spatialProfile: typedFrontierSpatialProfile,
+    viewAdapter: typedViewAdapter,
+    demandProducer: typedViewDemandProducer,
+})
+// @ts-expect-error MapFieldLayer does not own resource scheduling.
+typedMapField.scheduler
+// @ts-expect-error MapFieldLayer does not own a GPU runtime.
+typedMapField.runtime
+void typedViewDemands
 declare const typedFrontierGpuState: VirtualRasterGpuState
 const typedFrontierPolicy: GpuTileFrontierPolicy = gpuTileFrontierPolicy({
     refineErrorPixels: 2,
@@ -293,13 +377,14 @@ const typedFrontierDrawTemplates: readonly GpuTileFrontierDrawTemplate[] = [ {
 } ]
 const typedFrontierDescriptor: GpuTileFrontierDescriptor = {
     gpuState: typedFrontierGpuState,
-    addressCodec: typedWebMercatorCodec,
+    spatialProfile: typedFrontierSpatialProfile,
     policy: typedFrontierPolicy,
     levelMetrics: typedFrontierLevelMetrics,
     roots: [ typedFrontierAddressSpace.rootPage() ],
     drawTemplates: typedFrontierDrawTemplates,
 }
-const typedFrontierView: GpuTileFrontierView = {
+const typedFrontierView: GpuTileFrontierView = createGeoViewSnapshot({
+    id: 'typed-frontier-view',
     clipFromRelativeWorld: new Float32Array(16),
     cameraHigh: [ 0, 0, 0 ],
     cameraLow: [ 0, 0, 0 ],
@@ -310,7 +395,7 @@ const typedFrontierView: GpuTileFrontierView = {
     zoomHint: 0,
     frameEpoch: 1,
     residencySnapshotEpoch: 1,
-}
+})
 declare const typedFrontierRuntime: scr.GPURuntime
 declare const typedGpuFrontier: GpuTileFrontier
 declare const typedFeedbackRing: VirtualRasterGpuFeedbackRing

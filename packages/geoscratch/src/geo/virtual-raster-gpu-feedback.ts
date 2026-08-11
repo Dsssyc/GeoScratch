@@ -24,6 +24,7 @@ import {
     unregisterGpuTileFrontierFeedbackOwner,
     type GpuTileFrontierFrame,
 } from './gpu-tile-frontier.js'
+import type { TileSpatialProfile } from './tile-spatial-profile.js'
 import { virtualRasterGpuAcknowledgedSnapshot } from './virtual-raster-gpu.js'
 import type {
     VirtualRasterAddressSpace,
@@ -347,7 +348,8 @@ export class VirtualRasterGpuFeedbackRing {
             frontierAccess.output,
             frame,
             snapshot,
-            this.frontier.descriptor.policy.maximumActiveTiles
+            this.frontier.descriptor.policy.maximumActiveTiles,
+            this.frontier.descriptor.spatialProfile
         )
         return Object.freeze({
             kind: 'virtual-raster-gpu-feedback-batch',
@@ -400,7 +402,8 @@ function decodeFeedback(
     output: ReturnType<typeof gpuTileFrontierFeedbackAccess>['output'],
     frame: GpuTileFrontierFrame,
     snapshot: VirtualRasterSnapshot,
-    maximumActiveTiles: number
+    maximumActiveTiles: number,
+    spatialProfile: TileSpatialProfile
 ): DecodedFeedback {
 
     const layout = output.layout
@@ -576,7 +579,8 @@ function decodeFeedback(
         ),
         counters[5]!,
         snapshot,
-        frame.frameEpoch
+        frame.frameEpoch,
+        spatialProfile
     )
     const decodedRetirements = decodeRetirements(
         bytes.subarray(
@@ -585,7 +589,8 @@ function decodeFeedback(
         ),
         counters[6]!,
         snapshot,
-        frame.frameEpoch
+        frame.frameEpoch,
+        spatialProfile
     )
     const decodedCounters = Object.freeze({
         currentFrontierCount: counters[0]!,
@@ -659,7 +664,8 @@ function decodeDemands(
     bytes: Uint8Array,
     count: number,
     snapshot: VirtualRasterSnapshot,
-    frameEpoch: number
+    frameEpoch: number,
+    spatialProfile: TileSpatialProfile
 ): readonly GpuTileFrontierDemand[] {
 
     const records = gpuTileFrontierDemandCodec.createReadbackView(bytes).toArray()
@@ -734,7 +740,7 @@ function decodeDemands(
         }
     }
     return Object.freeze([ ...canonical.values() ].sort((left, right) =>
-        compareGpuTileFrontierPathOrder(left.page, right.page)
+        compareGpuTileFrontierPathOrder(spatialProfile, left.page, right.page)
     ))
 }
 
@@ -747,7 +753,8 @@ function decodeRetirements(
     bytes: Uint8Array,
     count: number,
     snapshot: VirtualRasterSnapshot,
-    frameEpoch: number
+    frameEpoch: number,
+    spatialProfile: TileSpatialProfile
 ): DecodedRetirements {
 
     const records = gpuTileFrontierEntryCodec.createReadbackView(bytes).toArray()
@@ -781,7 +788,7 @@ function decodeRetirements(
     return Object.freeze({
         retirements: Object.freeze(
             [ ...canonical.values() ].sort((left, right) =>
-                compareGpuTileFrontierPathOrder(left.page, right.page)
+                compareGpuTileFrontierPathOrder(spatialProfile, left.page, right.page)
             )
         ),
         discarded,

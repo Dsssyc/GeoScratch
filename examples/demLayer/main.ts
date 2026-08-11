@@ -3,7 +3,6 @@ import type {
     GPUDiagnosticCapture,
     GPUDiagnosticCaptureReport,
     GPURuntimeDiagnosticsEvidence,
-    Surface,
     SurfaceSize,
 } from 'geoscratch/scratch'
 import {
@@ -165,7 +164,7 @@ async function main(lifetime: DemLifecycle, proof: FailureProofController) {
         manifestReady,
     ])
     proof.observeRuntime(runtime)
-    lifetime.assertActive('continue DEM initialization')
+    lifetime.assertActive()
 
     const initialSize = canvasPixelSize(canvas)
     const surface = runtime.createSurface(canvas, {
@@ -174,7 +173,6 @@ async function main(lifetime: DemLifecycle, proof: FailureProofController) {
         alphaMode: 'premultiplied',
         size: initialSize,
     })
-    proof.observeSurface(surface)
     const virtualRaster = await createDemVirtualRasterRuntime({
         runtime,
         manifest,
@@ -207,12 +205,12 @@ async function main(lifetime: DemLifecycle, proof: FailureProofController) {
         failureProof: proof,
     })
     lifetime.deferRelease({ label: 'dem-gpu-frontier', run: graph.dispose })
-    lifetime.assertActive('continue DEM initialization')
+    lifetime.assertActive()
     const minimumTerrainElevationMeters = virtualRaster.manifest.offset * TERRAIN_EXAGGERATION
 
     const initialized = await graph.initialize()
     await lifetime.track(initialized.observation, 'dem-initial-submission')
-    lifetime.assertActive('continue DEM initialization')
+    lifetime.assertActive()
 
     let active = true
     let animationFrame: number | undefined
@@ -509,7 +507,6 @@ function publishFrameFacts({
     canvas.dataset.virtualSnapshotEpoch = String(state.virtualSnapshotEpoch)
     canvas.dataset.virtualRequestedPageCount = String(state.virtualRequestedPageCount)
     canvas.dataset.virtualRaster = JSON.stringify(graph.virtualRasterFacts())
-    canvas.dataset.stageActivity = JSON.stringify(state.stageActivity)
     canvas.dataset.provenance = JSON.stringify(latestProvenance)
     canvas.dataset.frontier = JSON.stringify(state.frontierFacts ?? null)
     canvas.dataset.frontierDiagnostics = JSON.stringify(state.latestFeedbackDiagnostics)
@@ -565,7 +562,6 @@ function adapterFacts(runtime: GPURuntime) {
 function createFailureProofController(configuration: FailureConfiguration) {
 
     let runtime: GPURuntime | undefined
-    let surface: Surface | undefined
     let capture: GPUDiagnosticCapture | undefined
     let captureReport: GPUDiagnosticCaptureReport | undefined
     let runtimeEvidence: GPURuntimeDiagnosticsEvidence | undefined
@@ -656,7 +652,6 @@ function createFailureProofController(configuration: FailureConfiguration) {
         }
         const serialized = JSON.stringify(proof)
         runtime = undefined
-        surface = undefined
         capture = undefined
         return frozenJson({
             ...proof,
@@ -673,7 +668,6 @@ function createFailureProofController(configuration: FailureConfiguration) {
         captureBeforeDisposal,
         finalize,
         observeRuntime: (value: GPURuntime) => { runtime = value },
-        observeSurface: (value: Surface) => { surface = value },
         mapAcquired: () => { mapAcquiredCount++ },
         rasterAcquired: () => { rasterAcquiredCount++ },
     })

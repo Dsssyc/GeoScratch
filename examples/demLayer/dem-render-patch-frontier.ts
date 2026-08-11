@@ -31,19 +31,29 @@ export const DEM_MAX_RENDER_MATRIX_LEVEL = 14
 export const DEM_MAX_RENDER_EXTRA_LEVELS = 4
 export const DEM_RENDER_PATCH_TERRAIN_SECTOR_SIZE = 64
 export const DEM_RENDER_PATCH_MAXIMUM_CELL_SPAN_PIXELS = 8
-export const DEM_RENDER_PATCH_MAXIMUM_COUNT_RATIO = 3
-export const DEM_RENDER_PATCH_BIAS_STEPS_PER_LEVEL = 4
-export const DEM_RENDER_PATCH_BIAS_STEP_COUNT =
+export const DEM_RENDER_PATCH_BALANCE_PASS_COUNT = DEM_MAX_RENDER_MATRIX_LEVEL
+const DEM_RENDER_PATCH_MAXIMUM_COUNT_RATIO = 3
+const DEM_RENDER_PATCH_BIAS_STEPS_PER_LEVEL = 4
+const DEM_RENDER_PATCH_BIAS_STEP_COUNT =
     DEM_MAX_RENDER_EXTRA_LEVELS * DEM_RENDER_PATCH_BIAS_STEPS_PER_LEVEL + 1
-export const DEM_RENDER_PATCH_BUDGET_HYSTERESIS_RATIO = 0.75
-export const DEM_RENDER_PATCH_NOMINAL_SPAN_PIXELS =
-    DEM_RENDER_PATCH_TERRAIN_SECTOR_SIZE * DEM_RENDER_PATCH_MAXIMUM_CELL_SPAN_PIXELS
+const DEM_RENDER_PATCH_BUDGET_HYSTERESIS_RATIO = 0.75
 
 const WORKGROUP_SIZE = 64
+const BALANCE_WORKGROUP_SIZE = 256
 const DRAW_ARGUMENT_BYTES = 16
 const DRAW_ARGUMENT_COUNT = 1
 const STATE_TRIAL_COUNTS_OFFSET_WORDS = 13
-const STATE_WORDS = STATE_TRIAL_COUNTS_OFFSET_WORDS + DEM_RENDER_PATCH_BIAS_STEP_COUNT
+const STATE_UNBALANCED_PATCH_COUNT_OFFSET_WORDS =
+    STATE_TRIAL_COUNTS_OFFSET_WORDS + DEM_RENDER_PATCH_BIAS_STEP_COUNT
+const STATE_BALANCE_SPLIT_COUNT_OFFSET_WORDS =
+    STATE_UNBALANCED_PATCH_COUNT_OFFSET_WORDS + 1
+const STATE_MAXIMUM_ADJACENT_LEVEL_DELTA_OFFSET_WORDS =
+    STATE_BALANCE_SPLIT_COUNT_OFFSET_WORDS + 1
+const STATE_BALANCE_PASS_COUNT_OFFSET_WORDS =
+    STATE_MAXIMUM_ADJACENT_LEVEL_DELTA_OFFSET_WORDS + 1
+const STATE_BALANCE_SCRATCH_COUNT_OFFSET_WORDS =
+    STATE_BALANCE_PASS_COUNT_OFFSET_WORDS + 1
+const STATE_WORDS = STATE_BALANCE_SCRATCH_COUNT_OFFSET_WORDS + 1
 const STATE_BYTES = STATE_WORDS * Uint32Array.BYTES_PER_ELEMENT
 const LOOKUP_ENTRY_BYTES = 8
 const bufferUsage = globalThis.GPUBufferUsage ?? Object.freeze({
@@ -86,6 +96,7 @@ const renderPatchPolicyCodec = layoutCodec({
         { name: 'biasStepsPerLevel', type: 'u32' },
         { name: 'biasStepCount', type: 'u32' },
         { name: 'budgetHysteresisRatio', type: 'f32' },
+        { name: 'balancePassCount', type: 'u32' },
     ],
 }, { usage: [ 'uniform', 'storage', 'readback' ] })
 
@@ -94,7 +105,7 @@ type BufferBindingType = 'uniform' | 'read-storage' | 'storage'
 
 type DrawTemplateId = 'terrain'
 
-export type DemRenderPatchRenderTemplate = Readonly<{
+type DemRenderPatchRenderTemplate = Readonly<{
     frontierId: string
     parity: 0 | 1
     templateId: DrawTemplateId
@@ -114,6 +125,8 @@ type ParityResources = Readonly<{
     source: GpuTileFrontierRenderTemplate
     renderPatches: BufferResource
     renderPatchLookup: BufferResource
+    balancePatches: BufferResource
+    balancePatchLookup: BufferResource
     state: BufferResource
     drawArguments: BufferResource
 }>
@@ -124,13 +137,16 @@ type ParityCommands = Readonly<{
     count: DispatchCommand
     select: DispatchCommand
     expand: DispatchCommand
+    balance: DispatchCommand
+    resetFinalDiagnostics: DispatchCommand
+    validate: DispatchCommand
     finalize: DispatchCommand
     feedback: ReadbackCommand
 }>
 
-export type DemRenderPatchFrontierFacts = Readonly<{
+type DemRenderPatchFrontierFacts = Readonly<{
     id: string
-    selectionPath: 'gpu-normalized-projected-grid-render-patches'
+    selectionPath: 'gpu-balanced-normalized-projected-grid-render-patches'
     disposed: boolean
     dataMaximumMatrixLevel: number
     maximumMatrixLevel: number
@@ -141,12 +157,15 @@ export type DemRenderPatchFrontierFacts = Readonly<{
     maximumPatchCountRatio: number
     biasStepsPerLevel: number
     biasStepCount: number
+    refinementHysteresisLevels: number
     budgetHysteresisRatio: number
     nominalPatchSpanPixels: number
     terrainSectorSize: number
     renderPatchBytes: number
     renderPatchLookupCapacity: number
     renderPatchLookupBytes: number
+    balancePassCount: number
+    balanceWorkgroupSize: number
     drawArgumentBytes: number
     workgroupSize: number
     parity: readonly Readonly<{
@@ -154,6 +173,8 @@ export type DemRenderPatchFrontierFacts = Readonly<{
         sourceBufferId: string
         renderPatchBufferId: string
         renderPatchLookupBufferId: string
+        balancePatchBufferId: string
+        balancePatchLookupBufferId: string
         stateBufferId: string
         drawArgumentBufferId: string
         commandIds: readonly string[]
@@ -171,7 +192,7 @@ type IdentityObjects = Readonly<{
     commands: readonly (ClearBufferCommand | DispatchCommand | ReadbackCommand)[]
 }>
 
-export type DemRenderPatchSelectionFacts = Readonly<{
+type DemRenderPatchSelectionFacts = Readonly<{
     selectedPatchCount: number
     descriptorOverflowCount: number
     lookupOverflowCount: number
@@ -188,6 +209,11 @@ export type DemRenderPatchSelectionFacts = Readonly<{
     selectedBiasStep: number
     selectedBiasLevels: number
     budgetLimitedByMinimumTrial: boolean
+    unbalancedPatchCount: number
+    balanceSplitCount: number
+    balanceOverheadPatchCount: number
+    maximumAdjacentLevelDelta: number
+    balancePassCount: number
 }>
 
 export type DemRenderPatchFeedback = Readonly<DemRenderPatchSelectionFacts & {
@@ -229,7 +255,7 @@ export type DemRenderPatchFrontier = Readonly<{
     dispose(): void
 }>
 
-export type DemRenderPatchFrontierOptions = Readonly<{
+type DemRenderPatchFrontierOptions = Readonly<{
     sourceTemplates: readonly [
         GpuTileFrontierRenderTemplate,
         GpuTileFrontierRenderTemplate,
@@ -249,163 +275,6 @@ export type DemRenderPatchFrontierOptions = Readonly<{
 }>
 
 let nextRenderPatchFrontierId = 1
-
-export function demRenderPatchFrameBudget({
-    viewport,
-    cameraPitchRadians,
-    nominalPatchSpanPixels = DEM_RENDER_PATCH_NOMINAL_SPAN_PIXELS,
-    maximumPatchCountRatio = DEM_RENDER_PATCH_MAXIMUM_COUNT_RATIO,
-    maximumRenderPatches = Number.MAX_SAFE_INTEGER,
-}: Readonly<{
-    viewport: readonly [number, number]
-    cameraPitchRadians: number
-    nominalPatchSpanPixels?: number
-    maximumPatchCountRatio?: number
-    maximumRenderPatches?: number
-}>): Readonly<{
-    baselinePatchBudget: number
-    framePatchBudget: number
-}> {
-
-    if (viewport?.length !== 2 || viewport.some(value => !Number.isFinite(value) || value <= 0)) {
-        throw new TypeError('DEM render-patch budget viewport must be positive and finite')
-    }
-    if (!Number.isFinite(cameraPitchRadians) || cameraPitchRadians < 0 ||
-        cameraPitchRadians > Math.PI / 2) {
-        throw new TypeError('DEM render-patch camera pitch must be within zero and pi over two')
-    }
-    if (!Number.isFinite(nominalPatchSpanPixels) || nominalPatchSpanPixels <= 0 ||
-        !Number.isFinite(maximumPatchCountRatio) || maximumPatchCountRatio < 1 ||
-        !Number.isSafeInteger(maximumRenderPatches) || maximumRenderPatches < 1) {
-        throw new TypeError('DEM render-patch budget policy is invalid')
-    }
-    const baselinePatchBudget = Math.min(maximumRenderPatches,
-        (Math.ceil(viewport[0] / nominalPatchSpanPixels) + 1) *
-        (Math.ceil(viewport[1] / nominalPatchSpanPixels) + 1)
-    )
-    const pitchWeight = Math.sin(cameraPitchRadians) ** 2
-    const pitchRatio = 1 + (maximumPatchCountRatio - 1) * pitchWeight
-    const framePatchBudget = Math.min(
-        maximumRenderPatches,
-        Math.ceil(baselinePatchBudget * pitchRatio)
-    )
-    return Object.freeze({ baselinePatchBudget, framePatchBudget })
-}
-
-export function demRenderPatchSelectBudgetBias(
-    trialCounts: readonly number[],
-    framePatchBudget: number,
-    previousBiasStep: number,
-    hysteresisRatio = DEM_RENDER_PATCH_BUDGET_HYSTERESIS_RATIO
-): number {
-
-    if (!Array.isArray(trialCounts) || trialCounts.length < 1 ||
-        trialCounts.some(count => !Number.isSafeInteger(count) || count < 0)) {
-        throw new TypeError('DEM render-patch trial counts must be non-negative integers')
-    }
-    if (!Number.isSafeInteger(framePatchBudget) || framePatchBudget < 1 ||
-        !Number.isInteger(previousBiasStep) || previousBiasStep < 0 ||
-        previousBiasStep >= trialCounts.length ||
-        !Number.isFinite(hysteresisRatio) || hysteresisRatio < 0 || hysteresisRatio > 1) {
-        throw new TypeError('DEM render-patch budget selection policy is invalid')
-    }
-    let desiredBiasStep = -1
-    let minimumTrialPatchCount = Number.POSITIVE_INFINITY
-    let minimumTrialBiasStep = 0
-    for (let index = 0; index < trialCounts.length; index++) {
-        const trialPatchCount = trialCounts[index]!
-        if (trialPatchCount < minimumTrialPatchCount) {
-            minimumTrialPatchCount = trialPatchCount
-            minimumTrialBiasStep = index
-        }
-        if (desiredBiasStep < 0 && trialPatchCount <= framePatchBudget) {
-            desiredBiasStep = index
-        }
-    }
-    if (desiredBiasStep < 0) {
-        desiredBiasStep = minimumTrialBiasStep
-    }
-    const previousCount = trialCounts[previousBiasStep]!
-    if (previousCount <= framePatchBudget &&
-        previousCount >= framePatchBudget * hysteresisRatio &&
-        previousBiasStep <= desiredBiasStep + 1) {
-        return previousBiasStep
-    }
-    return desiredBiasStep
-}
-
-export function demRenderPatchProjectedCellSpan({
-    widthPixels,
-    heightPixels,
-    terrainSectorSize = DEM_RENDER_PATCH_TERRAIN_SECTOR_SIZE,
-}: Readonly<{
-    widthPixels: number
-    heightPixels: number
-    terrainSectorSize?: number
-}>): number {
-
-    if (!Number.isFinite(widthPixels) || widthPixels < 0 ||
-        !Number.isFinite(heightPixels) || heightPixels < 0) {
-        throw new TypeError('DEM render-patch projected size must be finite and non-negative')
-    }
-    if (!Number.isInteger(terrainSectorSize) || terrainSectorSize < 1) {
-        throw new TypeError('DEM render-patch terrain sector size must be a positive integer')
-    }
-    return Math.sqrt(widthPixels * heightPixels) / terrainSectorSize
-}
-
-export function demRenderPatchSelectMatrixLevel(
-    sourceMatrixLevel: number,
-    projectedSize: Readonly<{
-        widthPixels: number
-        heightPixels: number
-    }>,
-    policy: Readonly<{
-        terrainSectorSize?: number
-        maximumCellSpanPixels?: number
-    }> = {},
-    options: Readonly<{
-        maximumMatrixLevel?: number
-        maximumExtraLevels?: number
-    }> = {}
-): number {
-
-    if (!Number.isInteger(sourceMatrixLevel) || sourceMatrixLevel < 0) {
-        throw new TypeError('DEM render-patch source matrix level must be a non-negative integer')
-    }
-    const sourceCellSpan = demRenderPatchProjectedCellSpan({
-        widthPixels: projectedSize?.widthPixels,
-        heightPixels: projectedSize?.heightPixels,
-        terrainSectorSize: policy.terrainSectorSize,
-    })
-    const maximumMatrixLevel = options.maximumMatrixLevel ?? DEM_MAX_RENDER_MATRIX_LEVEL
-    const maximumExtraLevels = options.maximumExtraLevels ?? DEM_MAX_RENDER_EXTRA_LEVELS
-    if (!Number.isInteger(maximumMatrixLevel) ||
-        maximumMatrixLevel < sourceMatrixLevel ||
-        maximumMatrixLevel > DEM_MAX_RENDER_MATRIX_LEVEL) {
-        throw new TypeError('DEM render-patch maximum matrix level is invalid')
-    }
-    if (!Number.isInteger(maximumExtraLevels) || maximumExtraLevels < 0 ||
-        maximumExtraLevels > DEM_MAX_RENDER_EXTRA_LEVELS) {
-        throw new TypeError('DEM render-patch maximum extra levels is invalid')
-    }
-    const maximumSelectedLevel = Math.max(sourceMatrixLevel, Math.min(
-        maximumMatrixLevel,
-        sourceMatrixLevel + maximumExtraLevels
-    ))
-    const maximumCellSpanPixels = policy.maximumCellSpanPixels ??
-        DEM_RENDER_PATCH_MAXIMUM_CELL_SPAN_PIXELS
-    if (!Number.isFinite(maximumCellSpanPixels) || maximumCellSpanPixels <= 0) {
-        throw new TypeError('DEM render-patch maximum cell span must be positive and finite')
-    }
-    let matrixLevel = sourceMatrixLevel
-    let cellSpan = sourceCellSpan
-    while (matrixLevel < maximumSelectedLevel && cellSpan > maximumCellSpanPixels) {
-        matrixLevel++
-        cellSpan *= 0.5
-    }
-    return matrixLevel
-}
 
 export function decodeDemRenderPatchState(
     bytes: Uint8Array,
@@ -445,6 +314,13 @@ export function decodeDemRenderPatchState(
         { length: DEM_RENDER_PATCH_BIAS_STEP_COUNT },
         (_, index) => word(STATE_TRIAL_COUNTS_OFFSET_WORDS + index)
     )
+    const unbalancedPatchCount = word(STATE_UNBALANCED_PATCH_COUNT_OFFSET_WORDS)
+    const balanceSplitCount = word(STATE_BALANCE_SPLIT_COUNT_OFFSET_WORDS)
+    const maximumAdjacentLevelDelta = word(
+        STATE_MAXIMUM_ADJACENT_LEVEL_DELTA_OFFSET_WORDS
+    )
+    const balancePassCount = word(STATE_BALANCE_PASS_COUNT_OFFSET_WORDS)
+    const balanceScratchCount = word(STATE_BALANCE_SCRATCH_COUNT_OFFSET_WORDS)
     const sourceRootPatchCount = trialCounts.at(-1)!
     const observedMinimumTrialPatchCount = Math.min(...trialCounts)
     const minimumTrialBiasStep = trialCounts.indexOf(observedMinimumTrialPatchCount)
@@ -452,26 +328,35 @@ export function decodeDemRenderPatchState(
         throw new DemRenderPatchFeedbackStaleError(options.expectedFrameEpoch, frameEpoch)
     }
     const selectedPatchCount = Math.min(attemptedPatchCount, options.maximumRenderPatches)
-    const expectedOverflowCount = Math.max(
-        attemptedPatchCount - options.maximumRenderPatches,
-        0
-    )
-    if (descriptorOverflowCount !== expectedOverflowCount) {
-        throw new RangeError('DEM render-patch descriptor overflow counters disagree')
+    if (attemptedPatchCount > options.maximumRenderPatches ||
+        balanceScratchCount > options.maximumRenderPatches ||
+        descriptorOverflowCount !== 0) {
+        throw new RangeError('DEM balanced render-patch capacity was exceeded')
+    }
+    if (maximumAdjacentLevelDelta > 1) {
+        throw new RangeError(
+            'DEM render-patch cut violates the level-difference-one invariant'
+        )
     }
     if (baselinePatchBudget < 1 || framePatchBudget < baselinePatchBudget ||
         framePatchBudget > options.maximumRenderPatches ||
         selectedBiasStep >= DEM_RENDER_PATCH_BIAS_STEP_COUNT ||
         requestedPatchCount !== trialCounts[0] ||
         minimumTrialPatchCount !== observedMinimumTrialPatchCount ||
-        attemptedPatchCount !== trialCounts[selectedBiasStep] ||
+        unbalancedPatchCount !== trialCounts[selectedBiasStep] ||
+        attemptedPatchCount !== unbalancedPatchCount + balanceSplitCount * 3 ||
+        balancePassCount !== DEM_RENDER_PATCH_BALANCE_PASS_COUNT ||
         (minimumTrialPatchCount <= framePatchBudget &&
-            attemptedPatchCount > framePatchBudget) ||
+            unbalancedPatchCount > framePatchBudget) ||
         (minimumTrialPatchCount > framePatchBudget &&
             (selectedBiasStep !== minimumTrialBiasStep ||
-                attemptedPatchCount !== minimumTrialPatchCount))) {
+                unbalancedPatchCount !== minimumTrialPatchCount))) {
         throw new RangeError(`DEM render-patch budget feedback is inconsistent: ${JSON.stringify({
             attemptedPatchCount,
+            unbalancedPatchCount,
+            balanceSplitCount,
+            maximumAdjacentLevelDelta,
+            balancePassCount,
             baselinePatchBudget,
             framePatchBudget,
             requestedPatchCount,
@@ -490,6 +375,11 @@ export function decodeDemRenderPatchState(
         selectedBiasStep,
         selectedBiasLevels: selectedBiasStep / DEM_RENDER_PATCH_BIAS_STEPS_PER_LEVEL,
         budgetLimitedByMinimumTrial: minimumTrialPatchCount > framePatchBudget,
+        unbalancedPatchCount,
+        balanceSplitCount,
+        balanceOverheadPatchCount: selectedPatchCount - unbalancedPatchCount,
+        maximumAdjacentLevelDelta,
+        balancePassCount,
     }
     if (selectedPatchCount === 0) {
         return Object.freeze({
@@ -519,7 +409,7 @@ export function decodeDemRenderPatchState(
     })
 }
 
-export function demRenderPatchLookupCapacity(
+function demRenderPatchLookupCapacity(
     maximumSourceTiles: number,
     maximumExtraLevels: number
 ): number {
@@ -617,6 +507,7 @@ export async function createDemRenderPatchFrontier(
                 biasStepsPerLevel: DEM_RENDER_PATCH_BIAS_STEPS_PER_LEVEL,
                 biasStepCount: DEM_RENDER_PATCH_BIAS_STEP_COUNT,
                 budgetHysteresisRatio: descriptor.budgetHysteresisRatio,
+                balancePassCount: DEM_RENDER_PATCH_BALANCE_PASS_COUNT,
             }),
         }))
         const parityResources = await Promise.all(descriptor.sourceTemplates.map(
@@ -632,6 +523,16 @@ export async function createDemRenderPatchFrontier(
                     })),
                     renderPatchLookup: own(await runtime.createBuffer({
                         label: `DEM render-patch lookup ${parity}`,
+                        size: renderPatchLookupBytes,
+                        usage: bufferUsage.COPY_DST | bufferUsage.STORAGE,
+                    })),
+                    balancePatches: own(await runtime.createBuffer({
+                        label: `DEM balanced render-patch scratch ${parity}`,
+                        size: renderPatchBytes,
+                        usage: bufferUsage.COPY_DST | bufferUsage.STORAGE,
+                    })),
+                    balancePatchLookup: own(await runtime.createBuffer({
+                        label: `DEM balanced render-patch lookup scratch ${parity}`,
                         size: renderPatchLookupBytes,
                         usage: bufferUsage.COPY_DST | bufferUsage.STORAGE,
                     })),
@@ -654,6 +555,14 @@ export async function createDemRenderPatchFrontier(
             own(runtime.createClearBufferCommand({
                 label: `Clear DEM render patches ${resources.parity}`,
                 target: resources.renderPatches.region(),
+            })),
+            own(runtime.createClearBufferCommand({
+                label: `Clear DEM balanced render-patch scratch ${resources.parity}`,
+                target: resources.balancePatches.region(),
+            })),
+            own(runtime.createClearBufferCommand({
+                label: `Clear DEM balanced render-patch lookup scratch ${resources.parity}`,
+                target: resources.balancePatchLookup.region(),
             })),
             own(runtime.createClearBufferCommand({
                 label: `Clear DEM render-patch state ${resources.parity}`,
@@ -721,6 +630,12 @@ export async function createDemRenderPatchFrontier(
                 ),
                 binding(3, 'sourceDrawArguments', 'read-storage', DRAW_ARGUMENT_BYTES),
                 binding(5, 'renderPatchState', 'storage', STATE_BYTES),
+                binding(
+                    10,
+                    'previousRenderPatchLookup',
+                    'read-storage',
+                    renderPatchLookupBytes
+                ),
             ],
             own
         )
@@ -759,6 +674,70 @@ export async function createDemRenderPatchFrontier(
                     'storage',
                     renderPatchLookupBytes
                 ),
+                binding(
+                    10,
+                    'previousRenderPatchLookup',
+                    'read-storage',
+                    renderPatchLookupBytes
+                ),
+            ],
+            own
+        )
+        const balanceKernel = await createKernel(
+            runtime,
+            shader,
+            'balanceRenderPatches',
+            'DEM balance render-patch cut',
+            [
+                binding(1, 'renderPatchPolicy', 'uniform', renderPatchPolicyCodec.byteLength()),
+                binding(4, 'renderPatches', 'storage', renderPatchBytes),
+                binding(5, 'renderPatchState', 'storage', STATE_BYTES),
+                binding(
+                    7,
+                    'renderPatchLookup',
+                    'storage',
+                    renderPatchLookupBytes
+                ),
+                binding(8, 'balancePatches', 'storage', renderPatchBytes),
+                binding(
+                    9,
+                    'balancePatchLookup',
+                    'storage',
+                    renderPatchLookupBytes
+                ),
+            ],
+            own
+        )
+        const resetFinalDiagnosticsKernel = await createKernel(
+            runtime,
+            shader,
+            'resetFinalRenderPatchDiagnostics',
+            'DEM reset final render-patch diagnostics',
+            [ binding(5, 'renderPatchState', 'storage', STATE_BYTES) ],
+            own
+        )
+        const validateKernel = await createKernel(
+            runtime,
+            shader,
+            'validateFinalRenderPatchCut',
+            'DEM validate final render-patch cut',
+            [
+                binding(0, 'mapMeta', 'uniform', descriptor.sourceTemplates[0].mapMeta.size),
+                binding(1, 'renderPatchPolicy', 'uniform', renderPatchPolicyCodec.byteLength()),
+                binding(4, 'renderPatches', 'storage', renderPatchBytes),
+                binding(5, 'renderPatchState', 'storage', STATE_BYTES),
+                binding(
+                    7,
+                    'renderPatchLookup',
+                    'storage',
+                    renderPatchLookupBytes
+                ),
+                binding(
+                    9,
+                    'balancePatchLookup',
+                    'storage',
+                    renderPatchLookupBytes
+                ),
             ],
             own
         )
@@ -781,6 +760,7 @@ export async function createDemRenderPatchFrontier(
         )
         const bindSets: BindSet[] = []
         const commands = await Promise.all(parityResources.map(async resources => {
+            const previousResources = parityResources[resources.parity === 0 ? 1 : 0]
             const resetSet = own(await runtime.createBindSet(resetKernel.layout, {
                 mapMeta: resources.source.mapMeta.region(),
                 renderPatchPolicy: policy.region({ layout: renderPatchPolicyCodec.artifact }),
@@ -793,6 +773,7 @@ export async function createDemRenderPatchFrontier(
                 sourceVisibleInstances: resources.source.visibleInstances.region(),
                 sourceDrawArguments: resources.source.drawArgument.region,
                 renderPatchState: resources.state.region(),
+                previousRenderPatchLookup: previousResources.renderPatchLookup.region(),
             }, { label: `DEM count render-patch trials ${resources.parity}` }))
             const selectSet = own(await runtime.createBindSet(selectKernel.layout, {
                 mapMeta: resources.source.mapMeta.region(),
@@ -809,13 +790,50 @@ export async function createDemRenderPatchFrontier(
                 }),
                 renderPatchState: resources.state.region(),
                 renderPatchLookup: resources.renderPatchLookup.region(),
+                previousRenderPatchLookup: previousResources.renderPatchLookup.region(),
             }, { label: `DEM expand render patches ${resources.parity}` }))
+            const balanceSet = own(await runtime.createBindSet(balanceKernel.layout, {
+                renderPatchPolicy: policy.region({ layout: renderPatchPolicyCodec.artifact }),
+                renderPatches: resources.renderPatches.region({
+                    layout: renderPatchCodec.artifact,
+                }),
+                renderPatchState: resources.state.region(),
+                renderPatchLookup: resources.renderPatchLookup.region(),
+                balancePatches: resources.balancePatches.region({
+                    layout: renderPatchCodec.artifact,
+                }),
+                balancePatchLookup: resources.balancePatchLookup.region(),
+            }, { label: `DEM balance render-patch cut ${resources.parity}` }))
+            const resetFinalDiagnosticsSet = own(await runtime.createBindSet(
+                resetFinalDiagnosticsKernel.layout,
+                { renderPatchState: resources.state.region() },
+                { label: `DEM reset final render-patch diagnostics ${resources.parity}` }
+            ))
+            const validateSet = own(await runtime.createBindSet(validateKernel.layout, {
+                mapMeta: resources.source.mapMeta.region(),
+                renderPatchPolicy: policy.region({ layout: renderPatchPolicyCodec.artifact }),
+                renderPatches: resources.renderPatches.region({
+                    layout: renderPatchCodec.artifact,
+                }),
+                renderPatchState: resources.state.region(),
+                renderPatchLookup: resources.renderPatchLookup.region(),
+                balancePatchLookup: resources.balancePatchLookup.region(),
+            }, { label: `DEM validate final render-patch cut ${resources.parity}` }))
             const finalizeSet = own(await runtime.createBindSet(finalizeKernel.layout, {
                 renderPatchPolicy: policy.region({ layout: renderPatchPolicyCodec.artifact }),
                 renderPatchState: resources.state.region(),
                 drawArguments: resources.drawArguments.region(),
             }, { label: `DEM finalize render patches ${resources.parity}` }))
-            bindSets.push(resetSet, countSet, selectSet, expandSet, finalizeSet)
+            bindSets.push(
+                resetSet,
+                countSet,
+                selectSet,
+                expandSet,
+                balanceSet,
+                resetFinalDiagnosticsSet,
+                validateSet,
+                finalizeSet
+            )
             const clearLookup = own(runtime.createClearBufferCommand({
                 label: `Clear DEM render-patch lookup ${resources.parity}`,
                 target: resources.renderPatchLookup.region(),
@@ -855,10 +873,32 @@ export async function createDemRenderPatchFrontier(
                     resources.renderPatches,
                     resources.state,
                     resources.renderPatchLookup,
+                    previousResources.renderPatchLookup,
                 ], [
                     resources.renderPatches,
                     resources.state,
                     resources.renderPatchLookup,
+                ]),
+                whenMissing: 'throw',
+            }))
+            const balance = own(runtime.createDispatchCommand({
+                label: `Balance DEM render-patch cut ${resources.parity}`,
+                pipeline: balanceKernel.pipeline,
+                bindSets: [ { set: balanceSet } ],
+                count: { workgroups: [ 1, 1, 1 ] },
+                resources: currentAccess([
+                    policy,
+                    resources.renderPatches,
+                    resources.state,
+                    resources.renderPatchLookup,
+                    resources.balancePatches,
+                    resources.balancePatchLookup,
+                ], [
+                    resources.renderPatches,
+                    resources.state,
+                    resources.renderPatchLookup,
+                    resources.balancePatches,
+                    resources.balancePatchLookup,
                 ]),
                 whenMissing: 'throw',
             }))
@@ -879,6 +919,7 @@ export async function createDemRenderPatchFrontier(
                     resources.source.visibleInstances,
                     resources.source.drawArgument.resource,
                     resources.state,
+                    previousResources.renderPatchLookup,
                 ], [ resources.state ]),
                 whenMissing: 'throw',
             }))
@@ -891,6 +932,43 @@ export async function createDemRenderPatchFrontier(
                     [ resources.source.mapMeta, policy, resources.state ],
                     [ resources.state ]
                 ),
+                whenMissing: 'throw',
+            }))
+            const resetFinalDiagnostics = own(runtime.createDispatchCommand({
+                label: `Reset final DEM render-patch diagnostics ${resources.parity}`,
+                pipeline: resetFinalDiagnosticsKernel.pipeline,
+                bindSets: [ { set: resetFinalDiagnosticsSet } ],
+                count: { workgroups: [ 1, 1, 1 ] },
+                resources: currentAccess(
+                    [ resources.state ],
+                    [ resources.state ]
+                ),
+                whenMissing: 'throw',
+            }))
+            const validate = own(runtime.createDispatchCommand({
+                label: `Validate final DEM render-patch cut ${resources.parity}`,
+                pipeline: validateKernel.pipeline,
+                bindSets: [ { set: validateSet } ],
+                count: {
+                    workgroups: [
+                        Math.ceil(maximumRenderPatches / WORKGROUP_SIZE),
+                        1,
+                        1,
+                    ],
+                },
+                resources: currentAccess([
+                    resources.source.mapMeta,
+                    policy,
+                    resources.renderPatches,
+                    resources.state,
+                    resources.renderPatchLookup,
+                    resources.balancePatchLookup,
+                ], [
+                    resources.renderPatches,
+                    resources.state,
+                    resources.renderPatchLookup,
+                    resources.balancePatchLookup,
+                ]),
                 whenMissing: 'throw',
             }))
             const finalize = own(runtime.createDispatchCommand({
@@ -919,6 +997,9 @@ export async function createDemRenderPatchFrontier(
                 count,
                 select,
                 expand,
+                balance,
+                resetFinalDiagnostics,
+                validate,
                 finalize,
                 feedback,
             })
@@ -928,6 +1009,9 @@ export async function createDemRenderPatchFrontier(
             countKernel.program,
             selectKernel.program,
             expandKernel.program,
+            balanceKernel.program,
+            resetFinalDiagnosticsKernel.program,
+            validateKernel.program,
             finalizeKernel.program,
         ])
         const pipelines = Object.freeze([
@@ -935,6 +1019,9 @@ export async function createDemRenderPatchFrontier(
             countKernel.pipeline,
             selectKernel.pipeline,
             expandKernel.pipeline,
+            balanceKernel.pipeline,
+            resetFinalDiagnosticsKernel.pipeline,
+            validateKernel.pipeline,
             finalizeKernel.pipeline,
         ])
         const layouts = Object.freeze([
@@ -942,6 +1029,9 @@ export async function createDemRenderPatchFrontier(
             countKernel.layout,
             selectKernel.layout,
             expandKernel.layout,
+            balanceKernel.layout,
+            resetFinalDiagnosticsKernel.layout,
+            validateKernel.layout,
             finalizeKernel.layout,
         ])
 
@@ -979,6 +1069,8 @@ export async function createDemRenderPatchFrontier(
                 ...parityResources.flatMap(resources => [
                     resources.renderPatches,
                     resources.renderPatchLookup,
+                    resources.balancePatches,
+                    resources.balancePatchLookup,
                     resources.state,
                     resources.drawArguments,
                 ]),
@@ -997,6 +1089,9 @@ export async function createDemRenderPatchFrontier(
                     parity.count,
                     parity.select,
                     parity.expand,
+                    parity.balance,
+                    parity.resetFinalDiagnostics,
+                    parity.validate,
                     parity.finalize,
                     parity.feedback,
                 ]),
@@ -1011,6 +1106,9 @@ export async function createDemRenderPatchFrontier(
                     throw new TypeError('DEM render-patch initialization requires a live owned builder')
                 }
                 for (const command of initializationClears) builder.clear(command)
+                for (const parityCommands of commands) {
+                    builder.clear(parityCommands.clearLookup)
+                }
                 builder.upload(policyUpload)
                 return builder
             },
@@ -1029,6 +1127,9 @@ export async function createDemRenderPatchFrontier(
                     selected.count,
                     selected.select,
                     selected.expand,
+                    selected.balance,
+                    selected.resetFinalDiagnostics,
+                    selected.validate,
                     selected.finalize,
                 ])
                 encodedFrames.set(builder, frame)
@@ -1096,7 +1197,7 @@ export async function createDemRenderPatchFrontier(
             facts() {
                 return Object.freeze({
                     id,
-                    selectionPath: 'gpu-normalized-projected-grid-render-patches' as const,
+                    selectionPath: 'gpu-balanced-normalized-projected-grid-render-patches' as const,
                     disposed,
                     dataMaximumMatrixLevel: descriptor.dataMaximumMatrixLevel,
                     maximumMatrixLevel: descriptor.renderMaximumMatrixLevel,
@@ -1107,6 +1208,8 @@ export async function createDemRenderPatchFrontier(
                     maximumPatchCountRatio: descriptor.maximumPatchCountRatio,
                     biasStepsPerLevel: DEM_RENDER_PATCH_BIAS_STEPS_PER_LEVEL,
                     biasStepCount: DEM_RENDER_PATCH_BIAS_STEP_COUNT,
+                    refinementHysteresisLevels:
+                        1 / DEM_RENDER_PATCH_BIAS_STEPS_PER_LEVEL,
                     budgetHysteresisRatio: descriptor.budgetHysteresisRatio,
                     nominalPatchSpanPixels: descriptor.terrainSectorSize *
                         descriptor.maximumCellSpanPixels,
@@ -1114,6 +1217,8 @@ export async function createDemRenderPatchFrontier(
                     renderPatchBytes,
                     renderPatchLookupCapacity,
                     renderPatchLookupBytes,
+                    balancePassCount: DEM_RENDER_PATCH_BALANCE_PASS_COUNT,
+                    balanceWorkgroupSize: BALANCE_WORKGROUP_SIZE,
                     drawArgumentBytes: DRAW_ARGUMENT_BYTES * DRAW_ARGUMENT_COUNT,
                     workgroupSize: WORKGROUP_SIZE,
                     parity: Object.freeze(parityResources.map(resources => Object.freeze({
@@ -1121,6 +1226,8 @@ export async function createDemRenderPatchFrontier(
                         sourceBufferId: resources.source.visibleInstances.id,
                         renderPatchBufferId: resources.renderPatches.id,
                         renderPatchLookupBufferId: resources.renderPatchLookup.id,
+                        balancePatchBufferId: resources.balancePatches.id,
+                        balancePatchLookupBufferId: resources.balancePatchLookup.id,
                         stateBufferId: resources.state.id,
                         drawArgumentBufferId: resources.drawArguments.id,
                         commandIds: Object.freeze([
@@ -1129,6 +1236,9 @@ export async function createDemRenderPatchFrontier(
                             commands[resources.parity].count.id,
                             commands[resources.parity].select.id,
                             commands[resources.parity].expand.id,
+                            commands[resources.parity].balance.id,
+                            commands[resources.parity].resetFinalDiagnostics.id,
+                            commands[resources.parity].validate.id,
                             commands[resources.parity].finalize.id,
                             commands[resources.parity].feedback.id,
                         ]),

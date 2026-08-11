@@ -18,9 +18,9 @@ import {
 } from './dem-rendering-preference.ts'
 import type { DemRenderingPreference } from './dem-rendering-preference.ts'
 
-export type DemControlPanelStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
+type DemControlPanelStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
 
-export type PreparedDemControlPanel = Readonly<{
+type PreparedDemControlPanel = Readonly<{
     parameters: URLSearchParams
     config: DemCachePanelConfig
     source: 'url' | 'storage' | 'default'
@@ -30,14 +30,14 @@ export type PreparedDemControlPanel = Readonly<{
     mount(options: DemControlPanelMountOptions): MountedDemControlPanel
 }>
 
-export type DemControlPanelMountOptions = Readonly<{
+type DemControlPanelMountOptions = Readonly<{
     container: HTMLElement
     location: Pick<Location, 'href' | 'replace'>
     onTileWireframeChange(enabled: boolean): void
     compact?: boolean
 }>
 
-export type MountedDemControlPanel = Readonly<{
+type MountedDemControlPanel = Readonly<{
     dispose(): void
 }>
 

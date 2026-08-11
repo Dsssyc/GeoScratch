@@ -205,11 +205,6 @@ export default defineWorkerModule({
 
                 return facts(state)
             },
-            async clear(state: DemTileWorkerState): Promise<DemTileWorkerFacts> {
-
-                await state.cache?.clear()
-                return facts(state)
-            },
         },
         snapshot(state: DemTileWorkerState) {
 

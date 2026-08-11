@@ -183,6 +183,82 @@ describe('examples structure', () => {
         expect(config).to.not.match(/scratch[A-Z]\w*\s*:/)
     })
 
+    it('keeps long-lived dev serving independent from transient dist rebuilds', async() => {
+
+        const { loadConfigFromFile } = await import('vite')
+        const configPath = path.join(root, 'examples', 'vite.config.ts')
+        const serve = await loadConfigFromFile(
+            { command: 'serve', mode: 'development' },
+            configPath
+        )
+        const build = await loadConfigFromFile(
+            { command: 'build', mode: 'production' },
+            configPath
+        )
+        const aliases = serve?.config.resolve?.alias
+        const replacementFor = specifier => aliases?.find(alias =>
+            alias.find instanceof RegExp
+                ? alias.find.test(specifier)
+                : alias.find === specifier
+        )?.replacement
+
+        expect(aliases).to.be.an('array')
+        expect(replacementFor('geoscratch')).to.equal(
+            path.join(root, 'packages', 'geoscratch', 'src', 'index.ts')
+        )
+        expect(replacementFor('geoscratch/scratch')).to.equal(
+            path.join(root, 'packages', 'geoscratch', 'src', 'scratch.ts')
+        )
+        expect(replacementFor('geoscratch/geo')).to.equal(
+            path.join(root, 'packages', 'geoscratch', 'src', 'geo', 'index.ts')
+        )
+        expect(build?.config.resolve?.alias).to.equal(undefined)
+
+        const runtimeUrlPlugin = serve?.config.plugins?.find(plugin =>
+            plugin.name === 'geoscratch-source-runtime-urls'
+        )
+        const buildRuntimeUrlPlugin = build?.config.plugins?.find(plugin =>
+            plugin.name === 'geoscratch-source-runtime-urls'
+        )
+        let middleware
+        runtimeUrlPlugin?.configureServer?.({
+            middlewares: {
+                use(candidate) {
+                    middleware = candidate
+                },
+            },
+        })
+        const request = {
+            url: `/@fs${path.join(
+                root,
+                'packages',
+                'geoscratch',
+                'src',
+                'scratch',
+                'worker',
+                'worker-bootstrap.js'
+            )}`,
+        }
+        let continued = false
+
+        middleware?.(request, {}, () => {
+            continued = true
+        })
+
+        expect(runtimeUrlPlugin).to.not.equal(undefined)
+        expect(buildRuntimeUrlPlugin).to.equal(undefined)
+        expect(request.url).to.equal(`/@fs${path.join(
+            root,
+            'packages',
+            'geoscratch',
+            'src',
+            'scratch',
+            'worker',
+            'worker-bootstrap.ts'
+        )}`)
+        expect(continued).to.equal(true)
+    })
+
     it('keeps the DEM layer example focused on terrain only', () => {
         const source = read('examples', 'demLayer', 'main.ts')
         const layer = read('examples', 'demLayer', 'dem-layer.ts')
@@ -208,8 +284,10 @@ describe('examples structure', () => {
         expect(mapRuntime).to.include('getPitch()')
         expect(mapRuntime).to.include('getBearing()')
         expect(mapRuntime).to.match(
-            /getScratchMercatorMatrix\(\s*transform,\s*minimumTerrainElevationMeters\s*\)/
+            /getCameraRelativeMercatorMatrix\(\s*transform,\s*minimumTerrainElevationMeters,\s*mercatorCenter,\s*cameraPosition\.lngLat\.lat\s*\)/
         )
+        expect(mapRuntime).to.include('new Float64Array(16)')
+        expect(mapRuntime).to.include('cameraOrigin.x * transform.worldSize - point.x')
         expect(mapRuntime).to.include('calculateFarZForTerrainPlane')
         expect(mapRuntime).to.not.include('underwaterTerrainMinElevation')
         expect(source).to.not.include('VITE_MAPBOX_ACCESS_TOKEN')

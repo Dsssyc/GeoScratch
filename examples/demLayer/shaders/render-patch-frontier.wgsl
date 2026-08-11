@@ -13,10 +13,20 @@ struct DemRenderPatchState {
     selectedBiasStep: atomic<u32>,
     minimumTrialPatchCount: atomic<u32>,
     trialCounts: array<atomic<u32>, 17>,
+    unbalancedPatchCount: atomic<u32>,
+    balanceSplitCount: atomic<u32>,
+    maximumAdjacentLevelDelta: atomic<u32>,
+    balancePassCount: atomic<u32>,
+    balanceScratchCount: atomic<u32>,
 };
 
 struct DemRenderPatchAtomicLookupEntry {
     key: atomic<u32>,
+    patchIndex: u32,
+};
+
+struct DemRenderPatchLookupEntry {
+    key: u32,
     patchIndex: u32,
 };
 
@@ -45,6 +55,11 @@ struct DemRenderPatchQuanta {
 @group(0) @binding(6) var<storage, read_write> drawArguments: array<u32>;
 @group(0) @binding(7) var<storage, read_write> renderPatchLookup:
     array<DemRenderPatchAtomicLookupEntry>;
+@group(0) @binding(8) var<storage, read_write> balancePatches: array<DemRenderPatch>;
+@group(0) @binding(9) var<storage, read_write> balancePatchLookup:
+    array<DemRenderPatchAtomicLookupEntry>;
+@group(0) @binding(10) var<storage, read> previousRenderPatchLookup:
+    array<DemRenderPatchLookupEntry>;
 
 const WEB_MERCATOR_WORLD_WIDTH_METERS: f32 = 40075016.0f;
 
@@ -184,24 +199,47 @@ fn patchVisible(bounds: DemRenderPatchBounds) -> bool {
 }
 
 fn projectedPlaneCellSpanPixels(bounds: DemRenderPatchBounds, elevation: f32) -> f32 {
-    var minimumNdc = vec2f(1e20f);
-    var maximumNdc = vec2f(-1e20f);
+    var clipCorners: array<vec4f, 4>;
     for (var index = 0u; index < 4u; index += 1u) {
         let point = vec3f(
-            select(bounds.minimum.x, bounds.maximum.x, (index & 1u) != 0u),
-            select(bounds.minimum.y, bounds.maximum.y, (index & 2u) != 0u),
+            select(
+                bounds.minimum.x,
+                bounds.maximum.x,
+                index == 1u || index == 2u,
+            ),
+            select(bounds.minimum.y, bounds.maximum.y, index >= 2u),
             elevation,
         );
-        let clip = mapMeta.clipFromRelativeWorld * vec4f(
-            point,
-            1.0f,
-        );
-        if (clip.w <= 1e-5f) {
-            return 65535.0f;
+        clipCorners[index] = mapMeta.clipFromRelativeWorld * vec4f(point, 1.0f);
+    }
+
+    var minimumNdc = vec2f(1e20f);
+    var maximumNdc = vec2f(-1e20f);
+    var clippedPointCount = 0u;
+    for (var index = 0u; index < 4u; index += 1u) {
+        let clip = clipCorners[index];
+        if (clip.z >= 0.0f && clip.w > 1e-5f) {
+            let ndc = clip.xy / clip.w;
+            minimumNdc = min(minimumNdc, ndc);
+            maximumNdc = max(maximumNdc, ndc);
+            clippedPointCount += 1u;
         }
-        let ndc = clip.xy / clip.w;
-        minimumNdc = min(minimumNdc, ndc);
-        maximumNdc = max(maximumNdc, ndc);
+    }
+    for (var index = 0u; index < 4u; index += 1u) {
+        let start = clipCorners[index];
+        let end = clipCorners[(index + 1u) & 3u];
+        if ((start.z >= 0.0f) != (end.z >= 0.0f)) {
+            let intersection = mix(start, end, start.z / (start.z - end.z));
+            if (intersection.w > 1e-5f) {
+                let ndc = intersection.xy / intersection.w;
+                minimumNdc = min(minimumNdc, ndc);
+                maximumNdc = max(maximumNdc, ndc);
+                clippedPointCount += 1u;
+            }
+        }
+    }
+    if (clippedPointCount == 0u) {
+        return 0.0f;
     }
     let clippedMinimum = clamp(minimumNdc, vec2f(-1.0f), vec2f(1.0f));
     let clippedMaximum = clamp(maximumNdc, vec2f(-1.0f), vec2f(1.0f));
@@ -223,6 +261,35 @@ fn projectedCellSpanPixels(bounds: DemRenderPatchBounds) -> f32 {
 fn trialCellSpanThreshold(biasStep: u32) -> f32 {
     return renderPatchPolicy.maximumCellSpanPixels * exp2(
         f32(biasStep) / f32(renderPatchPolicy.biasStepsPerLevel),
+    );
+}
+
+fn previousLookupContains(matrixLevel: u32, tileRow: u32, tileCol: u32) -> bool {
+    let key = DemRenderPatch_lookupKey(matrixLevel, tileRow, tileCol);
+    for (var probe = 0u; probe < renderPatchPolicy.renderPatchLookupCapacity; probe += 1u) {
+        let slot = DemRenderPatch_lookupSlot(
+            key,
+            probe,
+            renderPatchPolicy.renderPatchLookupCapacity,
+        );
+        let observed = previousRenderPatchLookup[slot].key;
+        if (observed == key) { return true; }
+        if (observed == 0u) { return false; }
+    }
+    return false;
+}
+
+fn historyAwareRefinementThreshold(
+    nominalThreshold: f32,
+    matrixLevel: u32,
+    tileRow: u32,
+    tileCol: u32,
+) -> f32 {
+    if (!previousLookupContains(matrixLevel, tileRow, tileCol)) {
+        return nominalThreshold;
+    }
+    return nominalThreshold * exp2(
+        1.0f / f32(renderPatchPolicy.biasStepsPerLevel),
     );
 }
 
@@ -261,6 +328,175 @@ fn insertRenderPatchLookup(
         }
     }
     return false;
+}
+
+fn insertBalancePatchLookup(
+    matrixLevel: u32,
+    tileRow: u32,
+    tileCol: u32,
+    patchIndex: u32,
+) -> bool {
+    let key = DemRenderPatch_lookupKey(matrixLevel, tileRow, tileCol);
+    for (var probe = 0u; probe < renderPatchPolicy.renderPatchLookupCapacity; probe += 1u) {
+        let slot = DemRenderPatch_lookupSlot(
+            key,
+            probe,
+            renderPatchPolicy.renderPatchLookupCapacity,
+        );
+        loop {
+            let claimed = atomicCompareExchangeWeak(&balancePatchLookup[slot].key, 0u, key);
+            if (claimed.exchanged) {
+                balancePatchLookup[slot].patchIndex = patchIndex;
+                return true;
+            }
+            if (claimed.old_value == key) { return true; }
+            if (claimed.old_value != 0u) { break; }
+        }
+    }
+    return false;
+}
+
+fn primaryLookupContains(matrixLevel: u32, tileRow: u32, tileCol: u32) -> bool {
+    let key = DemRenderPatch_lookupKey(matrixLevel, tileRow, tileCol);
+    for (var probe = 0u; probe < renderPatchPolicy.renderPatchLookupCapacity; probe += 1u) {
+        let slot = DemRenderPatch_lookupSlot(
+            key,
+            probe,
+            renderPatchPolicy.renderPatchLookupCapacity,
+        );
+        let observed = atomicLoad(&renderPatchLookup[slot].key);
+        if (observed == key) { return true; }
+        if (observed == 0u) { return false; }
+    }
+    return false;
+}
+
+fn scratchLookupContains(matrixLevel: u32, tileRow: u32, tileCol: u32) -> bool {
+    let key = DemRenderPatch_lookupKey(matrixLevel, tileRow, tileCol);
+    for (var probe = 0u; probe < renderPatchPolicy.renderPatchLookupCapacity; probe += 1u) {
+        let slot = DemRenderPatch_lookupSlot(
+            key,
+            probe,
+            renderPatchPolicy.renderPatchLookupCapacity,
+        );
+        let observed = atomicLoad(&balancePatchLookup[slot].key);
+        if (observed == key) { return true; }
+        if (observed == 0u) { return false; }
+    }
+    return false;
+}
+
+fn inputLookupContains(
+    fromScratch: bool,
+    matrixLevel: u32,
+    tileRow: u32,
+    tileCol: u32,
+) -> bool {
+    if (fromScratch) {
+        return scratchLookupContains(matrixLevel, tileRow, tileCol);
+    }
+    return primaryLookupContains(matrixLevel, tileRow, tileCol);
+}
+
+fn inputRenderPatch(fromScratch: bool, patchIndex: u32) -> DemRenderPatch {
+    if (fromScratch) {
+        return balancePatches[patchIndex];
+    }
+    return renderPatches[patchIndex];
+}
+
+fn maximumFinerNeighborDelta(fromScratch: bool, candidate: DemRenderPatch) -> u32 {
+    let availableDelta = min(
+        renderPatchPolicy.maximumExtraLevels + 1u,
+        renderPatchPolicy.renderMaximumMatrixLevel - candidate.matrixLevel,
+    );
+    var maximumDelta = 0u;
+    for (var delta = 1u; delta <= 5u; delta += 1u) {
+        if (delta > availableDelta) { break; }
+        let scale = 1u << delta;
+        let level = candidate.matrixLevel + delta;
+        let levelWidth = 1u << level;
+        let firstRow = candidate.tileRow * scale;
+        let firstCol = candidate.tileCol * scale;
+        let westCol = (firstCol + levelWidth - 1u) & (levelWidth - 1u);
+        let eastCol = (firstCol + scale) & (levelWidth - 1u);
+        for (var offset = 0u; offset < 32u; offset += 1u) {
+            if (offset >= scale) { break; }
+            let row = firstRow + offset;
+            let col = firstCol + offset;
+            let north = firstRow > 0u && inputLookupContains(
+                fromScratch,
+                level,
+                firstRow - 1u,
+                col,
+            );
+            let south = firstRow + scale < levelWidth && inputLookupContains(
+                fromScratch,
+                level,
+                firstRow + scale,
+                col,
+            );
+            let west = inputLookupContains(fromScratch, level, row, westCol);
+            let east = inputLookupContains(fromScratch, level, row, eastCol);
+            if (north || south || west || east) {
+                maximumDelta = delta;
+                break;
+            }
+        }
+    }
+    return maximumDelta;
+}
+
+fn writeBalancedPatch(toScratch: bool, candidate: DemRenderPatch) {
+    var outputIndex = 0u;
+    if (toScratch) {
+        outputIndex = atomicAdd(&renderPatchState.balanceScratchCount, 1u);
+    } else {
+        outputIndex = atomicAdd(&renderPatchState.count, 1u);
+    }
+    if (outputIndex >= renderPatchPolicy.maximumRenderPatches) {
+        atomicAdd(&renderPatchState.overflowCount, 1u);
+        return;
+    }
+    var inserted = false;
+    if (toScratch) {
+        balancePatches[outputIndex] = candidate;
+        inserted = insertBalancePatchLookup(
+            candidate.matrixLevel,
+            candidate.tileRow,
+            candidate.tileCol,
+            outputIndex,
+        );
+    } else {
+        renderPatches[outputIndex] = candidate;
+        inserted = insertRenderPatchLookup(
+            candidate.matrixLevel,
+            candidate.tileRow,
+            candidate.tileCol,
+            outputIndex,
+        );
+    }
+    if (!inserted) {
+        atomicAdd(&renderPatchState.lookupOverflowCount, 1u);
+    }
+}
+
+fn writeBalancedChildren(toScratch: bool, candidate: DemRenderPatch) {
+    let childLevel = candidate.matrixLevel + 1u;
+    let firstRow = candidate.tileRow * 2u;
+    let firstCol = candidate.tileCol * 2u;
+    for (var child = 0u; child < 4u; child += 1u) {
+        writeBalancedPatch(toScratch, DemRenderPatch(
+            childLevel,
+            firstRow + (child >> 1u),
+            firstCol + (child & 1u),
+            candidate.samplingLevel,
+            candidate.sourceMatrixLevel,
+            candidate.sourceTileRow,
+            candidate.sourceTileCol,
+            candidate.sourceCompactIndex,
+        ));
+    }
 }
 
 fn emitRenderPatch(
@@ -312,6 +548,11 @@ fn resetRenderPatches() {
     for (var step = 0u; step < 17u; step += 1u) {
         atomicStore(&renderPatchState.trialCounts[step], 0u);
     }
+    atomicStore(&renderPatchState.unbalancedPatchCount, 0u);
+    atomicStore(&renderPatchState.balanceSplitCount, 0u);
+    atomicStore(&renderPatchState.maximumAdjacentLevelDelta, 0u);
+    atomicStore(&renderPatchState.balancePassCount, renderPatchPolicy.balancePassCount);
+    atomicStore(&renderPatchState.balanceScratchCount, 0u);
     drawArguments[0] = renderPatchPolicy.terrainVertexCount;
     drawArguments[1] = 0u;
     drawArguments[2] = 0u;
@@ -353,11 +594,22 @@ fn countRenderPatchTrials(@builtin(global_invocation_id) globalId: vec3u) {
 
     let finalStep = renderPatchPolicy.biasStepCount - 1u;
     for (var step = 0u; step < 17u; step += 1u) {
-        let threshold = trialCellSpanThreshold(step);
+        let nominalThreshold = trialCellSpanThreshold(step);
         for (var depth = 0u; depth <= 4u; depth += 1u) {
             if (depth > availableDepth || (visibleDepthMask & (1u << depth)) == 0u) {
                 break;
             }
+            let remainingBits = renderPatchPolicy.maximumExtraLevels - depth;
+            let scale = 1u << depth;
+            let matrixLevel = source.matrixLevel + depth;
+            let tileRow = source.tileRow * scale + (terminalRow >> remainingBits);
+            let tileCol = source.tileCol * scale + (terminalCol >> remainingBits);
+            let threshold = historyAwareRefinementThreshold(
+                nominalThreshold,
+                matrixLevel,
+                tileRow,
+                tileCol,
+            );
             let refine = step < finalStep &&
                 depth < availableDepth && cellSpans[depth] > threshold;
             if (refine) { continue; }
@@ -451,7 +703,7 @@ fn expandRenderPatches(@builtin(global_invocation_id) globalId: vec3u) {
         renderPatchPolicy.renderMaximumMatrixLevel - source.matrixLevel,
     );
     let selectedBiasStep = atomicLoad(&renderPatchState.selectedBiasStep);
-    let selectedThreshold = trialCellSpanThreshold(selectedBiasStep);
+    let nominalThreshold = trialCellSpanThreshold(selectedBiasStep);
 
     for (var depth = 0u; depth <= 4u; depth += 1u) {
         if (depth > availableDepth) { return; }
@@ -464,6 +716,12 @@ fn expandRenderPatches(@builtin(global_invocation_id) globalId: vec3u) {
         if (!patchVisible(bounds)) { return; }
 
         let cellSpanPixels = projectedCellSpanPixels(bounds);
+        let selectedThreshold = historyAwareRefinementThreshold(
+            nominalThreshold,
+            matrixLevel,
+            tileRow,
+            tileCol,
+        );
         let refine = selectedBiasStep < renderPatchPolicy.biasStepCount - 1u &&
             depth < availableDepth && cellSpanPixels > selectedThreshold;
         if (refine) { continue; }
@@ -474,6 +732,95 @@ fn expandRenderPatches(@builtin(global_invocation_id) globalId: vec3u) {
         emitRenderPatch(source, matrixLevel, tileRow, tileCol, cellSpanPixels);
         return;
     }
+}
+
+@compute @workgroup_size(256)
+fn balanceRenderPatches(@builtin(local_invocation_index) lane: u32) {
+    if (lane == 0u) {
+        atomicStore(
+            &renderPatchState.unbalancedPatchCount,
+            atomicLoad(&renderPatchState.count),
+        );
+        atomicStore(&renderPatchState.balanceSplitCount, 0u);
+    }
+    storageBarrier();
+
+    for (var iteration = 0u; iteration < 14u; iteration += 1u) {
+        let fromScratch = (iteration & 1u) != 0u;
+        let toScratch = !fromScratch;
+        let inputCount = select(
+            atomicLoad(&renderPatchState.count),
+            atomicLoad(&renderPatchState.balanceScratchCount),
+            fromScratch,
+        );
+
+        for (
+            var slot = lane;
+            slot < renderPatchPolicy.renderPatchLookupCapacity;
+            slot += 256u
+        ) {
+            if (toScratch) {
+                atomicStore(&balancePatchLookup[slot].key, 0u);
+            } else {
+                atomicStore(&renderPatchLookup[slot].key, 0u);
+            }
+        }
+        if (lane == 0u) {
+            if (toScratch) {
+                atomicStore(&renderPatchState.balanceScratchCount, 0u);
+            } else {
+                atomicStore(&renderPatchState.count, 0u);
+            }
+        }
+        storageBarrier();
+
+        for (
+            var patchIndex = lane;
+            patchIndex < inputCount;
+            patchIndex += 256u
+        ) {
+            let candidate = inputRenderPatch(fromScratch, patchIndex);
+            let mustSplit = candidate.matrixLevel <
+                renderPatchPolicy.renderMaximumMatrixLevel &&
+                maximumFinerNeighborDelta(fromScratch, candidate) > 1u;
+            if (mustSplit) {
+                atomicAdd(&renderPatchState.balanceSplitCount, 1u);
+                writeBalancedChildren(toScratch, candidate);
+            } else {
+                writeBalancedPatch(toScratch, candidate);
+            }
+        }
+        storageBarrier();
+    }
+}
+
+@compute @workgroup_size(1)
+fn resetFinalRenderPatchDiagnostics() {
+    atomicStore(&renderPatchState.minimumMatrixLevel, 0xffffffffu);
+    atomicStore(&renderPatchState.maximumMatrixLevel, 0u);
+    atomicStore(&renderPatchState.minimumCellSpanQ8, 0xffffffffu);
+    atomicStore(&renderPatchState.maximumCellSpanQ8, 0u);
+    atomicStore(&renderPatchState.maximumAdjacentLevelDelta, 0u);
+}
+
+@compute @workgroup_size(64)
+fn validateFinalRenderPatchCut(@builtin(global_invocation_id) globalId: vec3u) {
+    let patchCount = atomicLoad(&renderPatchState.count);
+    if (globalId.x >= patchCount) { return; }
+    let candidate = renderPatches[globalId.x];
+    atomicMin(&renderPatchState.minimumMatrixLevel, candidate.matrixLevel);
+    atomicMax(&renderPatchState.maximumMatrixLevel, candidate.matrixLevel);
+    let cellSpan = cellSpanQ8(projectedCellSpanPixels(patchBounds(
+        candidate.matrixLevel,
+        candidate.tileRow,
+        candidate.tileCol,
+    )));
+    atomicMin(&renderPatchState.minimumCellSpanQ8, cellSpan);
+    atomicMax(&renderPatchState.maximumCellSpanQ8, cellSpan);
+    atomicMax(
+        &renderPatchState.maximumAdjacentLevelDelta,
+        maximumFinerNeighborDelta(false, candidate),
+    );
 }
 
 @compute @workgroup_size(1)

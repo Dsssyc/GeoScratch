@@ -1,4 +1,5 @@
 import { defineConfig, type Plugin } from 'vite'
+import { existsSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -7,6 +8,42 @@ const projectRoot = path.resolve(examplesRoot, '..')
 const examplesPublic = path.resolve(examplesRoot, 'public')
 const demWorkerUrlModule = path.resolve(examplesRoot, 'demLayer/dem-tile-worker-url.ts')
 const demWorkerModule = path.resolve(examplesRoot, 'demLayer/dem-tile-worker.ts')
+const packageSource = path.resolve(projectRoot, 'packages/geoscratch/src')
+
+function sourceRuntimeUrlPlugin(): Plugin {
+  return {
+    name: 'geoscratch-source-runtime-urls',
+    apply: 'serve' as const,
+    configureServer(server) {
+      server.middlewares.use((request, _response, next) => {
+        if (request.url !== undefined) {
+          request.url = sourceRuntimeRequestUrl(request.url)
+        }
+        next()
+      })
+    },
+  }
+}
+
+function sourceRuntimeRequestUrl(requestUrl: string): string {
+  const queryIndex = requestUrl.indexOf('?')
+  const pathname = queryIndex === -1 ? requestUrl : requestUrl.slice(0, queryIndex)
+  const suffix = queryIndex === -1 ? '' : requestUrl.slice(queryIndex)
+  if (!pathname.startsWith('/@fs') || !pathname.endsWith('.js')) return requestUrl
+
+  let requestedPath: string
+  try {
+    requestedPath = decodeURIComponent(pathname.slice('/@fs'.length))
+  } catch {
+    return requestUrl
+  }
+  const relativePath = path.relative(packageSource, requestedPath)
+  if (relativePath.startsWith('..') || path.isAbsolute(relativePath)) return requestUrl
+
+  const sourcePath = `${requestedPath.slice(0, -'.js'.length)}.ts`
+  if (!existsSync(sourcePath)) return requestUrl
+  return `${pathname.slice(0, -'.js'.length)}.ts${suffix}`
+}
 
 function workerModuleUrlPlugin(): Plugin {
   return {
@@ -47,10 +84,30 @@ const examplePages = {
 }
 
 // https://vitejs.dev/config/
-export default defineConfig({
+export default defineConfig(({ command }) => ({
   root: examplesRoot,
   publicDir: examplesPublic,
+  // Package builds replace dist; dev serving stays on stable source entrypoints.
+  ...(command === 'serve' ? {
+    resolve: {
+      alias: [
+        {
+          find: /^geoscratch\/scratch$/,
+          replacement: path.resolve(packageSource, 'scratch.ts'),
+        },
+        {
+          find: /^geoscratch\/geo$/,
+          replacement: path.resolve(packageSource, 'geo/index.ts'),
+        },
+        {
+          find: /^geoscratch$/,
+          replacement: path.resolve(packageSource, 'index.ts'),
+        },
+      ],
+    },
+  } : {}),
   plugins: [
+    ...(command === 'serve' ? [ sourceRuntimeUrlPlugin() ] : []),
     workerModuleUrlPlugin(),
   ],
   build: {
@@ -66,4 +123,4 @@ export default defineConfig({
       allow: [projectRoot],
     },
   }
-})
+}))

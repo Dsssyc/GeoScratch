@@ -12,7 +12,6 @@ import {
 } from 'geoscratch/scratch'
 import type {
     WorkerContextHandle,
-    WorkerGroup,
     WorkerGroupFacts,
     WorkerSystemFacts,
     WorkerTaskHandle,
@@ -41,7 +40,7 @@ import type {
 } from './dem-phase-budget.ts'
 import demTileWorkerUrl from './dem-tile-worker-url.ts'
 
-export type DemWorkerTileSourceDescriptor = Readonly<{
+type DemWorkerTileSourceDescriptor = Readonly<{
     sourceId: string
     tileMatrixSetId: 'WebMercatorQuad'
     tileMatrixSetUri: string
@@ -59,7 +58,7 @@ export type DemWorkerTileSourceDescriptor = Readonly<{
     tileUrl(page: VirtualRasterPageDemand['page']): string
 }>
 
-export type DemWorkerRequestExecutorFacts = Readonly<{
+type DemWorkerRequestExecutorFacts = Readonly<{
     disposed: boolean
     system: WorkerSystemFacts
     group: WorkerGroupFacts
@@ -91,7 +90,6 @@ export type DemWorkerRequestExecutorFacts = Readonly<{
 export type DemWorkerRequestExecutor = VirtualRasterRequestExecutor & Readonly<{
     refreshFacts(): Promise<DemWorkerRequestExecutorFacts>
     inspect(): DemWorkerRequestExecutorFacts
-    clearCache(): Promise<DemWorkerRequestExecutorFacts>
     dispose(): Promise<void>
 }>
 
@@ -220,17 +218,6 @@ export async function createDemWorkerRequestExecutor(
             return inspect()
         },
         inspect,
-        async clearCache() {
-
-            if (disposed) return inspect()
-            workerFacts = await Promise.all(contexts.map(context =>
-                context.run<null, DemTileWorkerFacts>('clear', null, {
-                    priority: { class: 'background', score: 0 },
-                    cancellation: 'cooperative',
-                }).result
-            ))
-            return inspect()
-        },
         dispose() {
 
             if (disposePromise !== undefined) return disposePromise

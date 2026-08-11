@@ -25,8 +25,10 @@ while raster requests remain capped at the source `z10` ceiling.
   terrain indirect argument.
 - [x] Replace LoD-texture neighbor sampling with max-level edge probes and logical hash
   lookup from `z14` toward `z0`.
-- [x] Generalize fine-edge snapping to bounded multi-level differences and preserve
-  explicit neighboring sampling levels.
+- [x] Generalize fine-edge snapping to bounded multi-level differences as a defensive
+  shader capability and preserve explicit neighboring sampling levels.
+- [x] Balance the final render-patch cut on the GPU so edge-adjacent patches differ by
+  at most one level; validate and report that invariant before indirect drawing.
 - [x] Remove the LoD-map texture, shader, program, pipeline, pass, commands, and stale
   graph/provenance facts.
 - [x] Run focused tests, TypeScript checks, production build, complete unit tests, and

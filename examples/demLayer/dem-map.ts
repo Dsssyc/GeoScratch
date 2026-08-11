@@ -2,11 +2,12 @@ import { mat4 } from 'wgpu-matrix'
 import {
     WEB_MERCATOR_QUAD_WORLD_WIDTH,
     WebMercatorQuad,
+    createGeoViewAdapter,
+    createGeoViewSnapshot,
 } from 'geoscratch/geo'
-import type { GpuTileFrontierView } from 'geoscratch/geo'
+import type { GeoViewSnapshotDescriptor } from 'geoscratch/geo'
 
 type Vec3 = [ number, number, number ]
-type Matrix = Float32Array<ArrayBuffer>
 
 type LngLat = {
     lng: number
@@ -131,11 +132,24 @@ type Viewport = {
     height: number
 }
 
-const mapApi = globalThis.maplibregl ?? globalThis.mapboxgl
+export type DemMapCameraState = Omit<
+    GeoViewSnapshotDescriptor,
+    'id' | 'frameEpoch' | 'residencySnapshotEpoch'
+> & Readonly<{
+    far: number
+    near: number
+    center: readonly [ number, number ]
+    pitchDegrees: number
+    bearingDegrees: number
+}>
 
-if (!mapApi) throw new Error('Map runtime failed to load for DEM Layer')
+export type DemMapViewInput = Readonly<{
+    camera: DemMapCameraState
+    frameEpoch: number
+    residencySnapshotEpoch: number
+}>
 
-export const DEM_MAP_DEFAULTS = Object.freeze({
+const DEM_MAP_DEFAULTS = Object.freeze({
     center: Object.freeze([ 120.980697, 31.684162 ]),
     zoom: 9,
     projection: 'mercator',
@@ -143,7 +157,7 @@ export const DEM_MAP_DEFAULTS = Object.freeze({
     maxPitch: 85,
 })
 
-export const darkMatterStyle = Object.freeze({
+const darkMatterStyle = Object.freeze({
     version: 8,
     sources: {
         cartoDarkMatter: {
@@ -178,6 +192,7 @@ const demProofStyle = Object.freeze({
 
 export function createDemMap(canvas: HTMLCanvasElement, options: DemMapOptions = {}) {
 
+    const mapApi = requireMapApi()
     const { proof = false, ...mapOptions } = options
     canvas.style.pointerEvents = 'none'
     canvas.style.zIndex = '1'
@@ -186,7 +201,7 @@ export function createDemMap(canvas: HTMLCanvasElement, options: DemMapOptions =
     mapContainer.id = 'map'
     document.body.appendChild(mapContainer)
 
-    return new mapApi!.Map({
+    return new mapApi.Map({
         style: (proof ? demProofStyle : darkMatterStyle) as MapStyle,
         center: DEM_MAP_DEFAULTS.center,
         zoom: DEM_MAP_DEFAULTS.zoom,
@@ -221,20 +236,15 @@ export function readDemCameraState(
     map: DemMap,
     viewport: Viewport,
     minimumTerrainElevationMeters: number
-): Omit<GpuTileFrontierView, 'frameEpoch' | 'residencySnapshotEpoch'> & Readonly<{
-    far: number
-    near: number
-    center: readonly [ number, number ]
-    pitchDegrees: number
-    bearingDegrees: number
-}> {
+): DemMapCameraState {
 
     if (!Number.isFinite(minimumTerrainElevationMeters)) {
         throw new TypeError('DEM camera requires a finite minimum terrain elevation')
     }
+    const mapApi = requireMapApi()
     const transform = map.transform
     const cameraPosition = transform.getCameraPosition()
-    const mercatorCenter = mapApi!.MercatorCoordinate.fromLngLat(
+    const mercatorCenter = mapApi.MercatorCoordinate.fromLngLat(
         cameraPosition.lngLat,
         cameraPosition.altitude
     )
@@ -247,29 +257,12 @@ export function readDemCameraState(
     const cameraZ = encodeFloatToDouble(cameraPosition.altitude)
     const cameraHigh: Vec3 = [ cameraX[0], cameraY[0], cameraZ[0] ]
     const cameraLow: Vec3 = [ cameraX[1], cameraY[1], cameraZ[1] ]
-    const normalizedX = encodeFloatToDouble(mercatorCenter.x)
-    const normalizedY = encodeFloatToDouble(mercatorCenter.y)
-    const normalizedZ = encodeFloatToDouble(mercatorCenter.z)
-    const normalizedHigh: Vec3 = [ normalizedX[0], normalizedY[0], normalizedZ[0] ]
-    const { far, near, matrix } = getScratchMercatorMatrix(
+    const { far, near, matrix: clipFromRelativeWorld } = getCameraRelativeMercatorMatrix(
         transform,
-        minimumTerrainElevationMeters
+        minimumTerrainElevationMeters,
+        mercatorCenter,
+        cameraPosition.lngLat.lat
     )
-    const clipFromRelativeWorld = (mat4.translate as (
-        matrix: Matrix,
-        vector: Vec3,
-        destination?: Matrix
-    ) => Matrix)(matrix, normalizedHigh)
-    const scaleMatrix = mat4.scale as (
-        matrix: Matrix,
-        vector: Vec3,
-        destination?: Matrix
-    ) => Matrix
-    scaleMatrix(clipFromRelativeWorld, [
-        1 / WEB_MERCATOR_QUAD_WORLD_WIDTH,
-        -1 / WEB_MERCATOR_QUAD_WORLD_WIDTH,
-        mercatorZfromAltitude(1, cameraPosition.lngLat.lat),
-    ], clipFromRelativeWorld)
     const verticalFovRadians = radiansFromTransformValue(transform._fov, transform.fov)
     const center = map.getCenter()
     const pitchDegrees = map.getPitch()
@@ -291,17 +284,53 @@ export function readDemCameraState(
     })
 }
 
-function getScratchMercatorMatrix(
+export const demMapViewAdapter = createGeoViewAdapter<DemMapViewInput>({
+    id: 'dem-maplibre-view-adapter',
+    read({ camera, frameEpoch, residencySnapshotEpoch }) {
+
+        return createGeoViewSnapshot({
+            id: 'dem-map-view',
+            clipFromRelativeWorld: camera.clipFromRelativeWorld,
+            cameraHigh: camera.cameraHigh,
+            cameraLow: camera.cameraLow,
+            viewport: camera.viewport,
+            verticalFovRadians: camera.verticalFovRadians,
+            cameraLatitudeRadians: camera.cameraLatitudeRadians,
+            cameraPitchRadians: camera.cameraPitchRadians,
+            zoomHint: camera.zoomHint,
+            frameEpoch,
+            residencySnapshotEpoch,
+        })
+    },
+})
+
+function requireMapApi(): MapApi {
+
+    const mapApi = globalThis.maplibregl ?? globalThis.mapboxgl
+    if (mapApi === undefined) throw new Error('Map runtime failed to load for DEM Layer')
+    return mapApi
+}
+
+function getCameraRelativeMercatorMatrix(
     transform: MapTransform,
-    minimumTerrainElevationMeters: number
+    minimumTerrainElevationMeters: number,
+    cameraOrigin: Readonly<{ x: number; y: number; z: number }>,
+    cameraLatitudeDegrees: number
 ) {
 
     if (!transform.height || !transform.mercatorMatrix) {
+        const matrix = Float64Array.from(transform.mercatorMatrix ??
+            mat4.identity(new Float64Array(16)))
+        mat4.translate(matrix, [ cameraOrigin.x, cameraOrigin.y, cameraOrigin.z ], matrix)
+        mat4.scale(matrix, [
+            1 / WEB_MERCATOR_QUAD_WORLD_WIDTH,
+            -1 / WEB_MERCATOR_QUAD_WORLD_WIDTH,
+            mercatorZfromAltitude(1, cameraLatitudeDegrees),
+        ], matrix)
         return {
             far: transform.farZ,
             near: transform.nearZ,
-            matrix: Float32Array.from(transform.mercatorMatrix ??
-                (mat4.identity as (destination?: Matrix) => Matrix)()),
+            matrix: Float32Array.from(matrix),
         }
     }
 
@@ -314,25 +343,30 @@ function getScratchMercatorMatrix(
     const angle = radiansFromTransformValue(transform.angle, -transform.bearing)
     const cameraToCenterDistance = getCameraToCenterDistance(transform, fov)
 
-    let matrix = (mat4.perspective as (
-        fieldOfView: number,
-        aspect: number,
-        near: number,
-        far: number,
-        destination?: Matrix
-    ) => Matrix)(fov, transform.width / transform.height, near, far)
+    const matrix = mat4.perspective(
+        fov,
+        transform.width / transform.height,
+        near,
+        far,
+        new Float64Array(16)
+    )
     matrix[8] = -offset.x * 2 / transform.width
     matrix[9] = offset.y * 2 / transform.height
     mat4.scale(matrix, [ 1, -1, 1 ], matrix)
     mat4.translate(matrix, [ 0, 0, -cameraToCenterDistance ], matrix)
     mat4.rotateX(matrix, pitch, matrix)
     mat4.rotateZ(matrix, angle, matrix)
-    mat4.translate(matrix, [ -point.x, -point.y, 0 ], matrix)
-    matrix = (mat4.scale as (
-        matrix: Matrix,
-        vector: Vec3,
-        destination?: Matrix
-    ) => Matrix)(matrix, [ transform.worldSize, transform.worldSize, transform.worldSize ])
+    // Cancel the global origin in JS f64 before the matrix crosses the GPU f32 ABI.
+    mat4.translate(matrix, [
+        cameraOrigin.x * transform.worldSize - point.x,
+        cameraOrigin.y * transform.worldSize - point.y,
+        cameraOrigin.z * transform.worldSize,
+    ], matrix)
+    mat4.scale(matrix, [
+        transform.worldSize / WEB_MERCATOR_QUAD_WORLD_WIDTH,
+        -transform.worldSize / WEB_MERCATOR_QUAD_WORLD_WIDTH,
+        transform.worldSize * mercatorZfromAltitude(1, cameraLatitudeDegrees),
+    ], matrix)
 
     return { far, near, matrix: Float32Array.from(matrix) }
 }

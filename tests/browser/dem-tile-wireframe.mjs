@@ -139,8 +139,26 @@ async function runWireframeProof(activeBrowser) {
         )
         const wireframeCapture = await captureState(page, 'tile-wireframe')
 
-        const refinement = []
+        const motionStability = []
         let previous = wireframe
+        const pitchedCamera = Object.freeze({ ...camera, pitch: 80 })
+        for (const zoom of [ 10.02, 10.04, 10.06, 13.66, 13.70, 13.84 ]) {
+            const motionCamera = Object.freeze({ ...pitchedCamera, zoom })
+            await page.evaluate(
+                value => window.__DEM_LAYER_PROOF__.moveCamera(value),
+                motionCamera
+            )
+            const facts = await waitForStableMode(
+                page,
+                'tile-wireframe',
+                previous.observedFrames,
+                motionCamera
+            )
+            motionStability.push(facts)
+            previous = facts
+        }
+
+        const refinement = []
         for (const zoom of [ 11, 12, 14 ]) {
             const refinementCamera = Object.freeze({ ...camera, zoom })
             await page.evaluate(
@@ -170,6 +188,7 @@ async function runWireframeProof(activeBrowser) {
             url: page.url(),
             baseline: Object.freeze({ ...baseline, capture: shadedCapture }),
             wireframe: Object.freeze({ ...wireframe, capture: wireframeCapture }),
+            motionStability: Object.freeze(motionStability),
             refinement: Object.freeze(refinement),
             restored: Object.freeze({ ...restored, capture: restoredCapture }),
             events,
@@ -396,7 +415,7 @@ function validateProof(value, processState) {
 
     const failures = []
     if (value === undefined) return [ 'DEM tile wireframe proof was not produced' ]
-    const { baseline, wireframe, refinement, restored } = value
+    const { baseline, wireframe, motionStability, refinement, restored } = value
     expect(failures,
         baseline?.terrainPresentation === 'shaded' &&
         baseline.tileWireframeChecked === false &&
@@ -412,9 +431,9 @@ function validateProof(value, processState) {
         wireframe.stableIdentityHash === restored?.stableIdentityHash &&
         JSON.stringify(baseline.identityFacts) === JSON.stringify(wireframe.identityFacts) &&
         JSON.stringify(wireframe.identityFacts) === JSON.stringify(restored.identityFacts) &&
-        baseline.identityFacts?.programs === 7 &&
-        baseline.identityFacts?.pipelines === 7 &&
-        baseline.identityFacts?.commands === 24,
+        baseline.identityFacts?.programs === 10 &&
+        baseline.identityFacts?.pipelines === 10 &&
+        baseline.identityFacts?.commands === 34,
     'live presentation switching rebuilt or replaced the persistent DEM graph')
 
     expect(failures,
@@ -428,7 +447,7 @@ function validateProof(value, processState) {
         baseline?.graphContract?.commandIds?.drawTerrain?.shaded?.length === 2 &&
         baseline.graphContract.commandIds.drawTerrain.tileWireframe?.length === 2 &&
         baseline.graphContract.commandIds.renderPatches?.length === 2 &&
-        baseline.graphContract.commandIds.renderPatches.every(ids => ids.length === 7) &&
+        baseline.graphContract.commandIds.renderPatches.every(ids => ids.length === 10) &&
         baseline.graphContract.dataMaximumMatrixLevel === 10 &&
         baseline.graphContract.renderMaximumMatrixLevel === 14 &&
         baseline.graphContract.renderPatches?.maximumExtraLevels === 4,
@@ -443,9 +462,12 @@ function validateProof(value, processState) {
     const requestedDataLevels = value.events?.tileRequestLevels ?? []
     expect(failures,
         baseline.graphContract?.renderPatches?.selectionPath ===
-            'gpu-normalized-projected-grid-render-patches' &&
+            'gpu-balanced-normalized-projected-grid-render-patches' &&
         baseline.graphContract.renderPatches.maximumCellSpanPixels === 8 &&
         baseline.graphContract.renderPatches.nominalPatchSpanPixels === 512 &&
+        baseline.graphContract.renderPatches.refinementHysteresisLevels === 0.25 &&
+        baseline.graphContract.renderPatches.balancePassCount === 14 &&
+        baseline.graphContract.renderPatches.balanceWorkgroupSize === 256 &&
         baseline.graphContract.renderPatches.renderPatchLookupCapacity >
             baseline.graphContract.renderPatches.maximumRenderPatches &&
         refinementDataLevels.every(level => Number.isInteger(level) && level <= 10) &&
@@ -466,12 +488,21 @@ function validateProof(value, processState) {
             sample.renderPatchCount <=
                 baseline.graphContract.renderPatches.maximumRenderPatches &&
             sample.renderPatchFeedback?.selectedPatchCount === sample.renderPatchCount &&
-            sample.renderPatchFeedback?.requestedPatchCount >= sample.renderPatchCount &&
+            sample.renderPatchFeedback?.requestedPatchCount >=
+                sample.renderPatchFeedback?.unbalancedPatchCount &&
+            sample.renderPatchCount ===
+                sample.renderPatchFeedback?.unbalancedPatchCount +
+                    sample.renderPatchFeedback?.balanceSplitCount * 3 &&
+            sample.renderPatchFeedback?.balanceOverheadPatchCount ===
+                sample.renderPatchFeedback?.balanceSplitCount * 3 &&
+            sample.renderPatchFeedback?.maximumAdjacentLevelDelta <= 1 &&
+            sample.renderPatchFeedback?.balancePassCount === 14 &&
             sample.renderPatchFeedback?.baselinePatchBudget >= 1 &&
             sample.renderPatchFeedback?.framePatchBudget >=
                 sample.renderPatchFeedback?.baselinePatchBudget &&
             (sample.renderPatchFeedback?.budgetLimitedByMinimumTrial === true ||
-                sample.renderPatchCount <= sample.renderPatchFeedback?.framePatchBudget) &&
+                sample.renderPatchFeedback?.unbalancedPatchCount <=
+                    sample.renderPatchFeedback?.framePatchBudget) &&
             sample.renderPatchDescriptorOverflowCount === 0 &&
             sample.renderPatchLookupOverflowCount === 0 &&
             sample.renderPatchFeedback?.frameEpoch === sample.renderPatchFrameEpoch &&
@@ -494,7 +525,56 @@ function validateProof(value, processState) {
     )}`)
 
     expect(failures,
-        wireframe?.renderPatchCount <= wireframe?.renderPatchFeedback?.framePatchBudget &&
+        patchSamples.some(sample => (
+            sample?.renderPatchFeedback?.balanceSplitCount > 0 &&
+            sample.renderPatchFeedback.balanceOverheadPatchCount > 0 &&
+            sample.renderPatchFeedback.maximumAdjacentLevelDelta === 1
+        )),
+    'no mixed-LoD camera exercised final render-patch balancing')
+
+    const transientSamples = motionStability?.slice(0, 3) ?? []
+    const transientFrontiers = transientSamples.map(sample => ({
+        visibleInstanceCount: sample?.frontier?.visibleInstanceCount,
+        levels: sample?.frontier?.levels,
+        demandCount: sample?.frontier?.demandCount,
+        convergenceState: sample?.frontier?.convergenceState,
+    }))
+    const transientCounts = transientSamples.map(sample => sample?.renderPatchCount)
+    const transientMaximumLevels = transientSamples.map(
+        sample => sample?.renderPatchLevelRange?.[1]
+    )
+    expect(failures,
+        transientSamples.length === 3 &&
+        new Set(transientFrontiers.map(JSON.stringify)).size === 1 &&
+        transientFrontiers.every(frontier => (
+            frontier.demandCount === 0 && frontier.convergenceState === 'converged'
+        )) &&
+        transientCounts[1] <= Math.max(transientCounts[0], transientCounts[2]) &&
+        transientMaximumLevels[1] <= Math.max(
+            transientMaximumLevels[0],
+            transientMaximumLevels[2]
+        ),
+    `stable source frontier produced a transient render-patch refinement: ${JSON.stringify({
+        frontiers: transientFrontiers,
+        counts: transientCounts,
+        maximumLevels: transientMaximumLevels,
+    })}`)
+
+    const nearPlaneSamples = motionStability?.slice(3) ?? []
+    expect(failures,
+        nearPlaneSamples.length === 3 &&
+        nearPlaneSamples.every(sample => sample?.renderPatchCellSpanRange?.[1] < 65_535),
+    `near-plane motion produced a projected-cell-span sentinel: ${JSON.stringify(
+        nearPlaneSamples.map(sample => ({
+            zoom: sample?.cameraView?.zoom,
+            levels: sample?.renderPatchLevelRange,
+            cellSpans: sample?.renderPatchCellSpanRange,
+        }))
+    )}`)
+
+    expect(failures,
+        wireframe?.renderPatchFeedback?.unbalancedPatchCount <=
+            wireframe?.renderPatchFeedback?.framePatchBudget &&
         wireframe.renderPatchLevelRange?.[0] >= 9 &&
         wireframe.renderPatchLevelRange?.[1] <= 11 &&
         wireframe.renderPatchCellSpanRange?.[1] <= 8 * 2 **

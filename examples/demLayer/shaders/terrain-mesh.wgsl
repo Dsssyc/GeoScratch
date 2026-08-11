@@ -5,7 +5,6 @@ struct DemTerrainConfig {
     exaggeration: f32,
     renderMaximumMatrixLevel: u32,
     renderPatchLookupCapacity: u32,
-    reserved: f32,
 };
 
 struct DemRenderPatchLookupEntry {

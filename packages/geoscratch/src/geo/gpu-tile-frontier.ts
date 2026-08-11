@@ -932,13 +932,17 @@ function snapshotDescriptor(
     validateGpuTileFrontierDescriptor(descriptor)
     return Object.freeze({
         gpuState: descriptor.gpuState,
-        addressCodec: descriptor.addressCodec,
+        spatialProfile: descriptor.spatialProfile,
         policy: Object.freeze({ ...descriptor.policy }),
         levelMetrics: Object.freeze(descriptor.levelMetrics.map(metric =>
             Object.freeze({ ...metric })
         )),
-        roots: Object.freeze([ ...descriptor.roots ].sort(
-            compareGpuTileFrontierPathOrder
+        roots: Object.freeze([ ...descriptor.roots ].sort((left, right) =>
+            compareGpuTileFrontierPathOrder(
+                descriptor.spatialProfile,
+                left,
+                right
+            )
         )),
         drawTemplates: Object.freeze(descriptor.drawTemplates.map(template =>
             Object.freeze({ ...template })
@@ -1100,9 +1104,9 @@ function packedSection(
 
 function validateCoverageBounds(descriptor: GpuTileFrontierDescriptor): void {
 
-    const coverage = descriptor.addressCodec.coverage
+    const coverage = descriptor.spatialProfile.coverage
     for (const metric of descriptor.levelMetrics) {
-        const matrixId = String(metric.matrixLevel)
+        const matrixId = descriptor.spatialProfile.matrixId(metric.matrixLevel)
         const limit = coverage.limit(matrixId)
         if (limit === undefined) {
             return descriptorInvalid(
@@ -1634,8 +1638,8 @@ function validateSeedSnapshot(
                 status: 'resident',
             }, { resolved, physical })
         }
-        const matrixLevel = Number(root.tile.matrixId)
-        const compactIndex = frontier.descriptor.addressCodec.coverage.index(root.tile)
+        const matrixLevel = frontier.descriptor.spatialProfile.matrixLevel(root.tile)
+        const compactIndex = frontier.descriptor.spatialProfile.coverage.index(root.tile)
         if (!u32(matrixLevel) || !u32(root.level) ||
             !u32(root.tile.tileRow) || !u32(root.tile.tileCol) || !u32(compactIndex)) {
             return invalidFrontier(frontier, 'GPU tile frontier roots require numeric u32 matrix ids.', {
@@ -1670,6 +1674,8 @@ function validateView(frontier: GpuTileFrontier, view: GpuTileFrontierView): voi
         Array.from(values).every(value => Number.isFinite(value))
     const acknowledgedEpoch = frontier.descriptor.gpuState.facts().snapshotEpoch
     if (typeof view !== 'object' || view === null ||
+        view.kind !== 'geo-view-snapshot' ||
+        typeof view.id !== 'string' || view.id.length === 0 ||
         matrix?.length !== 16 || !finite(matrix) ||
         view.cameraHigh?.length !== 3 || !finite(view.cameraHigh) ||
         view.cameraLow?.length !== 3 || !finite(view.cameraLow) ||
@@ -1700,10 +1706,10 @@ function mapMetaRecord(
 ): Record<string, unknown> {
 
     const matrix = view.clipFromRelativeWorld
-    const camera = descriptor.addressCodec.fromProjected([
+    const camera = descriptor.spatialProfile.encodeCamera([
         view.cameraHigh[0] + view.cameraLow[0],
         view.cameraHigh[1] + view.cameraLow[1],
-    ]).fixed.limbs
+    ])
     return {
         clipFromRelativeWorld: [
             [ matrix[0], matrix[1], matrix[2], matrix[3] ],
@@ -1713,8 +1719,8 @@ function mapMetaRecord(
         ],
         cameraHigh: view.cameraHigh,
         cameraLow: view.cameraLow,
-        cameraFixedLow: [ camera[0]!.low, camera[1]!.low ],
-        cameraFixedHigh: [ camera[0]!.high, camera[1]!.high ],
+        cameraFixedLow: camera.low,
+        cameraFixedHigh: camera.high,
         viewport: view.viewport,
         verticalFovRadians: view.verticalFovRadians,
         cameraLatitudeRadians: view.cameraLatitudeRadians,

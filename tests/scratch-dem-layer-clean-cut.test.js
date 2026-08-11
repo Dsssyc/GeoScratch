@@ -4,6 +4,7 @@ import crypto from 'node:crypto'
 import path from 'node:path'
 import { GPURuntime } from 'geoscratch/scratch'
 import {
+    ViewDemandProducer,
     VirtualRasterResidency,
     createVirtualRasterGpuState,
     ownedVirtualRasterPagePayload,
@@ -39,7 +40,9 @@ async function createTestVirtualRaster(runtime) {
         maxStagingBytes: 18 * 256 * 256,
         maxHistory: 8,
     })
-    residency.pin(model.rootPage)
+    expect(model.safetyCoverPages).to.have.length(1)
+    const safetyPage = model.safetyCoverPages[0]
+    residency.pin(safetyPage)
     const gpu = await createVirtualRasterGpuState(runtime, {
         addressSpace: model.addressSpace,
         plane: model.plane,
@@ -70,12 +73,16 @@ async function createTestVirtualRaster(runtime) {
         residency,
         gpu,
         scheduler: Object.freeze({ maxRequests: 18 }),
+        viewDemandProducer: new ViewDemandProducer({
+            id: 'test-dem-view-demand',
+            maxDemands: 18,
+        }),
         async initialize() {
 
             generation++
-            residency.reconcileGeneration(generation, [ model.rootPage ])
+            residency.reconcileGeneration(generation, [ safetyPage ])
             residency.stage(ownedVirtualRasterPagePayload({
-                page: model.rootPage,
+                page: safetyPage,
                 width: 256,
                 height: 256,
                 channels: 1,
@@ -87,7 +94,7 @@ async function createTestVirtualRaster(runtime) {
         reconcileFeedback() {
 
             generation++
-            residency.reconcileGeneration(generation, [ model.rootPage ])
+            residency.reconcileGeneration(generation, [ safetyPage ])
             return Object.freeze({
                 requestedCount: 0,
                 settlement: Promise.resolve(Object.freeze({
@@ -160,12 +167,17 @@ describe('DEM Layer clean cut', () => {
         expect(renderPatchSource).to.include('renderMaximumMatrixLevel')
         expect(renderPatchSource).to.include('maximumCellSpanPixels')
         expect(renderPatchSource).to.include('DEM_RENDER_PATCH_MAXIMUM_CELL_SPAN_PIXELS = 8')
-        expect(renderPatchSource).to.include('DEM_RENDER_PATCH_NOMINAL_SPAN_PIXELS')
         expect(renderPatchSource).to.include('decodeDemRenderPatchState')
         expect(renderPatchSource).to.include('createReadbackCommand')
         expect(renderPatchSource).to.include('renderPatchLookupCapacity')
+        expect(renderPatchSource).to.include('previousRenderPatchLookup')
         expect(renderPatchShader).to.include('source.samplingLevel')
         expect(renderPatchShader).to.include('projectedCellSpanPixels')
+        expect(renderPatchShader).to.include('start.z / (start.z - end.z)')
+        expect(renderPatchShader).not.to.include('return 65535.0f')
+        expect(renderPatchShader).to.include('historyAwareRefinementThreshold')
+        expect(renderPatchShader).to.include('previousLookupContains')
+        expect(renderPatchShader).to.include('let nominalPatchSpan = max(')
         expect(renderPatchShader).to.include('countRenderPatchTrials')
         expect(renderPatchShader).to.include('selectRenderPatchBudget')
         expect(renderPatchShader).to.include('trialCounts')
@@ -177,6 +189,11 @@ describe('DEM Layer clean cut', () => {
         expect(renderPatchShader).not.to.include('distanceToAabb')
         expect(renderPatchShader).not.to.include('geometricErrorMeters')
         expect(renderPatchShader).to.include('insertRenderPatchLookup')
+        expect(renderPatchShader).to.include('balanceRenderPatches')
+        expect(renderPatchShader).to.include('storageBarrier()')
+        expect(renderPatchShader).to.include('maximumFinerNeighborDelta')
+        expect(renderPatchShader).to.include('validateFinalRenderPatchCut')
+        expect(renderPatchShader).to.include('maximumAdjacentLevelDelta')
         expect(renderPatchShader).not.to.include('targetMatrixLevel')
         expect(renderPatchShader).not.to.include('mapMeta.zoomHint')
         expect(renderPatchShader).to.include('atomicAdd(&renderPatchState.count')
@@ -207,6 +224,9 @@ describe('DEM Layer clean cut', () => {
         const mapSource = read('examples', 'demLayer', 'dem-map.ts')
 
         expect(layerSource).to.include('GpuTileFrontier.create(')
+        expect(layerSource).to.include('mapFieldLayer<DemMapViewInput>({')
+        expect(layerSource).to.include('demMapViewAdapter')
+        expect(layerSource).to.include('spatialProfile: mapField.spatialProfile')
         expect(layerSource).to.include('frontier.encode(builder, frame)')
         expect(layerSource).to.include('feedbackRing.encode(builder, frame)')
         expect(layerSource).to.include("feedback.facts.convergenceState === 'transitioning'")
@@ -266,7 +286,8 @@ describe('DEM Layer clean cut', () => {
             expect(frameSource).not.to.include(call)
         }
         expect(frameSource).to.include("runtime.createSubmission({ validation: 'throw' })")
-        expect(frameSource).to.include('frontier.writeView({')
+        expect(frameSource).to.include('frontier.writeView(view)')
+        expect(frameSource).to.include('virtualRaster.reconcileFeedback(feedback, consumed!.view)')
         expect(frameSource).to.include('frontier.encode(builder, frame)')
         expect(frameSource).to.include('feedbackRing.encode(builder, frame)')
         expect(frameSource).to.include('.render(passes.terrain')
@@ -435,6 +456,45 @@ describe('DEM Layer clean cut', () => {
             pendingObservationsBefore: 2,
             pendingObservationsAfter: 0,
             cleanupInvocationCount: 1,
+        })
+        expect(report.cleanupFailures).to.deep.equal([])
+    })
+
+    it('drains child work registered by a tracked task during disposal', async() => {
+
+        const lifecycle = createDemLifecycle()
+        const actions = []
+        let resumeParent
+        let resolveChild
+        const parentGate = new Promise(resolve => { resumeParent = resolve })
+        const child = new Promise(resolve => { resolveChild = resolve })
+        lifecycle.deferRelease({
+            label: 'runtime',
+            run: () => { actions.push('release') },
+        })
+        lifecycle.track((async() => {
+            await parentGate
+            await lifecycle.track(child, 'late-child')
+            actions.push('child-settled')
+        })(), 'parent')
+
+        let disposalSettled = false
+        const disposal = lifecycle.dispose().then(report => {
+            disposalSettled = true
+            return report
+        })
+        resumeParent()
+        await new Promise(resolve => setImmediate(resolve))
+
+        expect(disposalSettled).to.equal(false)
+        expect(actions).to.deep.equal([])
+        resolveChild()
+        const report = await disposal
+
+        expect(actions).to.deep.equal([ 'child-settled', 'release' ])
+        expect(report).to.include({
+            pendingObservationsBefore: 1,
+            pendingObservationsAfter: 0,
         })
         expect(report.cleanupFailures).to.deep.equal([])
     })
@@ -647,12 +707,12 @@ describe('DEM Layer clean cut', () => {
         expect(initialIdentityFacts).to.deep.include({
             hash: initialIdentityHash,
             uploads: 4,
-            bindLayouts: 8,
-            bindSets: 14,
-            programs: 7,
-            pipelines: 7,
+            bindLayouts: 11,
+            bindSets: 20,
+            programs: 10,
+            pipelines: 10,
             passes: 2,
-            commands: 24,
+            commands: 34,
         })
         expect(graph.persistentFacts()).to.deep.equal(initialPersistentFacts)
 
@@ -687,7 +747,7 @@ describe('DEM Layer clean cut', () => {
             renderMaximumMatrixLevel: 14,
         })
         expect(graph.contractFacts().renderPatches).to.deep.include({
-            selectionPath: 'gpu-normalized-projected-grid-render-patches',
+            selectionPath: 'gpu-balanced-normalized-projected-grid-render-patches',
             maximumExtraLevels: 4,
             maximumMatrixLevel: 14,
             dataMaximumMatrixLevel: 10,
@@ -695,7 +755,10 @@ describe('DEM Layer clean cut', () => {
             maximumPatchCountRatio: 3,
             biasStepsPerLevel: 4,
             biasStepCount: 17,
+            refinementHysteresisLevels: 0.25,
             budgetHysteresisRatio: 0.75,
+            balancePassCount: 14,
+            balanceWorkgroupSize: 256,
             nominalPatchSpanPixels: 512,
             terrainSectorSize: 64,
         })
@@ -705,7 +768,7 @@ describe('DEM Layer clean cut', () => {
         expect(fake.calls.maps.filter(mapping => (
             mapping.size === graph.contractFacts().frontier.feedbackOutput.layout.byteLength
         ))).to.have.length(2)
-        expect(fake.calls.maps.filter(mapping => mapping.size === 120)).to.have.length(2)
+        expect(fake.calls.maps.filter(mapping => mapping.size === 140)).to.have.length(2)
 
         graph.dispose()
         expect(() => graph.setTerrainPresentation('tile-wireframe'))

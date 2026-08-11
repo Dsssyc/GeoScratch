@@ -5,7 +5,7 @@ export type DemRenderingPreference = Readonly<{
     tileWireframe: boolean
 }>
 
-export type DemRenderingPreferenceResolution = Readonly<{
+type DemRenderingPreferenceResolution = Readonly<{
     preference: DemRenderingPreference
     storageStatus: 'missing' | 'valid' | 'invalid'
 }>

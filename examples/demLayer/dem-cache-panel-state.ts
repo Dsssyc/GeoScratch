@@ -19,7 +19,7 @@ export type DemCachePanelConfig = Readonly<{
     persistence: 'best-effort' | 'request'
 }>
 
-export type DemCachePanelResolution = Readonly<{
+type DemCachePanelResolution = Readonly<{
     source: 'url' | 'storage' | 'default'
     storageStatus: 'missing' | 'valid' | 'invalid'
     config: DemCachePanelConfig

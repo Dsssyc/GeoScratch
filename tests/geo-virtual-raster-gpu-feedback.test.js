@@ -6,12 +6,14 @@ import {
     VirtualRasterGpuFeedbackRing,
     VirtualRasterResidency,
     WebMercatorQuad,
+    createGeoViewSnapshot,
     createVirtualRasterGpuState,
     gpuTileFrontierPolicy,
     ownedVirtualRasterPagePayload,
     tileMatrixCoverage,
     virtualRasterPlane,
     virtualRasterTileAddressSpace,
+    webMercatorPlanarTileSpatialProfile,
     webMercatorQuadAddressCodec,
 } from 'geoscratch/geo'
 import {
@@ -79,9 +81,10 @@ async function createFeedbackFixture(options = {}) {
     for (const command of update.commands) publicationBuilder.upload(command)
     await gpuState.acknowledge(publication, publicationBuilder.submit())
 
+    const addressCodec = webMercatorQuadAddressCodec({ coverage })
     const frontier = await GpuTileFrontier.create(runtime, {
         gpuState,
-        addressCodec: webMercatorQuadAddressCodec({ coverage }),
+        spatialProfile: webMercatorPlanarTileSpatialProfile({ addressCodec }),
         policy: gpuTileFrontierPolicy({
             refineErrorPixels: 2,
             coarsenErrorPixels: 1,
@@ -108,7 +111,8 @@ async function createFeedbackFixture(options = {}) {
         else seedBuilder.upload(command)
     }
     seedBuilder.submit()
-    const view = frameEpoch => ({
+    const view = frameEpoch => createGeoViewSnapshot({
+        id: 'feedback-fixture-view',
         clipFromRelativeWorld: [
             1 / HALF_WORLD, 0, 0, 0,
             0, 1 / HALF_WORLD, 0, 0,

@@ -79,13 +79,13 @@ export function createGpuTileFrontierWgsl(
 ): GpuTileFrontierWgslModule {
 
     const levels = descriptor.levelMetrics.map(metric => metric.matrixLevel)
-    const quantumMeters = descriptor.addressCodec.quantumMeters
-    const highLimbMeters = quantumMeters * 2 ** 32
+    const spatial = descriptor.spatialProfile.frontierEncoding
     const limits = levels.map(matrixLevel => {
-        const limit = descriptor.addressCodec.coverage.limit(String(matrixLevel))
+        const matrixId = descriptor.spatialProfile.matrixId(matrixLevel)
+        const limit = descriptor.spatialProfile.coverage.limit(matrixId)
         if (limit === undefined) throw new TypeError('GPU tile frontier WGSL coverage is incomplete.')
         return {
-            offset: descriptor.addressCodec.coverage.index({
+            offset: descriptor.spatialProfile.coverage.index({
                 matrixId: limit.matrixId,
                 tileRow: limit.minTileRow,
                 tileCol: limit.minTileCol,
@@ -120,9 +120,11 @@ const FRONTIER_LEVEL_COUNT: u32 = ${levels.length}u;
 const FRONTIER_DRAW_TEMPLATE_COUNT: u32 = ${drawTemplates.length}u;
 const FRONTIER_INVALID_U32: u32 = 0xffffffffu;
 const FRONTIER_PI: f32 = 3.141592653589793;
-const FRONTIER_COORDINATE_BITS: u32 = ${descriptor.addressCodec.coordinateBits}u;
-const FRONTIER_QUANTUM_METERS: f32 = ${f32Literal(quantumMeters)};
-const FRONTIER_HIGH_LIMB_METERS: f32 = ${f32Literal(highLimbMeters)};
+const FRONTIER_COORDINATE_BITS: u32 = ${spatial.coordinateBits}u;
+const FRONTIER_ROOT_COLUMN_BITS: u32 = ${spatial.rootColumnBits}u;
+const FRONTIER_ROOT_ROW_BITS: u32 = ${spatial.rootRowBits}u;
+const FRONTIER_QUANTUM_METERS: vec2f = vec2f(${f32Literal(spatial.quantumMeters[0])}, ${f32Literal(spatial.quantumMeters[1])});
+const FRONTIER_HIGH_LIMB_METERS: vec2f = vec2f(${f32Literal(spatial.highLimbMeters[0])}, ${f32Literal(spatial.highLimbMeters[1])});
 
 const FRONTIER_COVERAGE_OFFSETS: array<u32, ${levels.length}> = array<u32, ${levels.length}>(${u32List(limits.map(limit => limit.offset))});
 const FRONTIER_COVERAGE_MIN_ROWS: array<u32, ${levels.length}> = array<u32, ${levels.length}>(${u32List(limits.map(limit => limit.minimumRow))});
@@ -364,8 +366,8 @@ fn subtractExpansions(
     return difference + (roundoff + leftLow - rightLow);
 }
 
-fn boundaryQuanta(index: u32, matrixLevel: u32) -> FrontierQuanta {
-    let shift = FRONTIER_COORDINATE_BITS - matrixLevel;
+fn boundaryQuanta(index: u32, matrixLevel: u32, rootBits: u32) -> FrontierQuanta {
+    let shift = FRONTIER_COORDINATE_BITS - matrixLevel - rootBits;
     if (shift >= 32u) {
         return FrontierQuanta(0u, index << (shift - 32u));
     }
@@ -389,27 +391,32 @@ fn quantaMagnitude(value: FrontierQuanta) -> FrontierQuanta {
     return FrontierQuanta(low, ~value.high + carry);
 }
 
-fn relativeQuantaMeters(left: FrontierQuanta, right: FrontierQuanta) -> f32 {
+fn relativeQuantaMeters(
+    left: FrontierQuanta,
+    right: FrontierQuanta,
+    quantumMeters: f32,
+    highLimbMeters: f32
+) -> f32 {
     let difference = subtractQuanta(left, right);
     let negative = (difference.high & 0x80000000u) != 0u;
     let magnitude = quantaMagnitude(difference);
-    let meters = f32(magnitude.high) * FRONTIER_HIGH_LIMB_METERS +
-        f32(magnitude.low) * FRONTIER_QUANTUM_METERS;
+    let meters = f32(magnitude.high) * highLimbMeters +
+        f32(magnitude.low) * quantumMeters;
     return select(meters, -meters, negative);
 }
 
 fn boundsFor(matrixLevel: u32, row: u32, column: u32) -> FrontierBounds {
     let metric = metricFor(matrixLevel);
-    let west = boundaryQuanta(column, matrixLevel);
-    let east = boundaryQuanta(column + 1u, matrixLevel);
-    let north = boundaryQuanta(row, matrixLevel);
-    let south = boundaryQuanta(row + 1u, matrixLevel);
+    let west = boundaryQuanta(column, matrixLevel, FRONTIER_ROOT_COLUMN_BITS);
+    let east = boundaryQuanta(column + 1u, matrixLevel, FRONTIER_ROOT_COLUMN_BITS);
+    let north = boundaryQuanta(row, matrixLevel, FRONTIER_ROOT_ROW_BITS);
+    let south = boundaryQuanta(row + 1u, matrixLevel, FRONTIER_ROOT_ROW_BITS);
     let cameraX = FrontierQuanta(mapMeta.cameraFixedLow.x, mapMeta.cameraFixedHigh.x);
     let cameraY = FrontierQuanta(mapMeta.cameraFixedLow.y, mapMeta.cameraFixedHigh.y);
-    let minimumX = relativeQuantaMeters(west, cameraX);
-    let maximumX = relativeQuantaMeters(east, cameraX);
-    let maximumY = relativeQuantaMeters(cameraY, north);
-    let minimumY = relativeQuantaMeters(cameraY, south);
+    let minimumX = relativeQuantaMeters(west, cameraX, FRONTIER_QUANTUM_METERS.x, FRONTIER_HIGH_LIMB_METERS.x);
+    let maximumX = relativeQuantaMeters(east, cameraX, FRONTIER_QUANTUM_METERS.x, FRONTIER_HIGH_LIMB_METERS.x);
+    let maximumY = relativeQuantaMeters(cameraY, north, FRONTIER_QUANTUM_METERS.y, FRONTIER_HIGH_LIMB_METERS.y);
+    let minimumY = relativeQuantaMeters(cameraY, south, FRONTIER_QUANTUM_METERS.y, FRONTIER_HIGH_LIMB_METERS.y);
     let minimumZ = subtractExpansions(
         metric.minimumElevationMeters,
         0.0,
@@ -585,7 +592,7 @@ fn childTerminalFailureMask(entry: GpuTileFrontierEntry) -> u32 {
 }
 
 fn parentWouldImmediatelyRefine(entry: GpuTileFrontierEntry) -> bool {
-    if (entry.matrixLevel == 0u) { return false; }
+    if (entry.matrixLevel == selectionPolicy.minimumMatrixLevel) { return false; }
     let parentLevel = entry.matrixLevel - 1u;
     let parentRow = entry.tileRow / 2u;
     let parentColumn = entry.tileCol / 2u;
@@ -796,7 +803,7 @@ fn evaluateFrontier(@builtin(global_invocation_id) globalId: vec3u) {
 }
 
 fn isCanonicalCoveredSibling(entry: GpuTileFrontierEntry) -> bool {
-    if (entry.matrixLevel == 0u) { return false; }
+    if (entry.matrixLevel == selectionPolicy.minimumMatrixLevel) { return false; }
     let parentLevel = entry.matrixLevel - 1u;
     let parentRow = entry.tileRow / 2u;
     let parentColumn = entry.tileCol / 2u;

@@ -11,6 +11,62 @@ export type {
     GeoDiagnosticSeverity,
     GeoDiagnosticSubject,
 } from './diagnostics.js'
+export { regularQuadTileTopology } from './tile-topology.js'
+export type {
+    RegularQuadTileTopologyDescriptor,
+    TileTopology,
+} from './tile-topology.js'
+export {
+    planarTileSpatialProfile,
+    webMercatorPlanarTileSpatialProfile,
+} from './tile-spatial-profile.js'
+export type {
+    PlanarTileBounds,
+    PlanarTileSpatialProfileDescriptor,
+    TileSpatialCameraEncoding,
+    TileSpatialFrontierEncoding,
+    TileSpatialProfile,
+    WebMercatorPlanarTileSpatialProfile,
+    WebMercatorPlanarTileSpatialProfileDescriptor,
+} from './tile-spatial-profile.js'
+export {
+    createGeoViewAdapter,
+    createGeoViewSnapshot,
+} from './geo-view.js'
+export type {
+    GeoViewAdapter,
+    GeoViewAdapterDescriptor,
+    GeoViewSnapshot,
+    GeoViewSnapshotDescriptor,
+} from './geo-view.js'
+export {
+    ViewDemandProducer,
+    virtualRasterDemandSetFromViewDemands,
+} from './view-tile-demand.js'
+export type {
+    ViewDemandProducerDescriptor,
+    ViewDemandProduction,
+    ViewTileDemand,
+    ViewTileDemandDescriptor,
+    ViewTileDemandIntent,
+    ViewTileDemandSet,
+} from './view-tile-demand.js'
+export {
+    geoField,
+    tiledFieldRepresentation,
+} from './geo-field.js'
+export type {
+    GeoField,
+    GeoFieldDescriptor,
+    GeoFieldInterpolation,
+    TiledFieldRepresentation,
+    TiledFieldRepresentationDescriptor,
+} from './geo-field.js'
+export { mapFieldLayer } from './map-field-layer.js'
+export type {
+    MapFieldLayer,
+    MapFieldLayerDescriptor,
+} from './map-field-layer.js'
 export {
     gpuTileFrontierPolicy,
     gpuTileFrontierRenderWgslModule,

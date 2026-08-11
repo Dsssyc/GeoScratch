@@ -930,11 +930,21 @@ function validateNormalProof(proof, failures) {
         parseJsonOrUndefined(facts.renderPatchFeedback)
     ))).filter(feedback => (
         feedback?.selectedBiasStep > 0 &&
-        feedback?.requestedPatchCount > feedback?.selectedPatchCount &&
-        feedback?.selectedPatchCount <= feedback?.framePatchBudget
+        feedback?.requestedPatchCount > feedback?.unbalancedPatchCount &&
+        feedback?.unbalancedPatchCount <= feedback?.framePatchBudget
     ))
     if (normalizationProofs.length === 0) {
         failures.push('no camera scenario exercised GPU render-patch budget normalization')
+    }
+    const balanceProofs = scenarios.flatMap(result => result.facts.map(facts => (
+        parseJsonOrUndefined(facts.renderPatchFeedback)
+    ))).filter(feedback => (
+        feedback?.balanceSplitCount > 0 &&
+        feedback?.balanceOverheadPatchCount === feedback.balanceSplitCount * 3 &&
+        feedback?.maximumAdjacentLevelDelta === 1
+    ))
+    if (balanceProofs.length === 0) {
+        failures.push('no camera scenario exercised final render-patch balancing')
     }
     validateDemFacts('resized', resized, failures)
     validateDemFacts('drained', drained, failures, 'stopped')
@@ -1055,12 +1065,6 @@ function validateDemFacts(label, facts, failures, expectedStatus = 'ready') {
         failures.push(`${label} current identity hash/count publication was inconsistent`)
     }
 
-    const stageActivity = parseJson(facts.stageActivity, `${label} stage activity`, failures)
-    for (const name of expectedStageOrder) {
-        if (stageActivity?.[name] !== Number(facts.frames)) {
-            failures.push(`${label} ${name} activity did not match submitted frames`)
-        }
-    }
     const provenance = parseJson(facts.provenance, `${label} provenance`, failures)
     if (!Array.isArray(provenance) ||
         provenance.length !== requiredProvenanceNames.length) {
@@ -1088,12 +1092,14 @@ function validateDemFacts(label, facts, failures, expectedStatus = 'ready') {
         contract?.dataMaximumMatrixLevel !== 10 ||
         contract?.renderMaximumMatrixLevel !== 14 ||
         contract?.renderPatches?.selectionPath !==
-            'gpu-normalized-projected-grid-render-patches' ||
+            'gpu-balanced-normalized-projected-grid-render-patches' ||
         contract?.renderPatches?.maximumExtraLevels !== 4 ||
         contract?.renderPatches?.maximumCellSpanPixels !== 8 ||
         contract?.renderPatches?.nominalPatchSpanPixels !== 512 ||
         contract?.renderPatches?.maximumPatchCountRatio !== 3 ||
         contract?.renderPatches?.biasStepCount !== 17 ||
+        contract?.renderPatches?.balancePassCount !== 14 ||
+        contract?.renderPatches?.balanceWorkgroupSize !== 256 ||
         contract?.renderPatches?.renderPatchLookupCapacity <=
             contract?.renderPatches?.maximumRenderPatches ||
         contract?.terrainVertexCount !== 24_576 ||
@@ -1127,7 +1133,15 @@ function validateDemFacts(label, facts, failures, expectedStatus = 'ready') {
         renderPatchFeedback?.lookupOverflowCount !== 0 ||
         renderPatchFeedback?.baselinePatchBudget < 1 ||
         renderPatchFeedback?.framePatchBudget < renderPatchFeedback?.baselinePatchBudget ||
-        renderPatchFeedback?.requestedPatchCount < renderPatchFeedback?.selectedPatchCount ||
+        renderPatchFeedback?.requestedPatchCount <
+            renderPatchFeedback?.unbalancedPatchCount ||
+        renderPatchFeedback?.selectedPatchCount !==
+            renderPatchFeedback?.unbalancedPatchCount +
+                renderPatchFeedback?.balanceSplitCount * 3 ||
+        renderPatchFeedback?.balanceOverheadPatchCount !==
+            renderPatchFeedback?.balanceSplitCount * 3 ||
+        renderPatchFeedback?.maximumAdjacentLevelDelta > 1 ||
+        renderPatchFeedback?.balancePassCount !== 14 ||
         !Number.isSafeInteger(renderPatchFeedback?.minimumTrialPatchCount) ||
         renderPatchFeedback.minimumTrialPatchCount < 0 ||
         renderPatchFeedback.minimumTrialPatchCount >
@@ -1137,7 +1151,8 @@ function validateDemFacts(label, facts, failures, expectedStatus = 'ready') {
             renderPatchFeedback.minimumTrialPatchCount ||
         renderPatchFeedback?.budgetLimitedByMinimumTrial !== minimumTrialLimited ||
         (!minimumTrialLimited &&
-            renderPatchFeedback?.selectedPatchCount > renderPatchFeedback?.framePatchBudget) ||
+            renderPatchFeedback?.unbalancedPatchCount >
+                renderPatchFeedback?.framePatchBudget) ||
         !Array.isArray(renderPatchLevelRange) || renderPatchLevelRange[0] < 4 ||
         renderPatchLevelRange[1] > 14 ||
         !Array.isArray(renderPatchCellSpanRange) || renderPatchCellSpanRange[0] < 0 ||
@@ -1480,7 +1495,6 @@ function summarizeCleanupProof(proof) {
             staleBindSetPreparationCount: proof.graphState.staleBindSetPreparationCount,
             lastResizeFacts: proof.graphState.lastResizeFacts,
             visibleNodeCount: proof.graphState.visibleNodeCount,
-            stageActivity: proof.graphState.stageActivity,
         },
     }
 }
