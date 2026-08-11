@@ -181,6 +181,16 @@ export type {
     WebMercatorQuadTileBounds,
     WebMercatorTileSampleAddress,
 } from './web-mercator-quad.js'
+export { webMercatorVirtualRasterField } from './web-mercator-virtual-raster-field.js'
+export type {
+    WebMercatorVirtualRasterField,
+    WebMercatorVirtualRasterFieldDescriptor,
+} from './web-mercator-virtual-raster-field.js'
+export { webMercatorVirtualRasterWgslModule } from './web-mercator-virtual-raster-wgsl.js'
+export type {
+    WebMercatorVirtualRasterWgslModule,
+    WebMercatorVirtualRasterWgslOptions,
+} from './web-mercator-virtual-raster-wgsl.js'
 export { virtualRasterCacheAddress } from './virtual-raster-cache-address.js'
 export type {
     VirtualRasterCacheAddress,

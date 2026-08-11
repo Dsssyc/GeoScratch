@@ -141,6 +141,8 @@ const geoValues = [
     'virtualRasterTileAddressSpace',
     'webMercatorPlanarTileSpatialProfile',
     'webMercatorQuadAddressCodec',
+    'webMercatorVirtualRasterField',
+    'webMercatorVirtualRasterWgslModule',
     'wideFixedCodec',
 ]
 

@@ -37,6 +37,8 @@ import {
     virtualRasterTileAddressSpace,
     webMercatorPlanarTileSpatialProfile,
     webMercatorQuadAddressCodec,
+    webMercatorVirtualRasterField,
+    webMercatorVirtualRasterWgslModule,
     type CellLocalPosition,
     type CoordinateDomain,
     type GeoField,
@@ -67,6 +69,9 @@ import {
     type TiledFieldRepresentation,
     type WideFixedPosition,
     type WebMercatorQuadPosition,
+    type WebMercatorVirtualRasterField,
+    type WebMercatorVirtualRasterFieldDescriptor,
+    type WebMercatorVirtualRasterWgslModule,
     type VirtualRasterPageIdentity,
     type VirtualRasterGpuFeedbackBatch,
     type VirtualRasterGpuFeedbackCounters,
@@ -281,6 +286,28 @@ const typedWebMercatorCodec: WebMercatorQuadAddressCodec = webMercatorQuadAddres
 const typedWebMercatorPosition: WebMercatorQuadPosition =
     typedWebMercatorCodec.fromLonLat([ 121.5, 31.2 ])
 const typedWebMercatorAddress = typedWebMercatorCodec.address(typedWebMercatorPosition, '0')
+const typedWebMercatorFieldDescriptor: WebMercatorVirtualRasterFieldDescriptor = {
+    id: 'typed-height-field',
+    addressSpaceId: 'typed-height-address-space',
+    sourceRevision: 'typed-v1',
+    coverage: typedTileCoverage,
+    geographicBounds: [ -180, -85, 180, 85 ],
+    coordinateBits: 40,
+    fieldKind: 'scalar',
+    channels: 1,
+    sampleType: 'unorm8',
+    gpuFormat: 'r8unorm',
+    unit: 'm',
+    interpolation: 'linear',
+}
+const typedWebMercatorField: WebMercatorVirtualRasterField =
+    webMercatorVirtualRasterField(typedWebMercatorFieldDescriptor)
+const typedWebMercatorFieldWgsl: WebMercatorVirtualRasterWgslModule =
+    webMercatorVirtualRasterWgslModule(typedWebMercatorField, {
+        group: 2,
+        pageTableBinding: 0,
+        atlasBinding: 1,
+    })
 const typedFrontierAddressSpace = virtualRasterTileAddressSpace({
     id: 'typed-frontier-raster',
     coverage: typedTileCoverage,
@@ -557,6 +584,8 @@ void typedRasterPage
 void typedRasterSample
 void typedRasterGpuState
 void typedWebMercatorAddress
+void typedWebMercatorField
+void typedWebMercatorFieldWgsl
 void typedFrontierDescriptor
 void typedFrontierView
 void typedFrontierCreation

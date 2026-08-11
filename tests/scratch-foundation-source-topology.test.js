@@ -65,6 +65,7 @@ const workerBasenames = [
     'index.ts',
     'module.ts',
     'protocol.ts',
+    'task-phase-budget.ts',
     'worker-bootstrap.ts',
     'worker-system.ts',
 ]

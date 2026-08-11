@@ -344,7 +344,7 @@ fn vMain(input: VertexInput) -> VertexOutput {
     let uv = sourceUv(position);
     var output: VertexOutput;
     if (sourceContains(uv)) {
-        let sample = DemHeight_sample_vertex_mercator(position, heightLevel);
+        let sample = DemHeight_sample_vertex(position, heightLevel);
         let available = sample.status != 0u && sample.status != 3u && sample.status != 4u;
         let elevation = select(terrainConfig.elevationRange.x, sample.value.x, available);
         output.position = positionCs(position, elevation);

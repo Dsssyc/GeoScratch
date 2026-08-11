@@ -2,19 +2,11 @@ import type { GPURuntime } from 'geoscratch/scratch'
 import {
     WebMercatorQuad,
     createVirtualRasterRuntime,
-    geoField,
     tileMatrixCoverage,
-    tiledFieldRepresentation,
-    virtualRasterPlane,
-    virtualRasterTileAddressSpace,
-    webMercatorPlanarTileSpatialProfile,
-    webMercatorQuadAddressCodec,
+    webMercatorVirtualRasterField,
+    webMercatorVirtualRasterWgslModule,
 } from 'geoscratch/geo'
-import type {
-    VirtualRasterPageIdentity,
-    WebMercatorQuadAddressCodec,
-    WideFixedPosition,
-} from 'geoscratch/geo'
+import type { VirtualRasterPageIdentity } from 'geoscratch/geo'
 import {
     createDemWorkerRequestExecutor,
 } from './dem-worker-source.ts'
@@ -179,66 +171,27 @@ export function createDemVirtualRasterModel(manifest: DemVirtualRasterManifest) 
         tileMatrixSet: WebMercatorQuad,
         limits: parsed.tileMatrixSet.limits,
     })
-    const addressSpace = virtualRasterTileAddressSpace({
-        id: `dem.wmq.${parsed.sourceHash.slice(0, 16)}`,
+    const model = webMercatorVirtualRasterField({
+        id: 'dem-height',
+        addressSpaceId: `dem.wmq.${parsed.sourceHash.slice(0, 16)}`,
+        sourceRevision: parsed.contentVersion,
         coverage,
-    })
-    const addressCodec = webMercatorQuadAddressCodec({
-        coverage,
+        geographicBounds: parsed.source.geographicBounds,
         coordinateBits: DEM_WEB_MERCATOR_COORDINATE_BITS,
-    })
-    const spatialProfile = webMercatorPlanarTileSpatialProfile({ addressCodec })
-    const plane = virtualRasterPlane({
-        id: `dem-height.${parsed.contentVersion}`,
-        addressSpace,
-        kind: 'scalar',
+        fieldKind: 'scalar',
         channels: 1,
         sampleType: 'unorm8',
         gpuFormat: 'r8unorm',
+        unit: 'm',
         ...(parsed.nodata === null ? {} : { noData: parsed.nodata }),
+        interpolation: 'linear',
         scale: parsed.scale,
         offset: parsed.offset,
         auxiliaryAxes: [ { name: 'tile-matrix', value: 'explicit-WebMercatorQuad' } ],
     })
-    const field = geoField({
-        id: `dem-height.${parsed.contentVersion}`,
-        domain: addressCodec.positionCodec.domain,
-        kind: 'scalar',
-        channels: 1,
-        sampleType: 'unorm8',
-        unit: 'm',
-        ...(parsed.nodata === null ? {} : { noData: parsed.nodata }),
-        interpolation: 'linear',
-    })
-    const representation = tiledFieldRepresentation({
-        id: `dem-height.WebMercatorQuad.${parsed.contentVersion}`,
-        field,
-        plane,
-        spatialProfile,
-        sourceRevision: parsed.contentVersion,
-    })
-    const safetyLimit = coverage.limit(parsed.tileMatrixSet.minTileMatrix)!
-    const safetyCoverPages: VirtualRasterPageIdentity[] = []
-    for (let row = safetyLimit.minTileRow; row <= safetyLimit.maxTileRow; row++) {
-        for (let col = safetyLimit.minTileCol; col <= safetyLimit.maxTileCol; col++) {
-            safetyCoverPages.push(addressSpace.pageFromTile({
-                matrixId: safetyLimit.matrixId,
-                tileRow: row,
-                tileCol: col,
-            }))
-        }
-    }
     return Object.freeze({
-        id: representation.id,
+        ...model,
         manifest: parsed,
-        coverage,
-        addressSpace,
-        addressCodec,
-        spatialProfile,
-        field,
-        representation,
-        plane,
-        safetyCoverPages: Object.freeze(safetyCoverPages),
     })
 }
 
@@ -369,275 +322,15 @@ export async function createDemVirtualRasterRuntime({
 
 export function demVirtualRasterWgslModule(model: DemVirtualRasterModel): string {
 
-    const codec = model.addressCodec
-    const matrixIds = Array.from({ length: model.addressSpace.levelCount }, (_, level) =>
-        `${Number(model.addressSpace.matrixId(level))}u`
-    ).join(', ')
-    const sourceBounds = model.manifest.source.geographicBounds
-    const canonicalMinimum = canonicalPosition(codec, [ sourceBounds[0], sourceBounds[1] ])
-    const canonicalMaximum = canonicalPosition(codec, [ sourceBounds[2], sourceBounds[3] ])
-    const minimums: string[] = []
-    const maximums: string[] = []
-    for (let level = 0; level < model.addressSpace.levelCount; level++) {
-        const matrixId = model.addressSpace.matrixId(level)
-        const northwest = codec.address(codec.fromLonLat([ sourceBounds[0], sourceBounds[3] ]), matrixId)
-        const southeast = codec.address(codec.fromLonLat([ sourceBounds[2], sourceBounds[1] ]), matrixId)
-        minimums.push(`vec2u(${coveredTexel(northwest, 0, 'minimum')}u, ` +
-            `${coveredTexel(northwest, 1, 'minimum')}u)`)
-        maximums.push(`vec2u(${coveredTexel(southeast, 0, 'maximum')}u, ` +
-            `${coveredTexel(southeast, 1, 'maximum')}u)`)
-    }
-    const positionLiteral = (position: WideFixedPosition) => {
-        const axes = position.limbs.map(axis =>
-            `DemAddressFixedAxis(${axis.low}u, ${axis.high}u)`
-        ).join(', ')
-        return `DemAddressFixedPosition(array<DemAddressFixedAxis, 2>(${axes}))`
-    }
-    const rawScale = model.plane.sampleType === 'unorm8' ? 255 : 1
-    return `${codec.wgslModule({ namespace: 'DemAddress' })}\n\n` +
-        `struct DemHeightSample {\n` +
-        `    value: vec4f,\n    status: u32,\n    requested_level: u32,\n    resolved_level: u32,\n}\n\n` +
-        `@group(2) @binding(0) var<storage, read> DemHeight_page_table: array<u32>;\n` +
-        `@group(2) @binding(1) var DemHeight_atlas: texture_2d<f32>;\n\n` +
-        `const DemHeight_level_count = ${model.addressSpace.levelCount}u;\n` +
-        `const DemHeight_transition_texels = 16.0f;\n` +
-        `const DemHeight_matrix = array<u32, ${model.addressSpace.levelCount}>(${matrixIds});\n` +
-        `const DemHeight_minimum_texel = array<vec2u, ${model.addressSpace.levelCount}>(${minimums.join(', ')});\n` +
-        `const DemHeight_maximum_texel = array<vec2u, ${model.addressSpace.levelCount}>(${maximums.join(', ')});\n` +
-        `const DemCanonicalMinimum = ${positionLiteral(canonicalMinimum)};\n` +
-        `const DemCanonicalMaximum = ${positionLiteral(canonicalMaximum)};\n` +
-        `const DemElevationRange = vec2f(${Math.fround(model.manifest.offset)}f, ` +
-        `${Math.fround(model.manifest.offset + model.manifest.scale * 255)}f);\n\n` +
-        demCanonicalWgsl(codec.coordinateBits) + '\n' +
-        `fn DemHeight_missing(level: u32) -> DemHeightSample {\n` +
-        `    return DemHeightSample(vec4f(0.0), 0u, level, level);\n}\n\n` +
-        `fn DemHeight_failed(level: u32) -> DemHeightSample {\n` +
-        `    return DemHeightSample(vec4f(0.0), 4u, level, level);\n}\n\n` +
-        `fn DemHeight_mercator_position(value: DemAddressFixedPosition) -> DemAddressFixedPosition {\n` +
-        `    let south = DemCanonical_axis_fraction(value.axes[1]);\n` +
-        `    let latitude = (0.5f - south) * 3.141592653589793f;\n` +
-        `    let sine = sin(latitude);\n` +
-        `    let world_y = clamp(0.5f - log((1.0f + sine) / (1.0f - sine)) / (4.0f * 3.141592653589793f), 0.0f, 0.99999994f);\n` +
-        `    return DemAddressFixedPosition(array<DemAddressFixedAxis, 2>(\n` +
-        `        value.axes[0], DemCanonical_axis_from_fraction(world_y)\n` +
-        `    ));\n}\n\n` +
-        `fn DemHeight_resolution_global(input_texel: vec2i, level: u32) -> vec2u {\n` +
-        `    let texel = vec2u(clamp(input_texel, vec2i(DemHeight_minimum_texel[level]), vec2i(DemHeight_maximum_texel[level])));\n` +
-        `    let matrix = DemHeight_matrix[level];\n` +
-        `    let tile = texel >> vec2u(8u);\n` +
-        `    let table_index = DemAddress_compact_index(matrix, tile);\n` +
-        `    if (table_index == DemAddress_not_covered) { return vec2u(0u, level); }\n` +
-        `    let base = table_index * 8u;\n` +
-        `    let status = DemHeight_page_table[base + 3u];\n` +
-        `    return vec2u(status, select(level, DemHeight_page_table[base + 2u], status != 0u));\n` +
-        `}\n\n` +
-        `fn DemHeight_load_global(input_texel: vec2i, level: u32) -> DemHeightSample {\n` +
-        `    let texel = vec2u(clamp(input_texel, vec2i(DemHeight_minimum_texel[level]), vec2i(DemHeight_maximum_texel[level])));\n` +
-        `    let matrix = DemHeight_matrix[level];\n` +
-        `    let tile = texel >> vec2u(8u);\n` +
-        `    let table_index = DemAddress_compact_index(matrix, tile);\n` +
-        `    if (table_index == DemAddress_not_covered) { return DemHeight_missing(level); }\n` +
-        `    let base = table_index * 8u;\n` +
-        `    let status = DemHeight_page_table[base + 3u];\n` +
-        `    if (status == 0u) { return DemHeight_missing(level); }\n` +
-        `    if (status == 4u) { return DemHeight_failed(level); }\n` +
-        `    let resolved_level = DemHeight_page_table[base + 2u];\n` +
-        `    let resolved_matrix = DemHeight_matrix[resolved_level];\n` +
-        `    let resolved_texel = texel >> vec2u(matrix - resolved_matrix);\n` +
-        `    let local_texel = resolved_texel & vec2u(255u);\n` +
-        `    let slot = vec2u(DemHeight_page_table[base], DemHeight_page_table[base + 1u]);\n` +
-        `    let raw = textureLoad(DemHeight_atlas, vec2i(slot * vec2u(256u) + local_texel), 0);\n` +
-        `    let decoded = raw * ${rawScale}.0f * vec4f(${Math.fround(model.manifest.scale)}f) + vec4f(${Math.fround(model.manifest.offset)}f);\n` +
-        `    return DemHeightSample(decoded, status, level, resolved_level);\n}\n\n` +
-        `fn DemHeight_load_position(position: DemAddressFixedPosition, level: u32) -> DemHeightSample {\n` +
-        `    let address = DemAddress_address(DemHeight_mercator_position(position), DemHeight_matrix[level]);\n` +
-        `    let texel = address.tile * vec2u(256u) + address.texel;\n` +
-        `    return DemHeight_load_global(vec2i(texel), level);\n}\n\n` +
-        `fn DemHeight_sample_level_mercator(mercator_position: DemAddressFixedPosition, level: u32) -> DemHeightSample {\n` +
-        `    var sample_level = level;\n` +
-        `    var address = DemAddress_address(mercator_position, DemHeight_matrix[sample_level]);\n` +
-        `    for (var iteration = 0u; iteration < DemHeight_level_count; iteration++) {\n` +
-        `        let base = vec2i(address.tile * vec2u(256u) + address.texel);\n` +
-        `        let tl_resolution = DemHeight_resolution_global(base, sample_level);\n` +
-        `        let tr_resolution = DemHeight_resolution_global(base + vec2i(1, 0), sample_level);\n` +
-        `        let bl_resolution = DemHeight_resolution_global(base + vec2i(0, 1), sample_level);\n` +
-        `        let br_resolution = DemHeight_resolution_global(base + vec2i(1, 1), sample_level);\n` +
-        `        if (tl_resolution.x == 4u || tr_resolution.x == 4u || bl_resolution.x == 4u || br_resolution.x == 4u) { return DemHeight_failed(level); }\n` +
-        `        if (tl_resolution.x == 0u || tr_resolution.x == 0u || bl_resolution.x == 0u || br_resolution.x == 0u) { return DemHeight_missing(level); }\n` +
-        `        let resolved_level = max(max(tl_resolution.y, tr_resolution.y), max(bl_resolution.y, br_resolution.y));\n` +
-        `        if (resolved_level == sample_level) { break; }\n` +
-        `        sample_level = resolved_level;\n` +
-        `        address = DemAddress_address(mercator_position, DemHeight_matrix[sample_level]);\n` +
-        `    }\n` +
-        `    let base = vec2i(address.tile * vec2u(256u) + address.texel);\n` +
-        `    let tl = DemHeight_load_global(base, sample_level);\n` +
-        `    let tr = DemHeight_load_global(base + vec2i(1, 0), sample_level);\n` +
-        `    let bl = DemHeight_load_global(base + vec2i(0, 1), sample_level);\n` +
-        `    let br = DemHeight_load_global(base + vec2i(1, 1), sample_level);\n` +
-        `    if (tl.status == 4u || tr.status == 4u || bl.status == 4u || br.status == 4u) { return DemHeight_failed(level); }\n` +
-        `    if (tl.status == 0u || tr.status == 0u || bl.status == 0u || br.status == 0u) { return DemHeight_missing(level); }\n` +
-        `    if (tl.status == 3u || tr.status == 3u || bl.status == 3u || br.status == 3u) {\n` +
-        `        return DemHeightSample(vec4f(0.0), 3u, level, sample_level);\n` +
-        `    }\n` +
-        `    let value = mix(mix(tl.value, tr.value, address.sub_texel.x), mix(bl.value, br.value, address.sub_texel.x), address.sub_texel.y);\n` +
-        `    return DemHeightSample(value, max(max(tl.status, tr.status), max(bl.status, br.status)), level, sample_level);\n` +
-        `}\n\n` +
-        `fn DemHeight_sample_level(position: DemAddressFixedPosition, level: u32) -> DemHeightSample {\n` +
-        `    return DemHeight_sample_level_mercator(DemHeight_mercator_position(position), level);\n` +
-        `}\n\n` +
-        `fn DemHeight_edge_blend_weight_mercator(mercator_position: DemAddressFixedPosition, level: u32) -> f32 {\n` +
-        `    let address = DemAddress_address(mercator_position, DemHeight_matrix[level]);\n` +
-        `    let local = vec2f(address.texel) + address.sub_texel;\n` +
-        `    let origin = vec2i(address.tile * vec2u(256u));\n` +
-        `    var weight = 1.0f;\n` +
-        `    if (local.x < DemHeight_transition_texels) {\n` +
-        `        let neighbor = DemHeight_resolution_global(origin + vec2i(-1, i32(address.texel.y)), level);\n` +
-        `        if (neighbor.x != 0u && neighbor.y > level) { weight = min(weight, smoothstep(0.0f, DemHeight_transition_texels, local.x)); }\n` +
-        `    }\n` +
-        `    if (256.0f - local.x < DemHeight_transition_texels) {\n` +
-        `        let neighbor = DemHeight_resolution_global(origin + vec2i(256, i32(address.texel.y)), level);\n` +
-        `        if (neighbor.x != 0u && neighbor.y > level) { weight = min(weight, smoothstep(0.0f, DemHeight_transition_texels, 256.0f - local.x)); }\n` +
-        `    }\n` +
-        `    if (local.y < DemHeight_transition_texels) {\n` +
-        `        let neighbor = DemHeight_resolution_global(origin + vec2i(i32(address.texel.x), -1), level);\n` +
-        `        if (neighbor.x != 0u && neighbor.y > level) { weight = min(weight, smoothstep(0.0f, DemHeight_transition_texels, local.y)); }\n` +
-        `    }\n` +
-        `    if (256.0f - local.y < DemHeight_transition_texels) {\n` +
-        `        let neighbor = DemHeight_resolution_global(origin + vec2i(i32(address.texel.x), 256), level);\n` +
-        `        if (neighbor.x != 0u && neighbor.y > level) { weight = min(weight, smoothstep(0.0f, DemHeight_transition_texels, 256.0f - local.y)); }\n` +
-        `    }\n` +
-        `    return weight;\n` +
-        `}\n\n` +
-        `fn DemHeight_edge_blend_weight(position: DemAddressFixedPosition, level: u32) -> f32 {\n` +
-        `    return DemHeight_edge_blend_weight_mercator(DemHeight_mercator_position(position), level);\n` +
-        `}\n\n` +
-        `fn DemHeight_sample_bilinear_mercator(position: DemAddressFixedPosition, level: u32) -> DemHeightSample {\n` +
-        `    let fine = DemHeight_sample_level_mercator(position, level);\n` +
-        `    if (fine.status == 0u || fine.status == 3u || fine.status == 4u || fine.resolved_level != level || level + 1u >= DemHeight_level_count) { return fine; }\n` +
-        `    let weight = DemHeight_edge_blend_weight_mercator(position, level);\n` +
-        `    if (weight >= 1.0f) { return fine; }\n` +
-        `    let parent = DemHeight_sample_level_mercator(position, level + 1u);\n` +
-        `    if (parent.status == 0u || parent.status == 3u || parent.status == 4u) { return fine; }\n` +
-        `    return DemHeightSample(mix(parent.value, fine.value, weight), max(parent.status, fine.status), level, max(parent.resolved_level, fine.resolved_level));\n` +
-        `}\n\n` +
-        `fn DemHeight_sample_bilinear(position: DemAddressFixedPosition, level: u32) -> DemHeightSample { return DemHeight_sample_bilinear_mercator(DemHeight_mercator_position(position), level); }\n` +
-        `fn DemHeight_sample_vertex_mercator(position: DemAddressFixedPosition, level: u32) -> DemHeightSample { return DemHeight_sample_bilinear_mercator(position, level); }\n` +
-        `fn DemHeight_sample_vertex(position: DemAddressFixedPosition, level: u32) -> DemHeightSample { return DemHeight_sample_bilinear(position, level); }\n` +
-        `fn DemHeight_sample_fragment(position: DemAddressFixedPosition, level: u32) -> DemHeightSample { return DemHeight_sample_bilinear(position, level); }\n` +
-        `fn DemHeight_sample_compute(position: DemAddressFixedPosition, level: u32) -> DemHeightSample { return DemHeight_sample_bilinear(position, level); }\n`
+    return webMercatorVirtualRasterWgslModule(model, {
+        namespace: 'DemHeight',
+        addressNamespace: 'DemAddress',
+        group: 2,
+        pageTableBinding: 0,
+        atlasBinding: 1,
+        transitionTexels: 16,
+    }).code
 }
-
-function demCanonicalWgsl(coordinateBits: number): string {
-
-    const highBits = coordinateBits - 32
-    return `fn DemCanonical_compare_axis(a: DemAddressFixedAxis, b: DemAddressFixedAxis) -> i32 {\n` +
-        `    if (a.high < b.high || (a.high == b.high && a.low < b.low)) { return -1; }\n` +
-        `    if (a.high == b.high && a.low == b.low) { return 0; }\n` +
-        `    return 1;\n}\n\n` +
-        `fn DemCanonical_shift_right_6(value: DemAddressFixedAxis) -> DemAddressFixedAxis {\n` +
-        `    return DemAddressFixedAxis((value.low >> 6u) | (value.high << 26u), value.high >> 6u);\n}\n\n` +
-        `fn DemCanonical_multiply_small(value: DemAddressFixedAxis, factor: u32) -> DemAddressFixedAxis {\n` +
-        `    let low_low = value.low & 0xffffu;\n` +
-        `    let low_high = value.low >> 16u;\n` +
-        `    let first = low_low * factor;\n` +
-        `    let second = low_high * factor;\n` +
-        `    let shifted = second << 16u;\n` +
-        `    let low = first + shifted;\n` +
-        `    let carry = select(0u, 1u, low < first);\n` +
-        `    return DemAddressFixedAxis(low, value.high * factor + (second >> 16u) + carry);\n}\n\n` +
-        `fn DemCanonical_interpolation_delta(value: DemAddressFixedAxis, index: u32) -> DemAddressFixedAxis {\n` +
-        `    let quotient = DemCanonical_shift_right_6(value);\n` +
-        `    let product = DemCanonical_multiply_small(quotient, index);\n` +
-        `    let extra = ((value.low & 63u) * index) >> 6u;\n` +
-        `    return DemAddressFixed_add_axis(product, DemAddressFixedAxis(extra, 0u));\n}\n\n` +
-        `fn DemCanonical_interpolate(minimum: DemAddressFixedPosition, maximum: DemAddressFixedPosition, grid: vec2u) -> DemAddressFixedPosition {\n` +
-        `    var result = minimum;\n` +
-        `    let east_delta = DemAddressFixed_subtract_axis(maximum.axes[0], minimum.axes[0]);\n` +
-        `    let north_delta = DemAddressFixed_subtract_axis(minimum.axes[1], maximum.axes[1]);\n` +
-        `    result.axes[0] = DemAddressFixed_add_axis(minimum.axes[0], DemCanonical_interpolation_delta(east_delta, grid.x));\n` +
-        `    result.axes[1] = DemAddressFixed_subtract_axis(minimum.axes[1], DemCanonical_interpolation_delta(north_delta, grid.y));\n` +
-        `    return result;\n}\n\n` +
-        `fn DemCanonical_axis_fraction(value: DemAddressFixedAxis) -> f32 {\n` +
-        `    return ldexp(f32(value.high), -${highBits}) + ldexp(f32(value.low), -${coordinateBits});\n}\n\n` +
-        `fn DemCanonical_axis_from_fraction(input: f32) -> DemAddressFixedAxis {\n` +
-        `    let value = clamp(input, 0.0f, 0.99999994f);\n` +
-        `    let high_scaled = value * ${2 ** highBits}.0f;\n` +
-        `    let high = u32(floor(high_scaled));\n` +
-        `    let low_scaled = fract(high_scaled) * 65536.0f;\n` +
-        `    let upper = u32(floor(low_scaled));\n` +
-        `    let lower = u32(floor(fract(low_scaled) * 65536.0f));\n` +
-        `    return DemAddressFixedAxis((upper << 16u) | lower, high);\n}\n\n` +
-        `fn DemCanonical_axis_difference(a: DemAddressFixedAxis, b: DemAddressFixedAxis) -> f32 {\n` +
-        `    let order = DemCanonical_compare_axis(a, b);\n` +
-        `    var magnitude: DemAddressFixedAxis;\n` +
-        `    if (order >= 0) {\n` +
-        `        magnitude = DemAddressFixed_subtract_axis(a, b);\n` +
-        `    } else {\n` +
-        `        magnitude = DemAddressFixed_subtract_axis(b, a);\n` +
-        `    }\n` +
-        `    let value = ldexp(f32(magnitude.high), 32 - ${coordinateBits}) + ldexp(f32(magnitude.low), -${coordinateBits});\n` +
-        `    return select(-value, value, order >= 0);\n}\n\n` +
-        `fn DemCanonical_difference_degrees(value: DemAddressFixedPosition, origin: DemAddressFixedPosition) -> vec2f {\n` +
-        `    return vec2f(\n` +
-        `        DemCanonical_axis_difference(value.axes[0], origin.axes[0]) * 360.0f,\n` +
-        `        -DemCanonical_axis_difference(value.axes[1], origin.axes[1]) * 180.0f\n` +
-        `    );\n}\n\n` +
-        `fn DemCanonical_inside(value: DemAddressFixedPosition) -> bool {\n` +
-        `    return DemCanonical_compare_axis(value.axes[0], DemCanonicalMinimum.axes[0]) >= 0 &&\n` +
-        `        DemCanonical_compare_axis(value.axes[0], DemCanonicalMaximum.axes[0]) <= 0 &&\n` +
-        `        DemCanonical_compare_axis(value.axes[1], DemCanonicalMinimum.axes[1]) <= 0 &&\n` +
-        `        DemCanonical_compare_axis(value.axes[1], DemCanonicalMaximum.axes[1]) >= 0;\n}\n\n` +
-        `fn DemCanonical_uv(value: DemAddressFixedPosition) -> vec2f {\n` +
-        `    let x = DemCanonical_axis_difference(value.axes[0], DemCanonicalMinimum.axes[0]) / DemCanonical_axis_difference(DemCanonicalMaximum.axes[0], DemCanonicalMinimum.axes[0]);\n` +
-        `    let y = DemCanonical_axis_difference(DemCanonicalMinimum.axes[1], value.axes[1]) / DemCanonical_axis_difference(DemCanonicalMinimum.axes[1], DemCanonicalMaximum.axes[1]);\n` +
-        `    return vec2f(x, y);\n}\n`
-}
-
-function canonicalPosition(
-    codec: WebMercatorQuadAddressCodec,
-    coordinate: readonly [number, number]
-): WideFixedPosition {
-
-    return codec.positionCodec.fromQuanta(canonicalEndpointQuanta(codec, coordinate))
-}
-
-function canonicalEndpointQuanta(
-    codec: WebMercatorQuadAddressCodec,
-    coordinate: readonly [number, number]
-): readonly [bigint, bigint] {
-
-    const longitude = ((coordinate[0] + 180) % 360 + 360) % 360
-    const latitude = clamp(coordinate[1], -90, 90)
-    return Object.freeze([
-        BigInt(Math.round(longitude / 360 * Number(codec.worldQuanta))),
-        BigInt(Math.min(
-            Number(codec.worldQuanta - 1n),
-            Math.round((90 - latitude) / 180 * Number(codec.worldQuanta))
-        )),
-    ])
-}
-
-function globalTexel(
-    address: ReturnType<WebMercatorQuadAddressCodec['address']>,
-    axis: 0 | 1
-): number {
-
-    const tileCoordinate = axis === 0 ? address.tile.tileCol : address.tile.tileRow
-    return tileCoordinate * DEM_TILE_SIZE + address.texel[axis]
-}
-
-function coveredTexel(
-    address: ReturnType<WebMercatorQuadAddressCodec['address']>,
-    axis: 0 | 1,
-    edge: 'minimum' | 'maximum'
-): number {
-
-    const pixelCoordinate = globalTexel(address, axis) + address.subTexel[axis]
-    return edge === 'minimum'
-        ? Math.ceil(pixelCoordinate - 0.5)
-        : Math.floor(pixelCoordinate - 0.5)
-}
-
 function assertOrderedBounds(value: NumberSequence, name: string): void {
 
     if (value[0] >= value[2] || value[1] >= value[3]) {

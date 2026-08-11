@@ -138,7 +138,7 @@ export type VirtualRasterRuntimeFacts = Readonly<{
 
 export type VirtualRasterRuntime<
     Model extends VirtualRasterRuntimeModel = VirtualRasterRuntimeModel,
-> = Model & Readonly<{
+> = Omit<Model, 'kind'> & Readonly<{
     kind: 'virtual-raster-runtime'
     model: Model
     residency: VirtualRasterResidency

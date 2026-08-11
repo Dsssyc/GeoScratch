@@ -11,6 +11,8 @@ import {
     createGeoViewSnapshot,
     ownedVirtualRasterPagePayload,
     prepareVirtualRasterPageTransfer,
+    webMercatorVirtualRasterField,
+    webMercatorVirtualRasterWgslModule,
 } from 'geoscratch/geo'
 import {
     DEM_WEB_MERCATOR_COORDINATE_BITS,
@@ -460,6 +462,7 @@ describe('DEM WebMercator virtual raster', () => {
         expect(model.representation.field).to.equal(model.field)
         expect(model.representation.plane).to.equal(model.plane)
         expect(model.representation.spatialProfile).to.equal(model.spatialProfile)
+        expect(model.kind).to.equal('web-mercator-virtual-raster-field')
         expect(model.field).to.deep.include({
             kind: 'geo-field',
             fieldKind: 'scalar',
@@ -752,13 +755,38 @@ describe('DEM WebMercator virtual raster', () => {
         const parsed = parseDemVirtualRasterManifest(manifest)
         const model = createDemVirtualRasterModel(parsed)
         const wgsl = demVirtualRasterWgslModule(model)
+        const generic = webMercatorVirtualRasterField({
+            id: 'test-height',
+            addressSpaceId: 'test-height-address-space',
+            sourceRevision: parsed.contentVersion,
+            coverage: model.coverage,
+            geographicBounds: parsed.source.geographicBounds,
+            coordinateBits: DEM_WEB_MERCATOR_COORDINATE_BITS,
+            fieldKind: 'scalar',
+            channels: 1,
+            sampleType: 'unorm8',
+            gpuFormat: 'r8unorm',
+            unit: 'm',
+            interpolation: 'linear',
+            scale: parsed.scale,
+            offset: parsed.offset,
+        })
+        const genericWgsl = webMercatorVirtualRasterWgslModule(generic, {
+            namespace: 'TestHeight',
+            addressNamespace: 'TestAddress',
+            group: 2,
+            pageTableBinding: 0,
+            atlasBinding: 1,
+            transitionTexels: 16,
+        })
 
         expect(model.addressCodec.bytesPerPosition).to.equal(16)
+        expect(generic.kind).to.equal('web-mercator-virtual-raster-field')
+        expect(genericWgsl.code).to.include('fn TestHeight_sample_vertex(')
+        expect(genericWgsl.code).to.include('fn TestAddress_address(')
         expect(wgsl).to.include('fn DemAddress_address(')
         expect(wgsl).to.include('fn DemHeight_load_position(')
         expect(wgsl).to.include('fn DemHeight_sample_vertex(')
-        expect(wgsl).to.include('fn DemHeight_sample_vertex_mercator(')
-        expect(wgsl).to.include('fn DemHeight_sample_level_mercator(')
         expect(wgsl).to.include('fn DemHeight_resolution_global(')
         expect(wgsl).to.include('fn DemHeight_sample_level(')
         expect(wgsl).to.include('fn DemHeight_edge_blend_weight(')
@@ -773,6 +801,8 @@ describe('DEM WebMercator virtual raster', () => {
         expect(wgsl).to.include('vec2u(3435u, 1673u)')
         expect(wgsl).to.not.include('logicalTexel')
         expect(wgsl).to.not.include('canonicalNodes')
+        expect(wgsl).to.not.include('DemCanonical')
+        expect(wgsl).to.not.include('_mercator')
         expect(wgsl).to.not.include('f64')
     })
 })
