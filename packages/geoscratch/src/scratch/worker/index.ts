@@ -25,6 +25,14 @@ export {
     WorkerSystem,
     WorkerTaskHandle,
 } from './worker-system.js'
+export { TaskPhaseBudget } from './task-phase-budget.js'
+export type {
+    TaskPhaseBudgetDescriptor,
+    TaskPhaseBudgetFacts,
+    TaskPhaseBudgetLaneFacts,
+    TaskPhasePermit,
+    TaskPhasePermitRequest,
+} from './task-phase-budget.js'
 export type {
     WorkerContextFacts,
     WorkerContextOpenDescriptor,

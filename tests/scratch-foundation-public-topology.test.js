@@ -47,6 +47,7 @@ const scratchValues = [
     'Surface',
     'SurfaceTextureLease',
     'SurfaceTextureView',
+    'TaskPhaseBudget',
     'TextureResource',
     'TextureUploadCommand',
     'TextureViewSpec',

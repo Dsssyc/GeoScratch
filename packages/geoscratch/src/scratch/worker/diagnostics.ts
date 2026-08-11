@@ -32,7 +32,8 @@ export type WorkerDiagnosticCode =
     | 'WORKER_DESCRIPTOR_INVALID'
 
 export type WorkerDiagnosticSubject = Readonly<{
-    kind: 'WorkerSystem' | 'WorkerGroup' | 'WorkerHost' | 'WorkerModule' | 'WorkerTask' | 'WorkerContext'
+    kind: 'WorkerSystem' | 'WorkerGroup' | 'WorkerHost' | 'WorkerModule' |
+        'WorkerTask' | 'WorkerContext' | 'TaskPhaseBudget'
     id: string
     label?: string
 }>

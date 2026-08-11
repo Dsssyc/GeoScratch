@@ -597,6 +597,16 @@ const typedWorkerModule = workers.defineWorkerModule({
     },
 })
 const typedWorkerSystem = new workers.WorkerSystem({ maxWorkers: 2 })
+const typedPhaseBudget: workers.TaskPhaseBudget<'network' | 'decode'> =
+    new workers.TaskPhaseBudget({
+        id: 'typed-worker-phases',
+        limits: { network: 2, decode: 1 },
+        maxQueuedTasks: 8,
+    })
+const typedPhaseRequest: workers.TaskPhasePermitRequest<'network' | 'decode'> =
+    typedPhaseBudget.acquire('network', { class: 'user-visible', score: 1 })
+const typedPhaseFacts: workers.TaskPhaseBudgetFacts<'network' | 'decode'> =
+    typedPhaseBudget.inspect()
 const typedWorkerGroup: workers.WorkerGroup = typedWorkerSystem.createGroup({
     id: 'typed-worker-group',
     modules: [ {
@@ -638,6 +648,8 @@ typedWorkerSystem.schedule()
 typedWorkerGroup.contextControl
 void typedWorkerFacts
 void typedWorkerContext
+void typedPhaseRequest
+void typedPhaseFacts
 
 async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
 

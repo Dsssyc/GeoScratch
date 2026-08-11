@@ -8,9 +8,13 @@ import type {
     VirtualRasterRequestExecutor,
 } from 'geoscratch/geo'
 import {
+    TaskPhaseBudget,
     WorkerSystem,
 } from 'geoscratch/scratch'
 import type {
+    TaskPhaseBudgetFacts,
+    TaskPhasePermit,
+    TaskPhasePermitRequest,
     WorkerContextHandle,
     WorkerGroupFacts,
     WorkerSystemFacts,
@@ -29,16 +33,9 @@ import type {
     DemTileWorkerInit,
     DemTileCacheFacts,
 } from './dem-tile-protocol.ts'
-import {
-    DemPhaseBudget,
-} from './dem-phase-budget.ts'
-import type {
-    DemPhaseBudgetFacts,
-    DemPhasePermit,
-    DemPhasePermitRequest,
-    DemWorkerPhase,
-} from './dem-phase-budget.ts'
 import demTileWorkerUrl from './dem-tile-worker-url.ts'
+
+type DemWorkerPhase = 'network' | 'decode'
 
 type DemWorkerTileSourceDescriptor = Readonly<{
     sourceId: string
@@ -84,7 +81,7 @@ type DemWorkerRequestExecutorFacts = Readonly<{
     pendingCandidateCount: number
     maxPendingCandidateCount: number
     senderDecodedByteLength: number
-    phaseBudget: DemPhaseBudgetFacts
+    phaseBudget: TaskPhaseBudgetFacts<DemWorkerPhase>
 }>
 
 export type DemWorkerRequestExecutor = VirtualRasterRequestExecutor & Readonly<{
@@ -138,9 +135,12 @@ export async function createDemWorkerRequestExecutor(
         throw error
     }
     const contexts: DemContext[] = []
-    const phaseBudget = new DemPhaseBudget({
-        maxNetworkRequests,
-        maxDecodeTasks,
+    const phaseBudget = new TaskPhaseBudget<DemWorkerPhase>({
+        id: `dem-worker-phases-${id}`,
+        limits: {
+            network: maxNetworkRequests,
+            decode: maxDecodeTasks,
+        },
         maxQueuedTasks: descriptor.maxRequests,
     })
     try {
@@ -278,13 +278,13 @@ function createExecution(
     contextIndex: number,
     demand: VirtualRasterPageDemand,
     candidate: DemTileCandidateDescriptor,
-    phaseBudget: DemPhaseBudget,
+    phaseBudget: TaskPhaseBudget<DemWorkerPhase>,
     updateFacts: (facts: DemTileWorkerFacts) => void
 ): VirtualRasterRequestExecution {
 
     let currentTask: WorkerTaskHandle<unknown> | undefined
-    let phaseRequest: DemPhasePermitRequest | undefined
-    let phasePermit: DemPhasePermit | undefined
+    let phaseRequest: TaskPhasePermitRequest<DemWorkerPhase> | undefined
+    let phasePermit: TaskPhasePermit | undefined
     let phase: 'cache' | 'network' | 'decode' = 'cache'
     let terminalState: WorkerTaskState = 'queued'
     let priority = demand.priority
@@ -454,7 +454,7 @@ function aggregateFacts(
     group: WorkerGroupFacts,
     workers: readonly DemTileWorkerFacts[],
     policy: DemCachePolicy,
-    phaseBudget: DemPhaseBudgetFacts
+    phaseBudget: TaskPhaseBudgetFacts<DemWorkerPhase>
 ): DemWorkerRequestExecutorFacts {
 
     const sumCache = (read: (facts: DemTileCacheFacts) => number) =>

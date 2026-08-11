@@ -1,5 +1,8 @@
 import { expect } from 'chai'
 import {
+    TaskPhaseBudget,
+} from 'geoscratch/scratch'
+import {
     GeoDiagnosticError,
     ViewDemandProducer,
     VirtualRasterRequestScheduler,
@@ -17,7 +20,6 @@ import {
     fetchDemVirtualRasterManifest,
     parseDemVirtualRasterManifest,
 } from '../examples/demLayer/dem-virtual-raster.ts'
-import { DemPhaseBudget } from '../examples/demLayer/dem-phase-budget.ts'
 import { readDemCachePolicy } from '../examples/demLayer/dem-cache-policy.ts'
 import {
     DEM_CACHE_PANEL_DEFAULT_CONFIG,
@@ -349,9 +351,12 @@ describe('DEM WebMercator virtual raster', () => {
 
     it('configures and enforces independent network and decode concurrency budgets', async() => {
 
-        const budget = new DemPhaseBudget({
-            maxNetworkRequests: 2,
-            maxDecodeTasks: 1,
+        const budget = new TaskPhaseBudget({
+            id: 'dem-worker-phases',
+            limits: {
+                network: 2,
+                decode: 1,
+            },
             maxQueuedTasks: 4,
         })
         const firstNetwork = budget.acquire('network', {
@@ -384,19 +389,22 @@ describe('DEM WebMercator virtual raster', () => {
         expect(queuedDecode.inspect().state).to.equal('queued')
         expect(budget.inspect()).to.deep.include({
             disposed: false,
-            network: {
-                limit: 2,
-                activeCount: 2,
-                queuedCount: 1,
-                maxActiveCount: 2,
-                maxQueuedCount: 1,
-            },
-            decode: {
-                limit: 1,
-                activeCount: 1,
-                queuedCount: 1,
-                maxActiveCount: 1,
-                maxQueuedCount: 1,
+            id: 'dem-worker-phases',
+            lanes: {
+                network: {
+                    limit: 2,
+                    activeCount: 2,
+                    queuedCount: 1,
+                    maxActiveCount: 2,
+                    maxQueuedCount: 1,
+                },
+                decode: {
+                    limit: 1,
+                    activeCount: 1,
+                    queuedCount: 1,
+                    maxActiveCount: 1,
+                    maxQueuedCount: 1,
+                },
             },
         })
 
@@ -413,19 +421,22 @@ describe('DEM WebMercator virtual raster', () => {
         await budget.dispose()
         expect(budget.inspect()).to.deep.include({
             disposed: true,
-            network: {
-                limit: 2,
-                activeCount: 0,
-                queuedCount: 0,
-                maxActiveCount: 2,
-                maxQueuedCount: 1,
-            },
-            decode: {
-                limit: 1,
-                activeCount: 0,
-                queuedCount: 0,
-                maxActiveCount: 1,
-                maxQueuedCount: 1,
+            id: 'dem-worker-phases',
+            lanes: {
+                network: {
+                    limit: 2,
+                    activeCount: 0,
+                    queuedCount: 0,
+                    maxActiveCount: 2,
+                    maxQueuedCount: 1,
+                },
+                decode: {
+                    limit: 1,
+                    activeCount: 0,
+                    queuedCount: 0,
+                    maxActiveCount: 1,
+                    maxQueuedCount: 1,
+                },
             },
         })
     })

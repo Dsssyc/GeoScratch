@@ -478,8 +478,14 @@ export {
     WorkerGroup,
     WorkerSystem,
     WorkerTaskHandle,
+    TaskPhaseBudget,
 } from './worker/index.js'
 export type {
+    TaskPhaseBudgetDescriptor,
+    TaskPhaseBudgetFacts,
+    TaskPhaseBudgetLaneFacts,
+    TaskPhasePermit,
+    TaskPhasePermitRequest,
     WorkerCancellationKind,
     WorkerContextDefinition,
     WorkerContextFacts,
