@@ -33,9 +33,22 @@ export {
     createGeoViewAdapter,
     createGeoViewSnapshot,
 } from './geo-view.js'
+export { mapLibrePlanarViewAdapter } from './maplibre-planar-view.js'
+export type {
+    MapLibreLngLat,
+    MapLibreMercatorCoordinate,
+    MapLibrePlanarCameraInput,
+    MapLibrePlanarCameraState,
+    MapLibrePlanarMap,
+    MapLibrePlanarTransform,
+    MapLibrePlanarViewAdapter,
+    MapLibrePlanarViewAdapterDescriptor,
+    MapLibrePlanarViewport,
+} from './maplibre-planar-view.js'
 export type {
     GeoViewAdapter,
     GeoViewAdapterDescriptor,
+    GeoViewReadContext,
     GeoViewSnapshot,
     GeoViewSnapshotDescriptor,
 } from './geo-view.js'

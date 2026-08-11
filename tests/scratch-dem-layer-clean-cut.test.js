@@ -222,6 +222,9 @@ describe('DEM Layer clean cut', () => {
         const layerSource = read('examples', 'demLayer', 'dem-layer.ts')
         const virtualRasterSource = read('examples', 'demLayer', 'dem-virtual-raster.ts')
         const mapSource = read('examples', 'demLayer', 'dem-map.ts')
+        const mapAdapterSource = read(
+            'packages', 'geoscratch', 'src', 'geo', 'maplibre-planar-view.ts'
+        )
 
         expect(layerSource).to.include('GpuTileFrontier.create(')
         expect(layerSource).to.include('mapFieldLayer<DemMapViewInput>({')
@@ -235,11 +238,12 @@ describe('DEM Layer clean cut', () => {
         expect(layerSource).not.to.match(/selectTerrainNodes|nodeLevels|nodeBoxes|canonicalNodes/)
         expect(layerSource).not.to.match(/lodArguments\.upload|terrainArguments\.upload/)
         expect(virtualRasterSource).not.to.match(/\bprepare\(selection\)|planDemVirtualPages/)
-        expect(mapSource).to.include('clipFromRelativeWorld')
-        expect(mapSource).to.include('verticalFovRadians')
-        expect(mapSource).to.include('cameraLatitudeRadians')
-        expect(mapSource).to.include('zoomHint')
-        expect(mapSource).to.include('minimumTerrainElevationMeters')
+        expect(mapSource).to.include('mapLibrePlanarViewAdapter')
+        expect(mapAdapterSource).to.include('clipFromRelativeWorld')
+        expect(mapAdapterSource).to.include('verticalFovRadians')
+        expect(mapAdapterSource).to.include('cameraLatitudeRadians')
+        expect(mapAdapterSource).to.include('zoomHint')
+        expect(mapAdapterSource).to.include('minimumElevationMeters')
         expect(mainSourceFacts()).to.include('canvas.dataset.cpuSelectionUploadCount = \'0\'')
         expect(mainSourceFacts()).to.include('canvas.dataset.frontier = JSON.stringify(')
         expect(mainSourceFacts()).to.include('canvas.dataset.cameraView = JSON.stringify(')

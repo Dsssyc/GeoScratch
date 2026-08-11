@@ -1,5 +1,8 @@
 import { expect } from 'chai'
-import { WebMercatorQuad } from 'geoscratch/geo'
+import {
+    WebMercatorQuad,
+    mapLibrePlanarViewAdapter,
+} from 'geoscratch/geo'
 
 const EARTH_RADIUS_METERS = 6_371_008.8
 const VIEWPORT = Object.freeze({ width: 1_280, height: 800 })
@@ -12,8 +15,7 @@ const TARGET = Object.freeze([ 120.980997, CENTER[1] ])
 
 describe('DEM camera stability', () => {
 
-    let readDemCameraState
-    let demMapViewAdapter
+    let viewAdapter
 
     before(async() => {
 
@@ -29,10 +31,11 @@ describe('DEM camera stability', () => {
                 },
             },
         }
-        ;({
-            demMapViewAdapter,
-            readDemCameraState,
-        } = await import('../examples/demLayer/dem-map.ts'))
+        viewAdapter = mapLibrePlanarViewAdapter({
+            id: 'dem-maplibre-view-adapter',
+            viewId: 'dem-map-view',
+            mercatorCoordinateFromLngLat: globalThis.maplibregl.MercatorCoordinate.fromLngLat,
+        })
     })
 
     after(() => {
@@ -51,7 +54,11 @@ describe('DEM camera stability', () => {
                 CENTER[1],
             ]
             const map = fakeMap(center)
-            const camera = readDemCameraState(map, VIEWPORT, -100)
+            const camera = viewAdapter.camera({
+                map,
+                viewport: VIEWPORT,
+                minimumElevationMeters: -100,
+            })
             const cameraMeters = camera.cameraHigh.map(
                 (high, axis) => high + camera.cameraLow[axis]
             )
@@ -74,9 +81,13 @@ describe('DEM camera stability', () => {
 
     it('adapts one map camera reading into an immutable epoch-bound Geo view', () => {
 
-        const camera = readDemCameraState(fakeMap(CENTER), VIEWPORT, -100)
-        const view = demMapViewAdapter.read({
-            camera,
+        const input = {
+            map: fakeMap(CENTER),
+            viewport: VIEWPORT,
+            minimumElevationMeters: -100,
+        }
+        const camera = viewAdapter.camera(input)
+        const view = viewAdapter.read(camera, {
             frameEpoch: 17,
             residencySnapshotEpoch: 9,
         })

@@ -83,16 +83,25 @@ describe('Geo view snapshots and demand', () => {
 
         const descriptor = {
             id: 'captured-adapter',
-            read: () => view({ id: 'original-view' }),
+            read: (_input, context) => view({
+                id: 'original-view',
+                frameEpoch: context.frameEpoch,
+                residencySnapshotEpoch: context.residencySnapshotEpoch,
+            }),
         }
         const adapter = createGeoViewAdapter(descriptor)
         descriptor.read = () => view({ id: 'mutated-view' })
 
-        expect(adapter.read(undefined).id).to.equal('original-view')
+        const context = { frameEpoch: 7, residencySnapshotEpoch: 3 }
+        expect(adapter.read(undefined, context)).to.deep.include({
+            id: 'original-view',
+            frameEpoch: 7,
+            residencySnapshotEpoch: 3,
+        })
         expect(() => createGeoViewAdapter({
             id: 'forged-adapter',
             read: () => ({ kind: 'geo-view-snapshot' }),
-        }).read(undefined)).to.throw(GeoDiagnosticError)
+        }).read(undefined, context)).to.throw(GeoDiagnosticError)
     })
 
     it('adds view provenance, deduplicates by priority, and applies a hard demand bound', () => {

@@ -67,7 +67,7 @@ function fixture() {
     })
     const viewAdapter = createGeoViewAdapter({
         id: 'maplibre-camera',
-        read: input => createGeoViewSnapshot(input),
+        read: (input, context) => createGeoViewSnapshot({ ...input, ...context }),
     })
     const demandProducer = new ViewDemandProducer({ id: 'dem-view-demand', maxDemands: 32 })
     return { field, representation, profile, viewAdapter, demandProducer }

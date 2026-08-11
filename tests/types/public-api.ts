@@ -23,6 +23,7 @@ import {
     gpuTileFrontierPolicy,
     gpuTileFrontierRenderWgslModule,
     localVector,
+    mapLibrePlanarViewAdapter,
     mapFieldLayer,
     ownedVirtualRasterPagePayload,
     surfaceDomain,
@@ -59,6 +60,8 @@ import {
     type GpuTileFrontierViewToken,
     type GpuTileFrontierRetirement,
     type MapFieldLayer,
+    type MapLibrePlanarCameraInput,
+    type MapLibrePlanarViewAdapter,
     type PositionPrecisionFacts,
     type TileSpatialProfile,
     type TiledFieldRepresentation,
@@ -310,7 +313,7 @@ const typedTiledField: TiledFieldRepresentation = tiledFieldRepresentation({
 })
 const typedViewAdapter: GeoViewAdapter<{ frameEpoch: number }> = createGeoViewAdapter({
     id: 'typed-view-adapter',
-    read: ({ frameEpoch }) => createGeoViewSnapshot({
+    read: ({ frameEpoch }, context) => createGeoViewSnapshot({
         id: 'typed-view',
         clipFromRelativeWorld: new Float32Array(16),
         cameraHigh: [ 0, 0, 0 ],
@@ -320,11 +323,24 @@ const typedViewAdapter: GeoViewAdapter<{ frameEpoch: number }> = createGeoViewAd
         cameraLatitudeRadians: 0,
         cameraPitchRadians: 0,
         zoomHint: 0,
-        frameEpoch,
-        residencySnapshotEpoch: 0,
+        frameEpoch: context.frameEpoch + frameEpoch,
+        residencySnapshotEpoch: context.residencySnapshotEpoch,
     }),
 })
-const typedViewSnapshot: GeoViewSnapshot = typedViewAdapter.read({ frameEpoch: 1 })
+const typedViewSnapshot: GeoViewSnapshot = typedViewAdapter.read(
+    { frameEpoch: 1 },
+    { frameEpoch: 1, residencySnapshotEpoch: 0 }
+)
+declare const typedMapLibreCameraInput: MapLibrePlanarCameraInput
+const typedMapLibreViewAdapter: MapLibrePlanarViewAdapter = mapLibrePlanarViewAdapter({
+    id: 'typed-maplibre-view-adapter',
+    mercatorCoordinateFromLngLat: (_lngLat, altitude) => ({ x: 0.5, y: 0.5, z: altitude }),
+})
+const typedMapLibreCamera = typedMapLibreViewAdapter.camera(typedMapLibreCameraInput)
+const typedMapLibreView: GeoViewSnapshot = typedMapLibreViewAdapter.read(
+    typedMapLibreCamera,
+    { frameEpoch: 1, residencySnapshotEpoch: 1 }
+)
 const typedViewDemandProducer = new ViewDemandProducer({
     id: 'typed-view-demand',
     maxDemands: 8,
@@ -352,6 +368,7 @@ typedMapField.scheduler
 // @ts-expect-error MapFieldLayer does not own a GPU runtime.
 typedMapField.runtime
 void typedViewDemands
+void typedMapLibreView
 declare const typedFrontierGpuState: VirtualRasterGpuState
 const typedFrontierPolicy: GpuTileFrontierPolicy = gpuTileFrontierPolicy({
     refineErrorPixels: 2,

@@ -263,6 +263,9 @@ describe('examples structure', () => {
         const source = read('examples', 'demLayer', 'main.ts')
         const layer = read('examples', 'demLayer', 'dem-layer.ts')
         const mapRuntime = read('examples', 'demLayer', 'dem-map.ts')
+        const mapAdapter = read(
+            'packages', 'geoscratch', 'src', 'geo', 'maplibre-planar-view.ts'
+        )
 
         expect(source).to.include('GPURuntime')
         expect(source).to.include('createDemLayer')
@@ -278,18 +281,14 @@ describe('examples structure', () => {
         expect(layer).to.not.match(/lodArguments\.upload|terrainArguments\.upload/)
         expect(mapRuntime).to.include('globalThis.maplibregl')
         expect(mapRuntime).to.include('darkMatterStyle')
-        expect(mapRuntime).to.include('getCameraPosition()')
-        expect(mapRuntime).to.include('minimumTerrainElevationMeters')
+        expect(mapRuntime).to.include('mapLibrePlanarViewAdapter')
         expect(mapRuntime).to.include('maxPitch: DEM_MAP_DEFAULTS.maxPitch')
-        expect(mapRuntime).to.include('getPitch()')
-        expect(mapRuntime).to.include('getBearing()')
-        expect(mapRuntime).to.match(
-            /getCameraRelativeMercatorMatrix\(\s*transform,\s*minimumTerrainElevationMeters,\s*mercatorCenter,\s*cameraPosition\.lngLat\.lat\s*\)/
-        )
-        expect(mapRuntime).to.include('new Float64Array(16)')
-        expect(mapRuntime).to.include('cameraOrigin.x * transform.worldSize - point.x')
-        expect(mapRuntime).to.include('calculateFarZForTerrainPlane')
-        expect(mapRuntime).to.not.include('underwaterTerrainMinElevation')
+        expect(mapAdapter).to.include('getCameraPosition()')
+        expect(mapAdapter).to.include('minimumElevationMeters')
+        expect(mapAdapter).to.include('new Float64Array(16)')
+        expect(mapAdapter).to.include('cameraOrigin.x * transform.worldSize - point.x')
+        expect(mapAdapter).to.include('farZForTerrainPlane')
+        expect(mapRuntime).to.not.include('new Float64Array(16)')
         expect(source).to.not.include('VITE_MAPBOX_ACCESS_TOKEN')
         expect(source).to.not.include('accessToken')
         expect(mapRuntime).to.not.include('_computeCameraPosition')

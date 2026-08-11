@@ -365,8 +365,7 @@ export async function createDemLayer({
         const noOpPublication = await publishChangedResidency(graph, state)
         const residencySnapshotEpoch = virtualRaster.gpu.facts().snapshotEpoch
         const decisionKey = frontierDecisionKey(camera, residencySnapshotEpoch)
-        const view = mapField.viewAdapter.read({
-            camera,
+        const view = mapField.viewAdapter.read(camera, {
             frameEpoch: state.frame + 1,
             residencySnapshotEpoch,
         })

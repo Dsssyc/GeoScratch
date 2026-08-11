@@ -119,6 +119,7 @@ const geoValues = [
     'isGeoDiagnosticError',
     'localVector',
     'mapFieldLayer',
+    'mapLibrePlanarViewAdapter',
     'ownedVirtualRasterPagePayload',
     'planarTileSpatialProfile',
     'prepareVirtualRasterPageTransfer',

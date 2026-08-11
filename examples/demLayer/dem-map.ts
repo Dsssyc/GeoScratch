@@ -1,28 +1,13 @@
-import { mat4 } from 'wgpu-matrix'
 import {
-    WEB_MERCATOR_QUAD_WORLD_WIDTH,
-    WebMercatorQuad,
-    createGeoViewAdapter,
-    createGeoViewSnapshot,
+    mapLibrePlanarViewAdapter,
 } from 'geoscratch/geo'
-import type { GeoViewSnapshotDescriptor } from 'geoscratch/geo'
-
-type Vec3 = [ number, number, number ]
-
-type LngLat = {
-    lng: number
-    lat: number
-}
-
-type CameraPosition = {
-    lngLat: LngLat
-    altitude: number
-}
-
-type Point = {
-    x: number
-    y: number
-}
+import type {
+    MapLibreLngLat,
+    MapLibreMercatorCoordinate,
+    MapLibrePlanarCameraState,
+    MapLibrePlanarMap,
+    MapLibrePlanarViewport,
+} from 'geoscratch/geo'
 
 type MapStyle = {
     readonly version: number
@@ -49,58 +34,20 @@ type MapStyle = {
     )[]
 }
 
-type MapTransform = {
-    height: number
-    width: number
-    mercatorMatrix?: ArrayLike<number> | null
-    farZ: number
-    nearZ: number
-    centerOffset?: Point | null
-    point: Point
-    _fov?: number
-    fov: number
-    _pitch?: number
-    pitch: number
-    angle: number
-    bearing: number
-    worldSize: number
-    elevation?: number
-    _elevation?: number
-    minElevationForCurrentTile?: number
-    cameraToCenterDistance?: number
-    _pixelPerMeter?: number
-    pixelsPerMeter?: number
-    center: { lat: number }
-    getCameraPosition(): CameraPosition
-    getHorizon?(): number
-}
-
-export type DemMap = {
-    transform: MapTransform
+export type DemMap = MapLibrePlanarMap & Readonly<{
     loaded(): boolean
     once(event: 'load', listener: () => void): void
-    off(event: 'load', listener: () => void): void
-    getZoom(): number
-    getBounds(): {
-        getWest(): number
-        getSouth(): number
-        getEast(): number
-        getNorth(): number
-    }
-    resize(): void
-    getCenter(): LngLat
-    getPitch(): number
-    getBearing(): number
-    on(event: 'render', listener: () => void): void
     off(event: 'render' | 'load', listener: () => void): void
+    resize(): void
+    on(event: 'render', listener: () => void): void
     jumpTo(options: {
-        center?: readonly [ number, number ]
+        center?: readonly [number, number]
         zoom?: number
         pitch?: number
         bearing?: number
     }): void
     remove(): void
-}
+}>
 
 type MapApi = {
     Map: new (options: {
@@ -114,7 +61,10 @@ type MapApi = {
         antialias: boolean
     }) => DemMap
     MercatorCoordinate: {
-        fromLngLat(lngLat: LngLat, altitude: number): { x: number; y: number; z: number }
+        fromLngLat(
+            lngLat: MapLibreLngLat,
+            altitude: number
+        ): MapLibreMercatorCoordinate
     }
 }
 
@@ -123,31 +73,12 @@ declare global {
     var mapboxgl: MapApi | undefined
 }
 
-type DemMapOptions = {
+type DemMapOptions = Readonly<{
     proof?: boolean
-}
-
-type Viewport = {
-    width: number
-    height: number
-}
-
-export type DemMapCameraState = Omit<
-    GeoViewSnapshotDescriptor,
-    'id' | 'frameEpoch' | 'residencySnapshotEpoch'
-> & Readonly<{
-    far: number
-    near: number
-    center: readonly [ number, number ]
-    pitchDegrees: number
-    bearingDegrees: number
 }>
 
-export type DemMapViewInput = Readonly<{
-    camera: DemMapCameraState
-    frameEpoch: number
-    residencySnapshotEpoch: number
-}>
+export type DemMapCameraState = MapLibrePlanarCameraState
+export type DemMapViewInput = DemMapCameraState
 
 const DEM_MAP_DEFAULTS = Object.freeze({
     center: Object.freeze([ 120.980697, 31.684162 ]),
@@ -188,6 +119,13 @@ const demProofStyle = Object.freeze({
         type: 'background',
         paint: { 'background-color': '#101418' },
     } ],
+})
+
+export const demMapViewAdapter = mapLibrePlanarViewAdapter({
+    id: 'dem-maplibre-view-adapter',
+    viewId: 'dem-map-view',
+    mercatorCoordinateFromLngLat: (lngLat, altitude) =>
+        requireMapApi().MercatorCoordinate.fromLngLat(lngLat, altitude),
 })
 
 export function createDemMap(canvas: HTMLCanvasElement, options: DemMapOptions = {}) {
@@ -234,228 +172,16 @@ export function waitForDemMap(map: DemMap, signal?: AbortSignal): Promise<DemMap
 
 export function readDemCameraState(
     map: DemMap,
-    viewport: Viewport,
-    minimumTerrainElevationMeters: number
+    viewport: MapLibrePlanarViewport,
+    minimumElevationMeters: number
 ): DemMapCameraState {
 
-    if (!Number.isFinite(minimumTerrainElevationMeters)) {
-        throw new TypeError('DEM camera requires a finite minimum terrain elevation')
-    }
-    const mapApi = requireMapApi()
-    const transform = map.transform
-    const cameraPosition = transform.getCameraPosition()
-    const mercatorCenter = mapApi.MercatorCoordinate.fromLngLat(
-        cameraPosition.lngLat,
-        cameraPosition.altitude
-    )
-    const projected = WebMercatorQuad.project([
-        cameraPosition.lngLat.lng,
-        cameraPosition.lngLat.lat,
-    ])
-    const cameraX = encodeFloatToDouble(projected[0])
-    const cameraY = encodeFloatToDouble(projected[1])
-    const cameraZ = encodeFloatToDouble(cameraPosition.altitude)
-    const cameraHigh: Vec3 = [ cameraX[0], cameraY[0], cameraZ[0] ]
-    const cameraLow: Vec3 = [ cameraX[1], cameraY[1], cameraZ[1] ]
-    const { far, near, matrix: clipFromRelativeWorld } = getCameraRelativeMercatorMatrix(
-        transform,
-        minimumTerrainElevationMeters,
-        mercatorCenter,
-        cameraPosition.lngLat.lat
-    )
-    const verticalFovRadians = radiansFromTransformValue(transform._fov, transform.fov)
-    const center = map.getCenter()
-    const pitchDegrees = map.getPitch()
-
-    return Object.freeze({
-        far,
-        near,
-        clipFromRelativeWorld: Array.from(clipFromRelativeWorld),
-        cameraHigh,
-        cameraLow,
-        viewport: [ viewport.width, viewport.height ] as const,
-        verticalFovRadians,
-        cameraLatitudeRadians: cameraPosition.lngLat.lat * Math.PI / 180,
-        cameraPitchRadians: pitchDegrees * Math.PI / 180,
-        zoomHint: map.getZoom(),
-        center: [ center.lng, center.lat ] as const,
-        pitchDegrees,
-        bearingDegrees: map.getBearing(),
-    })
+    return demMapViewAdapter.camera({ map, viewport, minimumElevationMeters })
 }
-
-export const demMapViewAdapter = createGeoViewAdapter<DemMapViewInput>({
-    id: 'dem-maplibre-view-adapter',
-    read({ camera, frameEpoch, residencySnapshotEpoch }) {
-
-        return createGeoViewSnapshot({
-            id: 'dem-map-view',
-            clipFromRelativeWorld: camera.clipFromRelativeWorld,
-            cameraHigh: camera.cameraHigh,
-            cameraLow: camera.cameraLow,
-            viewport: camera.viewport,
-            verticalFovRadians: camera.verticalFovRadians,
-            cameraLatitudeRadians: camera.cameraLatitudeRadians,
-            cameraPitchRadians: camera.cameraPitchRadians,
-            zoomHint: camera.zoomHint,
-            frameEpoch,
-            residencySnapshotEpoch,
-        })
-    },
-})
 
 function requireMapApi(): MapApi {
 
     const mapApi = globalThis.maplibregl ?? globalThis.mapboxgl
     if (mapApi === undefined) throw new Error('Map runtime failed to load for DEM Layer')
     return mapApi
-}
-
-function getCameraRelativeMercatorMatrix(
-    transform: MapTransform,
-    minimumTerrainElevationMeters: number,
-    cameraOrigin: Readonly<{ x: number; y: number; z: number }>,
-    cameraLatitudeDegrees: number
-) {
-
-    if (!transform.height || !transform.mercatorMatrix) {
-        const matrix = Float64Array.from(transform.mercatorMatrix ??
-            mat4.identity(new Float64Array(16)))
-        mat4.translate(matrix, [ cameraOrigin.x, cameraOrigin.y, cameraOrigin.z ], matrix)
-        mat4.scale(matrix, [
-            1 / WEB_MERCATOR_QUAD_WORLD_WIDTH,
-            -1 / WEB_MERCATOR_QUAD_WORLD_WIDTH,
-            mercatorZfromAltitude(1, cameraLatitudeDegrees),
-        ], matrix)
-        return {
-            far: transform.farZ,
-            near: transform.nearZ,
-            matrix: Float32Array.from(matrix),
-        }
-    }
-
-    const near = transform.height / 50
-    const far = calculateFarZForTerrainPlane(transform, minimumTerrainElevationMeters)
-    const offset = transform.centerOffset ?? { x: 0, y: 0 }
-    const point = transform.point
-    const fov = radiansFromTransformValue(transform._fov, transform.fov)
-    const pitch = radiansFromTransformValue(transform._pitch, transform.pitch)
-    const angle = radiansFromTransformValue(transform.angle, -transform.bearing)
-    const cameraToCenterDistance = getCameraToCenterDistance(transform, fov)
-
-    const matrix = mat4.perspective(
-        fov,
-        transform.width / transform.height,
-        near,
-        far,
-        new Float64Array(16)
-    )
-    matrix[8] = -offset.x * 2 / transform.width
-    matrix[9] = offset.y * 2 / transform.height
-    mat4.scale(matrix, [ 1, -1, 1 ], matrix)
-    mat4.translate(matrix, [ 0, 0, -cameraToCenterDistance ], matrix)
-    mat4.rotateX(matrix, pitch, matrix)
-    mat4.rotateZ(matrix, angle, matrix)
-    // Cancel the global origin in JS f64 before the matrix crosses the GPU f32 ABI.
-    mat4.translate(matrix, [
-        cameraOrigin.x * transform.worldSize - point.x,
-        cameraOrigin.y * transform.worldSize - point.y,
-        cameraOrigin.z * transform.worldSize,
-    ], matrix)
-    mat4.scale(matrix, [
-        transform.worldSize / WEB_MERCATOR_QUAD_WORLD_WIDTH,
-        -transform.worldSize / WEB_MERCATOR_QUAD_WORLD_WIDTH,
-        transform.worldSize * mercatorZfromAltitude(1, cameraLatitudeDegrees),
-    ], matrix)
-
-    return { far, near, matrix: Float32Array.from(matrix) }
-}
-
-function calculateFarZForTerrainPlane(transform: MapTransform, minElevation: number) {
-
-    const fov = radiansFromTransformValue(transform._fov, transform.fov)
-    const pitch = radiansFromTransformValue(transform._pitch, transform.pitch)
-    const offset = transform.centerOffset ?? { x: 0, y: 0 }
-    const pixelPerMeter = getPixelPerMeter(transform)
-    const elevation = getFiniteNumber(transform.elevation, transform._elevation, 0)
-    const currentTileMinElevation = getFiniteNumber(transform.minElevationForCurrentTile, elevation)
-    const visibleMinElevation = Math.min(elevation, currentTileMinElevation, minElevation)
-    const cameraToCenterDistance = getCameraToCenterDistance(transform, fov)
-    const cameraToSeaLevelDistance = cameraToCenterDistance +
-        elevation * pixelPerMeter / Math.cos(pitch)
-    const cameraToLowestPointDistance = cameraToSeaLevelDistance -
-        visibleMinElevation * pixelPerMeter / Math.cos(pitch)
-    const lowestPlane = visibleMinElevation < 0
-        ? cameraToLowestPointDistance
-        : cameraToSeaLevelDistance
-    const groundAngle = Math.PI / 2 + pitch
-    const fovAboveCenter = fov * (0.5 + offset.y / transform.height)
-    const topHalfSurfaceDistance = Math.sin(fovAboveCenter) * lowestPlane /
-        Math.sin(clamp(Math.PI - groundAngle - fovAboveCenter, 0.01, Math.PI - 0.01))
-    const horizon = typeof transform.getHorizon === 'function' ? transform.getHorizon() : Infinity
-    let topHalfSurfaceDistanceHorizon = Infinity
-
-    if (Number.isFinite(horizon) && horizon > 0) {
-        const horizonAngle = Math.atan(horizon / cameraToCenterDistance)
-        const fovCenterToHorizon = 2 * horizonAngle *
-            (0.5 + offset.y / (horizon * 2))
-        topHalfSurfaceDistanceHorizon = Math.sin(fovCenterToHorizon) * lowestPlane /
-            Math.sin(clamp(
-                Math.PI - groundAngle - fovCenterToHorizon,
-                0.01,
-                Math.PI - 0.01
-            ))
-    }
-
-    const topHalfMinDistance = Math.min(topHalfSurfaceDistance, topHalfSurfaceDistanceHorizon)
-    return (Math.cos(Math.PI / 2 - pitch) * topHalfMinDistance + lowestPlane) * 1.01
-}
-
-function getCameraToCenterDistance(transform: MapTransform, fov: number) {
-
-    return getFiniteNumber(
-        transform.cameraToCenterDistance,
-        0.5 / Math.tan(fov / 2) * transform.height
-    )
-}
-
-function getPixelPerMeter(transform: MapTransform) {
-
-    return getFiniteNumber(
-        transform._pixelPerMeter,
-        transform.pixelsPerMeter,
-        mercatorZfromAltitude(1, transform.center.lat) * transform.worldSize
-    )
-}
-
-function radiansFromTransformValue(privateRadians: number | undefined, publicDegrees: number) {
-
-    return Number.isFinite(privateRadians) ? privateRadians as number : publicDegrees * Math.PI / 180
-}
-
-function getFiniteNumber(...values: readonly (number | undefined)[]): number {
-
-    return values.find(value => Number.isFinite(value)) as number
-}
-
-function clamp(value: number, min: number, max: number) {
-
-    return Math.min(Math.max(value, min), max)
-}
-
-function circumferenceAtLatitude(latitude: number) {
-
-    const earthRadius = 6371008.8
-    return 2 * Math.PI * earthRadius * Math.cos(latitude * Math.PI / 180)
-}
-
-function mercatorZfromAltitude(altitude: number, latitude: number) {
-
-    return altitude / circumferenceAtLatitude(latitude)
-}
-
-function encodeFloatToDouble(value: number): [ number, number ] {
-
-    const high = Math.fround(value)
-    return [ high, value - high ]
 }

@@ -29,15 +29,20 @@ export type GeoViewSnapshot = Readonly<{
     residencySnapshotEpoch: number
 }>
 
+export type GeoViewReadContext = Readonly<{
+    frameEpoch: number
+    residencySnapshotEpoch: number
+}>
+
 export type GeoViewAdapterDescriptor<Input> = Readonly<{
     id: string
-    read(input: Input): GeoViewSnapshot
+    read(input: Input, context: GeoViewReadContext): GeoViewSnapshot
 }>
 
 export type GeoViewAdapter<Input = unknown> = Readonly<{
     kind: 'geo-view-adapter'
     id: string
-    read(input: Input): GeoViewSnapshot
+    read(input: Input, context: GeoViewReadContext): GeoViewSnapshot
 }>
 
 const U32_MAX = 0xffff_ffff
@@ -128,13 +133,30 @@ export function createGeoViewAdapter<Input>(
     return Object.freeze({
         kind: 'geo-view-adapter' as const,
         id: descriptor.id,
-        read(input: Input) {
+        read(input: Input, context: GeoViewReadContext) {
 
-            const snapshot = read(input)
-            if (!geoViewSnapshots.has(snapshot)) {
+            if (!u32(context?.frameEpoch) || !u32(context?.residencySnapshotEpoch)) {
                 return invalidView(
-                    'A Geo view adapter must return a snapshot from createGeoViewSnapshot().',
-                    { kind: 'geo-view-snapshot' },
+                    'A Geo view adapter read requires explicit frame and residency provenance.',
+                    { frameEpoch: 'u32', residencySnapshotEpoch: 'u32' },
+                    context
+                )
+            }
+            const immutableContext = Object.freeze({
+                frameEpoch: context.frameEpoch,
+                residencySnapshotEpoch: context.residencySnapshotEpoch,
+            })
+            const snapshot = read(input, immutableContext)
+            if (!geoViewSnapshots.has(snapshot) ||
+                snapshot.frameEpoch !== immutableContext.frameEpoch ||
+                snapshot.residencySnapshotEpoch !== immutableContext.residencySnapshotEpoch) {
+                return invalidView(
+                    'A Geo view adapter must return a library snapshot with the supplied provenance.',
+                    {
+                        kind: 'geo-view-snapshot',
+                        frameEpoch: immutableContext.frameEpoch,
+                        residencySnapshotEpoch: immutableContext.residencySnapshotEpoch,
+                    },
                     snapshot
                 )
             }
