@@ -7,13 +7,13 @@ import {
     ViewDemandProducer,
     VirtualRasterRequestScheduler,
     VirtualRasterResidency,
+    createVirtualRasterDemandController,
     createGeoViewSnapshot,
     ownedVirtualRasterPagePayload,
     prepareVirtualRasterPageTransfer,
 } from 'geoscratch/geo'
 import {
     DEM_WEB_MERCATOR_COORDINATE_BITS,
-    createDemVirtualRasterDemandAdapter,
     createDemVirtualRasterModel,
     demTileUrl,
     demVirtualRasterWgslModule,
@@ -823,12 +823,13 @@ async function createGpuDemandFixture({ maxPhysicalPages = 6 } = {}) {
         id: 'dem-test-view-demand',
         maxDemands: scheduler.maxRequests,
     })
-    const adapter = createDemVirtualRasterDemandAdapter({
+    const adapter = createVirtualRasterDemandController({
         model,
         residency,
         scheduler,
         viewDemandProducer,
         maxPhysicalPages,
+        maxHistory: 16,
     })
     const initialization = adapter.initialize()
     for (const request of executor.requests.values()) {

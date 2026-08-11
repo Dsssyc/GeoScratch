@@ -193,6 +193,21 @@ export {
     VirtualRasterRequestScheduler,
     virtualRasterDemandSet,
 } from './virtual-raster-demand.js'
+export {
+    createVirtualRasterDemandController,
+    createVirtualRasterRuntime,
+} from './virtual-raster-runtime.js'
+export type {
+    VirtualRasterDemandController,
+    VirtualRasterDemandControllerDescriptor,
+    VirtualRasterDemandControllerFacts,
+    VirtualRasterFeedbackReconciliation,
+    VirtualRasterRuntime,
+    VirtualRasterRuntimeDescriptor,
+    VirtualRasterRuntimeFacts,
+    VirtualRasterRuntimeModel,
+    VirtualRasterRuntimePublication,
+} from './virtual-raster-runtime.js'
 export type {
     VirtualRasterDemandGenerationFacts,
     VirtualRasterDemandHistoryEntry,
