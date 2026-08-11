@@ -117,6 +117,7 @@ const geoValues = [
     'createGeoViewAdapter',
     'createGeoViewSnapshot',
     'createGpuRenderPatchFrontier',
+    'createTerrainFieldRenderer',
     'createVirtualRasterDemandController',
     'createVirtualRasterGpuState',
     'createVirtualRasterRuntime',

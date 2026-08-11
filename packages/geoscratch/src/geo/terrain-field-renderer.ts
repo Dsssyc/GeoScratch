@@ -2,69 +2,107 @@ import {
     GPURuntime,
     layoutCodec,
     plane,
-} from 'geoscratch/scratch'
-import type {
-    BindLayoutEntry,
-    BindVisibility,
-    BufferResource,
-    LayoutCodec,
-    LayoutFixedFieldDescriptor,
-    ProgramBufferLayoutRequirement,
-    SubmittedWork,
-    Surface,
-    SurfaceSize,
-    TextureResource,
-} from 'geoscratch/scratch'
+    type BindLayoutEntry,
+    type BindVisibility,
+    type BufferResource,
+    type LayoutCodec,
+    type LayoutFixedFieldDescriptor,
+    type Program,
+    type ProgramBufferLayoutRequirement,
+    type RenderPipeline,
+    type SubmittedWork,
+    type Surface,
+    type SurfaceSize,
+    type TextureResource,
+} from '../scratch/index.js'
 import {
     GPU_RENDER_PATCH_DEFAULT_CELLS_PER_EDGE,
     GPU_RENDER_PATCH_DEFAULT_MAXIMUM_CELL_SPAN_PIXELS,
     GPU_RENDER_PATCH_MAXIMUM_EXTRA_LEVELS,
     GPU_RENDER_PATCH_MAXIMUM_MATRIX_LEVEL,
-    GeoDiagnosticError,
     GpuRenderPatchFeedbackStaleError,
-    GpuTileFrontier,
-    VirtualRasterGpuFeedbackRing,
+    createGpuRenderPatchFrontier,
+    gpuRenderPatchWgslModule,
+    type GpuRenderPatchFeedback,
+    type GpuRenderPatchFrontier,
+} from './gpu-render-patch-frontier.js'
+import { GeoDiagnosticError } from './diagnostics.js'
+import { GpuTileFrontier } from './gpu-tile-frontier.js'
+import type {
+    GpuTileFrontierFacts,
+    GpuTileFrontierFrame,
+} from './gpu-tile-frontier.js'
+import { gpuTileFrontierPolicy } from './gpu-tile-frontier-layout.js'
+import type { GeoViewSnapshot } from './geo-view.js'
+import type { MapFieldLayer } from './map-field-layer.js'
+import {
     WEB_MERCATOR_QUAD_HALF_WORLD,
     WEB_MERCATOR_QUAD_WORLD_WIDTH,
     WebMercatorQuad,
-    createGpuRenderPatchFrontier,
-    gpuRenderPatchWgslModule,
-    gpuTileFrontierPolicy,
-    mapFieldLayer,
-} from 'geoscratch/geo'
-import type {
-    GeoViewSnapshot,
-    GpuRenderPatchFeedback,
-    GpuRenderPatchFrontier,
-    GpuTileFrontierFacts,
-    GpuTileFrontierFrame,
-    VirtualRasterGpuFeedbackBatch,
-} from 'geoscratch/geo'
-import {
-    demMapViewAdapter,
-} from './dem-map.ts'
-import type {
-    DemMapCameraState,
-    DemMapViewInput,
-} from './dem-map.ts'
-import { demVirtualRasterWgslModule } from './dem-virtual-raster.ts'
-import type { createDemVirtualRasterRuntime } from './dem-virtual-raster.ts'
+} from './web-mercator-quad.js'
+import type { WebMercatorVirtualRasterField } from './web-mercator-virtual-raster-field.js'
+import { webMercatorVirtualRasterWgslModule } from './web-mercator-virtual-raster-wgsl.js'
+import { VirtualRasterGpuFeedbackRing } from './virtual-raster-gpu-feedback.js'
+import type { VirtualRasterGpuFeedbackBatch } from './virtual-raster-gpu-feedback.js'
+import type { VirtualRasterRuntime } from './virtual-raster-runtime.js'
 
-type DemShaders = {
-    terrain: string
-}
+export type TerrainFieldPresentationDescriptor<Presentation extends string = string> =
+    Readonly<{
+        id: Presentation
+        fragmentEntryPoint: string
+        label?: string
+    }>
 
-type DemTerrainPresentation = 'shaded' | 'tile-wireframe'
+export type TerrainFieldSamplingWgslOptions = Readonly<{
+    namespace: string
+    addressNamespace: string
+    transitionTexels?: number
+}>
 
-type DemFailureProof = {
-    terrainShader(source: string): string
-    beforeTerrainShaderModule(runtime: GPURuntime): void
-}
+export type TerrainFieldProvenanceFact = Readonly<{
+    name: string
+    resourceId: string
+    declaredContentEpoch: 'current-at-step'
+    producerContentEpoch: number
+    readContentEpoch: number
+    producerStepIndex: number
+    consumerStepIndex: number
+}>
 
-type DemCameraState = DemMapCameraState
+export type TerrainFieldResizeFacts = Readonly<{
+    resizeGeneration: number
+    staleBindSetCount: number
+    preparedBindSetCount: number
+    depthAllocationVersion: number
+}>
 
-type DemVirtualRaster = Awaited<ReturnType<typeof createDemVirtualRasterRuntime>>
-type DemMapField = ReturnType<typeof createDemMapField>
+export type TerrainFieldRendererDescriptor<
+    ViewInput,
+    Presentation extends string = string,
+> = Readonly<{
+    runtime: GPURuntime
+    surface: Surface
+    fieldLayer: MapFieldLayer<ViewInput>
+    virtualRaster: VirtualRasterRuntime<WebMercatorVirtualRasterField>
+    size: SurfaceSize
+    shader: string
+    fieldSampling: TerrainFieldSamplingWgslOptions
+    elevationRangeMeters: readonly [number, number]
+    exaggeration?: number
+    presentations: readonly TerrainFieldPresentationDescriptor<Presentation>[]
+    initialPresentation: Presentation
+    observeProvenance?: (facts: readonly TerrainFieldProvenanceFact[]) => void
+}>
+
+type TerrainVirtualRaster = VirtualRasterRuntime<WebMercatorVirtualRasterField>
+type TerrainMapField = Readonly<{
+    id: string
+    field: TerrainVirtualRaster['field']
+    representation: TerrainVirtualRaster['representation']
+    spatialProfile: TerrainVirtualRaster['spatialProfile']
+    viewAdapter: Readonly<{ id: string }>
+    demandProducer: TerrainVirtualRaster['viewDemandProducer']
+}>
 type Codecs = ReturnType<typeof createCodecs>
 type TerrainGeometry = ReturnType<typeof createTerrainGeometry>
 type Uniforms = Awaited<ReturnType<typeof createUniformResources>>
@@ -84,11 +122,11 @@ type LayoutValues = Parameters<LayoutCodec['pack']>[0]
 type BufferData = Uint32Array<ArrayBuffer>
 type ContentResource = BufferResource | TextureResource
 
-type DemGraph = {
+type TerrainFieldGraph = {
     runtime: GPURuntime
     surface: Surface
-    virtualRaster: DemVirtualRaster
-    mapField: DemMapField
+    virtualRaster: TerrainVirtualRaster
+    fieldLayer: TerrainMapField
     codecs: Codecs
     geometry: TerrainGeometry
     uniforms: Uniforms
@@ -107,38 +145,21 @@ type DemGraph = {
     commands: Commands
 }
 
-type ProvenanceFact = Readonly<{
-    name: string
-    resourceId: string
-    declaredContentEpoch: 'current-at-step'
-    producerContentEpoch: number
-    readContentEpoch: number
-    producerStepIndex: number
-    consumerStepIndex: number
-}>
-
 type ProvenanceVerifier = (
     submitted: SubmittedWork,
-    graph: DemGraph,
+    graph: TerrainFieldGraph,
     frame: GpuTileFrontierFrame,
-    terrainPresentation: DemTerrainPresentation
-) => readonly ProvenanceFact[]
+    terrainPresentation: string
+) => readonly TerrainFieldProvenanceFact[]
 
-type ResizeFacts = Readonly<{
-    resizeGeneration: number
-    staleBindSetCount: number
-    preparedBindSetCount: number
-    depthAllocationVersion: number
-}>
-
-type DemState = {
+type TerrainFieldState = {
     initialized: boolean
     disposed: boolean
     frame: number
     size: SurfaceSize
     resizeGeneration: number
     staleBindSetPreparationCount: number
-    lastResizeFacts?: ResizeFacts
+    lastResizeFacts?: TerrainFieldResizeFacts
     virtualSnapshotEpoch: number
     virtualRequestedPageCount: number
     staleFeedbackCount: number
@@ -146,7 +167,7 @@ type DemState = {
     latestFrontierFacts?: GpuTileFrontierFacts
     latestRenderPatchFeedback?: GpuRenderPatchFeedback
     latestFeedbackDiagnostics: readonly unknown[]
-    terrainPresentation: DemTerrainPresentation
+    terrainPresentation: string
 }
 
 type PersistentFacts = Readonly<{
@@ -156,17 +177,6 @@ type PersistentFacts = Readonly<{
     pipelines: number
     logicalFootprintBytes: number
 }>
-
-type DemLayerOptions = {
-    runtime: GPURuntime
-    surface: Surface
-    virtualRaster: DemVirtualRaster
-    size: SurfaceSize
-    shaders: DemShaders
-    terrainPresentation?: DemTerrainPresentation
-    failureProof?: DemFailureProof
-    provenanceVerifier?: ProvenanceVerifier
-}
 
 type PendingFeedback = Readonly<{
     frame: GpuTileFrontierFrame
@@ -182,49 +192,63 @@ type ConsumedFeedback = Readonly<{
     renderPatchFeedback?: GpuRenderPatchFeedback
 }>
 
-export const DEM_STAGE_ORDER = Object.freeze([
+export const TERRAIN_FIELD_STAGE_ORDER = Object.freeze([
     'frontier-compute',
     'render-patch-compute',
     'terrain',
 ])
 const TERRAIN_SECTOR_SIZE = GPU_RENDER_PATCH_DEFAULT_CELLS_PER_EDGE
-export const TERRAIN_EXAGGERATION = 50
+const BUFFER_COPY_DST = 0x08
+const BUFFER_UNIFORM = 0x40
+const BUFFER_STORAGE = 0x80
+const TEXTURE_RENDER_ATTACHMENT = 0x10
 
-const bufferUsage = globalThis.GPUBufferUsage ?? Object.freeze({
-    COPY_DST: 0x08,
-    UNIFORM: 0x40,
-    STORAGE: 0x80,
-})
-const textureUsage = globalThis.GPUTextureUsage ?? Object.freeze({
-    RENDER_ATTACHMENT: 0x10,
-})
-
-export async function createDemLayer({
+export async function createTerrainFieldRenderer<
+    ViewInput,
+    Presentation extends string,
+>({
     runtime,
     surface,
+    fieldLayer,
     virtualRaster,
     size,
-    shaders,
-    terrainPresentation = 'shaded',
-    failureProof = defaultFailureProof,
-    provenanceVerifier = verifyFrameProvenance,
-}: DemLayerOptions) {
+    shader,
+    fieldSampling,
+    elevationRangeMeters,
+    exaggeration = 1,
+    presentations,
+    initialPresentation,
+    observeProvenance,
+}: TerrainFieldRendererDescriptor<ViewInput, Presentation>) {
 
-    if (!(runtime instanceof GPURuntime)) throw new TypeError('DEM Layer requires GPURuntime')
+    if (!(runtime instanceof GPURuntime)) {
+        throw new TypeError('Terrain field renderer requires GPURuntime')
+    }
     assertSize(size)
     assertVirtualRaster(virtualRaster)
-    assertShaders(shaders)
-    assertTerrainPresentation(terrainPresentation)
-    if (typeof provenanceVerifier !== 'function') {
-        throw new TypeError('DEM provenance verifier must be a function')
+    assertFieldLayer(fieldLayer, virtualRaster)
+    assertShader(shader)
+    assertFieldSampling(fieldSampling)
+    assertElevation(elevationRangeMeters, exaggeration)
+    const presentationTable = normalizePresentations(presentations, initialPresentation)
+    if (observeProvenance !== undefined && typeof observeProvenance !== 'function') {
+        throw new TypeError('Terrain field provenance observer must be a function')
     }
 
     const codecs = createCodecs()
     const geometry = createTerrainGeometry()
     const buffers = await createBufferResources(runtime, geometry)
     const textures = await createTextures(runtime, size)
-    const mapField = createDemMapField(virtualRaster)
-    const frontier = await createFrontier(runtime, virtualRaster, mapField)
+    const exaggeratedElevationRange = scaleElevationRange(
+        elevationRangeMeters,
+        exaggeration
+    )
+    const frontier = await createFrontier(
+        runtime,
+        virtualRaster,
+        fieldLayer,
+        exaggeratedElevationRange
+    )
     const feedbackRing = await VirtualRasterGpuFeedbackRing.create(frontier)
     const frontierRenderTemplates = createFrontierRenderTemplates(frontier)
     const renderPatchFrontier = await createGpuRenderPatchFrontier(runtime, {
@@ -234,7 +258,7 @@ export async function createDemLayer({
         renderMaximumMatrixLevel: GPU_RENDER_PATCH_MAXIMUM_MATRIX_LEVEL,
         maximumExtraLevels: GPU_RENDER_PATCH_MAXIMUM_EXTRA_LEVELS,
         coordinateBits: virtualRaster.addressCodec.coordinateBits,
-        elevationRangeMeters: terrainElevationRange(virtualRaster),
+        elevationRangeMeters: exaggeratedElevationRange,
         vertexCount: geometry.vertexCount,
         cellsPerPatchEdge: TERRAIN_SECTOR_SIZE,
         maximumCellSpanPixels: GPU_RENDER_PATCH_DEFAULT_MAXIMUM_CELL_SPAN_PIXELS,
@@ -244,7 +268,9 @@ export async function createDemLayer({
         runtime,
         codecs,
         virtualRaster,
-        renderPatchFrontier.facts().renderPatchLookupCapacity
+        renderPatchFrontier.facts().renderPatchLookupCapacity,
+        elevationRangeMeters,
+        exaggeration
     )
     const layouts = await createBindLayouts(
         runtime,
@@ -259,14 +285,22 @@ export async function createDemLayer({
         virtualRaster,
         renderTemplates
     )
-    const programs = await createPrograms(
+    const programs = await createPrograms({
         runtime,
         codecs,
-        shaders,
-        failureProof,
-        virtualRaster
+        shader,
+        fieldSampling,
+        virtualRaster,
+        presentations: presentationTable,
+    })
+    const pipelines = await createPipelines(
+        runtime,
+        surface,
+        textures,
+        layouts,
+        programs,
+        presentationTable
     )
-    const pipelines = await createPipelines(runtime, surface, textures, layouts, programs)
     const passes = createPasses(runtime, surface, textures)
     const commands = createCommands(
         runtime,
@@ -277,11 +311,11 @@ export async function createDemLayer({
         bindSets,
         pipelines
     )
-    const graph: DemGraph = {
+    const graph: TerrainFieldGraph = {
         runtime,
         surface,
         virtualRaster,
-        mapField,
+        fieldLayer,
         codecs,
         geometry,
         uniforms,
@@ -299,7 +333,7 @@ export async function createDemLayer({
         passes,
         commands,
     }
-    const state = createState(size, terrainPresentation)
+    const state = createState(size, initialPresentation)
     const pendingFeedback: PendingFeedback[] = []
     const stableIdentities = Object.freeze(stableIdentitySnapshot(graph))
     const stableIdentityFacts = identityFactSnapshot(graph)
@@ -347,22 +381,21 @@ export async function createDemLayer({
         return Object.freeze({ submitted, observation })
     }
 
-    async function renderFrame(camera: DemCameraState) {
+    async function renderFrame(input: ViewInput) {
 
-        if (!state.initialized) throw new Error('DEM graph must be initialized before rendering')
-        if (state.disposed) throw new Error('DEM graph is disposed')
-        assertCamera(camera)
+        if (!state.initialized) throw new Error('Terrain field graph must be initialized before rendering')
+        if (state.disposed) throw new Error('Terrain field graph is disposed')
         assertSameIdentities(stableIdentities, stableIdentitySnapshot(graph), 'frame')
         assertPersistentCounts(persistentBaseline, persistentFactSnapshot(runtime), 'frame')
         const frameTerrainPresentation = state.terrainPresentation
 
         const noOpPublication = await publishChangedResidency(graph, state)
         const residencySnapshotEpoch = virtualRaster.gpu.facts().snapshotEpoch
-        const decisionKey = frontierDecisionKey(camera, residencySnapshotEpoch)
-        const view = mapField.viewAdapter.read(camera, {
+        const view = fieldLayer.viewAdapter.read(input, {
             frameEpoch: state.frame + 1,
             residencySnapshotEpoch,
         })
+        const decisionKey = frontierDecisionKey(view)
         const viewToken = frontier.writeView(view)
         let frame: GpuTileFrontierFrame
         let submitted: SubmittedWork
@@ -384,15 +417,16 @@ export async function createDemLayer({
             await virtualRaster.acknowledge(noOpPublication, submitted!)
         }
 
-        let provenance: readonly ProvenanceFact[] = Object.freeze([])
+        let provenance: readonly TerrainFieldProvenanceFact[] = Object.freeze([])
         let provenanceFailure: unknown
         try {
-            provenance = provenanceVerifier(
+            provenance = verifyFrameProvenance(
                 submitted!,
                 graph,
                 frame!,
                 frameTerrainPresentation
             )
+            observeProvenance?.(provenance)
         } catch (error) {
             provenanceFailure = error
         }
@@ -451,10 +485,12 @@ export async function createDemLayer({
         })
     }
 
-    function setTerrainPresentation(nextPresentation: DemTerrainPresentation) {
+    function setPresentation(nextPresentation: Presentation) {
 
-        assertTerrainPresentation(nextPresentation)
-        if (state.disposed) throw new Error('DEM graph is disposed')
+        if (!presentationTable.has(nextPresentation)) {
+            throw new TypeError(`Unknown terrain presentation ${nextPresentation}`)
+        }
+        if (state.disposed) throw new Error('Terrain field graph is disposed')
         state.terrainPresentation = nextPresentation
         return state.terrainPresentation
     }
@@ -502,7 +538,7 @@ export async function createDemLayer({
     return Object.freeze({
         initialize,
         renderFrame,
-        setTerrainPresentation,
+        setPresentation,
         resize,
         dispose,
         stableIdentities,
@@ -516,17 +552,12 @@ export async function createDemLayer({
     })
 }
 
-const defaultFailureProof: DemFailureProof = Object.freeze({
-    terrainShader: (source: string) => source,
-    beforeTerrainShaderModule() {},
-})
-
 function createCodecs() {
 
     const uniform = (name: string, fields: LayoutFixedFieldDescriptor[]) =>
         layoutCodec({ name, fields }, { usage: [ 'uniform' ] })
     return Object.freeze({
-        config: uniform('DemTerrainConfig', [
+        config: uniform('TerrainFieldConfig', [
             { name: 'sourceMercatorBox', type: 'vec4f' },
             { name: 'elevationRange', type: 'vec2f' },
             { name: 'coordinateBits', type: 'u32' },
@@ -540,27 +571,28 @@ function createCodecs() {
 async function createUniformResources(
     runtime: GPURuntime,
     codecs: Codecs,
-    virtualRaster: DemVirtualRaster,
-    renderPatchLookupCapacity: number
+    virtualRaster: TerrainVirtualRaster,
+    renderPatchLookupCapacity: number,
+    elevationRangeMeters: readonly [number, number],
+    exaggeration: number
 ) {
 
-    const [ west, south, east, north ] = virtualRaster.manifest.projectedBounds.bounds
+    const [ westLongitude, southLatitude, eastLongitude, northLatitude ] =
+        virtualRaster.model.geographicBounds
+    const [ west, south ] = WebMercatorQuad.project([ westLongitude, southLatitude ])
+    const [ east, north ] = WebMercatorQuad.project([ eastLongitude, northLatitude ])
     const sourceMercatorBox = [
         (west + WEB_MERCATOR_QUAD_HALF_WORLD) / WEB_MERCATOR_QUAD_WORLD_WIDTH,
         (WEB_MERCATOR_QUAD_HALF_WORLD - north) / WEB_MERCATOR_QUAD_WORLD_WIDTH,
         (east + WEB_MERCATOR_QUAD_HALF_WORLD) / WEB_MERCATOR_QUAD_WORLD_WIDTH,
         (WEB_MERCATOR_QUAD_HALF_WORLD - south) / WEB_MERCATOR_QUAD_WORLD_WIDTH,
     ]
-    const elevationRange = [
-        virtualRaster.manifest.offset,
-        virtualRaster.manifest.offset + virtualRaster.manifest.scale * 255,
-    ]
     return {
-        config: await createUniform(runtime, 'DEM terrain configuration', codecs.config, {
+        config: await createUniform(runtime, 'Terrain field terrain configuration', codecs.config, {
             sourceMercatorBox,
-            elevationRange,
+            elevationRange: elevationRangeMeters,
             coordinateBits: virtualRaster.addressCodec.coordinateBits,
-            exaggeration: TERRAIN_EXAGGERATION,
+            exaggeration,
             renderMaximumMatrixLevel: GPU_RENDER_PATCH_MAXIMUM_MATRIX_LEVEL,
             renderPatchLookupCapacity,
         }),
@@ -578,7 +610,7 @@ async function createUniform(
     const buffer = await runtime.createBuffer({
         label,
         size: bytes.byteLength,
-        usage: bufferUsage.COPY_DST | bufferUsage.UNIFORM,
+        usage: BUFFER_COPY_DST | BUFFER_UNIFORM,
     })
     const region = buffer.region({ layout: codec.artifact })
     return Object.freeze({
@@ -607,15 +639,15 @@ async function createBufferResources(runtime: GPURuntime, geometry: TerrainGeome
     return {
         positions: await createBufferWithUpload(
             runtime,
-            'DEM terrain positions',
+            'Terrain field terrain positions',
             geometry.positions,
-            bufferUsage.COPY_DST | bufferUsage.STORAGE
+            BUFFER_COPY_DST | BUFFER_STORAGE
         ),
         indices: await createBufferWithUpload(
             runtime,
-            'DEM terrain indices',
+            'Terrain field terrain indices',
             geometry.indices,
-            bufferUsage.COPY_DST | bufferUsage.STORAGE
+            BUFFER_COPY_DST | BUFFER_STORAGE
         ),
     }
 }
@@ -640,10 +672,10 @@ async function createBufferWithUpload<T extends BufferData>(
 async function createTextures(runtime: GPURuntime, size: SurfaceSize) {
 
     const depth = await runtime.createTexture({
-        label: 'DEM presentation depth',
+        label: 'Terrain field presentation depth',
         size,
         format: 'depth32float',
-        usage: textureUsage.RENDER_ATTACHMENT,
+        usage: TEXTURE_RENDER_ATTACHMENT,
     })
     return {
         depth,
@@ -655,16 +687,18 @@ async function createTextures(runtime: GPURuntime, size: SurfaceSize) {
 
 async function createFrontier(
     runtime: GPURuntime,
-    virtualRaster: DemVirtualRaster,
-    mapField: DemMapField
+    virtualRaster: TerrainVirtualRaster,
+    fieldLayer: TerrainMapField,
+    elevationRangeMeters: readonly [number, number]
 ) {
 
-    const minimumMatrixLevel = Number(virtualRaster.manifest.tileMatrixSet.minTileMatrix)
-    const maximumMatrixLevel = Number(virtualRaster.manifest.tileMatrixSet.maxTileMatrix)
+    const matrixIds = virtualRaster.coverage.limits.map(limit => limit.matrixId)
+    const minimumMatrixLevel = Number(matrixIds[0])
+    const maximumMatrixLevel = Number(matrixIds.at(-1))
     const rootCount = virtualRaster.safetyCoverPages.length
     const maxPhysicalPages = virtualRaster.gpu.maxPhysicalPages
     if (maxPhysicalPages <= rootCount) {
-        throw new Error('DEM GPU frontier requires transition capacity beyond its safety cover')
+        throw new Error('Terrain field GPU frontier requires transition capacity beyond its safety cover')
     }
     const transitionReservePages = Math.min(5, maxPhysicalPages - rootCount)
     const maximumActiveTiles = Math.max(rootCount, Math.min(
@@ -675,11 +709,9 @@ async function createFrontier(
         maximumActiveTiles * 4,
         virtualRaster.scheduler.maxRequests
     ))
-    const elevation = terrainElevationRange(virtualRaster)
-
     return GpuTileFrontier.create(runtime, {
         gpuState: virtualRaster.gpu,
-        spatialProfile: mapField.spatialProfile,
+        spatialProfile: fieldLayer.spatialProfile,
         policy: gpuTileFrontierPolicy({
             refineErrorPixels: 2,
             coarsenErrorPixels: 1,
@@ -690,12 +722,12 @@ async function createFrontier(
             transitionReservePages,
             invisibleGraceFrames: 2,
         }),
-        levelMetrics: virtualRaster.manifest.tileMatrixSet.tileMatrixIds.map(matrixId => {
+        levelMetrics: matrixIds.map(matrixId => {
             const matrix = WebMercatorQuad.matrix(matrixId)
             return Object.freeze({
                 matrixLevel: Number(matrixId),
-                minimumElevationMeters: elevation[0]!,
-                maximumElevationMeters: elevation[1]!,
+                minimumElevationMeters: elevationRangeMeters[0],
+                maximumElevationMeters: elevationRangeMeters[1],
                 geometricErrorMeters: matrix.cellSize,
             })
         }),
@@ -706,15 +738,14 @@ async function createFrontier(
     })
 }
 
-function terrainElevationRange(
-    virtualRaster: DemVirtualRaster
+function scaleElevationRange(
+    range: readonly [number, number],
+    exaggeration: number
 ): readonly [number, number] {
 
-    return Object.freeze([
-        virtualRaster.manifest.offset * TERRAIN_EXAGGERATION,
-        (virtualRaster.manifest.offset + virtualRaster.manifest.scale * 255) *
-            TERRAIN_EXAGGERATION,
-    ].sort((left, right) => left - right) as [number, number])
+    return Object.freeze(range
+        .map(value => value * exaggeration)
+        .sort((left, right) => left - right) as [number, number])
 }
 
 function createFrontierRenderTemplates(frontier: GpuTileFrontier) {
@@ -754,7 +785,7 @@ async function createBindLayouts(runtime: GPURuntime, codecs: Codecs, mapMetaByt
 
     return {
         scene: await runtime.createBindLayout({
-            label: 'DEM frontier scene layout',
+            label: 'Terrain field frontier scene layout',
             group: 0,
             entries: [
                 uniform(0, 'mapMeta', mapMetaBytes, [ 'vertex' ]),
@@ -762,7 +793,7 @@ async function createBindLayouts(runtime: GPURuntime, codecs: Codecs, mapMetaByt
             ],
         }),
         terrainData: await runtime.createBindLayout({
-            label: 'DEM terrain frontier data layout',
+            label: 'Terrain field terrain frontier data layout',
             group: 1,
             entries: [
                 readStorage(0, 'indices'),
@@ -772,13 +803,13 @@ async function createBindLayouts(runtime: GPURuntime, codecs: Codecs, mapMetaByt
             ],
         }),
         terrainTextures: await runtime.createBindLayout({
-            label: 'DEM terrain texture layout',
+            label: 'Terrain field terrain texture layout',
             group: 2,
             entries: [
-                readStorage(0, 'demPageTable'),
+                readStorage(0, 'fieldPageTable'),
                 {
                     binding: 1,
-                    name: 'demAtlas',
+                    name: 'fieldAtlas',
                     type: 'texture',
                     sampleType: 'float',
                     viewDimension: '2d',
@@ -794,7 +825,7 @@ async function createBindSets(
     layouts: Layouts,
     uniforms: Uniforms,
     buffers: Buffers,
-    virtualRaster: DemVirtualRaster,
+    virtualRaster: TerrainVirtualRaster,
     templates: RenderTemplates
 ) {
 
@@ -805,29 +836,37 @@ async function createBindSets(
             gridPositions: buffers.positions.region,
             visibleInstances: template.visibleInstances.region(),
             renderPatchLookupEntries: template.renderPatchLookup.region(),
-        }, { label: `DEM terrain frontier data ${parity}` }))
+        }, { label: `Terrain field terrain frontier data ${parity}` }))
     }
 
     return {
         scene: await runtime.createBindSet(layouts.scene, {
             mapMeta: templates.terrain[0].mapMeta.region(),
             terrainConfig: uniforms.config.region,
-        }, { label: 'DEM frontier scene' }),
+        }, { label: 'Terrain field frontier scene' }),
         terrainData,
         terrainTextures: await runtime.createBindSet(layouts.terrainTextures, {
-            demPageTable: virtualRaster.gpu.pageTable.region(),
-            demAtlas: virtualRaster.gpu.atlasView,
-        }, { label: 'DEM terrain textures' }),
+            fieldPageTable: virtualRaster.gpu.pageTable.region(),
+            fieldAtlas: virtualRaster.gpu.atlasView,
+        }, { label: 'Terrain field terrain textures' }),
     }
 }
 
-async function createPrograms(
-    runtime: GPURuntime,
-    codecs: Codecs,
-    shaders: DemShaders,
-    failureProof: DemFailureProof,
-    virtualRaster: DemVirtualRaster
-) {
+async function createPrograms({
+    runtime,
+    codecs,
+    shader,
+    fieldSampling,
+    virtualRaster,
+    presentations,
+}: Readonly<{
+    runtime: GPURuntime
+    codecs: Codecs
+    shader: string
+    fieldSampling: TerrainFieldSamplingWgslOptions
+    virtualRaster: TerrainVirtualRaster
+    presentations: ReadonlyMap<string, TerrainFieldPresentationDescriptor>
+}>): Promise<Readonly<Record<string, Program>>> {
 
     const renderWgsl = gpuRenderPatchWgslModule()
     const configRequirement: ProgramBufferLayoutRequirement = {
@@ -841,28 +880,37 @@ async function createPrograms(
         code: renderWgsl.code,
         layoutDependencies: renderWgsl.layoutDependencies,
     }
-    failureProof.beforeTerrainShaderModule(runtime)
+    const fieldWgsl = webMercatorVirtualRasterWgslModule(virtualRaster.model, {
+        namespace: fieldSampling.namespace,
+        addressNamespace: fieldSampling.addressNamespace,
+        group: 2,
+        pageTableBinding: 0,
+        atlasBinding: 1,
+        ...(fieldSampling.transitionTexels === undefined
+            ? {}
+            : { transitionTexels: fieldSampling.transitionTexels }),
+    })
     const terrainShader = await runtime.createShaderModule({
-        label: 'DEM terrain shader',
+        label: 'Terrain field terrain shader',
         sourceParts: [
             frontierSource,
-            { code: demVirtualRasterWgslModule(virtualRaster.model) },
-            { code: failureProof.terrainShader(shaders.terrain) },
+            { code: fieldWgsl.code },
+            { code: shader },
         ],
     })
-    const terrainProgram = (label: string, fragmentEntryPoint: string) => runtime.createProgram({
-        label,
-        vertex: { module: terrainShader, entryPoint: 'vMain' },
-        fragment: { module: terrainShader, entryPoint: fragmentEntryPoint },
-        layoutRequirements: [ configRequirement ],
-    })
-    return {
-        terrain: terrainProgram('DEM terrain program', 'fMain'),
-        tileWireframe: terrainProgram(
-            'DEM tile wireframe program',
-            'fTileWireframe'
-        ),
+    const programs: Record<string, Program> = {}
+    for (const presentation of presentations.values()) {
+        programs[presentation.id] = runtime.createProgram({
+            label: presentation.label ?? `Terrain field ${presentation.id} program`,
+            vertex: { module: terrainShader, entryPoint: 'vMain' },
+            fragment: {
+                module: terrainShader,
+                entryPoint: presentation.fragmentEntryPoint,
+            },
+            layoutRequirements: [ configRequirement ],
+        })
     }
+    return Object.freeze(programs)
 }
 
 async function createPipelines(
@@ -870,47 +918,36 @@ async function createPipelines(
     surface: Surface,
     textures: Textures,
     layouts: Layouts,
-    programs: Programs
-) {
+    programs: Programs,
+    presentations: ReadonlyMap<string, TerrainFieldPresentationDescriptor>
+): Promise<Readonly<Record<string, RenderPipeline>>> {
 
-    const terrain = await runtime.createRenderPipeline({
-        label: 'DEM terrain pipeline',
-        program: programs.terrain,
-        layout: {
-            mode: 'explicit',
-            bindLayouts: [ layouts.scene, layouts.terrainData, layouts.terrainTextures ],
-        },
-        targets: [ { format: surface.format } ],
-        primitive: { topology: 'triangle-list', cullMode: 'none' },
-        depthStencil: {
-            format: textures.depth.format,
-            depthWriteEnabled: true,
-            depthCompare: 'less',
-        },
-    })
-    const tileWireframe = await runtime.createRenderPipeline({
-        label: 'DEM tile wireframe pipeline',
-        program: programs.tileWireframe,
-        layout: {
-            mode: 'explicit',
-            bindLayouts: [ layouts.scene, layouts.terrainData, layouts.terrainTextures ],
-        },
-        targets: [ { format: surface.format } ],
-        primitive: { topology: 'triangle-list', cullMode: 'none' },
-        depthStencil: {
-            format: textures.depth.format,
-            depthWriteEnabled: true,
-            depthCompare: 'less',
-        },
-    })
-    return { terrain, tileWireframe }
+    const pipelines: Record<string, RenderPipeline> = {}
+    for (const presentation of presentations.values()) {
+        pipelines[presentation.id] = await runtime.createRenderPipeline({
+            label: presentation.label ?? `Terrain field ${presentation.id} pipeline`,
+            program: programs[presentation.id]!,
+            layout: {
+                mode: 'explicit',
+                bindLayouts: [ layouts.scene, layouts.terrainData, layouts.terrainTextures ],
+            },
+            targets: [ { format: surface.format } ],
+            primitive: { topology: 'triangle-list', cullMode: 'none' },
+            depthStencil: {
+                format: textures.depth.format,
+                depthWriteEnabled: true,
+                depthCompare: 'less',
+            },
+        })
+    }
+    return Object.freeze(pipelines)
 }
 
 function createPasses(runtime: GPURuntime, surface: Surface, textures: Textures) {
 
     return {
         terrain: runtime.createRenderPass({
-            label: 'DEM terrain stage',
+            label: 'Terrain field terrain stage',
             color: [ {
                 target: surface,
                 load: 'clear',
@@ -931,7 +968,7 @@ function createCommands(
     runtime: GPURuntime,
     uniforms: Uniforms,
     buffers: Buffers,
-    virtualRaster: DemVirtualRaster,
+    virtualRaster: TerrainVirtualRaster,
     templates: RenderTemplates,
     bindSets: BindSets,
     pipelines: Pipelines
@@ -939,7 +976,7 @@ function createCommands(
 
     const terrainCommands = (
         label: string,
-        pipeline: Pipelines['terrain']
+        pipeline: RenderPipeline
     ) => templates.terrain.map((template, parity) => runtime.createDrawCommand({
         label: `${label} ${parity}`,
         pipeline,
@@ -966,15 +1003,14 @@ function createCommands(
         whenMissing: 'throw',
     }))
 
-    return {
-        terrain: {
-            shaded: terrainCommands('Draw DEM terrain', pipelines.terrain),
-            'tile-wireframe': terrainCommands(
-                'Draw DEM tile wireframe',
-                pipelines.tileWireframe
-            ),
-        },
-    }
+    return Object.freeze({
+        terrain: Object.freeze(Object.fromEntries(
+            Object.entries(pipelines).map(([ id, pipeline ]) => [
+                id,
+                Object.freeze(terrainCommands(`Draw terrain field ${id}`, pipeline)),
+            ])
+        )),
+    })
 }
 
 function currentReads(resources: readonly ContentResource[]) {
@@ -982,7 +1018,7 @@ function currentReads(resources: readonly ContentResource[]) {
     return resources.map(resource => ({ resource, contentEpoch: 'current-at-step' as const }))
 }
 
-async function publishChangedResidency(graph: DemGraph, state: DemState) {
+async function publishChangedResidency(graph: TerrainFieldGraph, state: TerrainFieldState) {
 
     const publication = graph.virtualRaster.publish()
     if (!publication.changed) return publication
@@ -998,9 +1034,9 @@ async function publishChangedResidency(graph: DemGraph, state: DemState) {
 }
 
 async function consumeReadyFeedback(
-    graph: DemGraph,
+    graph: TerrainFieldGraph,
     pending: PendingFeedback[],
-    state: DemState
+    state: TerrainFieldState
 ): Promise<ConsumedFeedback | undefined> {
 
     if (pending.length < 2) return undefined
@@ -1033,29 +1069,29 @@ async function consumeReadyFeedback(
     })
 }
 
-function frontierDecisionKey(camera: DemCameraState, residencySnapshotEpoch: number): string {
+function frontierDecisionKey(view: GeoViewSnapshot): string {
 
     return JSON.stringify([
-        camera.clipFromRelativeWorld,
-        camera.cameraHigh,
-        camera.cameraLow,
-        camera.viewport,
-        camera.verticalFovRadians,
-        camera.cameraLatitudeRadians,
-        camera.cameraPitchRadians,
-        camera.zoomHint,
-        residencySnapshotEpoch,
+        view.clipFromRelativeWorld,
+        view.cameraHigh,
+        view.cameraLow,
+        view.viewport,
+        view.verticalFovRadians,
+        view.cameraLatitudeRadians,
+        view.cameraPitchRadians,
+        view.zoomHint,
+        view.residencySnapshotEpoch,
     ])
 }
 
 function verifyFrameProvenance(
     submitted: SubmittedWork,
-    graph: DemGraph,
+    graph: TerrainFieldGraph,
     frame: GpuTileFrontierFrame,
-    terrainPresentation: DemTerrainPresentation
+    terrainPresentation: string
 ) {
 
-    const terrainCommand = graph.commands.terrain[terrainPresentation][frame.parity]
+    const terrainCommand = graph.commands.terrain[terrainPresentation]![frame.parity]!
     const renderPatchCommands = graph.renderPatchFrontier.commandsFor(frame)
     const sourceTemplate = graph.frontierRenderTemplates.renderPatch[frame.parity]
     const terrainTemplate = graph.renderTemplates.terrain[frame.parity]
@@ -1104,7 +1140,7 @@ function verifyFrameProvenance(
         ))
         if (producer === undefined || read === undefined ||
             read.declaredContentEpoch !== 'current-at-step') {
-            throw new Error(`DEM submission provenance mismatch for ${pair.name}`)
+            throw new Error(`Terrain field submission provenance mismatch for ${pair.name}`)
         }
         return Object.freeze({
             name: pair.name,
@@ -1118,13 +1154,13 @@ function verifyFrameProvenance(
     }))
 }
 
-function stableIdentitySnapshot(graph: DemGraph) {
+function stableIdentitySnapshot(graph: TerrainFieldGraph) {
 
     const objects = Object.values(identityObjectsByKind(graph)).flat()
     return [ ...new Set(objects.map(object => object.id)) ].sort()
 }
 
-function identityFactSnapshot(graph: DemGraph) {
+function identityFactSnapshot(graph: TerrainFieldGraph) {
 
     const objects = identityObjectsByKind(graph)
     const identities = stableIdentitySnapshot(graph)
@@ -1142,7 +1178,7 @@ function identityFactSnapshot(graph: DemGraph) {
     })
 }
 
-function identityObjectsByKind(graph: DemGraph) {
+function identityObjectsByKind(graph: TerrainFieldGraph) {
 
     const renderPatchIdentity = graph.renderPatchFrontier.identityObjects()
     const templateResources = [
@@ -1179,8 +1215,7 @@ function identityObjectsByKind(graph: DemGraph) {
         passes: [ ...Object.values(graph.passes), ...renderPatchIdentity.passes ],
         commands: [
             ...renderPatchIdentity.commands,
-            ...graph.commands.terrain.shaded,
-            ...graph.commands.terrain['tile-wireframe'],
+            ...Object.values(graph.commands.terrain).flat(),
         ],
     }
 }
@@ -1211,29 +1246,29 @@ function persistentFactSnapshot(runtime: GPURuntime): PersistentFacts {
     })
 }
 
-function graphContractSnapshot(graph: DemGraph) {
+function graphContractSnapshot(graph: TerrainFieldGraph) {
 
     const dataMaximumMatrixLevel = graph.frontier.descriptor.policy.maximumMatrixLevel
     return Object.freeze({
-        stageOrder: DEM_STAGE_ORDER,
+        stageOrder: TERRAIN_FIELD_STAGE_ORDER,
         countPath: 'gpu-produced-indirect-arguments',
         selectionPath: 'gpu-resident-active-frontier',
         dataMaximumMatrixLevel,
         renderMaximumMatrixLevel: GPU_RENDER_PATCH_MAXIMUM_MATRIX_LEVEL,
-        mapField: Object.freeze({
-            id: graph.mapField.id,
-            fieldId: graph.mapField.field.id,
-            representationId: graph.mapField.representation.id,
-            spatialProfileId: graph.mapField.spatialProfile.id,
-            viewAdapterId: graph.mapField.viewAdapter.id,
-            demandProducerId: graph.mapField.demandProducer.id,
+        fieldLayer: Object.freeze({
+            id: graph.fieldLayer.id,
+            fieldId: graph.fieldLayer.field.id,
+            representationId: graph.fieldLayer.representation.id,
+            spatialProfileId: graph.fieldLayer.spatialProfile.id,
+            viewAdapterId: graph.fieldLayer.viewAdapter.id,
+            demandProducerId: graph.fieldLayer.demandProducer.id,
         }),
         terrainVertexCount: graph.geometry.vertexCount,
         frontier: graph.frontier.facts(),
         renderPatches: graph.renderPatchFrontier.facts(),
         feedback: graph.feedbackRing.facts(),
         virtualRaster: Object.freeze({
-            contentVersion: graph.virtualRaster.manifest.contentVersion,
+            sourceRevision: graph.virtualRaster.model.sourceRevision,
             pageSize: graph.virtualRaster.addressSpace.pageSize,
             levelCount: graph.virtualRaster.addressSpace.levelCount,
             maxPhysicalPages: graph.virtualRaster.residency.maxPhysicalPages,
@@ -1250,22 +1285,20 @@ function graphContractSnapshot(graph: DemGraph) {
             renderPatches: Object.freeze(
                 graph.renderPatchFrontier.facts().parity.map(parity => parity.commandIds)
             ),
-            drawTerrain: Object.freeze({
-                shaded: Object.freeze(
-                    graph.commands.terrain.shaded.map(command => command.id)
-                ),
-                tileWireframe: Object.freeze(
-                    graph.commands.terrain['tile-wireframe'].map(command => command.id)
-                ),
-            }),
+            drawTerrain: Object.freeze(Object.fromEntries(
+                Object.entries(graph.commands.terrain).map(([ id, commands ]) => [
+                    id,
+                    Object.freeze(commands.map(command => command.id)),
+                ])
+            )),
         }),
     })
 }
 
 function createState(
     size: SurfaceSize,
-    terrainPresentation: DemTerrainPresentation
-): DemState {
+    terrainPresentation: string
+): TerrainFieldState {
 
     return {
         initialized: false,
@@ -1287,7 +1320,7 @@ function createState(
 }
 
 function stateSnapshot(
-    state: DemState,
+    state: TerrainFieldState,
     pendingFeedbackCount: number,
     feedbackRing: VirtualRasterGpuFeedbackRing
 ) {
@@ -1352,7 +1385,7 @@ async function observeSubmittedWork(submitted: SubmittedWork) {
 
     const [ nativeOutcome ] = await Promise.all([ submitted.nativeOutcome, submitted.done ])
     if (nativeOutcome.status !== 'observed-succeeded') {
-        throw new Error(`DEM submission native outcome was ${nativeOutcome.status}`)
+        throw new Error(`Terrain field submission native outcome was ${nativeOutcome.status}`)
     }
     return Object.freeze({ submissionId: submitted.id, nativeStatus: nativeOutcome.status })
 }
@@ -1364,7 +1397,7 @@ function assertSameIdentities(
 ) {
 
     if (before.length !== after.length || before.some((id, index) => id !== after[index])) {
-        throw new Error(`Persistent DEM graph identity changed during ${action}`)
+        throw new Error(`Persistent Terrain field graph identity changed during ${action}`)
     }
 }
 
@@ -1372,7 +1405,7 @@ function assertPersistentCounts(before: PersistentFacts, after: PersistentFacts,
 
     for (const name of [ 'resources', 'bindLayouts', 'bindSets', 'pipelines' ] as const) {
         if (before[name] !== after[name]) {
-            throw new Error(`Persistent DEM ${name} count changed during ${action}`)
+            throw new Error(`Persistent Terrain field ${name} count changed during ${action}`)
         }
     }
 }
@@ -1393,13 +1426,14 @@ function assertSize(value: SurfaceSize) {
 
     if (value === undefined || !Number.isInteger(value.width) ||
         !Number.isInteger(value.height) || value.width <= 0 || value.height <= 0) {
-        throw new TypeError('DEM size must contain positive integer width and height')
+        throw new TypeError('Terrain field size must contain positive integer width and height')
     }
 }
 
-function assertVirtualRaster(value: DemVirtualRaster) {
+function assertVirtualRaster(value: TerrainVirtualRaster) {
 
-    if (value === undefined || value.manifest?.contentVersion === undefined ||
+    if (value === undefined || value.kind !== 'virtual-raster-runtime' ||
+        value.model?.kind !== 'web-mercator-virtual-raster-field' ||
         value.addressSpace?.dimensions !== 2 || value.gpu?.atlas === undefined ||
         value.gpu.pageTable === undefined || value.gpu.slotTable === undefined ||
         value.field?.kind !== 'geo-field' ||
@@ -1407,47 +1441,72 @@ function assertVirtualRaster(value: DemVirtualRaster) {
         value.spatialProfile?.kind !== 'tile-spatial-profile' ||
         value.viewDemandProducer?.kind !== 'view-demand-producer' ||
         typeof value.reconcileFeedback !== 'function') {
-        throw new TypeError('DEM Layer requires a prepared GPU-demand virtual raster runtime')
+        throw new TypeError(
+            'Terrain field renderer requires a prepared WebMercator Virtual Raster runtime'
+        )
     }
 }
 
-function createDemMapField(virtualRaster: DemVirtualRaster) {
+function assertFieldLayer<ViewInput>(
+    value: MapFieldLayer<ViewInput>,
+    virtualRaster: TerrainVirtualRaster
+) {
 
-    return mapFieldLayer<DemMapViewInput>({
-        id: `dem-map-field.${virtualRaster.manifest.contentVersion}`,
-        field: virtualRaster.field,
-        representation: virtualRaster.representation,
-        spatialProfile: virtualRaster.spatialProfile,
-        viewAdapter: demMapViewAdapter,
-        demandProducer: virtualRaster.viewDemandProducer,
-    })
-}
-
-function assertShaders(value: DemShaders) {
-
-    if (typeof value?.terrain !== 'string') {
-        throw new TypeError('DEM shaders must contain terrain WGSL')
+    if (value?.field !== virtualRaster.field ||
+        value.representation !== virtualRaster.representation ||
+        value.spatialProfile !== virtualRaster.spatialProfile ||
+        value.demandProducer !== virtualRaster.viewDemandProducer ||
+        typeof value.viewAdapter?.read !== 'function') {
+        throw new TypeError(
+            'Terrain field renderer requires one coherent MapFieldLayer and Virtual Raster runtime'
+        )
     }
 }
 
-function assertTerrainPresentation(
-    value: unknown
-): asserts value is DemTerrainPresentation {
+function assertShader(value: string) {
 
-    if (value !== 'shaded' && value !== 'tile-wireframe') {
-        throw new TypeError('DEM terrain presentation must be shaded or tile-wireframe')
+    if (typeof value !== 'string' || value.trim() === '') {
+        throw new TypeError('Terrain field renderer requires application terrain WGSL')
     }
 }
 
-function assertCamera(value: DemCameraState) {
+function assertFieldSampling(value: TerrainFieldSamplingWgslOptions) {
 
-    if (value === undefined || !Number.isFinite(value.far) || !Number.isFinite(value.near) ||
-        !Number.isFinite(value.zoomHint) || value.clipFromRelativeWorld?.length !== 16 ||
-        value.cameraLow?.length !== 3 || value.cameraHigh?.length !== 3 ||
-        value.viewport?.length !== 2 || !Number.isFinite(value.verticalFovRadians) ||
-        !Number.isFinite(value.cameraLatitudeRadians) ||
-        !Number.isFinite(value.cameraPitchRadians) || value.cameraPitchRadians < 0 ||
-        value.cameraPitchRadians > Math.PI / 2) {
-        throw new TypeError('DEM camera state is incomplete')
+    if (typeof value?.namespace !== 'string' || value.namespace.length === 0 ||
+        typeof value.addressNamespace !== 'string' || value.addressNamespace.length === 0) {
+        throw new TypeError('Terrain field sampling requires WGSL namespaces')
     }
+}
+
+function assertElevation(range: readonly [number, number], exaggeration: number) {
+
+    if (!Array.isArray(range) || range.length !== 2 ||
+        range.some(value => !Number.isFinite(value)) || range[0] > range[1] ||
+        !Number.isFinite(exaggeration) || exaggeration <= 0) {
+        throw new TypeError('Terrain field elevation range and exaggeration are invalid')
+    }
+}
+
+function normalizePresentations<Presentation extends string>(
+    values: readonly TerrainFieldPresentationDescriptor<Presentation>[],
+    initial: Presentation
+): ReadonlyMap<Presentation, TerrainFieldPresentationDescriptor<Presentation>> {
+
+    if (!Array.isArray(values) || values.length === 0) {
+        throw new TypeError('Terrain field renderer requires at least one presentation')
+    }
+    const normalized = new Map<Presentation, TerrainFieldPresentationDescriptor<Presentation>>()
+    for (const value of values) {
+        if (typeof value?.id !== 'string' || value.id.length === 0 ||
+            typeof value.fragmentEntryPoint !== 'string' ||
+            !/^[A-Za-z_][A-Za-z0-9_]*$/.test(value.fragmentEntryPoint) ||
+            normalized.has(value.id)) {
+            throw new TypeError('Terrain field presentations require unique ids and WGSL entry points')
+        }
+        normalized.set(value.id, Object.freeze({ ...value }))
+    }
+    if (!normalized.has(initial)) {
+        throw new TypeError(`Unknown initial terrain presentation ${initial}`)
+    }
+    return normalized
 }
