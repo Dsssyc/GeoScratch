@@ -20,7 +20,6 @@ import {
 import { prepareDemControlPanel } from './dem-control-panel.ts'
 import { readDemCachePolicy } from './dem-cache-policy.ts'
 import type { DemCachePolicy } from './dem-tile-protocol.ts'
-import renderPatchShader from './shaders/render-patch-frontier.wgsl?raw'
 import terrainShader from './shaders/terrain-mesh.wgsl?raw'
 
 type DemLayer = Awaited<ReturnType<typeof createDemLayer>>
@@ -198,7 +197,6 @@ async function main(lifetime: DemLifecycle, proof: FailureProofController) {
         virtualRaster,
         size: initialSize,
         shaders: {
-            renderPatch: renderPatchShader,
             terrain: terrainShader,
         },
         terrainPresentation: tileWireframeEnabled ? 'tile-wireframe' : 'shaded',

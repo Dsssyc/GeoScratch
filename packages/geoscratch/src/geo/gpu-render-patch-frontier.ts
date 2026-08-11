@@ -1,42 +1,45 @@
 import {
     layoutCodec,
-} from 'geoscratch/scratch'
-import type {
-    BindLayout,
-    BindLayoutEntry,
-    BindSet,
-    BufferRegion,
-    BufferResource,
-    ClearBufferCommand,
-    ComputePassSpec,
-    ComputePipeline,
-    DispatchCommand,
-    GPURuntime,
-    Program,
-    ReadbackCommand,
-    ShaderModule,
-    SubmissionBuilder,
-    SubmittedWork,
-    UploadCommand,
-} from 'geoscratch/scratch'
+    type BindLayout,
+    type BindLayoutEntry,
+    type BindSet,
+    type BufferRegion,
+    type BufferResource,
+    type ClearBufferCommand,
+    type ComputePassSpec,
+    type ComputePipeline,
+    type DispatchCommand,
+    type GPURuntime,
+    type Program,
+    type ReadbackCommand,
+    type ShaderModule,
+    type SubmissionBuilder,
+    type SubmittedWork,
+    type UploadCommand,
+} from '../scratch/index.js'
 import {
     gpuTileFrontierRenderWgslModule,
-} from 'geoscratch/geo'
+} from './gpu-tile-frontier-layout.js'
 import type {
     GpuTileFrontierFrame,
     GpuTileFrontierRenderTemplate,
-} from 'geoscratch/geo'
+} from './gpu-tile-frontier.js'
+import {
+    createGeoDiagnostic,
+    GeoDiagnosticError,
+} from './diagnostics.js'
+import { GPU_RENDER_PATCH_FRONTIER_WGSL } from './gpu-render-patch-frontier-wgsl.js'
 
-export const DEM_MAX_RENDER_MATRIX_LEVEL = 14
-export const DEM_MAX_RENDER_EXTRA_LEVELS = 4
-export const DEM_RENDER_PATCH_TERRAIN_SECTOR_SIZE = 64
-export const DEM_RENDER_PATCH_MAXIMUM_CELL_SPAN_PIXELS = 8
-export const DEM_RENDER_PATCH_BALANCE_PASS_COUNT = DEM_MAX_RENDER_MATRIX_LEVEL
-const DEM_RENDER_PATCH_MAXIMUM_COUNT_RATIO = 3
-const DEM_RENDER_PATCH_BIAS_STEPS_PER_LEVEL = 4
-const DEM_RENDER_PATCH_BIAS_STEP_COUNT =
-    DEM_MAX_RENDER_EXTRA_LEVELS * DEM_RENDER_PATCH_BIAS_STEPS_PER_LEVEL + 1
-const DEM_RENDER_PATCH_BUDGET_HYSTERESIS_RATIO = 0.75
+export const GPU_RENDER_PATCH_MAXIMUM_MATRIX_LEVEL = 14
+export const GPU_RENDER_PATCH_MAXIMUM_EXTRA_LEVELS = 4
+export const GPU_RENDER_PATCH_DEFAULT_CELLS_PER_EDGE = 64
+export const GPU_RENDER_PATCH_DEFAULT_MAXIMUM_CELL_SPAN_PIXELS = 8
+export const GPU_RENDER_PATCH_BALANCE_PASS_COUNT = GPU_RENDER_PATCH_MAXIMUM_MATRIX_LEVEL
+const GPU_RENDER_PATCH_DEFAULT_MAXIMUM_COUNT_RATIO = 3
+const GPU_RENDER_PATCH_BIAS_STEPS_PER_LEVEL = 4
+const GPU_RENDER_PATCH_BIAS_STEP_COUNT =
+    GPU_RENDER_PATCH_MAXIMUM_EXTRA_LEVELS * GPU_RENDER_PATCH_BIAS_STEPS_PER_LEVEL + 1
+const GPU_RENDER_PATCH_DEFAULT_BUDGET_HYSTERESIS_RATIO = 0.75
 
 const WORKGROUP_SIZE = 64
 const BALANCE_WORKGROUP_SIZE = 256
@@ -44,7 +47,7 @@ const DRAW_ARGUMENT_BYTES = 16
 const DRAW_ARGUMENT_COUNT = 1
 const STATE_TRIAL_COUNTS_OFFSET_WORDS = 13
 const STATE_UNBALANCED_PATCH_COUNT_OFFSET_WORDS =
-    STATE_TRIAL_COUNTS_OFFSET_WORDS + DEM_RENDER_PATCH_BIAS_STEP_COUNT
+    STATE_TRIAL_COUNTS_OFFSET_WORDS + GPU_RENDER_PATCH_BIAS_STEP_COUNT
 const STATE_BALANCE_SPLIT_COUNT_OFFSET_WORDS =
     STATE_UNBALANCED_PATCH_COUNT_OFFSET_WORDS + 1
 const STATE_MAXIMUM_ADJACENT_LEVEL_DELTA_OFFSET_WORDS =
@@ -56,16 +59,14 @@ const STATE_BALANCE_SCRATCH_COUNT_OFFSET_WORDS =
 const STATE_WORDS = STATE_BALANCE_SCRATCH_COUNT_OFFSET_WORDS + 1
 const STATE_BYTES = STATE_WORDS * Uint32Array.BYTES_PER_ELEMENT
 const LOOKUP_ENTRY_BYTES = 8
-const bufferUsage = globalThis.GPUBufferUsage ?? Object.freeze({
-    COPY_DST: 0x08,
-    COPY_SRC: 0x04,
-    UNIFORM: 0x40,
-    STORAGE: 0x80,
-    INDIRECT: 0x100,
-})
+const BUFFER_COPY_DST = 0x08
+const BUFFER_COPY_SRC = 0x04
+const BUFFER_UNIFORM = 0x40
+const BUFFER_STORAGE = 0x80
+const BUFFER_INDIRECT = 0x100
 
 const renderPatchCodec = layoutCodec({
-    name: 'DemRenderPatch',
+    name: 'GpuRenderPatch',
     fields: [
         { name: 'matrixLevel', type: 'u32' },
         { name: 'tileRow', type: 'u32' },
@@ -79,7 +80,7 @@ const renderPatchCodec = layoutCodec({
 }, { usage: [ 'storage', 'readback' ] })
 
 const renderPatchPolicyCodec = layoutCodec({
-    name: 'DemRenderPatchPolicy',
+    name: 'GpuRenderPatchPolicy',
     fields: [
         { name: 'dataMaximumMatrixLevel', type: 'u32' },
         { name: 'renderMaximumMatrixLevel', type: 'u32' },
@@ -88,9 +89,9 @@ const renderPatchPolicyCodec = layoutCodec({
         { name: 'minimumElevationMeters', type: 'f32' },
         { name: 'maximumElevationMeters', type: 'f32' },
         { name: 'coordinateBits', type: 'u32' },
-        { name: 'terrainVertexCount', type: 'u32' },
+        { name: 'vertexCount', type: 'u32' },
         { name: 'renderPatchLookupCapacity', type: 'u32' },
-        { name: 'terrainSectorSize', type: 'u32' },
+        { name: 'cellsPerPatchEdge', type: 'u32' },
         { name: 'maximumCellSpanPixels', type: 'f32' },
         { name: 'maximumPatchCountRatio', type: 'f32' },
         { name: 'biasStepsPerLevel', type: 'u32' },
@@ -103,12 +104,10 @@ const renderPatchPolicyCodec = layoutCodec({
 type Disposable = { dispose(): void }
 type BufferBindingType = 'uniform' | 'read-storage' | 'storage'
 
-type DrawTemplateId = 'terrain'
-
-type DemRenderPatchRenderTemplate = Readonly<{
+export type GpuRenderPatchRenderTemplate = Readonly<{
     frontierId: string
     parity: 0 | 1
-    templateId: DrawTemplateId
+    templateId: 'patch-mesh'
     mapMeta: BufferResource
     visibleInstances: BufferResource
     renderPatchLookup: BufferResource
@@ -131,7 +130,7 @@ type ParityResources = Readonly<{
     drawArguments: BufferResource
 }>
 
-type ParityCommands = Readonly<{
+export type GpuRenderPatchCommands = Readonly<{
     clearLookup: ClearBufferCommand
     reset: DispatchCommand
     count: DispatchCommand
@@ -144,7 +143,7 @@ type ParityCommands = Readonly<{
     feedback: ReadbackCommand
 }>
 
-type DemRenderPatchFrontierFacts = Readonly<{
+export type GpuRenderPatchFrontierFacts = Readonly<{
     id: string
     selectionPath: 'gpu-balanced-normalized-projected-grid-render-patches'
     disposed: boolean
@@ -160,7 +159,7 @@ type DemRenderPatchFrontierFacts = Readonly<{
     refinementHysteresisLevels: number
     budgetHysteresisRatio: number
     nominalPatchSpanPixels: number
-    terrainSectorSize: number
+    cellsPerPatchEdge: number
     renderPatchBytes: number
     renderPatchLookupCapacity: number
     renderPatchLookupBytes: number
@@ -181,7 +180,7 @@ type DemRenderPatchFrontierFacts = Readonly<{
     }>[]
 }>
 
-type IdentityObjects = Readonly<{
+export type GpuRenderPatchIdentityObjects = Readonly<{
     resources: readonly BufferResource[]
     uploads: readonly UploadCommand[]
     bindLayouts: readonly BindLayout[]
@@ -192,7 +191,7 @@ type IdentityObjects = Readonly<{
     commands: readonly (ClearBufferCommand | DispatchCommand | ReadbackCommand)[]
 }>
 
-type DemRenderPatchSelectionFacts = Readonly<{
+export type GpuRenderPatchSelectionFacts = Readonly<{
     selectedPatchCount: number
     descriptorOverflowCount: number
     lookupOverflowCount: number
@@ -216,27 +215,30 @@ type DemRenderPatchSelectionFacts = Readonly<{
     balancePassCount: number
 }>
 
-export type DemRenderPatchFeedback = Readonly<DemRenderPatchSelectionFacts & {
-    kind: 'dem-render-patch-feedback'
+export type GpuRenderPatchFeedback = Readonly<GpuRenderPatchSelectionFacts & {
+    kind: 'gpu-render-patch-feedback'
     frontierId: string
     submissionId: string
 }>
 
-export class DemRenderPatchFeedbackStaleError extends Error {
-
-    readonly code = 'DEM_RENDER_PATCH_FEEDBACK_STALE'
+export class GpuRenderPatchFeedbackStaleError extends GeoDiagnosticError {
 
     constructor(expectedFrameEpoch: number, actualFrameEpoch: number) {
 
-        super(
-            `DEM render-patch frame epoch is stale: expected ${expectedFrameEpoch}, ` +
-            `received ${actualFrameEpoch}`
-        )
-        this.name = 'DemRenderPatchFeedbackStaleError'
+        super(createGeoDiagnostic({
+            code: 'GEO_GPU_RENDER_PATCH_FEEDBACK_STALE',
+            phase: 'selection',
+            subject: { kind: 'gpu-render-patch-feedback' },
+            message: `GPU render-patch frame epoch is stale: expected ${expectedFrameEpoch}, ` +
+                `received ${actualFrameEpoch}`,
+            expected: { frameEpoch: expectedFrameEpoch },
+            actual: { frameEpoch: actualFrameEpoch },
+        }))
+        this.name = 'GpuRenderPatchFeedbackStaleError'
     }
 }
 
-export type DemRenderPatchFrontier = Readonly<{
+export type GpuRenderPatchFrontier = Readonly<{
     id: string
     initialize(builder: SubmissionBuilder): SubmissionBuilder
     encode(builder: SubmissionBuilder, frame: GpuTileFrontierFrame): SubmissionBuilder
@@ -244,18 +246,18 @@ export type DemRenderPatchFrontier = Readonly<{
     feedback(
         frame: GpuTileFrontierFrame,
         submitted: SubmittedWork
-    ): Promise<DemRenderPatchFeedback>
-    renderTemplates(id: DrawTemplateId): readonly [
-        DemRenderPatchRenderTemplate,
-        DemRenderPatchRenderTemplate,
+    ): Promise<GpuRenderPatchFeedback>
+    renderTemplates(): readonly [
+        GpuRenderPatchRenderTemplate,
+        GpuRenderPatchRenderTemplate,
     ]
-    commandsFor(frame: GpuTileFrontierFrame): ParityCommands
-    facts(): DemRenderPatchFrontierFacts
-    identityObjects(): IdentityObjects
+    commandsFor(frame: GpuTileFrontierFrame): GpuRenderPatchCommands
+    facts(): GpuRenderPatchFrontierFacts
+    identityObjects(): GpuRenderPatchIdentityObjects
     dispose(): void
 }>
 
-type DemRenderPatchFrontierOptions = Readonly<{
+export type GpuRenderPatchFrontierDescriptor = Readonly<{
     sourceTemplates: readonly [
         GpuTileFrontierRenderTemplate,
         GpuTileFrontierRenderTemplate,
@@ -266,34 +268,33 @@ type DemRenderPatchFrontierOptions = Readonly<{
     maximumExtraLevels?: number
     coordinateBits: number
     elevationRangeMeters: readonly [number, number]
-    terrainVertexCount: number
-    terrainSectorSize?: number
+    vertexCount: number
+    cellsPerPatchEdge?: number
     maximumCellSpanPixels?: number
     maximumPatchCountRatio?: number
     budgetHysteresisRatio?: number
-    shader: string
 }>
 
 let nextRenderPatchFrontierId = 1
 
-export function decodeDemRenderPatchState(
+export function decodeGpuRenderPatchState(
     bytes: Uint8Array,
     options: Readonly<{
         maximumRenderPatches: number
         expectedFrameEpoch?: number
     }>
-): DemRenderPatchSelectionFacts {
+): GpuRenderPatchSelectionFacts {
 
     if (!(bytes instanceof Uint8Array) || bytes.byteLength !== STATE_BYTES) {
-        throw new TypeError(`DEM render-patch feedback must contain ${STATE_BYTES} bytes`)
+        throw new TypeError(`GPU render-patch feedback must contain ${STATE_BYTES} bytes`)
     }
     if (!Number.isSafeInteger(options?.maximumRenderPatches) ||
         options.maximumRenderPatches < 1) {
-        throw new TypeError('DEM render-patch feedback capacity must be positive')
+        throw new TypeError('GPU render-patch feedback capacity must be positive')
     }
     if (options.expectedFrameEpoch !== undefined &&
         (!Number.isSafeInteger(options.expectedFrameEpoch) || options.expectedFrameEpoch < 0)) {
-        throw new TypeError('DEM render-patch expected frame epoch must be non-negative')
+        throw new TypeError('GPU render-patch expected frame epoch must be non-negative')
     }
     const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
     const word = (index: number) => view.getUint32(index * 4, true)
@@ -311,7 +312,7 @@ export function decodeDemRenderPatchState(
     const selectedBiasStep = word(11)
     const minimumTrialPatchCount = word(12)
     const trialCounts = Array.from(
-        { length: DEM_RENDER_PATCH_BIAS_STEP_COUNT },
+        { length: GPU_RENDER_PATCH_BIAS_STEP_COUNT },
         (_, index) => word(STATE_TRIAL_COUNTS_OFFSET_WORDS + index)
     )
     const unbalancedPatchCount = word(STATE_UNBALANCED_PATCH_COUNT_OFFSET_WORDS)
@@ -325,33 +326,33 @@ export function decodeDemRenderPatchState(
     const observedMinimumTrialPatchCount = Math.min(...trialCounts)
     const minimumTrialBiasStep = trialCounts.indexOf(observedMinimumTrialPatchCount)
     if (options.expectedFrameEpoch !== undefined && frameEpoch !== options.expectedFrameEpoch) {
-        throw new DemRenderPatchFeedbackStaleError(options.expectedFrameEpoch, frameEpoch)
+        throw new GpuRenderPatchFeedbackStaleError(options.expectedFrameEpoch, frameEpoch)
     }
     const selectedPatchCount = Math.min(attemptedPatchCount, options.maximumRenderPatches)
     if (attemptedPatchCount > options.maximumRenderPatches ||
         balanceScratchCount > options.maximumRenderPatches ||
         descriptorOverflowCount !== 0) {
-        throw new RangeError('DEM balanced render-patch capacity was exceeded')
+        throw new RangeError('GPU balanced render-patch capacity was exceeded')
     }
     if (maximumAdjacentLevelDelta > 1) {
         throw new RangeError(
-            'DEM render-patch cut violates the level-difference-one invariant'
+            'GPU render-patch cut violates the level-difference-one invariant'
         )
     }
     if (baselinePatchBudget < 1 || framePatchBudget < baselinePatchBudget ||
         framePatchBudget > options.maximumRenderPatches ||
-        selectedBiasStep >= DEM_RENDER_PATCH_BIAS_STEP_COUNT ||
+        selectedBiasStep >= GPU_RENDER_PATCH_BIAS_STEP_COUNT ||
         requestedPatchCount !== trialCounts[0] ||
         minimumTrialPatchCount !== observedMinimumTrialPatchCount ||
         unbalancedPatchCount !== trialCounts[selectedBiasStep] ||
         attemptedPatchCount !== unbalancedPatchCount + balanceSplitCount * 3 ||
-        balancePassCount !== DEM_RENDER_PATCH_BALANCE_PASS_COUNT ||
+        balancePassCount !== GPU_RENDER_PATCH_BALANCE_PASS_COUNT ||
         (minimumTrialPatchCount <= framePatchBudget &&
             unbalancedPatchCount > framePatchBudget) ||
         (minimumTrialPatchCount > framePatchBudget &&
             (selectedBiasStep !== minimumTrialBiasStep ||
                 unbalancedPatchCount !== minimumTrialPatchCount))) {
-        throw new RangeError(`DEM render-patch budget feedback is inconsistent: ${JSON.stringify({
+        throw new RangeError(`GPU render-patch budget feedback is inconsistent: ${JSON.stringify({
             attemptedPatchCount,
             unbalancedPatchCount,
             balanceSplitCount,
@@ -373,7 +374,7 @@ export function decodeDemRenderPatchState(
         minimumTrialPatchCount,
         sourceRootPatchCount,
         selectedBiasStep,
-        selectedBiasLevels: selectedBiasStep / DEM_RENDER_PATCH_BIAS_STEPS_PER_LEVEL,
+        selectedBiasLevels: selectedBiasStep / GPU_RENDER_PATCH_BIAS_STEPS_PER_LEVEL,
         budgetLimitedByMinimumTrial: minimumTrialPatchCount > framePatchBudget,
         unbalancedPatchCount,
         balanceSplitCount,
@@ -394,7 +395,7 @@ export function decodeDemRenderPatchState(
         minimumMatrixLevel > maximumMatrixLevel ||
         minimumCellSpanQ8 === 0xffff_ffff ||
         minimumCellSpanQ8 > maximumCellSpanQ8) {
-        throw new RangeError('DEM render-patch feedback ranges are invalid')
+        throw new RangeError('GPU render-patch feedback ranges are invalid')
     }
     return Object.freeze({
         selectedPatchCount,
@@ -409,40 +410,40 @@ export function decodeDemRenderPatchState(
     })
 }
 
-function demRenderPatchLookupCapacity(
+function gpuRenderPatchLookupCapacity(
     maximumSourceTiles: number,
     maximumExtraLevels: number
 ): number {
 
     if (!Number.isSafeInteger(maximumSourceTiles) || maximumSourceTiles < 1) {
-        throw new TypeError('DEM render-patch maximum source tiles must be positive')
+        throw new TypeError('GPU render-patch maximum source tiles must be positive')
     }
     if (!Number.isInteger(maximumExtraLevels) || maximumExtraLevels < 0 ||
-        maximumExtraLevels > DEM_MAX_RENDER_EXTRA_LEVELS) {
-        throw new TypeError('DEM render-patch maximum extra levels is invalid')
+        maximumExtraLevels > GPU_RENDER_PATCH_MAXIMUM_EXTRA_LEVELS) {
+        throw new TypeError('GPU render-patch maximum extra levels is invalid')
     }
     const required = maximumSourceTiles * 4 ** maximumExtraLevels * 2
     let capacity = 1
     while (capacity < required) capacity *= 2
     if (!Number.isSafeInteger(capacity) || capacity > 0x4000_0000) {
-        throw new RangeError('DEM render-patch lookup capacity exceeds supported bounds')
+        throw new RangeError('GPU render-patch lookup capacity exceeds supported bounds')
     }
     return capacity
 }
 
-export function demRenderPatchWgslModule() {
+export function gpuRenderPatchWgslModule() {
 
     const frontier = gpuTileFrontierRenderWgslModule()
     return Object.freeze({
         code: [
             frontier.code,
-            renderPatchCodec.wgslAccessors({ namespace: 'DemRenderPatch' }),
+            renderPatchCodec.wgslAccessors({ namespace: 'GpuRenderPatch' }),
             `
-fn DemRenderPatch_lookupKey(matrixLevel: u32, tileRow: u32, tileCol: u32) -> u32 {
+fn GpuRenderPatch_lookupKey(matrixLevel: u32, tileRow: u32, tileCol: u32) -> u32 {
     return 1u + (matrixLevel << 28u) + (tileRow << 14u) + tileCol;
 }
 
-fn DemRenderPatch_lookupSlot(key: u32, probe: u32, capacity: u32) -> u32 {
+fn GpuRenderPatch_lookupSlot(key: u32, probe: u32, capacity: u32) -> u32 {
     var hash = key;
     hash = (hash ^ (hash >> 16u)) * 0x7feb352du;
     hash = (hash ^ (hash >> 15u)) * 0x846ca68bu;
@@ -458,16 +459,16 @@ fn DemRenderPatch_lookupSlot(key: u32, probe: u32, capacity: u32) -> u32 {
     })
 }
 
-export async function createDemRenderPatchFrontier(
+export async function createGpuRenderPatchFrontier(
     runtime: GPURuntime,
-    options: DemRenderPatchFrontierOptions
-): Promise<DemRenderPatchFrontier> {
+    options: GpuRenderPatchFrontierDescriptor
+): Promise<GpuRenderPatchFrontier> {
 
     const descriptor = validateOptions(runtime, options)
-    const id = `dem-render-patch-frontier-${nextRenderPatchFrontierId++}`
+    const id = `gpu-render-patch-frontier-${nextRenderPatchFrontierId++}`
     const maximumRenderPatches = descriptor.maximumSourceTiles *
         4 ** descriptor.maximumExtraLevels
-    const renderPatchLookupCapacity = demRenderPatchLookupCapacity(
+    const renderPatchLookupCapacity = gpuRenderPatchLookupCapacity(
         descriptor.maximumSourceTiles,
         descriptor.maximumExtraLevels
     )
@@ -484,12 +485,12 @@ export async function createDemRenderPatchFrontier(
 
     try {
         const policy = own(await runtime.createBuffer({
-            label: 'DEM render-patch policy',
+            label: 'GPU render-patch policy',
             size: renderPatchPolicyCodec.byteLength(),
-            usage: bufferUsage.COPY_DST | bufferUsage.UNIFORM,
+            usage: BUFFER_COPY_DST | BUFFER_UNIFORM,
         }))
         const policyUpload = own(runtime.createUploadCommand({
-            label: 'Upload DEM render-patch policy',
+            label: 'Upload GPU render-patch policy',
             target: policy.region({ layout: renderPatchPolicyCodec.artifact }),
             data: renderPatchPolicyCodec.pack({
                 dataMaximumMatrixLevel: descriptor.dataMaximumMatrixLevel,
@@ -499,15 +500,15 @@ export async function createDemRenderPatchFrontier(
                 minimumElevationMeters: descriptor.elevationRangeMeters[0],
                 maximumElevationMeters: descriptor.elevationRangeMeters[1],
                 coordinateBits: descriptor.coordinateBits,
-                terrainVertexCount: descriptor.terrainVertexCount,
+                vertexCount: descriptor.vertexCount,
                 renderPatchLookupCapacity,
-                terrainSectorSize: descriptor.terrainSectorSize,
+                cellsPerPatchEdge: descriptor.cellsPerPatchEdge,
                 maximumCellSpanPixels: descriptor.maximumCellSpanPixels,
                 maximumPatchCountRatio: descriptor.maximumPatchCountRatio,
-                biasStepsPerLevel: DEM_RENDER_PATCH_BIAS_STEPS_PER_LEVEL,
-                biasStepCount: DEM_RENDER_PATCH_BIAS_STEP_COUNT,
+                biasStepsPerLevel: GPU_RENDER_PATCH_BIAS_STEPS_PER_LEVEL,
+                biasStepCount: GPU_RENDER_PATCH_BIAS_STEP_COUNT,
                 budgetHysteresisRatio: descriptor.budgetHysteresisRatio,
-                balancePassCount: DEM_RENDER_PATCH_BALANCE_PASS_COUNT,
+                balancePassCount: GPU_RENDER_PATCH_BALANCE_PASS_COUNT,
             }),
         }))
         const parityResources = await Promise.all(descriptor.sourceTemplates.map(
@@ -517,72 +518,72 @@ export async function createDemRenderPatchFrontier(
                     parity,
                     source,
                     renderPatches: own(await runtime.createBuffer({
-                        label: `DEM render patches ${parity}`,
+                        label: `GPU render patches ${parity}`,
                         size: renderPatchBytes,
-                        usage: bufferUsage.COPY_DST | bufferUsage.STORAGE,
+                        usage: BUFFER_COPY_DST | BUFFER_STORAGE,
                     })),
                     renderPatchLookup: own(await runtime.createBuffer({
-                        label: `DEM render-patch lookup ${parity}`,
+                        label: `GPU render-patch lookup ${parity}`,
                         size: renderPatchLookupBytes,
-                        usage: bufferUsage.COPY_DST | bufferUsage.STORAGE,
+                        usage: BUFFER_COPY_DST | BUFFER_STORAGE,
                     })),
                     balancePatches: own(await runtime.createBuffer({
-                        label: `DEM balanced render-patch scratch ${parity}`,
+                        label: `GPU balanced render-patch scratch ${parity}`,
                         size: renderPatchBytes,
-                        usage: bufferUsage.COPY_DST | bufferUsage.STORAGE,
+                        usage: BUFFER_COPY_DST | BUFFER_STORAGE,
                     })),
                     balancePatchLookup: own(await runtime.createBuffer({
-                        label: `DEM balanced render-patch lookup scratch ${parity}`,
+                        label: `GPU balanced render-patch lookup scratch ${parity}`,
                         size: renderPatchLookupBytes,
-                        usage: bufferUsage.COPY_DST | bufferUsage.STORAGE,
+                        usage: BUFFER_COPY_DST | BUFFER_STORAGE,
                     })),
                     state: own(await runtime.createBuffer({
-                        label: `DEM render-patch state ${parity}`,
+                        label: `GPU render-patch state ${parity}`,
                         size: STATE_BYTES,
-                        usage: bufferUsage.COPY_DST | bufferUsage.COPY_SRC |
-                            bufferUsage.STORAGE,
+                        usage: BUFFER_COPY_DST | BUFFER_COPY_SRC |
+                            BUFFER_STORAGE,
                     })),
                     drawArguments: own(await runtime.createBuffer({
-                        label: `DEM render-patch draw arguments ${parity}`,
+                        label: `GPU render-patch draw arguments ${parity}`,
                         size: DRAW_ARGUMENT_BYTES * DRAW_ARGUMENT_COUNT,
-                        usage: bufferUsage.COPY_DST | bufferUsage.STORAGE |
-                            bufferUsage.INDIRECT,
+                        usage: BUFFER_COPY_DST | BUFFER_STORAGE |
+                            BUFFER_INDIRECT,
                     })),
                 })
             }
         )) as unknown as readonly [ParityResources, ParityResources]
         const initializationClears = Object.freeze(parityResources.flatMap(resources => [
             own(runtime.createClearBufferCommand({
-                label: `Clear DEM render patches ${resources.parity}`,
+                label: `Clear GPU render patches ${resources.parity}`,
                 target: resources.renderPatches.region(),
             })),
             own(runtime.createClearBufferCommand({
-                label: `Clear DEM balanced render-patch scratch ${resources.parity}`,
+                label: `Clear GPU balanced render-patch scratch ${resources.parity}`,
                 target: resources.balancePatches.region(),
             })),
             own(runtime.createClearBufferCommand({
-                label: `Clear DEM balanced render-patch lookup scratch ${resources.parity}`,
+                label: `Clear GPU balanced render-patch lookup scratch ${resources.parity}`,
                 target: resources.balancePatchLookup.region(),
             })),
             own(runtime.createClearBufferCommand({
-                label: `Clear DEM render-patch state ${resources.parity}`,
+                label: `Clear GPU render-patch state ${resources.parity}`,
                 target: resources.state.region(),
             })),
             own(runtime.createClearBufferCommand({
-                label: `Clear DEM render-patch draw arguments ${resources.parity}`,
+                label: `Clear GPU render-patch draw arguments ${resources.parity}`,
                 target: resources.drawArguments.region(),
             })),
         ]))
-        const shared = demRenderPatchWgslModule()
+        const shared = gpuRenderPatchWgslModule()
         const shader = own(await runtime.createShaderModule({
-            label: 'DEM render-patch frontier shader',
+            label: 'GPU render-patch frontier shader',
             sourceParts: [
                 {
-                    label: 'DEM render-patch shared ABI',
+                    label: 'GPU render-patch shared ABI',
                     code: [
                         shared.code,
                         renderPatchPolicyCodec.wgslAccessors({
-                            namespace: 'DemRenderPatchPolicy',
+                            namespace: 'GpuRenderPatchPolicy',
                         }),
                     ].join('\n'),
                     layoutDependencies: [
@@ -590,17 +591,17 @@ export async function createDemRenderPatchFrontier(
                         renderPatchPolicyCodec.artifact,
                     ],
                 },
-                { label: 'DEM render-patch kernels', code: descriptor.shader },
+                { label: 'GPU render-patch kernels', code: GPU_RENDER_PATCH_FRONTIER_WGSL },
             ],
         }))
         const pass = own(runtime.createComputePass({
-            label: 'DEM render-patch frontier stage',
+            label: 'GPU render-patch frontier stage',
         }))
         const resetKernel = await createKernel(
             runtime,
             shader,
             'resetRenderPatches',
-            'DEM reset render patches',
+            'GPU reset render patches',
             [
                 binding(0, 'mapMeta', 'uniform', descriptor.sourceTemplates[0].mapMeta.size),
                 binding(1, 'renderPatchPolicy', 'uniform', renderPatchPolicyCodec.byteLength()),
@@ -618,7 +619,7 @@ export async function createDemRenderPatchFrontier(
             runtime,
             shader,
             'countRenderPatchTrials',
-            'DEM count render-patch trials',
+            'GPU count render-patch trials',
             [
                 binding(0, 'mapMeta', 'uniform', descriptor.sourceTemplates[0].mapMeta.size),
                 binding(1, 'renderPatchPolicy', 'uniform', renderPatchPolicyCodec.byteLength()),
@@ -643,7 +644,7 @@ export async function createDemRenderPatchFrontier(
             runtime,
             shader,
             'selectRenderPatchBudget',
-            'DEM select render-patch budget',
+            'GPU select render-patch budget',
             [
                 binding(0, 'mapMeta', 'uniform', descriptor.sourceTemplates[0].mapMeta.size),
                 binding(1, 'renderPatchPolicy', 'uniform', renderPatchPolicyCodec.byteLength()),
@@ -655,7 +656,7 @@ export async function createDemRenderPatchFrontier(
             runtime,
             shader,
             'expandRenderPatches',
-            'DEM expand render patches',
+            'GPU expand render patches',
             [
                 binding(0, 'mapMeta', 'uniform', descriptor.sourceTemplates[0].mapMeta.size),
                 binding(1, 'renderPatchPolicy', 'uniform', renderPatchPolicyCodec.byteLength()),
@@ -687,7 +688,7 @@ export async function createDemRenderPatchFrontier(
             runtime,
             shader,
             'balanceRenderPatches',
-            'DEM balance render-patch cut',
+            'GPU balance render-patch cut',
             [
                 binding(1, 'renderPatchPolicy', 'uniform', renderPatchPolicyCodec.byteLength()),
                 binding(4, 'renderPatches', 'storage', renderPatchBytes),
@@ -712,7 +713,7 @@ export async function createDemRenderPatchFrontier(
             runtime,
             shader,
             'resetFinalRenderPatchDiagnostics',
-            'DEM reset final render-patch diagnostics',
+            'GPU reset final render-patch diagnostics',
             [ binding(5, 'renderPatchState', 'storage', STATE_BYTES) ],
             own
         )
@@ -720,7 +721,7 @@ export async function createDemRenderPatchFrontier(
             runtime,
             shader,
             'validateFinalRenderPatchCut',
-            'DEM validate final render-patch cut',
+            'GPU validate final render-patch cut',
             [
                 binding(0, 'mapMeta', 'uniform', descriptor.sourceTemplates[0].mapMeta.size),
                 binding(1, 'renderPatchPolicy', 'uniform', renderPatchPolicyCodec.byteLength()),
@@ -745,7 +746,7 @@ export async function createDemRenderPatchFrontier(
             runtime,
             shader,
             'finalizeRenderPatches',
-            'DEM finalize render patches',
+            'GPU finalize render patches',
             [
                 binding(1, 'renderPatchPolicy', 'uniform', renderPatchPolicyCodec.byteLength()),
                 binding(5, 'renderPatchState', 'storage', STATE_BYTES),
@@ -766,7 +767,7 @@ export async function createDemRenderPatchFrontier(
                 renderPatchPolicy: policy.region({ layout: renderPatchPolicyCodec.artifact }),
                 renderPatchState: resources.state.region(),
                 drawArguments: resources.drawArguments.region(),
-            }, { label: `DEM reset render patches ${resources.parity}` }))
+            }, { label: `GPU reset render patches ${resources.parity}` }))
             const countSet = own(await runtime.createBindSet(countKernel.layout, {
                 mapMeta: resources.source.mapMeta.region(),
                 renderPatchPolicy: policy.region({ layout: renderPatchPolicyCodec.artifact }),
@@ -774,12 +775,12 @@ export async function createDemRenderPatchFrontier(
                 sourceDrawArguments: resources.source.drawArgument.region,
                 renderPatchState: resources.state.region(),
                 previousRenderPatchLookup: previousResources.renderPatchLookup.region(),
-            }, { label: `DEM count render-patch trials ${resources.parity}` }))
+            }, { label: `GPU count render-patch trials ${resources.parity}` }))
             const selectSet = own(await runtime.createBindSet(selectKernel.layout, {
                 mapMeta: resources.source.mapMeta.region(),
                 renderPatchPolicy: policy.region({ layout: renderPatchPolicyCodec.artifact }),
                 renderPatchState: resources.state.region(),
-            }, { label: `DEM select render-patch budget ${resources.parity}` }))
+            }, { label: `GPU select render-patch budget ${resources.parity}` }))
             const expandSet = own(await runtime.createBindSet(expandKernel.layout, {
                 mapMeta: resources.source.mapMeta.region(),
                 renderPatchPolicy: policy.region({ layout: renderPatchPolicyCodec.artifact }),
@@ -791,7 +792,7 @@ export async function createDemRenderPatchFrontier(
                 renderPatchState: resources.state.region(),
                 renderPatchLookup: resources.renderPatchLookup.region(),
                 previousRenderPatchLookup: previousResources.renderPatchLookup.region(),
-            }, { label: `DEM expand render patches ${resources.parity}` }))
+            }, { label: `GPU expand render patches ${resources.parity}` }))
             const balanceSet = own(await runtime.createBindSet(balanceKernel.layout, {
                 renderPatchPolicy: policy.region({ layout: renderPatchPolicyCodec.artifact }),
                 renderPatches: resources.renderPatches.region({
@@ -803,11 +804,11 @@ export async function createDemRenderPatchFrontier(
                     layout: renderPatchCodec.artifact,
                 }),
                 balancePatchLookup: resources.balancePatchLookup.region(),
-            }, { label: `DEM balance render-patch cut ${resources.parity}` }))
+            }, { label: `GPU balance render-patch cut ${resources.parity}` }))
             const resetFinalDiagnosticsSet = own(await runtime.createBindSet(
                 resetFinalDiagnosticsKernel.layout,
                 { renderPatchState: resources.state.region() },
-                { label: `DEM reset final render-patch diagnostics ${resources.parity}` }
+                { label: `GPU reset final render-patch diagnostics ${resources.parity}` }
             ))
             const validateSet = own(await runtime.createBindSet(validateKernel.layout, {
                 mapMeta: resources.source.mapMeta.region(),
@@ -818,12 +819,12 @@ export async function createDemRenderPatchFrontier(
                 renderPatchState: resources.state.region(),
                 renderPatchLookup: resources.renderPatchLookup.region(),
                 balancePatchLookup: resources.balancePatchLookup.region(),
-            }, { label: `DEM validate final render-patch cut ${resources.parity}` }))
+            }, { label: `GPU validate final render-patch cut ${resources.parity}` }))
             const finalizeSet = own(await runtime.createBindSet(finalizeKernel.layout, {
                 renderPatchPolicy: policy.region({ layout: renderPatchPolicyCodec.artifact }),
                 renderPatchState: resources.state.region(),
                 drawArguments: resources.drawArguments.region(),
-            }, { label: `DEM finalize render patches ${resources.parity}` }))
+            }, { label: `GPU finalize render patches ${resources.parity}` }))
             bindSets.push(
                 resetSet,
                 countSet,
@@ -835,11 +836,11 @@ export async function createDemRenderPatchFrontier(
                 finalizeSet
             )
             const clearLookup = own(runtime.createClearBufferCommand({
-                label: `Clear DEM render-patch lookup ${resources.parity}`,
+                label: `Clear GPU render-patch lookup ${resources.parity}`,
                 target: resources.renderPatchLookup.region(),
             }))
             const reset = own(runtime.createDispatchCommand({
-                label: `Reset DEM render patches ${resources.parity}`,
+                label: `Reset GPU render patches ${resources.parity}`,
                 pipeline: resetKernel.pipeline,
                 bindSets: [ { set: resetSet } ],
                 count: { workgroups: [ 1, 1, 1 ] },
@@ -855,7 +856,7 @@ export async function createDemRenderPatchFrontier(
                 whenMissing: 'throw',
             }))
             const expand = own(runtime.createDispatchCommand({
-                label: `Expand DEM render patches ${resources.parity}`,
+                label: `Expand GPU render patches ${resources.parity}`,
                 pipeline: expandKernel.pipeline,
                 bindSets: [ { set: expandSet } ],
                 count: {
@@ -882,7 +883,7 @@ export async function createDemRenderPatchFrontier(
                 whenMissing: 'throw',
             }))
             const balance = own(runtime.createDispatchCommand({
-                label: `Balance DEM render-patch cut ${resources.parity}`,
+                label: `Balance GPU render-patch cut ${resources.parity}`,
                 pipeline: balanceKernel.pipeline,
                 bindSets: [ { set: balanceSet } ],
                 count: { workgroups: [ 1, 1, 1 ] },
@@ -903,7 +904,7 @@ export async function createDemRenderPatchFrontier(
                 whenMissing: 'throw',
             }))
             const count = own(runtime.createDispatchCommand({
-                label: `Count DEM render-patch trials ${resources.parity}`,
+                label: `Count GPU render-patch trials ${resources.parity}`,
                 pipeline: countKernel.pipeline,
                 bindSets: [ { set: countSet } ],
                 count: {
@@ -924,7 +925,7 @@ export async function createDemRenderPatchFrontier(
                 whenMissing: 'throw',
             }))
             const select = own(runtime.createDispatchCommand({
-                label: `Select DEM render-patch budget ${resources.parity}`,
+                label: `Select GPU render-patch budget ${resources.parity}`,
                 pipeline: selectKernel.pipeline,
                 bindSets: [ { set: selectSet } ],
                 count: { workgroups: [ 1, 1, 1 ] },
@@ -935,7 +936,7 @@ export async function createDemRenderPatchFrontier(
                 whenMissing: 'throw',
             }))
             const resetFinalDiagnostics = own(runtime.createDispatchCommand({
-                label: `Reset final DEM render-patch diagnostics ${resources.parity}`,
+                label: `Reset final GPU render-patch diagnostics ${resources.parity}`,
                 pipeline: resetFinalDiagnosticsKernel.pipeline,
                 bindSets: [ { set: resetFinalDiagnosticsSet } ],
                 count: { workgroups: [ 1, 1, 1 ] },
@@ -946,7 +947,7 @@ export async function createDemRenderPatchFrontier(
                 whenMissing: 'throw',
             }))
             const validate = own(runtime.createDispatchCommand({
-                label: `Validate final DEM render-patch cut ${resources.parity}`,
+                label: `Validate final GPU render-patch cut ${resources.parity}`,
                 pipeline: validateKernel.pipeline,
                 bindSets: [ { set: validateSet } ],
                 count: {
@@ -972,7 +973,7 @@ export async function createDemRenderPatchFrontier(
                 whenMissing: 'throw',
             }))
             const finalize = own(runtime.createDispatchCommand({
-                label: `Finalize DEM render patches ${resources.parity}`,
+                label: `Finalize GPU render patches ${resources.parity}`,
                 pipeline: finalizeKernel.pipeline,
                 bindSets: [ { set: finalizeSet } ],
                 count: { workgroups: [ 1, 1, 1 ] },
@@ -983,7 +984,7 @@ export async function createDemRenderPatchFrontier(
                 whenMissing: 'throw',
             }))
             const feedback = own(await runtime.createReadbackCommand({
-                label: `Read DEM render-patch feedback ${resources.parity}`,
+                label: `Read GPU render-patch feedback ${resources.parity}`,
                 source: {
                     region: resources.state.region(),
                     contentEpoch: 'current-at-step',
@@ -1003,7 +1004,7 @@ export async function createDemRenderPatchFrontier(
                 finalize,
                 feedback,
             })
-        })) as unknown as readonly [ParityCommands, ParityCommands]
+        })) as unknown as readonly [GpuRenderPatchCommands, GpuRenderPatchCommands]
         const programs = Object.freeze([
             resetKernel.program,
             countKernel.program,
@@ -1035,13 +1036,13 @@ export async function createDemRenderPatchFrontier(
             finalizeKernel.layout,
         ])
 
-        const templates = (templateId: DrawTemplateId) => Object.freeze(
+        const renderTemplates = Object.freeze(
             parityResources.map(resources => {
                 const offset = 0
                 return Object.freeze({
                     frontierId: id,
                     parity: resources.parity,
-                    templateId,
+                    templateId: 'patch-mesh' as const,
                     mapMeta: resources.source.mapMeta,
                     visibleInstances: resources.renderPatches,
                     renderPatchLookup: resources.renderPatchLookup,
@@ -1056,14 +1057,11 @@ export async function createDemRenderPatchFrontier(
                     }),
                 })
             }) as unknown as [
-                DemRenderPatchRenderTemplate,
-                DemRenderPatchRenderTemplate,
+                GpuRenderPatchRenderTemplate,
+                GpuRenderPatchRenderTemplate,
             ]
         )
-        const renderTemplates = Object.freeze({
-            terrain: templates('terrain'),
-        })
-        const identity: IdentityObjects = Object.freeze({
+        const identity: GpuRenderPatchIdentityObjects = Object.freeze({
             resources: Object.freeze([
                 policy,
                 ...parityResources.flatMap(resources => [
@@ -1098,12 +1096,12 @@ export async function createDemRenderPatchFrontier(
             ]),
         })
 
-        const frontier: DemRenderPatchFrontier = Object.freeze({
+        const frontier: GpuRenderPatchFrontier = Object.freeze({
             id,
             initialize(builder: SubmissionBuilder) {
                 assertActive(disposed)
                 if (builder.runtime !== runtime || builder.isSubmitted) {
-                    throw new TypeError('DEM render-patch initialization requires a live owned builder')
+                    throw new TypeError('GPU render-patch initialization requires a live owned builder')
                 }
                 for (const command of initializationClears) builder.clear(command)
                 for (const parityCommands of commands) {
@@ -1118,7 +1116,7 @@ export async function createDemRenderPatchFrontier(
                 if (builder.runtime !== runtime || builder.isSubmitted ||
                     (parity !== 0 && parity !== 1) ||
                     frame.frontierId !== descriptor.sourceTemplates[parity].frontierId) {
-                    throw new TypeError('DEM render-patch encoding requires the current source frontier frame')
+                    throw new TypeError('GPU render-patch encoding requires the current source frontier frame')
                 }
                 const selected = commands[parity]
                 builder.clear(selected.clearLookup)
@@ -1143,7 +1141,7 @@ export async function createDemRenderPatchFrontier(
                     (parity !== 0 && parity !== 1) ||
                     encoded !== frame || capturedBuilders.has(builder)) {
                     throw new TypeError(
-                        'DEM render-patch capture requires one matching encoded frame'
+                        'GPU render-patch capture requires one matching encoded frame'
                     )
                 }
                 capturedBuilders.add(builder)
@@ -1156,41 +1154,37 @@ export async function createDemRenderPatchFrontier(
                     frame.frontierId !== descriptor.sourceTemplates[parity].frontierId ||
                     submitted?.runtime !== runtime) {
                     throw new TypeError(
-                        'DEM render-patch feedback requires an owned frame submission'
+                        'GPU render-patch feedback requires an owned frame submission'
                     )
                 }
                 const command = commands[parity].feedback
                 if (!submitted.readbacks.some(link => link.commandId === command.id)) {
                     throw new TypeError(
-                        'DEM render-patch feedback submission does not contain its readback'
+                        'GPU render-patch feedback submission does not contain its readback'
                     )
                 }
                 const bytes = await command.result({ after: submitted }).toBytes()
-                const facts = decodeDemRenderPatchState(bytes, {
+                const facts = decodeGpuRenderPatchState(bytes, {
                     maximumRenderPatches,
                     expectedFrameEpoch: frame.frameEpoch,
                 })
                 return Object.freeze({
-                    kind: 'dem-render-patch-feedback' as const,
+                    kind: 'gpu-render-patch-feedback' as const,
                     frontierId: id,
                     submissionId: submitted.id,
                     ...facts,
                 })
             },
-            renderTemplates(templateId: DrawTemplateId) {
+            renderTemplates() {
                 assertActive(disposed)
-                const selected = renderTemplates[templateId]
-                if (selected === undefined) {
-                    throw new TypeError(`Unknown DEM render-patch template ${templateId}`)
-                }
-                return selected
+                return renderTemplates
             },
             commandsFor(frame: GpuTileFrontierFrame) {
                 assertActive(disposed)
                 const parity = frame?.parity
                 if ((parity !== 0 && parity !== 1) ||
                     frame.frontierId !== descriptor.sourceTemplates[parity].frontierId) {
-                    throw new TypeError('DEM render-patch commands require an owned source frame')
+                    throw new TypeError('GPU render-patch commands require an owned source frame')
                 }
                 return commands[parity]
             },
@@ -1206,18 +1200,18 @@ export async function createDemRenderPatchFrontier(
                     maximumRenderPatches,
                     maximumCellSpanPixels: descriptor.maximumCellSpanPixels,
                     maximumPatchCountRatio: descriptor.maximumPatchCountRatio,
-                    biasStepsPerLevel: DEM_RENDER_PATCH_BIAS_STEPS_PER_LEVEL,
-                    biasStepCount: DEM_RENDER_PATCH_BIAS_STEP_COUNT,
+                    biasStepsPerLevel: GPU_RENDER_PATCH_BIAS_STEPS_PER_LEVEL,
+                    biasStepCount: GPU_RENDER_PATCH_BIAS_STEP_COUNT,
                     refinementHysteresisLevels:
-                        1 / DEM_RENDER_PATCH_BIAS_STEPS_PER_LEVEL,
+                        1 / GPU_RENDER_PATCH_BIAS_STEPS_PER_LEVEL,
                     budgetHysteresisRatio: descriptor.budgetHysteresisRatio,
-                    nominalPatchSpanPixels: descriptor.terrainSectorSize *
+                    nominalPatchSpanPixels: descriptor.cellsPerPatchEdge *
                         descriptor.maximumCellSpanPixels,
-                    terrainSectorSize: descriptor.terrainSectorSize,
+                    cellsPerPatchEdge: descriptor.cellsPerPatchEdge,
                     renderPatchBytes,
                     renderPatchLookupCapacity,
                     renderPatchLookupBytes,
-                    balancePassCount: DEM_RENDER_PATCH_BALANCE_PASS_COUNT,
+                    balancePassCount: GPU_RENDER_PATCH_BALANCE_PASS_COUNT,
                     balanceWorkgroupSize: BALANCE_WORKGROUP_SIZE,
                     drawArgumentBytes: DRAW_ARGUMENT_BYTES * DRAW_ARGUMENT_COUNT,
                     workgroupSize: WORKGROUP_SIZE,
@@ -1328,29 +1322,29 @@ function uniqueResources(values: readonly BufferResource[]): BufferResource[] {
 
 function validateOptions(
     runtime: GPURuntime,
-    options: DemRenderPatchFrontierOptions
-): Required<DemRenderPatchFrontierOptions> {
+    options: GpuRenderPatchFrontierDescriptor
+): Required<GpuRenderPatchFrontierDescriptor> {
 
     const renderMaximumMatrixLevel = options.renderMaximumMatrixLevel ??
-        DEM_MAX_RENDER_MATRIX_LEVEL
-    const maximumExtraLevels = options.maximumExtraLevels ?? DEM_MAX_RENDER_EXTRA_LEVELS
-    const terrainSectorSize = options.terrainSectorSize ??
-        DEM_RENDER_PATCH_TERRAIN_SECTOR_SIZE
+        GPU_RENDER_PATCH_MAXIMUM_MATRIX_LEVEL
+    const maximumExtraLevels = options.maximumExtraLevels ?? GPU_RENDER_PATCH_MAXIMUM_EXTRA_LEVELS
+    const cellsPerPatchEdge = options.cellsPerPatchEdge ??
+        GPU_RENDER_PATCH_DEFAULT_CELLS_PER_EDGE
     const maximumCellSpanPixels = options.maximumCellSpanPixels ??
-        DEM_RENDER_PATCH_MAXIMUM_CELL_SPAN_PIXELS
+        GPU_RENDER_PATCH_DEFAULT_MAXIMUM_CELL_SPAN_PIXELS
     const maximumPatchCountRatio = options.maximumPatchCountRatio ??
-        DEM_RENDER_PATCH_MAXIMUM_COUNT_RATIO
+        GPU_RENDER_PATCH_DEFAULT_MAXIMUM_COUNT_RATIO
     const budgetHysteresisRatio = options.budgetHysteresisRatio ??
-        DEM_RENDER_PATCH_BUDGET_HYSTERESIS_RATIO
+        GPU_RENDER_PATCH_DEFAULT_BUDGET_HYSTERESIS_RATIO
     if (runtime === undefined || typeof runtime.createBuffer !== 'function') {
-        throw new TypeError('DEM render-patch frontier requires GPURuntime')
+        throw new TypeError('GPU render-patch frontier requires GPURuntime')
     }
     if (options.sourceTemplates?.length !== 2 ||
         options.sourceTemplates.some((template, parity) => (
             template?.parity !== parity || template.mapMeta === undefined ||
             template.visibleInstances === undefined || template.drawArgument === undefined
         ))) {
-        throw new TypeError('DEM render-patch frontier requires two source parity templates')
+        throw new TypeError('GPU render-patch frontier requires two source parity templates')
     }
     for (const [ name, value ] of [
         [ 'maximumSourceTiles', options.maximumSourceTiles ],
@@ -1358,43 +1352,40 @@ function validateOptions(
         [ 'renderMaximumMatrixLevel', renderMaximumMatrixLevel ],
         [ 'maximumExtraLevels', maximumExtraLevels ],
         [ 'coordinateBits', options.coordinateBits ],
-        [ 'terrainVertexCount', options.terrainVertexCount ],
-        [ 'terrainSectorSize', terrainSectorSize ],
+        [ 'vertexCount', options.vertexCount ],
+        [ 'cellsPerPatchEdge', cellsPerPatchEdge ],
     ] as const) {
         if (!Number.isInteger(value) || value < 0) {
-            throw new TypeError(`DEM render-patch ${name} must be a non-negative integer`)
+            throw new TypeError(`GPU render-patch ${name} must be a non-negative integer`)
         }
     }
-    if (options.maximumSourceTiles < 1 || options.terrainVertexCount < 1 ||
+    if (options.maximumSourceTiles < 1 || options.vertexCount < 1 ||
         renderMaximumMatrixLevel < options.dataMaximumMatrixLevel ||
-        renderMaximumMatrixLevel > DEM_MAX_RENDER_MATRIX_LEVEL ||
-        maximumExtraLevels > DEM_MAX_RENDER_EXTRA_LEVELS ||
+        renderMaximumMatrixLevel > GPU_RENDER_PATCH_MAXIMUM_MATRIX_LEVEL ||
+        maximumExtraLevels > GPU_RENDER_PATCH_MAXIMUM_EXTRA_LEVELS ||
         maximumExtraLevels > renderMaximumMatrixLevel ||
         options.coordinateBits <= renderMaximumMatrixLevel) {
-        throw new TypeError('DEM render-patch policy bounds are invalid')
+        throw new TypeError('GPU render-patch policy bounds are invalid')
     }
     if (options.elevationRangeMeters?.length !== 2 ||
         options.elevationRangeMeters.some(value => !Number.isFinite(value)) ||
         options.elevationRangeMeters[0] > options.elevationRangeMeters[1]) {
-        throw new TypeError('DEM render-patch elevation range is invalid')
+        throw new TypeError('GPU render-patch elevation range is invalid')
     }
     if (!Number.isFinite(maximumCellSpanPixels) || maximumCellSpanPixels <= 0) {
-        throw new TypeError('DEM render-patch maximum cell span must be positive and finite')
+        throw new TypeError('GPU render-patch maximum cell span must be positive and finite')
     }
     if (!Number.isFinite(maximumPatchCountRatio) || maximumPatchCountRatio < 1 ||
         !Number.isFinite(budgetHysteresisRatio) || budgetHysteresisRatio < 0 ||
         budgetHysteresisRatio > 1) {
-        throw new TypeError('DEM render-patch budget policy is invalid')
-    }
-    if (typeof options.shader !== 'string' || options.shader.trim() === '') {
-        throw new TypeError('DEM render-patch shader source is required')
+        throw new TypeError('GPU render-patch budget policy is invalid')
     }
     return Object.freeze({
         ...options,
         sourceTemplates: options.sourceTemplates,
         renderMaximumMatrixLevel,
         maximumExtraLevels,
-        terrainSectorSize,
+        cellsPerPatchEdge,
         maximumCellSpanPixels,
         maximumPatchCountRatio,
         budgetHysteresisRatio,
@@ -1403,5 +1394,5 @@ function validateOptions(
 
 function assertActive(disposed: boolean) {
 
-    if (disposed) throw new Error('DEM render-patch frontier is disposed')
+    if (disposed) throw new Error('GPU render-patch frontier is disposed')
 }

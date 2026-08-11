@@ -16,17 +16,26 @@ import type {
     TextureResource,
 } from 'geoscratch/scratch'
 import {
+    GPU_RENDER_PATCH_DEFAULT_CELLS_PER_EDGE,
+    GPU_RENDER_PATCH_DEFAULT_MAXIMUM_CELL_SPAN_PIXELS,
+    GPU_RENDER_PATCH_MAXIMUM_EXTRA_LEVELS,
+    GPU_RENDER_PATCH_MAXIMUM_MATRIX_LEVEL,
     GeoDiagnosticError,
+    GpuRenderPatchFeedbackStaleError,
     GpuTileFrontier,
     VirtualRasterGpuFeedbackRing,
     WEB_MERCATOR_QUAD_HALF_WORLD,
     WEB_MERCATOR_QUAD_WORLD_WIDTH,
     WebMercatorQuad,
+    createGpuRenderPatchFrontier,
+    gpuRenderPatchWgslModule,
     gpuTileFrontierPolicy,
     mapFieldLayer,
 } from 'geoscratch/geo'
 import type {
     GeoViewSnapshot,
+    GpuRenderPatchFeedback,
+    GpuRenderPatchFrontier,
     GpuTileFrontierFacts,
     GpuTileFrontierFrame,
     VirtualRasterGpuFeedbackBatch,
@@ -40,22 +49,8 @@ import type {
 } from './dem-map.ts'
 import { demVirtualRasterWgslModule } from './dem-virtual-raster.ts'
 import type { createDemVirtualRasterRuntime } from './dem-virtual-raster.ts'
-import {
-    DEM_MAX_RENDER_EXTRA_LEVELS,
-    DEM_MAX_RENDER_MATRIX_LEVEL,
-    DEM_RENDER_PATCH_MAXIMUM_CELL_SPAN_PIXELS,
-    DEM_RENDER_PATCH_TERRAIN_SECTOR_SIZE,
-    DemRenderPatchFeedbackStaleError,
-    createDemRenderPatchFrontier,
-    demRenderPatchWgslModule,
-} from './dem-render-patch-frontier.ts'
-import type {
-    DemRenderPatchFeedback,
-    DemRenderPatchFrontier,
-} from './dem-render-patch-frontier.ts'
 
 type DemShaders = {
-    renderPatch: string
     terrain: string
 }
 
@@ -77,7 +72,7 @@ type Buffers = Awaited<ReturnType<typeof createBufferResources>>
 type Textures = Awaited<ReturnType<typeof createTextures>>
 type Frontier = Awaited<ReturnType<typeof createFrontier>>
 type FrontierRenderTemplates = ReturnType<typeof createFrontierRenderTemplates>
-type RenderPatchFrontier = DemRenderPatchFrontier
+type RenderPatchFrontier = GpuRenderPatchFrontier
 type RenderTemplates = ReturnType<typeof createRenderTemplates>
 type Layouts = Awaited<ReturnType<typeof createBindLayouts>>
 type BindSets = Awaited<ReturnType<typeof createBindSets>>
@@ -149,7 +144,7 @@ type DemState = {
     staleFeedbackCount: number
     supersededFeedbackCount: number
     latestFrontierFacts?: GpuTileFrontierFacts
-    latestRenderPatchFeedback?: DemRenderPatchFeedback
+    latestRenderPatchFeedback?: GpuRenderPatchFeedback
     latestFeedbackDiagnostics: readonly unknown[]
     terrainPresentation: DemTerrainPresentation
 }
@@ -184,7 +179,7 @@ type ConsumedFeedback = Readonly<{
     decisionKey: string
     view: GeoViewSnapshot
     feedback?: VirtualRasterGpuFeedbackBatch
-    renderPatchFeedback?: DemRenderPatchFeedback
+    renderPatchFeedback?: GpuRenderPatchFeedback
 }>
 
 export const DEM_STAGE_ORDER = Object.freeze([
@@ -192,7 +187,7 @@ export const DEM_STAGE_ORDER = Object.freeze([
     'render-patch-compute',
     'terrain',
 ])
-const TERRAIN_SECTOR_SIZE = DEM_RENDER_PATCH_TERRAIN_SECTOR_SIZE
+const TERRAIN_SECTOR_SIZE = GPU_RENDER_PATCH_DEFAULT_CELLS_PER_EDGE
 export const TERRAIN_EXAGGERATION = 50
 
 const bufferUsage = globalThis.GPUBufferUsage ?? Object.freeze({
@@ -232,18 +227,17 @@ export async function createDemLayer({
     const frontier = await createFrontier(runtime, virtualRaster, mapField)
     const feedbackRing = await VirtualRasterGpuFeedbackRing.create(frontier)
     const frontierRenderTemplates = createFrontierRenderTemplates(frontier)
-    const renderPatchFrontier = await createDemRenderPatchFrontier(runtime, {
+    const renderPatchFrontier = await createGpuRenderPatchFrontier(runtime, {
         sourceTemplates: frontierRenderTemplates.renderPatch,
         maximumSourceTiles: frontier.descriptor.policy.maximumActiveTiles,
         dataMaximumMatrixLevel: frontier.descriptor.policy.maximumMatrixLevel,
-        renderMaximumMatrixLevel: DEM_MAX_RENDER_MATRIX_LEVEL,
-        maximumExtraLevels: DEM_MAX_RENDER_EXTRA_LEVELS,
+        renderMaximumMatrixLevel: GPU_RENDER_PATCH_MAXIMUM_MATRIX_LEVEL,
+        maximumExtraLevels: GPU_RENDER_PATCH_MAXIMUM_EXTRA_LEVELS,
         coordinateBits: virtualRaster.addressCodec.coordinateBits,
         elevationRangeMeters: terrainElevationRange(virtualRaster),
-        terrainVertexCount: geometry.vertexCount,
-        terrainSectorSize: TERRAIN_SECTOR_SIZE,
-        maximumCellSpanPixels: DEM_RENDER_PATCH_MAXIMUM_CELL_SPAN_PIXELS,
-        shader: shaders.renderPatch,
+        vertexCount: geometry.vertexCount,
+        cellsPerPatchEdge: TERRAIN_SECTOR_SIZE,
+        maximumCellSpanPixels: GPU_RENDER_PATCH_DEFAULT_MAXIMUM_CELL_SPAN_PIXELS,
     })
     const renderTemplates = createRenderTemplates(renderPatchFrontier)
     const uniforms = await createUniformResources(
@@ -567,7 +561,7 @@ async function createUniformResources(
             elevationRange,
             coordinateBits: virtualRaster.addressCodec.coordinateBits,
             exaggeration: TERRAIN_EXAGGERATION,
-            renderMaximumMatrixLevel: DEM_MAX_RENDER_MATRIX_LEVEL,
+            renderMaximumMatrixLevel: GPU_RENDER_PATCH_MAXIMUM_MATRIX_LEVEL,
             renderPatchLookupCapacity,
         }),
     }
@@ -730,10 +724,10 @@ function createFrontierRenderTemplates(frontier: GpuTileFrontier) {
     })
 }
 
-function createRenderTemplates(frontier: DemRenderPatchFrontier) {
+function createRenderTemplates(frontier: GpuRenderPatchFrontier) {
 
     return Object.freeze({
-        terrain: frontier.renderTemplates('terrain'),
+        terrain: frontier.renderTemplates(),
     })
 }
 
@@ -835,7 +829,7 @@ async function createPrograms(
     virtualRaster: DemVirtualRaster
 ) {
 
-    const renderWgsl = demRenderPatchWgslModule()
+    const renderWgsl = gpuRenderPatchWgslModule()
     const configRequirement: ProgramBufferLayoutRequirement = {
         group: 0,
         binding: 1,
@@ -1025,10 +1019,10 @@ async function consumeReadyFeedback(
         if (code !== 'GEO_GPU_TILE_FEEDBACK_STALE') throw frontierResult.reason
         state.staleFeedbackCount++
     }
-    let renderPatchFeedback: DemRenderPatchFeedback | undefined
+    let renderPatchFeedback: GpuRenderPatchFeedback | undefined
     if (renderPatchResult.status === 'fulfilled') {
         renderPatchFeedback = renderPatchResult.value
-    } else if (!(renderPatchResult.reason instanceof DemRenderPatchFeedbackStaleError)) {
+    } else if (!(renderPatchResult.reason instanceof GpuRenderPatchFeedbackStaleError)) {
         throw renderPatchResult.reason
     }
     return Object.freeze({
@@ -1225,7 +1219,7 @@ function graphContractSnapshot(graph: DemGraph) {
         countPath: 'gpu-produced-indirect-arguments',
         selectionPath: 'gpu-resident-active-frontier',
         dataMaximumMatrixLevel,
-        renderMaximumMatrixLevel: DEM_MAX_RENDER_MATRIX_LEVEL,
+        renderMaximumMatrixLevel: GPU_RENDER_PATCH_MAXIMUM_MATRIX_LEVEL,
         mapField: Object.freeze({
             id: graph.mapField.id,
             fieldId: graph.mapField.field.id,
@@ -1431,10 +1425,8 @@ function createDemMapField(virtualRaster: DemVirtualRaster) {
 
 function assertShaders(value: DemShaders) {
 
-    if (typeof value?.renderPatch !== 'string' || typeof value?.terrain !== 'string') {
-        throw new TypeError(
-            'DEM shaders must contain renderPatch and terrain WGSL strings'
-        )
+    if (typeof value?.terrain !== 'string') {
+        throw new TypeError('DEM shaders must contain terrain WGSL')
     }
 }
 

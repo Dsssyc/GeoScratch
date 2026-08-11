@@ -7,12 +7,12 @@ struct DemTerrainConfig {
     renderPatchLookupCapacity: u32,
 };
 
-struct DemRenderPatchLookupEntry {
+struct GpuRenderPatchLookupEntry {
     key: u32,
     patchIndex: u32,
 };
 
-struct DemRenderPatchNeighbor {
+struct GpuRenderPatchNeighbor {
     found: u32,
     matrixLevel: u32,
     samplingLevel: u32,
@@ -41,9 +41,9 @@ struct VertexOutput {
 @group(1) @binding(0) var<storage, read> indices: array<u32>;
 @group(1) @binding(1) var<storage, read> gridPositions: array<u32>;
 @group(1) @binding(2) var<storage, read> visibleInstances:
-    array<DemRenderPatch>;
+    array<GpuRenderPatch>;
 @group(1) @binding(3) var<storage, read> renderPatchLookupEntries:
-    array<DemRenderPatchLookupEntry>;
+    array<GpuRenderPatchLookupEntry>;
 
 const TERRAIN_SECTOR_SIZE: u32 = 64u;
 const WEB_MERCATOR_WORLD_WIDTH_METERS: f32 = 40075016.0f;
@@ -57,7 +57,7 @@ fn gridPosition(index: u32) -> vec2u {
     return vec2u(gridPositions[index * 2u], gridPositions[index * 2u + 1u]);
 }
 
-fn logicalTileColor(instance: DemRenderPatch) -> vec3f {
+fn logicalTileColor(instance: GpuRenderPatch) -> vec3f {
     var hash = instance.matrixLevel * 0x9e3779b9u;
     hash = hash ^ (instance.tileRow * 0x85ebca6bu);
     hash = hash ^ (instance.tileCol * 0xc2b2ae35u);
@@ -101,7 +101,7 @@ fn fixedAxisFromShiftedNumerator(numerator: u32, shift: u32) -> DemAddressFixedA
 }
 
 fn fixedMercatorPosition(
-    instance: DemRenderPatch,
+    instance: GpuRenderPatch,
     grid: vec2u,
 ) -> DemAddressFixedPosition {
     let shift = terrainConfig.coordinateBits - instance.matrixLevel - 6u;
@@ -188,18 +188,18 @@ fn sourceContains(uv: vec2f) -> bool {
     return all(uv >= vec2f(0.0f)) && all(uv <= vec2f(1.0f));
 }
 
-fn missingNeighbor() -> DemRenderPatchNeighbor {
-    return DemRenderPatchNeighbor(0u, 0u, 0u, 0xffffffffu);
+fn missingNeighbor() -> GpuRenderPatchNeighbor {
+    return GpuRenderPatchNeighbor(0u, 0u, 0u, 0xffffffffu);
 }
 
 fn renderPatchLookup(
     matrixLevel: u32,
     tileRow: u32,
     tileCol: u32,
-) -> DemRenderPatchNeighbor {
-    let key = DemRenderPatch_lookupKey(matrixLevel, tileRow, tileCol);
+) -> GpuRenderPatchNeighbor {
+    let key = GpuRenderPatch_lookupKey(matrixLevel, tileRow, tileCol);
     for (var probe = 0u; probe < terrainConfig.renderPatchLookupCapacity; probe += 1u) {
-        let slot = DemRenderPatch_lookupSlot(
+        let slot = GpuRenderPatch_lookupSlot(
             key,
             probe,
             terrainConfig.renderPatchLookupCapacity,
@@ -208,7 +208,7 @@ fn renderPatchLookup(
         if (entry.key == 0u) { return missingNeighbor(); }
         if (entry.key == key) {
             let resolvedPatch = visibleInstances[entry.patchIndex];
-            return DemRenderPatchNeighbor(
+            return GpuRenderPatchNeighbor(
                 1u,
                 resolvedPatch.matrixLevel,
                 resolvedPatch.samplingLevel,
@@ -219,7 +219,7 @@ fn renderPatchLookup(
     return missingNeighbor();
 }
 
-fn patchCoveringRenderCell(renderRow: u32, renderCol: u32) -> DemRenderPatchNeighbor {
+fn patchCoveringRenderCell(renderRow: u32, renderCol: u32) -> GpuRenderPatchNeighbor {
     var matrixLevel = terrainConfig.renderMaximumMatrixLevel;
     loop {
         let shift = terrainConfig.renderMaximumMatrixLevel - matrixLevel;
@@ -232,10 +232,10 @@ fn patchCoveringRenderCell(renderRow: u32, renderCol: u32) -> DemRenderPatchNeig
 }
 
 fn neighboringPatch(
-    instance: DemRenderPatch,
+    instance: GpuRenderPatch,
     edge: u32,
     local: vec2f,
-) -> DemRenderPatchNeighbor {
+) -> GpuRenderPatchNeighbor {
     let levelDelta = terrainConfig.renderMaximumMatrixLevel - instance.matrixLevel;
     let scale = 1u << levelDelta;
     let matrixWidth = 1u << terrainConfig.renderMaximumMatrixLevel;

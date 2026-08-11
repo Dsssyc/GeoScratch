@@ -503,6 +503,33 @@ const typedFrontierDraw: GpuTileFrontierDrawArgument = typedGpuFrontier.drawArgu
 )
 const typedFrontierRenderTemplates: readonly GpuTileFrontierRenderTemplate[] =
     typedGpuFrontier.renderTemplates('terrain')
+const typedRenderPatchSourceTemplates = typedGpuFrontier.renderTemplates('terrain')
+const typedRenderPatchDescriptor: geoApi.GpuRenderPatchFrontierDescriptor = {
+    sourceTemplates: typedRenderPatchSourceTemplates,
+    maximumSourceTiles: 16,
+    dataMaximumMatrixLevel: 10,
+    renderMaximumMatrixLevel: 14,
+    maximumExtraLevels: 4,
+    coordinateBits: 32,
+    elevationRangeMeters: [ -100, 8_000 ],
+    vertexCount: 24_576,
+    cellsPerPatchEdge: 64,
+    maximumCellSpanPixels: 8,
+}
+const typedRenderPatchCreation: Promise<geoApi.GpuRenderPatchFrontier> =
+    geoApi.createGpuRenderPatchFrontier(typedFrontierRuntime, typedRenderPatchDescriptor)
+declare const typedRenderPatchFrontier: geoApi.GpuRenderPatchFrontier
+const typedRenderPatchTemplates: readonly [
+    geoApi.GpuRenderPatchRenderTemplate,
+    geoApi.GpuRenderPatchRenderTemplate,
+] = typedRenderPatchFrontier.renderTemplates()
+const typedRenderPatchWgsl = geoApi.gpuRenderPatchWgslModule()
+const typedRenderPatchFacts: geoApi.GpuRenderPatchFrontierFacts =
+    typedRenderPatchFrontier.facts()
+const typedDecodedRenderPatch: geoApi.GpuRenderPatchSelectionFacts =
+    geoApi.decodeGpuRenderPatchState(new Uint8Array(140), {
+        maximumRenderPatches: 12_544,
+    })
 const typedFrontierRenderWgsl: GpuTileFrontierRenderWgslModule =
     gpuTileFrontierRenderWgslModule({ namespace: 'TypedFrontierVisible' })
 const typedFrontierVisibleBuffer: scr.BufferResource =
@@ -512,6 +539,11 @@ const typedFrontierMapMetaBuffer: scr.BufferResource =
 const typedFrontierIndirectRegion: scr.BufferRegion =
     typedFrontierRenderTemplates[0]!.drawArgument.region
 void typedFrontierRenderWgsl
+void typedRenderPatchCreation
+void typedRenderPatchTemplates
+void typedRenderPatchWgsl
+void typedRenderPatchFacts
+void typedDecodedRenderPatch
 void typedFrontierVisibleBuffer
 void typedFrontierMapMetaBuffer
 void typedFrontierIndirectRegion

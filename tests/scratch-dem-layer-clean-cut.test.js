@@ -141,33 +141,30 @@ async function createTestVirtualRaster(runtime) {
 
 describe('DEM Layer clean cut', () => {
 
-    it('separates the bounded data frontier from projected-grid render patches', () => {
+    it('consumes Geo-owned projected-grid render patches after the data frontier', () => {
 
         const layerSource = read('examples', 'demLayer', 'dem-layer.ts')
         const renderPatchSource = read(
-            'examples',
-            'demLayer',
-            'dem-render-patch-frontier.ts'
+            'packages', 'geoscratch', 'src', 'geo', 'gpu-render-patch-frontier.ts'
         )
         const renderPatchShader = read(
-            'examples',
-            'demLayer',
-            'shaders',
-            'render-patch-frontier.wgsl'
+            'packages', 'geoscratch', 'src', 'geo', 'gpu-render-patch-frontier-wgsl.ts'
         )
         const terrainShader = read('examples', 'demLayer', 'shaders', 'terrain-mesh.wgsl')
 
-        expect(layerSource).to.include('createDemRenderPatchFrontier(')
+        expect(layerSource).to.include('createGpuRenderPatchFrontier(')
         expect(layerSource).to.include('renderPatchFrontier.encode(builder, frame)')
         expect(layerSource).to.include('renderPatchFrontier.capture(builder, frame)')
         expect(layerSource).to.include("'render-patch-compute'")
-        expect(renderPatchSource).to.include('DEM_MAX_RENDER_MATRIX_LEVEL = 14')
-        expect(renderPatchSource).to.include('DEM_MAX_RENDER_EXTRA_LEVELS = 4')
+        expect(renderPatchSource).to.include('GPU_RENDER_PATCH_MAXIMUM_MATRIX_LEVEL = 14')
+        expect(renderPatchSource).to.include('GPU_RENDER_PATCH_MAXIMUM_EXTRA_LEVELS = 4')
         expect(renderPatchSource).to.include('dataMaximumMatrixLevel')
         expect(renderPatchSource).to.include('renderMaximumMatrixLevel')
         expect(renderPatchSource).to.include('maximumCellSpanPixels')
-        expect(renderPatchSource).to.include('DEM_RENDER_PATCH_MAXIMUM_CELL_SPAN_PIXELS = 8')
-        expect(renderPatchSource).to.include('decodeDemRenderPatchState')
+        expect(renderPatchSource).to.include(
+            'GPU_RENDER_PATCH_DEFAULT_MAXIMUM_CELL_SPAN_PIXELS = 8'
+        )
+        expect(renderPatchSource).to.include('decodeGpuRenderPatchState')
         expect(renderPatchSource).to.include('createReadbackCommand')
         expect(renderPatchSource).to.include('renderPatchLookupCapacity')
         expect(renderPatchSource).to.include('previousRenderPatchLookup')
@@ -208,6 +205,19 @@ describe('DEM Layer clean cut', () => {
         expect(terrainShader).to.include('fn neighboringPatch(')
         expect(terrainShader).to.include('fn snapEdgeCoordinate(')
         expect(terrainShader).not.to.include('fn coarserSamplingLevel(')
+        expect(fs.existsSync(path.join(
+            root,
+            'examples',
+            'demLayer',
+            'dem-render-patch-frontier.ts'
+        ))).to.equal(false)
+        expect(fs.existsSync(path.join(
+            root,
+            'examples',
+            'demLayer',
+            'shaders',
+            'render-patch-frontier.wgsl'
+        ))).to.equal(false)
         expect(fs.existsSync(path.join(
             root,
             'examples',
@@ -601,12 +611,6 @@ describe('DEM Layer clean cut', () => {
             virtualRaster,
             size: { width: 320, height: 180 },
             shaders: {
-                renderPatch: read(
-                    'examples',
-                    'demLayer',
-                    'shaders',
-                    'render-patch-frontier.wgsl'
-                ),
                 terrain: read('examples', 'demLayer', 'shaders', 'terrain-mesh.wgsl'),
             },
             provenanceVerifier() {
@@ -650,12 +654,6 @@ describe('DEM Layer clean cut', () => {
             virtualRaster,
             size: { width: 320, height: 180 },
             shaders: {
-                renderPatch: read(
-                    'examples',
-                    'demLayer',
-                    'shaders',
-                    'render-patch-frontier.wgsl'
-                ),
                 terrain: read('examples', 'demLayer', 'shaders', 'terrain-mesh.wgsl'),
             },
         })
@@ -765,7 +763,7 @@ describe('DEM Layer clean cut', () => {
             balancePassCount: 14,
             balanceWorkgroupSize: 256,
             nominalPatchSpanPixels: 512,
-            terrainSectorSize: 64,
+            cellsPerPatchEdge: 64,
         })
         expect(graph.contractFacts().renderPatches.renderPatchLookupCapacity)
             .to.be.greaterThan(graph.contractFacts().renderPatches.maximumRenderPatches)

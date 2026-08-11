@@ -1,4 +1,5 @@
-struct DemRenderPatchState {
+export const GPU_RENDER_PATCH_FRONTIER_WGSL = String.raw`
+struct GpuRenderPatchState {
     count: atomic<u32>,
     overflowCount: atomic<u32>,
     lookupOverflowCount: atomic<u32>,
@@ -20,46 +21,46 @@ struct DemRenderPatchState {
     balanceScratchCount: atomic<u32>,
 };
 
-struct DemRenderPatchAtomicLookupEntry {
+struct GpuRenderPatchAtomicLookupEntry {
     key: atomic<u32>,
     patchIndex: u32,
 };
 
-struct DemRenderPatchLookupEntry {
+struct GpuRenderPatchLookupEntry {
     key: u32,
     patchIndex: u32,
 };
 
-struct DemRenderPatchBounds {
+struct GpuRenderPatchBounds {
     minimum: vec3f,
     maximum: vec3f,
 };
 
-struct DemRenderPatchPlane {
+struct GpuRenderPatchPlane {
     normal: vec3f,
     distance: f32,
 };
 
-struct DemRenderPatchQuanta {
+struct GpuRenderPatchQuanta {
     low: u32,
     high: u32,
 };
 
 @group(0) @binding(0) var<uniform> mapMeta: GpuTileFrontierMapMeta;
-@group(0) @binding(1) var<uniform> renderPatchPolicy: DemRenderPatchPolicy;
+@group(0) @binding(1) var<uniform> renderPatchPolicy: GpuRenderPatchPolicy;
 @group(0) @binding(2) var<storage, read> sourceVisibleInstances:
     array<GpuTileFrontierVisibleInstance>;
 @group(0) @binding(3) var<storage, read> sourceDrawArguments: array<u32>;
-@group(0) @binding(4) var<storage, read_write> renderPatches: array<DemRenderPatch>;
-@group(0) @binding(5) var<storage, read_write> renderPatchState: DemRenderPatchState;
+@group(0) @binding(4) var<storage, read_write> renderPatches: array<GpuRenderPatch>;
+@group(0) @binding(5) var<storage, read_write> renderPatchState: GpuRenderPatchState;
 @group(0) @binding(6) var<storage, read_write> drawArguments: array<u32>;
 @group(0) @binding(7) var<storage, read_write> renderPatchLookup:
-    array<DemRenderPatchAtomicLookupEntry>;
-@group(0) @binding(8) var<storage, read_write> balancePatches: array<DemRenderPatch>;
+    array<GpuRenderPatchAtomicLookupEntry>;
+@group(0) @binding(8) var<storage, read_write> balancePatches: array<GpuRenderPatch>;
 @group(0) @binding(9) var<storage, read_write> balancePatchLookup:
-    array<DemRenderPatchAtomicLookupEntry>;
+    array<GpuRenderPatchAtomicLookupEntry>;
 @group(0) @binding(10) var<storage, read> previousRenderPatchLookup:
-    array<DemRenderPatchLookupEntry>;
+    array<GpuRenderPatchLookupEntry>;
 
 const WEB_MERCATOR_WORLD_WIDTH_METERS: f32 = 40075016.0f;
 
@@ -79,40 +80,40 @@ fn subtractExpansions(
     return difference + (roundoff + leftLow - rightLow);
 }
 
-fn boundaryQuanta(index: u32, matrixLevel: u32) -> DemRenderPatchQuanta {
+fn boundaryQuanta(index: u32, matrixLevel: u32) -> GpuRenderPatchQuanta {
     let shift = renderPatchPolicy.coordinateBits - matrixLevel;
     if (shift >= 32u) {
-        return DemRenderPatchQuanta(0u, index << (shift - 32u));
+        return GpuRenderPatchQuanta(0u, index << (shift - 32u));
     }
     if (shift == 0u) {
-        return DemRenderPatchQuanta(index, 0u);
+        return GpuRenderPatchQuanta(index, 0u);
     }
-    return DemRenderPatchQuanta(index << shift, index >> (32u - shift));
+    return GpuRenderPatchQuanta(index << shift, index >> (32u - shift));
 }
 
 fn subtractQuanta(
-    left: DemRenderPatchQuanta,
-    right: DemRenderPatchQuanta,
-) -> DemRenderPatchQuanta {
+    left: GpuRenderPatchQuanta,
+    right: GpuRenderPatchQuanta,
+) -> GpuRenderPatchQuanta {
     let borrow = select(0u, 1u, left.low < right.low);
-    return DemRenderPatchQuanta(
+    return GpuRenderPatchQuanta(
         left.low - right.low,
         left.high - right.high - borrow,
     );
 }
 
-fn quantaMagnitude(value: DemRenderPatchQuanta) -> DemRenderPatchQuanta {
+fn quantaMagnitude(value: GpuRenderPatchQuanta) -> GpuRenderPatchQuanta {
     if ((value.high & 0x80000000u) == 0u) {
         return value;
     }
     let low = ~value.low + 1u;
     let carry = select(0u, 1u, low == 0u);
-    return DemRenderPatchQuanta(low, ~value.high + carry);
+    return GpuRenderPatchQuanta(low, ~value.high + carry);
 }
 
 fn relativeQuantaMeters(
-    left: DemRenderPatchQuanta,
-    right: DemRenderPatchQuanta,
+    left: GpuRenderPatchQuanta,
+    right: GpuRenderPatchQuanta,
 ) -> f32 {
     let difference = subtractQuanta(left, right);
     let negative = (difference.high & 0x80000000u) != 0u;
@@ -127,16 +128,16 @@ fn relativeQuantaMeters(
     return select(meters, -meters, negative);
 }
 
-fn patchBounds(matrixLevel: u32, row: u32, column: u32) -> DemRenderPatchBounds {
+fn patchBounds(matrixLevel: u32, row: u32, column: u32) -> GpuRenderPatchBounds {
     let west = boundaryQuanta(column, matrixLevel);
     let east = boundaryQuanta(column + 1u, matrixLevel);
     let north = boundaryQuanta(row, matrixLevel);
     let south = boundaryQuanta(row + 1u, matrixLevel);
-    let cameraX = DemRenderPatchQuanta(
+    let cameraX = GpuRenderPatchQuanta(
         mapMeta.cameraFixedLow.x,
         mapMeta.cameraFixedHigh.x,
     );
-    let cameraY = DemRenderPatchQuanta(
+    let cameraY = GpuRenderPatchQuanta(
         mapMeta.cameraFixedLow.y,
         mapMeta.cameraFixedHigh.y,
     );
@@ -156,18 +157,18 @@ fn patchBounds(matrixLevel: u32, row: u32, column: u32) -> DemRenderPatchBounds 
         mapMeta.cameraHigh.z,
         mapMeta.cameraLow.z,
     );
-    return DemRenderPatchBounds(
+    return GpuRenderPatchBounds(
         vec3f(minimumX, minimumY, minimumZ),
         vec3f(maximumX, maximumY, maximumZ),
     );
 }
 
-fn normalizedPlane(equation: vec4f) -> DemRenderPatchPlane {
+fn normalizedPlane(equation: vec4f) -> GpuRenderPatchPlane {
     let magnitude = max(length(equation.xyz), 1e-20f);
-    return DemRenderPatchPlane(equation.xyz / magnitude, equation.w / magnitude);
+    return GpuRenderPatchPlane(equation.xyz / magnitude, equation.w / magnitude);
 }
 
-fn frustumPlane(index: u32) -> DemRenderPatchPlane {
+fn frustumPlane(index: u32) -> GpuRenderPatchPlane {
     let matrix = mapMeta.clipFromRelativeWorld;
     let row0 = vec4f(matrix[0].x, matrix[1].x, matrix[2].x, matrix[3].x);
     let row1 = vec4f(matrix[0].y, matrix[1].y, matrix[2].y, matrix[3].y);
@@ -183,7 +184,7 @@ fn frustumPlane(index: u32) -> DemRenderPatchPlane {
     }
 }
 
-fn patchVisible(bounds: DemRenderPatchBounds) -> bool {
+fn patchVisible(bounds: GpuRenderPatchBounds) -> bool {
     for (var index = 0u; index < 6u; index += 1u) {
         let plane = frustumPlane(index);
         let positive = vec3f(
@@ -198,7 +199,7 @@ fn patchVisible(bounds: DemRenderPatchBounds) -> bool {
     return true;
 }
 
-fn projectedPlaneCellSpanPixels(bounds: DemRenderPatchBounds, elevation: f32) -> f32 {
+fn projectedPlaneCellSpanPixels(bounds: GpuRenderPatchBounds, elevation: f32) -> f32 {
     var clipCorners: array<vec4f, 4>;
     for (var index = 0u; index < 4u; index += 1u) {
         let point = vec3f(
@@ -248,10 +249,10 @@ fn projectedPlaneCellSpanPixels(bounds: DemRenderPatchBounds, elevation: f32) ->
         vec2f(0.0f),
     );
     return sqrt(projectedSize.x * projectedSize.y) /
-        f32(renderPatchPolicy.terrainSectorSize);
+        f32(renderPatchPolicy.cellsPerPatchEdge);
 }
 
-fn projectedCellSpanPixels(bounds: DemRenderPatchBounds) -> f32 {
+fn projectedCellSpanPixels(bounds: GpuRenderPatchBounds) -> f32 {
     return max(
         projectedPlaneCellSpanPixels(bounds, bounds.minimum.z),
         projectedPlaneCellSpanPixels(bounds, bounds.maximum.z),
@@ -265,9 +266,9 @@ fn trialCellSpanThreshold(biasStep: u32) -> f32 {
 }
 
 fn previousLookupContains(matrixLevel: u32, tileRow: u32, tileCol: u32) -> bool {
-    let key = DemRenderPatch_lookupKey(matrixLevel, tileRow, tileCol);
+    let key = GpuRenderPatch_lookupKey(matrixLevel, tileRow, tileCol);
     for (var probe = 0u; probe < renderPatchPolicy.renderPatchLookupCapacity; probe += 1u) {
-        let slot = DemRenderPatch_lookupSlot(
+        let slot = GpuRenderPatch_lookupSlot(
             key,
             probe,
             renderPatchPolicy.renderPatchLookupCapacity,
@@ -310,9 +311,9 @@ fn insertRenderPatchLookup(
     tileCol: u32,
     patchIndex: u32,
 ) -> bool {
-    let key = DemRenderPatch_lookupKey(matrixLevel, tileRow, tileCol);
+    let key = GpuRenderPatch_lookupKey(matrixLevel, tileRow, tileCol);
     for (var probe = 0u; probe < renderPatchPolicy.renderPatchLookupCapacity; probe += 1u) {
-        let slot = DemRenderPatch_lookupSlot(
+        let slot = GpuRenderPatch_lookupSlot(
             key,
             probe,
             renderPatchPolicy.renderPatchLookupCapacity,
@@ -336,9 +337,9 @@ fn insertBalancePatchLookup(
     tileCol: u32,
     patchIndex: u32,
 ) -> bool {
-    let key = DemRenderPatch_lookupKey(matrixLevel, tileRow, tileCol);
+    let key = GpuRenderPatch_lookupKey(matrixLevel, tileRow, tileCol);
     for (var probe = 0u; probe < renderPatchPolicy.renderPatchLookupCapacity; probe += 1u) {
-        let slot = DemRenderPatch_lookupSlot(
+        let slot = GpuRenderPatch_lookupSlot(
             key,
             probe,
             renderPatchPolicy.renderPatchLookupCapacity,
@@ -357,9 +358,9 @@ fn insertBalancePatchLookup(
 }
 
 fn primaryLookupContains(matrixLevel: u32, tileRow: u32, tileCol: u32) -> bool {
-    let key = DemRenderPatch_lookupKey(matrixLevel, tileRow, tileCol);
+    let key = GpuRenderPatch_lookupKey(matrixLevel, tileRow, tileCol);
     for (var probe = 0u; probe < renderPatchPolicy.renderPatchLookupCapacity; probe += 1u) {
-        let slot = DemRenderPatch_lookupSlot(
+        let slot = GpuRenderPatch_lookupSlot(
             key,
             probe,
             renderPatchPolicy.renderPatchLookupCapacity,
@@ -372,9 +373,9 @@ fn primaryLookupContains(matrixLevel: u32, tileRow: u32, tileCol: u32) -> bool {
 }
 
 fn scratchLookupContains(matrixLevel: u32, tileRow: u32, tileCol: u32) -> bool {
-    let key = DemRenderPatch_lookupKey(matrixLevel, tileRow, tileCol);
+    let key = GpuRenderPatch_lookupKey(matrixLevel, tileRow, tileCol);
     for (var probe = 0u; probe < renderPatchPolicy.renderPatchLookupCapacity; probe += 1u) {
-        let slot = DemRenderPatch_lookupSlot(
+        let slot = GpuRenderPatch_lookupSlot(
             key,
             probe,
             renderPatchPolicy.renderPatchLookupCapacity,
@@ -398,14 +399,14 @@ fn inputLookupContains(
     return primaryLookupContains(matrixLevel, tileRow, tileCol);
 }
 
-fn inputRenderPatch(fromScratch: bool, patchIndex: u32) -> DemRenderPatch {
+fn inputRenderPatch(fromScratch: bool, patchIndex: u32) -> GpuRenderPatch {
     if (fromScratch) {
         return balancePatches[patchIndex];
     }
     return renderPatches[patchIndex];
 }
 
-fn maximumFinerNeighborDelta(fromScratch: bool, candidate: DemRenderPatch) -> u32 {
+fn maximumFinerNeighborDelta(fromScratch: bool, candidate: GpuRenderPatch) -> u32 {
     let availableDelta = min(
         renderPatchPolicy.maximumExtraLevels + 1u,
         renderPatchPolicy.renderMaximumMatrixLevel - candidate.matrixLevel,
@@ -447,7 +448,7 @@ fn maximumFinerNeighborDelta(fromScratch: bool, candidate: DemRenderPatch) -> u3
     return maximumDelta;
 }
 
-fn writeBalancedPatch(toScratch: bool, candidate: DemRenderPatch) {
+fn writeBalancedPatch(toScratch: bool, candidate: GpuRenderPatch) {
     var outputIndex = 0u;
     if (toScratch) {
         outputIndex = atomicAdd(&renderPatchState.balanceScratchCount, 1u);
@@ -481,12 +482,12 @@ fn writeBalancedPatch(toScratch: bool, candidate: DemRenderPatch) {
     }
 }
 
-fn writeBalancedChildren(toScratch: bool, candidate: DemRenderPatch) {
+fn writeBalancedChildren(toScratch: bool, candidate: GpuRenderPatch) {
     let childLevel = candidate.matrixLevel + 1u;
     let firstRow = candidate.tileRow * 2u;
     let firstCol = candidate.tileCol * 2u;
     for (var child = 0u; child < 4u; child += 1u) {
-        writeBalancedPatch(toScratch, DemRenderPatch(
+        writeBalancedPatch(toScratch, GpuRenderPatch(
             childLevel,
             firstRow + (child >> 1u),
             firstCol + (child & 1u),
@@ -511,7 +512,7 @@ fn emitRenderPatch(
         atomicAdd(&renderPatchState.overflowCount, 1u);
         return;
     }
-    renderPatches[outputIndex] = DemRenderPatch(
+    renderPatches[outputIndex] = GpuRenderPatch(
         matrixLevel,
         tileRow,
         tileCol,
@@ -553,7 +554,7 @@ fn resetRenderPatches() {
     atomicStore(&renderPatchState.maximumAdjacentLevelDelta, 0u);
     atomicStore(&renderPatchState.balancePassCount, renderPatchPolicy.balancePassCount);
     atomicStore(&renderPatchState.balanceScratchCount, 0u);
-    drawArguments[0] = renderPatchPolicy.terrainVertexCount;
+    drawArguments[0] = renderPatchPolicy.vertexCount;
     drawArguments[1] = 0u;
     drawArguments[2] = 0u;
     drawArguments[3] = 0u;
@@ -625,7 +626,7 @@ fn countRenderPatchTrials(@builtin(global_invocation_id) globalId: vec3u) {
 fn selectRenderPatchBudget() {
     let nominalPatchSpan = max(
         1.0f,
-        f32(renderPatchPolicy.terrainSectorSize) *
+        f32(renderPatchPolicy.cellsPerPatchEdge) *
             renderPatchPolicy.maximumCellSpanPixels,
     );
     let viewportColumns = u32(ceil(mapMeta.viewport.x / nominalPatchSpan)) + 1u;
@@ -831,3 +832,4 @@ fn finalizeRenderPatches() {
     );
     drawArguments[1] = renderPatchCount;
 }
+`

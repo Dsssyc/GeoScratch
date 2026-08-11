@@ -1,7 +1,10 @@
 import { expect } from 'chai'
-import * as renderPatch from '../examples/demLayer/dem-render-patch-frontier.ts'
+import {
+    GeoDiagnosticError,
+    decodeGpuRenderPatchState,
+} from 'geoscratch/geo'
 
-describe('DEM render-patch frontier', () => {
+describe('Geo GPU render-patch frontier', () => {
 
     it('decodes bounded delayed GPU selection facts', () => {
 
@@ -32,7 +35,7 @@ describe('DEM render-patch frontier', () => {
             14,
             23,
         ], 30)
-        const facts = renderPatch.decodeDemRenderPatchState(
+        const facts = decodeGpuRenderPatchState(
             new Uint8Array(words.buffer),
             { maximumRenderPatches: 12_544, expectedFrameEpoch: 41 }
         )
@@ -86,7 +89,7 @@ describe('DEM render-patch frontier', () => {
         ], 13)
         words.set([ 9, 0, 1, 14, 9 ], 30)
 
-        const facts = renderPatch.decodeDemRenderPatchState(
+        const facts = decodeGpuRenderPatchState(
             new Uint8Array(words.buffer),
             { maximumRenderPatches: 12_544, expectedFrameEpoch: 17 }
         )
@@ -110,10 +113,10 @@ describe('DEM render-patch frontier', () => {
 
     it('rejects feedback from a different frame epoch', () => {
 
-        expect(() => renderPatch.decodeDemRenderPatchState(
+        expect(() => decodeGpuRenderPatchState(
             new Uint8Array(140),
             { maximumRenderPatches: 12_544, expectedFrameEpoch: 9 }
-        )).to.throw('frame epoch')
+        )).to.throw(GeoDiagnosticError, 'frame epoch')
     })
 
     it('rejects a final render cut whose adjacent patch levels differ by more than one', () => {
@@ -137,7 +140,7 @@ describe('DEM render-patch frontier', () => {
         words.fill(4, 13, 30)
         words.set([ 4, 0, 2, 14, 4 ], 30)
 
-        expect(() => renderPatch.decodeDemRenderPatchState(
+        expect(() => decodeGpuRenderPatchState(
             new Uint8Array(words.buffer),
             { maximumRenderPatches: 12_544, expectedFrameEpoch: 7 }
         )).to.throw('level-difference-one')
