@@ -18,25 +18,22 @@ import {
     DEM_WEB_MERCATOR_COORDINATE_BITS,
     createDemVirtualRasterModel,
     demTileUrl,
-    demVirtualRasterWgslModule,
     fetchDemVirtualRasterManifest,
     parseDemVirtualRasterManifest,
 } from '../examples/demLayer/dem-virtual-raster.ts'
-import { readDemCachePolicy } from '../examples/demLayer/dem-cache-policy.ts'
 import {
     DEM_CACHE_PANEL_DEFAULT_CONFIG,
     DEM_CACHE_PANEL_STORAGE_KEY,
+    DEM_RENDERING_PREFERENCE_STORAGE_KEY,
+    prepareDemControlPanel,
+    readDemCachePolicy,
     removeDemCacheParameters,
     replaceDemCacheParameters,
+    resolveDemRenderingPreference,
     resolveDemCachePanelConfig,
     serializeDemCachePanelConfig,
-} from '../examples/demLayer/dem-cache-panel-state.ts'
-import { prepareDemControlPanel } from '../examples/demLayer/dem-control-panel.ts'
-import {
-    DEM_RENDERING_PREFERENCE_STORAGE_KEY,
-    resolveDemRenderingPreference,
     serializeDemRenderingPreference,
-} from '../examples/demLayer/dem-rendering-preference.ts'
+} from '../examples/demLayer/dem-controls.ts'
 import { demWebMercatorManifest as manifest } from './fixtures/dem-webmercator-manifest.js'
 
 describe('DEM WebMercator virtual raster', () => {
@@ -754,7 +751,14 @@ describe('DEM WebMercator virtual raster', () => {
 
         const parsed = parseDemVirtualRasterManifest(manifest)
         const model = createDemVirtualRasterModel(parsed)
-        const wgsl = demVirtualRasterWgslModule(model)
+        const wgsl = webMercatorVirtualRasterWgslModule(model, {
+            namespace: 'DemHeight',
+            addressNamespace: 'DemAddress',
+            group: 2,
+            pageTableBinding: 0,
+            atlasBinding: 1,
+            transitionTexels: 16,
+        }).code
         const generic = webMercatorVirtualRasterField({
             id: 'test-height',
             addressSpaceId: 'test-height-address-space',

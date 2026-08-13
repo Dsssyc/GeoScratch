@@ -429,6 +429,21 @@ const typedTerrainRendererCreation: Promise<
     ],
     initialPresentation: 'shaded',
 })
+const typedGeoFrameController: geoApi.GeoFrameController =
+    geoApi.createGeoFrameController({
+        render: async frameNumber => ({
+            observation: Promise.resolve(),
+            residencyWorkCount: 0,
+            needsFollowUp: false,
+            value: frameNumber,
+        }),
+        onSubmitted(frame: geoApi.GeoFrameControllerFrame<number>) {
+            const value: number = frame.value
+            void value
+        },
+    })
+const typedGeoFrameSnapshot: geoApi.GeoFrameControllerSnapshot =
+    typedGeoFrameController.snapshot()
 // @ts-expect-error MapFieldLayer does not own resource scheduling.
 typedMapField.scheduler
 // @ts-expect-error MapFieldLayer does not own a GPU runtime.
@@ -436,6 +451,7 @@ typedMapField.runtime
 void typedViewDemands
 void typedMapLibreView
 void typedTerrainRendererCreation
+void typedGeoFrameSnapshot
 declare const typedFrontierGpuState: VirtualRasterGpuState
 const typedFrontierPolicy: GpuTileFrontierPolicy = gpuTileFrontierPolicy({
     refineErrorPixels: 2,

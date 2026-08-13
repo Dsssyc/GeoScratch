@@ -4,17 +4,9 @@ import {
 } from 'geoscratch/geo'
 import type {
     VirtualRasterPageDemand,
-    VirtualRasterRequestExecutor,
     VirtualRasterWorkerExecutor,
-    VirtualRasterWorkerExecutorFacts,
 } from 'geoscratch/geo'
 import { WorkerSystem } from 'geoscratch/scratch'
-import type {
-    PersistentCacheLifecycle,
-    TaskPhaseBudgetFacts,
-    WorkerGroupFacts,
-    WorkerSystemFacts,
-} from 'geoscratch/scratch'
 import type {
     DemCachePolicy,
     DemTileCacheFacts,
@@ -23,8 +15,6 @@ import type {
     DemTileWorkerInit,
 } from './dem-tile-protocol.ts'
 import demTileWorkerUrl from './dem-tile-worker-url.ts'
-
-type DemWorkerPhase = 'network' | 'decode'
 
 type DemWorkerTileSourceDescriptor = Readonly<{
     sourceId: string
@@ -44,40 +34,7 @@ type DemWorkerTileSourceDescriptor = Readonly<{
     tileUrl(page: VirtualRasterPageDemand['page']): string
 }>
 
-type DemWorkerRequestExecutorFacts = Readonly<{
-    disposed: boolean
-    system: WorkerSystemFacts
-    group: WorkerGroupFacts
-    workers: readonly DemTileWorkerFacts[]
-    cache: Readonly<{
-        mode: DemCachePolicy['mode']
-        lifecycle?: PersistentCacheLifecycle
-        requestPersistence: boolean
-        maxPayloadBytes: number
-        maxEntries: number
-        entryCount: number
-        payloadBytes: number
-        hitCount: number
-        missCount: number
-        putCount: number
-        evictionCount: number
-        quotaFailureCount: number
-    }>
-    networkRequestCount: number
-    decodedPageCount: number
-    acceptedCandidateCount: number
-    discardedCandidateCount: number
-    pendingCandidateCount: number
-    maxPendingCandidateCount: number
-    senderDecodedByteLength: number
-    phaseBudget: TaskPhaseBudgetFacts<DemWorkerPhase>
-}>
-
-export type DemWorkerRequestExecutor = VirtualRasterRequestExecutor & Readonly<{
-    refreshFacts(): Promise<DemWorkerRequestExecutorFacts>
-    inspect(): DemWorkerRequestExecutorFacts
-    dispose(): Promise<void>
-}>
+export type DemWorkerRequestExecutor = VirtualRasterWorkerExecutor<DemTileWorkerFacts>
 
 const MODULE_ID = 'geoscratch-dem-tile'
 const MODULE_VERSION = '2'
@@ -149,30 +106,23 @@ export async function createDemWorkerRequestExecutor(
             },
         })
     } catch (error) {
-        await system.dispose()
+        try {
+            await system.dispose()
+        } catch (cleanupError) {
+            throw new AggregateError(
+                [ error, cleanupError ],
+                'DEM Worker executor initialization and cleanup failed'
+            )
+        }
         throw error
     }
 
-    let facts = core.inspect()
     let disposal: Promise<void> | undefined
-
-    function inspect(): DemWorkerRequestExecutorFacts {
-
-        return aggregateFacts(facts, descriptor.cachePolicy)
-    }
-
-    async function refreshFacts(): Promise<DemWorkerRequestExecutorFacts> {
-
-        facts = await core.refreshFacts()
-        return inspect()
-    }
 
     async function disposeOnce(): Promise<void> {
 
         const settlements = await Promise.allSettled([ core.dispose() ])
-        facts = core.inspect()
         const systemSettlement = await Promise.allSettled([ system.dispose() ])
-        facts = core.inspect()
         const failures = [ ...settlements, ...systemSettlement ]
             .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
             .map(result => result.reason)
@@ -183,8 +133,8 @@ export async function createDemWorkerRequestExecutor(
 
     return Object.freeze({
         request: core.request,
-        refreshFacts,
-        inspect,
+        refreshFacts: core.refreshFacts,
+        inspect: core.inspect,
         dispose() {
 
             disposal ??= disposeOnce()
@@ -227,54 +177,6 @@ function createCandidate(
         }),
         url: descriptor.tileUrl(demand.page),
         contentVersion: descriptor.contentVersion,
-    })
-}
-
-function aggregateFacts(
-    core: VirtualRasterWorkerExecutorFacts<DemTileWorkerFacts>,
-    policy: DemCachePolicy
-): DemWorkerRequestExecutorFacts {
-
-    const workers = core.workers
-    const sumCache = (read: (facts: DemTileCacheFacts) => number) =>
-        workers.reduce((sum, worker) => sum + read(worker.cache), 0)
-    const sum = (read: (facts: DemTileWorkerFacts) => number) =>
-        workers.reduce((total, worker) => total + read(worker), 0)
-    return Object.freeze({
-        disposed: core.disposed,
-        system: core.system,
-        group: core.group,
-        workers,
-        cache: Object.freeze({
-            mode: policy.mode,
-            ...(policy.mode === 'none' ? {
-                requestPersistence: false,
-                maxPayloadBytes: 0,
-                maxEntries: 0,
-            } : {
-                lifecycle: policy.lifecycle,
-                requestPersistence: policy.requestPersistence,
-                maxPayloadBytes: policy.maxPayloadBytes,
-                maxEntries: policy.maxEntries,
-            }),
-            entryCount: sumCache(facts => facts.entryCount),
-            payloadBytes: sumCache(facts => facts.payloadBytes),
-            hitCount: sumCache(facts => facts.hitCount),
-            missCount: sumCache(facts => facts.missCount),
-            putCount: sumCache(facts => facts.putCount),
-            evictionCount: sumCache(facts => facts.evictionCount),
-            quotaFailureCount: sumCache(facts => facts.quotaFailureCount),
-        }),
-        networkRequestCount: sum(facts => facts.networkRequestCount),
-        decodedPageCount: sum(facts => facts.decodedPageCount),
-        acceptedCandidateCount: sum(facts => facts.acceptedCandidateCount),
-        discardedCandidateCount: sum(facts => facts.discardedCandidateCount),
-        pendingCandidateCount: sum(facts => facts.pendingCandidateCount),
-        maxPendingCandidateCount: Math.max(0, ...workers.map(facts =>
-            facts.maxPendingCandidateCount
-        )),
-        senderDecodedByteLength: sum(facts => facts.senderDecodedByteLength),
-        phaseBudget: core.phaseBudget,
     })
 }
 

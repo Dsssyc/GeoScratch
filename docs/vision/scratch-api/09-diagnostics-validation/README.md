@@ -188,6 +188,14 @@ type ScratchDiagnosticError = Error & {
 
 ## Phase Sources
 
+### Lifetime
+
+`LifetimeScope` is the generic asynchronous ownership boundary for page, worker,
+and application composition. `SCRATCH_LIFETIME_STOPPED` means that acquisition,
+registration, or an explicit active-state assertion raced with disposal. The error
+retains the stable scope label but does not claim a GPU Runtime, device, or native
+WebGPU failure.
+
 ### Runtime
 
 Runtime diagnostics cover device, adapter, feature, limit, ownership, lifecycle, and device-loss problems.

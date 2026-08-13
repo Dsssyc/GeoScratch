@@ -1,18 +1,13 @@
 import { GPURuntime, LifetimeScope } from 'geoscratch/scratch'
-import type {
-    GPUDiagnosticCapture,
-    GPUDiagnosticCaptureReport,
-    GPURuntimeDiagnosticsEvidence,
-    SurfaceSize,
-} from 'geoscratch/scratch'
+import type { SurfaceSize } from 'geoscratch/scratch'
 import {
+    createGeoFrameController,
     createTerrainFieldRenderer,
     mapFieldLayer,
 } from 'geoscratch/geo'
 import {
     createDemMap,
     demMapViewAdapter,
-    readDemCameraState,
     waitForDemMap,
 } from './dem-map.ts'
 import type { DemMap } from './dem-map.ts'
@@ -20,72 +15,21 @@ import {
     createDemVirtualRasterRuntime,
     fetchDemVirtualRasterManifest,
 } from './dem-virtual-raster.ts'
-import { prepareDemControlPanel } from './dem-control-panel.ts'
-import { readDemCachePolicy } from './dem-cache-policy.ts'
-import type { DemCachePolicy } from './dem-tile-protocol.ts'
+import { prepareDemControlPanel, readDemCachePolicy } from './dem-controls.ts'
 import terrainShader from './shaders/terrain-mesh.wgsl?raw'
 
-type DemLifecycle = LifetimeScope
-type CleanupReport = Awaited<ReturnType<DemLifecycle['dispose']>>
-type FrameProvenance = Awaited<ReturnType<DemLayer['renderFrame']>>['provenance']
-type FailureConfiguration = Readonly<{ scenario?: string }>
-type FailureProofController = ReturnType<typeof createFailureProofController>
-type FailureProof = Exclude<ReturnType<FailureProofController['finalize']>, undefined>
-type CleanupProof = Readonly<{
-    report: ReturnType<typeof serializeCleanupReport>
-    lifecycle: ReturnType<DemLifecycle['snapshot']>
-    graphState?: ReturnType<DemLayer['state']>
-    virtualRaster?: ReturnType<DemLayer['virtualRasterFacts']>
-}>
-type PageSettlement = Promise<FailureProof | CleanupProof | void | undefined>
-type PageContext = { graph: DemLayer; runtime: GPURuntime }
+type DemLayerProofModule = typeof import(
+    '../../tests/browser/support/dem-layer-proof.ts'
+)
+type DemLayerProof = ReturnType<DemLayerProofModule['createDemLayerProof']>
+type PageSettlement = Promise<unknown>
 type CameraMoveOptions = Parameters<DemMap['jumpTo']>[0]
-type DemCameraView = ReturnType<typeof readDemCameraState>
-type DemTerrainPresentation = 'shaded' | 'tile-wireframe'
-type DemLayer = Awaited<ReturnType<
-    typeof createTerrainFieldRenderer<DemCameraView, DemTerrainPresentation>
->>
-type FrameWork = {
-    scheduled: number
-    completed: number
-    cancelled: number
-    active: number
-}
-type FailureDetails = Error & {
-    code?: unknown
-    scenario?: unknown
-    diagnostic?: { code?: unknown }
-    context?: { domain?: unknown, incident?: unknown }
-}
+type FailureDetails = Error & { diagnostic?: unknown }
 
-declare global {
-    interface Window {
-        __DEM_LAYER_PROOF__: Readonly<{
-            pauseAndDrain(): Promise<Readonly<DOMStringMap>>
-            dispose(): Promise<FailureProof | CleanupProof | void | undefined>
-            facts(): Readonly<DOMStringMap>
-            moveCamera(options: CameraMoveOptions): void
-        }>
-        __DEM_LAYER_INIT_FAILURE_PROOF__: FailureProof
-        __DEM_LAYER_CLEANUP_PROOF__: CleanupProof
-    }
-}
-
+const TERRAIN_EXAGGERATION = 50
 const canvas = document.getElementById('GPUFrame') as HTMLCanvasElement
 const controlPanelContainer = document.getElementById('DemControlPanel') as HTMLElement
-const TERRAIN_EXAGGERATION = 50
-const FAILURE_RUNTIME_EVIDENCE_MAX_BYTES = 512 * 1024
-const FAILURE_CAPTURE_BOUNDS = Object.freeze({
-    maxOperations: 1,
-    maxDurationMs: 2_000,
-    maxEvidenceBytes: 64 * 1024,
-    includeStacks: true,
-    includeDescriptors: true,
-})
-const FAILURE_SCENARIOS = Object.freeze([
-    'after-map-acquisition',
-    'invalid-terrain-shader-wgsl',
-])
+const pageLifetime = new LifetimeScope({ label: 'dem-page' })
 const preparedControlPanel = prepareDemControlPanel({
     parameters: new URLSearchParams(window.location.search),
 })
@@ -93,21 +37,12 @@ const parameters = preparedControlPanel.parameters
 const proofMode = parameters.get('proof') === '1'
 const tileServerUrl = parameters.get('tileServer') ?? 'http://127.0.0.1:8787'
 const cachePolicy = readDemCachePolicy(parameters)
-const maxPhysicalPages = boundedIntegerParameter(
-    parameters.get('atlasPages'),
-    64,
-    2,
-    64
-)
-const requestedFailureScenario = parameters.get('fault')
-const failureConfiguration = Object.freeze({
-    scenario: proofMode && requestedFailureScenario !== null
-        ? requestedFailureScenario
-        : undefined,
-})
-const pageLifetime = new LifetimeScope({ label: 'dem-page' })
+const maxPhysicalPages = boundedIntegerParameter(parameters.get('atlasPages'), 64, 2, 64)
 let tileWireframeEnabled = preparedControlPanel.renderingPreference.tileWireframe
 let applyTerrainPresentation: ((enabled: boolean) => void) | undefined
+let proof: DemLayerProof | undefined
+let pageSettlement: PageSettlement | undefined
+
 const controlPanel = preparedControlPanel.mount({
     container: controlPanelContainer,
     location: window.location,
@@ -117,13 +52,7 @@ const controlPanel = preparedControlPanel.mount({
         applyTerrainPresentation?.(enabled)
     },
 })
-const failureProof = createFailureProofController(failureConfiguration)
-let pageSettlement: PageSettlement | undefined
-let pageContext: PageContext | undefined
-const handlePageHide = () => {
-    void disposePage()
-}
-
+const handlePageHide = () => { void disposePage() }
 window.addEventListener('pagehide', handlePageHide, { once: true })
 pageLifetime.deferStop({ label: 'dem-control-panel', run: controlPanel.dispose })
 pageLifetime.deferStop({
@@ -133,7 +62,10 @@ pageLifetime.deferStop({
 
 setStatus('loading')
 const pageInitialization = pageLifetime.track(
-    Promise.resolve().then(() => main(pageLifetime, failureProof)),
+    loadProof().then(loadedProof => {
+        proof = loadedProof
+        return main(pageLifetime, loadedProof)
+    }),
     'dem-page-initialization'
 )
 void pageInitialization.catch(error => {
@@ -141,41 +73,54 @@ void pageInitialization.catch(error => {
     void failPage(error)
 })
 
-async function main(lifetime: DemLifecycle, proof: FailureProofController) {
+async function loadProof(): Promise<DemLayerProof | undefined> {
+    if (!import.meta.env.DEV || !proofMode) return undefined
+    const { createDemLayerProof } = await import(
+        '../../tests/browser/support/dem-layer-proof.ts'
+    )
+    return createDemLayerProof({
+        canvas,
+        lifetime: pageLifetime,
+        scenario: parameters.get('fault') ?? undefined,
+        tileServerUrl,
+        cachePolicy,
+        maxPhysicalPages,
+        controlPanel: preparedControlPanel,
+    })
+}
 
-    proof.assertConfiguration()
+async function main(lifetime: LifetimeScope, activeProof?: DemLayerProof) {
+
+    activeProof?.assertConfiguration()
     const map = lifetime.own(createDemMap(canvas, { proof: proofMode }), {
         label: 'maplibre-map',
         release: value => value.remove(),
     })
-    proof.mapAcquired()
-    proof.reach(FAILURE_SCENARIOS[0])
+    activeProof?.mapAcquired()
+    activeProof?.reach('after-map-acquisition')
 
-    const mapReady = waitForDemMap(map, lifetime.signal)
-    const runtimeReady = lifetime.acquire(GPURuntime.create({
-        label: 'DEM Layer runtime',
-        powerPreference: 'high-performance',
-        diagnostics: {
-            operationCapacity: 192,
-            incidentCapacity: 32,
-            evidenceByteCapacity: 256 * 1024,
-            submissionScopes: 'summary',
-            maxPendingNativeObservations: 8,
-        },
-    }), {
-        label: 'scratch-runtime',
-        release: value => value.dispose(),
-    })
-    const manifestReady = lifetime.track(
-        fetchDemVirtualRasterManifest(tileServerUrl, lifetime.signal),
-        'dem-virtual-raster-manifest'
-    )
     const [ runtime, , manifest ] = await Promise.all([
-        runtimeReady,
-        mapReady,
-        manifestReady,
+        lifetime.acquire(GPURuntime.create({
+            label: 'DEM Layer runtime',
+            powerPreference: 'high-performance',
+            diagnostics: {
+                operationCapacity: 192,
+                incidentCapacity: 32,
+                evidenceByteCapacity: 256 * 1024,
+                submissionScopes: 'summary',
+                maxPendingNativeObservations: 8,
+            },
+        }), {
+            label: 'scratch-runtime',
+            release: value => value.dispose(),
+        }),
+        waitForDemMap(map, lifetime.signal),
+        lifetime.track(
+            fetchDemVirtualRasterManifest(tileServerUrl, lifetime.signal),
+            'dem-virtual-raster-manifest'
+        ),
     ])
-    proof.observeRuntime(runtime)
+    activeProof?.observeRuntime(runtime)
     lifetime.assertActive()
 
     const initialSize = canvasPixelSize(canvas)
@@ -185,121 +130,128 @@ async function main(lifetime: DemLifecycle, proof: FailureProofController) {
         alphaMode: 'premultiplied',
         size: initialSize,
     })
-    const virtualRaster = await createDemVirtualRasterRuntime({
-        runtime,
-        manifest,
-        tileServerUrl,
-        cachePolicy,
-        workerCount: 3,
-        maxNetworkRequests: 2,
-        maxDecodeTasks: 1,
-        maxPhysicalPages,
-    })
-    proof.rasterAcquired()
+    const virtualRaster = await lifetime.acquire(
+        createDemVirtualRasterRuntime({
+            runtime,
+            manifest,
+            tileServerUrl,
+            cachePolicy,
+            workerCount: 3,
+            maxNetworkRequests: 2,
+            maxDecodeTasks: 1,
+            maxPhysicalPages,
+        }), {
+            label: 'dem-virtual-raster-streaming',
+            release: value => value.dispose(),
+        }
+    )
+    activeProof?.rasterAcquired()
     lifetime.deferStop({
         label: 'dem-virtual-raster-demand',
         run: virtualRaster.stopDemand,
     })
-    lifetime.deferRelease({
-        label: 'dem-virtual-raster-streaming',
-        run: virtualRaster.stopStreaming,
-    })
-    const fieldLayer = mapFieldLayer({
-        id: 'dem-height-layer',
-        field: virtualRaster.field,
-        representation: virtualRaster.representation,
-        spatialProfile: virtualRaster.spatialProfile,
-        viewAdapter: demMapViewAdapter,
-        demandProducer: virtualRaster.viewDemandProducer,
-    })
+
     const elevationRangeMeters = [
         virtualRaster.manifest.offset,
         virtualRaster.manifest.offset + virtualRaster.manifest.scale * 255,
     ].sort((left, right) => left - right) as [number, number]
-    proof.beforeTerrainShaderModule(runtime)
-    const graph = await createTerrainFieldRenderer({
-        runtime,
-        surface,
-        fieldLayer,
-        virtualRaster,
-        size: initialSize,
-        shader: proof.terrainShader(terrainShader),
-        fieldSampling: {
-            namespace: 'DemHeight',
-            addressNamespace: 'DemAddress',
-            transitionTexels: 16,
-        },
-        elevationRangeMeters,
-        exaggeration: TERRAIN_EXAGGERATION,
-        presentations: [
-            { id: 'shaded', fragmentEntryPoint: 'fMain', label: 'DEM terrain pipeline' },
-            {
-                id: 'tile-wireframe',
-                fragmentEntryPoint: 'fTileWireframe',
-                label: 'DEM tile wireframe pipeline',
+    activeProof?.beforeTerrainShaderModule(runtime)
+    const graph = await lifetime.acquire(
+        createTerrainFieldRenderer({
+            runtime,
+            surface,
+            fieldLayer: mapFieldLayer({
+                id: 'dem-height-layer',
+                field: virtualRaster.field,
+                representation: virtualRaster.representation,
+                spatialProfile: virtualRaster.spatialProfile,
+                viewAdapter: demMapViewAdapter,
+                demandProducer: virtualRaster.viewDemandProducer,
+            }),
+            virtualRaster,
+            size: initialSize,
+            shader: activeProof?.terrainShader(terrainShader) ?? terrainShader,
+            fieldSampling: {
+                namespace: 'DemHeight',
+                addressNamespace: 'DemAddress',
+                transitionTexels: 16,
             },
-        ],
-        initialPresentation: tileWireframeEnabled ? 'tile-wireframe' : 'shaded',
-    })
-    lifetime.deferRelease({ label: 'dem-gpu-frontier', run: graph.dispose })
-    lifetime.assertActive()
-    const minimumTerrainElevationMeters = elevationRangeMeters[0] * TERRAIN_EXAGGERATION
-
+            elevationRangeMeters,
+            exaggeration: TERRAIN_EXAGGERATION,
+            presentations: [
+                { id: 'shaded', fragmentEntryPoint: 'fMain', label: 'DEM terrain pipeline' },
+                {
+                    id: 'tile-wireframe',
+                    fragmentEntryPoint: 'fTileWireframe',
+                    label: 'DEM tile wireframe pipeline',
+                },
+            ],
+            initialPresentation: tileWireframeEnabled ? 'tile-wireframe' : 'shaded',
+        }), {
+            label: 'dem-gpu-frontier',
+            release: value => value.dispose(),
+        }
+    )
     const initialized = await graph.initialize()
     await lifetime.track(initialized.observation, 'dem-initial-submission')
     lifetime.assertActive()
 
-    let active = true
-    let animationFrame: number | undefined
-    let rendering = false
-    let renderRequested = false
-    let submittedFrames = 0
-    let observedFrames = 0
-    let latestProvenance: FrameProvenance = []
-    let latestCamera: DemCameraView | undefined
-    let frameWorkScheduled = 0
-    let frameWorkCompleted = 0
-    let frameWorkCancelled = 0
-    let convergenceFollowUps = 0
-    const maximumConvergenceFollowUps = 8
+    const minimumTerrainElevationMeters = elevationRangeMeters[0] * TERRAIN_EXAGGERATION
+    const frameController = createGeoFrameController({
+        track: (work, label) => lifetime.track(work, label),
+        async render() {
+            const nextSize = canvasPixelSize(canvas)
+            if (!sameSize(graph.state().size, nextSize)) await graph.resize(nextSize)
+            lifetime.assertActive()
+            const camera = demMapViewAdapter.camera({
+                map,
+                viewport: nextSize,
+                minimumElevationMeters: minimumTerrainElevationMeters,
+            })
+            const frame = await graph.renderFrame(camera)
+            return {
+                observation: frame.observation,
+                residencySettlement: frame.residencySettlement,
+                residencyWorkCount: frame.requestedPageCount,
+                needsFollowUp: frame.needsFollowUp,
+                value: { frame, camera },
+            }
+        },
+        onSubmitted({ value }) {
+            activeProof?.frameSubmitted(value.frame.provenance, value.camera)
+        },
+        onObserved({ frameNumber }) {
+            activeProof?.frameObserved(frameNumber)
+            if (frameController.snapshot().state === 'running') setStatus('ready')
+        },
+        onError(error) {
+            if (lifetime.isStopError(error)) return
+            void failPage(error)
+        },
+    })
 
-    function stopScheduling() {
+    function moveCamera(options: CameraMoveOptions) {
 
-        active = false
-        renderRequested = false
-        if (animationFrame !== undefined) {
-            cancelAnimationFrame(animationFrame)
-            animationFrame = undefined
-            frameWorkCancelled++
+        if (frameController.snapshot().state === 'stopped') {
+            throw new Error('DEM frame controller is stopped')
         }
-    }
-
-    function requestRender() {
-
-        if (!active) return
-        renderRequested = true
-        if (animationFrame !== undefined || rendering) return
-        animationFrame = requestAnimationFrame(render)
-        frameWorkScheduled++
+        map.jumpTo(options)
+        frameController.invalidate()
     }
 
     applyTerrainPresentation = enabled => {
         graph.setPresentation(enabled ? 'tile-wireframe' : 'shaded')
-        requestRender()
+        frameController.invalidate()
     }
-    graph.setPresentation(tileWireframeEnabled ? 'tile-wireframe' : 'shaded')
     lifetime.deferStop({
         label: 'dem-terrain-presentation-control',
         run: () => { applyTerrainPresentation = undefined },
     })
 
-    const handleMapRender = () => {
-        convergenceFollowUps = 0
-        requestRender()
-    }
+    const handleMapRender = () => { frameController.invalidate() }
     const handleResize = () => {
         map.resize()
-        requestRender()
+        frameController.invalidate()
     }
     map.on('render', handleMapRender)
     window.addEventListener('resize', handleResize)
@@ -311,419 +263,27 @@ async function main(lifetime: DemLifecycle, proof: FailureProofController) {
         label: 'window-resize-listener',
         run: () => window.removeEventListener('resize', handleResize),
     })
-    lifetime.deferStop({ label: 'dem-frame-scheduler', run: stopScheduling })
-
-    function publish() {
-
-        publishFrameFacts({
-            runtime,
-            graph,
-            lifetime,
-            submittedFrames,
-            observedFrames,
-            latestProvenance,
-            latestCamera,
-            frameWork: {
-                scheduled: frameWorkScheduled,
-                completed: frameWorkCompleted,
-                cancelled: frameWorkCancelled,
-                active: frameWorkScheduled - frameWorkCompleted - frameWorkCancelled,
-            },
-        })
-    }
-
-    async function pauseAndDrain() {
-
-        stopScheduling()
-        await lifetime.drain()
-        publish()
-        setStatus('stopped')
-        return readPublishedFacts()
-    }
-
-    function moveCamera(options: CameraMoveOptions) {
-
-        if (!active) throw new Error('DEM proof scheduler is stopped')
-        map.jumpTo(options)
-        requestRender()
-    }
-
-    window.__DEM_LAYER_PROOF__ = Object.freeze({
-        pauseAndDrain,
+    lifetime.deferStop({ label: 'dem-frame-scheduler', run: frameController.stop })
+    activeProof?.bindGraph({
+        runtime,
+        graph,
+        lifetime,
+        frameController,
         dispose: disposePage,
-        facts: readPublishedFacts,
         moveCamera,
+        setStatus,
     })
-    pageContext = { graph, runtime }
-    publishGraphFacts(runtime, graph)
-    publish()
-
-    function render() {
-
-        animationFrame = undefined
-        frameWorkCompleted++
-        if (!active || rendering) return
-        rendering = true
-        const renderTask = Promise.resolve().then(renderOnce)
-        void lifetime.track(renderTask, `dem-render-task-${frameWorkCompleted}`).catch(error => {
-            if (lifetime.isStopError(error)) return
-            active = false
-            void failPage(error)
-        })
-    }
-
-    async function renderOnce() {
-
-        renderRequested = false
-
-        try {
-            const nextSize = canvasPixelSize(canvas)
-            const state = graph.state()
-            if (!sameSize(state.size, nextSize)) await graph.resize(nextSize)
-            if (!active) return
-
-            const camera = readDemCameraState(
-                map,
-                nextSize,
-                minimumTerrainElevationMeters
-            )
-            const frame = await graph.renderFrame(camera)
-            submittedFrames++
-            latestProvenance = frame.provenance
-            latestCamera = camera
-            if (frame.requestedPageCount > 0) {
-                const settlement = frame.residencySettlement.then(() => {
-                    if (!active) return
-                    convergenceFollowUps = 0
-                    requestRender()
-                })
-                void lifetime.track(
-                    settlement,
-                    `dem-page-requests-${submittedFrames}`
-                ).catch(error => {
-                    if (lifetime.isStopError(error)) return
-                    active = false
-                    void failPage(error)
-                })
-            }
-            publish()
-
-            const frameNumber = submittedFrames
-            await lifetime.track(frame.observation, `dem-frame-${frameNumber}`)
-            observedFrames = Math.max(observedFrames, frameNumber)
-            publish()
-            if (active) setStatus('ready')
-            if (frame.needsFollowUp &&
-                convergenceFollowUps < maximumConvergenceFollowUps) {
-                convergenceFollowUps++
-                requestRender()
-            } else if (!frame.needsFollowUp) {
-                convergenceFollowUps = 0
-            }
-        } finally {
-            rendering = false
-        }
-
-        if (renderRequested && active) requestRender()
-    }
-
-    requestRender()
-}
-
-function publishGraphFacts(runtime: GPURuntime, graph: DemLayer) {
-
-    const contract = graph.contractFacts()
-    canvas.dataset.proofMode = String(proofMode)
-    canvas.dataset.stageOrder = contract.stageOrder.join('|')
-    canvas.dataset.stageCount = String(contract.stageOrder.length)
-    canvas.dataset.stableIdentityCount = String(graph.stableIdentities.length)
-    canvas.dataset.stableIdentityHash = graph.stableIdentityHash
-    canvas.dataset.graphContract = JSON.stringify(contract)
-    canvas.dataset.countPath = contract.countPath
-    canvas.dataset.selectionPath = contract.selectionPath
-    canvas.dataset.cpuSelectionUploadCount = '0'
-    canvas.dataset.adapterAcquired = String(runtime.adapter !== undefined)
-    canvas.dataset.adapter = JSON.stringify(adapterFacts(runtime))
-    canvas.dataset.tileServer = tileServerUrl
-    canvas.dataset.cacheMode = cachePolicy.mode
-    canvas.dataset.cacheLifecycle = cacheLifecycleLabel(cachePolicy)
-    canvas.dataset.cacheNamespace = cachePolicy.mode === 'persistent'
-        ? cachePolicy.namespace
-        : ''
-    canvas.dataset.cacheMaxPayloadBytes = cachePolicy.mode === 'persistent'
-        ? String(cachePolicy.maxPayloadBytes)
-        : '0'
-    canvas.dataset.cacheMaxEntries = cachePolicy.mode === 'persistent'
-        ? String(cachePolicy.maxEntries)
-        : '0'
-    canvas.dataset.cachePersistenceRequested = cachePolicy.mode === 'persistent'
-        ? String(cachePolicy.requestPersistence)
-        : 'false'
-    canvas.dataset.cachePanelSource = preparedControlPanel.source
-    canvas.dataset.cachePanelStorageStatus = preparedControlPanel.storageStatus
-    canvas.dataset.renderingStorageStatus = preparedControlPanel.renderingStorageStatus
-    canvas.dataset.maxPhysicalPages = String(maxPhysicalPages)
-}
-
-function cacheLifecycleLabel(policy: DemCachePolicy): string {
-
-    if (policy.mode === 'none') return 'none'
-    return policy.lifecycle.kind === 'session'
-        ? 'session'
-        : `durable-${policy.lifecycle.open}`
-}
-
-function publishFrameFacts({
-    runtime,
-    graph,
-    lifetime,
-    submittedFrames,
-    observedFrames,
-    latestProvenance,
-    latestCamera,
-    frameWork,
-}: {
-    runtime: GPURuntime
-    graph: DemLayer
-    lifetime: DemLifecycle
-    submittedFrames: number
-    observedFrames: number
-    latestProvenance: FrameProvenance
-    latestCamera?: DemCameraView
-    frameWork: FrameWork
-}) {
-
-    const state = graph.state()
-    const lifecycle = lifetime.snapshot()
-    const diagnostics = runtime.diagnostics.snapshot()
-    const bounded = diagnostics.recorder.retainedOperationCount <= diagnostics.recorder.operationCapacity &&
-        diagnostics.recorder.retainedIncidentCount <= diagnostics.recorder.incidentCapacity &&
-        diagnostics.recorder.retainedEvidenceBytes <= diagnostics.recorder.evidenceByteCapacity
-
-    canvas.dataset.frames = String(submittedFrames)
-    canvas.dataset.observedFrames = String(observedFrames)
-    canvas.dataset.resizeGeneration = String(state.resizeGeneration)
-    canvas.dataset.visibleNodeCount = String(state.visibleNodeCount)
-    canvas.dataset.frontierCount = String(state.frontierCount)
-    canvas.dataset.demandCount = String(state.demandCount)
-    canvas.dataset.fallbackCount = String(state.fallbackCount)
-    canvas.dataset.staleGenerationCount = String(state.staleGenerationCount)
-    canvas.dataset.budgetLimitedCount = String(state.budgetLimitedCount)
-    canvas.dataset.levelRange = JSON.stringify(state.levelRange)
-    canvas.dataset.maximumObservedSse = String(state.maximumObservedSse)
-    canvas.dataset.renderPatchCount = String(state.renderPatchCount)
-    canvas.dataset.renderPatchLevelRange = JSON.stringify(state.renderPatchLevelRange)
-    canvas.dataset.renderPatchCellSpanRange = JSON.stringify(
-        state.renderPatchCellSpanRange
-    )
-    canvas.dataset.renderPatchDescriptorOverflowCount = String(
-        state.renderPatchDescriptorOverflowCount
-    )
-    canvas.dataset.renderPatchLookupOverflowCount = String(
-        state.renderPatchLookupOverflowCount
-    )
-    canvas.dataset.renderPatchFrameEpoch = String(state.renderPatchFrameEpoch ?? '')
-    canvas.dataset.renderPatchBaselineBudget = String(state.renderPatchBaselineBudget)
-    canvas.dataset.renderPatchFrameBudget = String(state.renderPatchFrameBudget)
-    canvas.dataset.renderPatchRequestedCount = String(state.renderPatchRequestedCount)
-    canvas.dataset.renderPatchMinimumTrialCount = String(state.renderPatchMinimumTrialCount)
-    canvas.dataset.renderPatchSourceRootCount = String(state.renderPatchSourceRootCount)
-    canvas.dataset.renderPatchSelectedBiasLevels = String(
-        state.renderPatchSelectedBiasLevels
-    )
-    canvas.dataset.renderPatchBudgetLimitedByMinimumTrial = String(
-        state.renderPatchBudgetLimitedByMinimumTrial
-    )
-    canvas.dataset.renderPatchFeedback = JSON.stringify(
-        state.renderPatchFeedback ?? null
-    )
-    canvas.dataset.convergenceState = state.convergenceState
-    canvas.dataset.readbackInFlightCount = String(state.readbackInFlightCount)
-    canvas.dataset.staleFeedbackCount = String(state.staleFeedbackCount)
-    canvas.dataset.supersededFeedbackCount = String(state.supersededFeedbackCount)
-    canvas.dataset.virtualSnapshotEpoch = String(state.virtualSnapshotEpoch)
-    canvas.dataset.virtualRequestedPageCount = String(state.virtualRequestedPageCount)
-    canvas.dataset.virtualRaster = JSON.stringify(graph.virtualRasterFacts())
-    canvas.dataset.provenance = JSON.stringify(latestProvenance)
-    canvas.dataset.frontier = JSON.stringify(state.frontierFacts ?? null)
-    canvas.dataset.frontierDiagnostics = JSON.stringify(state.latestFeedbackDiagnostics)
-    canvas.dataset.frontierConverged = String(state.convergenceState === 'converged')
-    canvas.dataset.terrainPresentation = state.terrainPresentation
-    canvas.dataset.cameraView = JSON.stringify(latestCamera === undefined ? null : {
-        center: latestCamera.center,
-        zoom: latestCamera.zoomHint,
-        pitch: latestCamera.pitchDegrees,
-        bearing: latestCamera.bearingDegrees,
-        cameraHigh: latestCamera.cameraHigh,
-        cameraLow: latestCamera.cameraLow,
-        viewport: latestCamera.viewport,
-    })
-    canvas.dataset.persistentFacts = JSON.stringify(graph.persistentFacts())
-    const identityFacts = graph.currentIdentityFacts()
-    canvas.dataset.currentStableIdentityHash = identityFacts.hash
-    canvas.dataset.currentStableIdentityCount = String(identityFacts.count)
-    canvas.dataset.currentIdentityFacts = JSON.stringify(identityFacts)
-    canvas.dataset.staleBindSetPreparationCount = String(state.staleBindSetPreparationCount)
-    canvas.dataset.lastResizeFacts = JSON.stringify(state.lastResizeFacts ?? null)
-    canvas.dataset.pendingObservationCount = String(lifecycle.pendingObservationCount)
-    canvas.dataset.frameWork = JSON.stringify(frameWork)
-    canvas.dataset.diagnosticsBounded = String(bounded)
-    canvas.dataset.diagnosticOperations = String(diagnostics.recorder.retainedOperationCount)
-    canvas.dataset.diagnosticIncidents = String(diagnostics.recorder.retainedIncidentCount)
-    canvas.dataset.diagnosticEvidenceBytes = String(diagnostics.recorder.retainedEvidenceBytes)
-    canvas.dataset.currentPendingNativeObservations = String(
-        diagnostics.submissionNative.currentPendingNativeObservations
-    )
-    canvas.dataset.currentEffectfulSubmittedWork = String(
-        diagnostics.submissionNative.currentEffectfulSubmittedWork
-    )
-    canvas.dataset.uncapturedErrors = String(diagnostics.aggregates.uncapturedErrors)
-    canvas.dataset.deviceLosses = String(diagnostics.aggregates.deviceLosses)
-}
-
-function adapterFacts(runtime: GPURuntime) {
-
-    const info = runtime.adapter?.info
-    return frozenJson({
-        featureCount: Array.from(runtime.adapterFeatures).length,
-        maxTextureDimension2D: runtime.adapterLimits.maxTextureDimension2D,
-        ...(info === undefined ? {} : {
-            vendor: info.vendor,
-            architecture: info.architecture,
-            device: info.device,
-            description: info.description,
-        }),
-    })
-}
-
-function createFailureProofController(configuration: FailureConfiguration) {
-
-    let runtime: GPURuntime | undefined
-    let capture: GPUDiagnosticCapture | undefined
-    let captureReport: GPUDiagnosticCaptureReport | undefined
-    let runtimeEvidence: GPURuntimeDiagnosticsEvidence | undefined
-    let runtimeEvidenceByteLength: number | undefined
-    let evidenceFailure: unknown
-    let reachedCount = 0
-    let mapAcquiredCount = 0
-    let rasterAcquiredCount = 0
-
-    function assertConfiguration() {
-
-        if (configuration.scenario !== undefined && !FAILURE_SCENARIOS.includes(configuration.scenario)) {
-            throw new Error(`Unsupported DEM Layer failure scenario: ${configuration.scenario}`)
-        }
-    }
-
-    function reach(scenario: string) {
-
-        if (configuration.scenario !== scenario) return
-        reachedCount++
-        const error = new Error(
-            `Injected DEM Layer initialization failure: ${scenario}`
-        ) as FailureDetails
-        error.name = 'DemLayerInjectedFailure'
-        error.code = 'DEM_LAYER_INJECTED_FAILURE'
-        error.scenario = scenario
-        throw error
-    }
-
-    function terrainShaderForProof(source: string) {
-
-        if (configuration.scenario !== FAILURE_SCENARIOS[1]) return source
-        return `${source}\n@vertex fn demInjectedFailure( {`
-    }
-
-    function beforeTerrainShaderModule(value: GPURuntime) {
-
-        if (configuration.scenario !== FAILURE_SCENARIOS[1]) return
-        reachedCount++
-        runtime = value
-        capture = runtime.diagnostics.capture(FAILURE_CAPTURE_BOUNDS)
-    }
-
-    function captureBeforeDisposal() {
-
-        try {
-            if (capture !== undefined) captureReport = capture.stop()
-            if (runtime !== undefined) {
-                runtimeEvidence = runtime.diagnostics.exportEvidence()
-                runtimeEvidenceByteLength = new TextEncoder()
-                    .encode(JSON.stringify(runtimeEvidence)).byteLength
-                if (runtimeEvidenceByteLength > FAILURE_RUNTIME_EVIDENCE_MAX_BYTES) {
-                    throw new Error(
-                        `DEM runtime evidence exceeded ${FAILURE_RUNTIME_EVIDENCE_MAX_BYTES} bytes`
-                    )
-                }
-            }
-        } catch (error) {
-            evidenceFailure = error
-        }
-    }
-
-    function finalize(primaryFailure: unknown, cleanupReport: CleanupReport) {
-
-        if (configuration.scenario === undefined) return undefined
-        const diagnostic = (primaryFailure as FailureDetails | null | undefined)?.diagnostic
-        const incident = (primaryFailure as FailureDetails | null | undefined)?.context?.incident
-        const proof = {
-            schemaVersion: 1,
-            scenario: configuration.scenario,
-            reachedCount,
-            mapAcquiredCount,
-            rasterAcquiredCount,
-            primaryFailure: serializeFailure(primaryFailure),
-            ...(diagnostic === undefined ? {} : { diagnostic }),
-            ...(incident === undefined ? {} : { incident }),
-            runtimeEvidence,
-            runtimeEvidenceByteLength,
-            runtimeEvidenceMaxBytes: FAILURE_RUNTIME_EVIDENCE_MAX_BYTES,
-            ...(captureReport === undefined ? {} : {
-                captureBounds: FAILURE_CAPTURE_BOUNDS,
-                captureReport,
-            }),
-            ...(evidenceFailure === undefined
-                ? {}
-                : { evidenceFailure: serializeFailure(evidenceFailure) }),
-            cleanup: serializeCleanupReport(cleanupReport),
-        }
-        const serialized = JSON.stringify(proof)
-        runtime = undefined
-        capture = undefined
-        return frozenJson({
-            ...proof,
-            retainsWgslSource: serialized.includes('struct VertexInput') ||
-                serialized.includes('@vertex fn vMain'),
-        })
-    }
-
-    return Object.freeze({
-        assertConfiguration,
-        reach,
-        terrainShader: terrainShaderForProof,
-        beforeTerrainShaderModule,
-        captureBeforeDisposal,
-        finalize,
-        observeRuntime: (value: GPURuntime) => { runtime = value },
-        mapAcquired: () => { mapAcquiredCount++ },
-        rasterAcquired: () => { rasterAcquiredCount++ },
-    })
+    frameController.invalidate()
 }
 
 async function failPage(error: unknown) {
 
     if (pageSettlement !== undefined) return pageSettlement
     reportFatalError(error)
-    failureProof.captureBeforeDisposal()
-    pageSettlement = pageLifetime.dispose(error).then(cleanupReport => {
-        const proof = failureProof.finalize(error, cleanupReport)
-        if (proof !== undefined) {
-            window.__DEM_LAYER_INIT_FAILURE_PROOF__ = proof
-            canvas.dataset.initFailureProof = JSON.stringify(proof)
-            canvas.dataset.failureScenario = proof.scenario
-        }
-        return proof
-    }).catch((cleanupFailure: unknown) => {
+    proof?.captureBeforeDisposal()
+    pageSettlement = pageLifetime.dispose(error).then(report =>
+        proof?.finalizeFailure(error, report)
+    ).catch((cleanupFailure: unknown) => {
         console.error(cleanupFailure)
     })
     return pageSettlement
@@ -733,55 +293,11 @@ async function disposePage() {
 
     if (pageSettlement !== undefined) return pageSettlement
     pageSettlement = pageLifetime.dispose().then(report => {
-        const cleanupProof = frozenJson({
-            report: serializeCleanupReport(report),
-            lifecycle: pageLifetime.snapshot(),
-            graphState: pageContext?.graph.state(),
-            virtualRaster: pageContext?.graph.virtualRasterFacts(),
-        })
-        window.__DEM_LAYER_CLEANUP_PROOF__ = cleanupProof
-        canvas.dataset.cleanupProof = JSON.stringify(cleanupProof)
+        const cleanupProof = proof?.finalizeCleanup(report)
         setStatus(report.cleanupFailures.length === 0 ? 'disposed' : 'error')
-        return cleanupProof
+        return cleanupProof ?? report
     })
     return pageSettlement
-}
-
-function serializeCleanupReport(report: CleanupReport) {
-
-    return {
-        primaryFailure: serializeFailure(report.primaryFailure),
-        cleanupInvocationCount: report.cleanupInvocationCount,
-        pendingObservationsBefore: report.pendingObservationsBefore,
-        pendingObservationsAfter: report.pendingObservationsAfter,
-        retainedActionCount: report.retainedActionCount,
-        cleanupActions: report.cleanupActions,
-        cleanupFailures: report.cleanupFailures.map(({ phase, label, error }) => ({
-            phase,
-            label,
-            error: serializeFailure(error),
-        })),
-    }
-}
-
-function serializeFailure(error: unknown) {
-
-    if (error === undefined) return undefined
-    if (!(error instanceof Error)) return { name: 'NonErrorFailure', message: String(error) }
-    return {
-        name: error.name,
-        message: error.message,
-        ...(typeof (error as FailureDetails).code === 'string'
-            ? { code: (error as FailureDetails).code as string }
-            : {}),
-        ...(typeof (error as FailureDetails).scenario === 'string'
-            ? { scenario: (error as FailureDetails).scenario as string }
-            : {}),
-        ...((error as FailureDetails).diagnostic?.code === undefined
-            ? {}
-            : { diagnosticCode: (error as FailureDetails).diagnostic!.code }),
-        ...(typeof error.stack === 'string' ? { stack: error.stack.slice(0, 8 * 1024) } : {}),
-    }
 }
 
 function canvasPixelSize(target: HTMLElement): SurfaceSize {
@@ -815,11 +331,6 @@ function boundedIntegerParameter(
     return parsed
 }
 
-function readPublishedFacts() {
-
-    return Object.freeze({ ...canvas.dataset })
-}
-
 function setStatus(status: string) {
 
     canvas.dataset.status = status
@@ -834,16 +345,4 @@ function reportFatalError(error: unknown) {
         canvas.dataset.diagnostic = JSON.stringify((error as FailureDetails).diagnostic)
     }
     console.error(error)
-}
-
-function frozenJson<T>(value: T): T {
-
-    return deepFreeze(JSON.parse(JSON.stringify(value)) as unknown as T)
-}
-
-function deepFreeze<T>(value: T): T {
-
-    if (value === null || typeof value !== 'object' || Object.isFrozen(value)) return value
-    for (const child of Object.values(value)) deepFreeze(child)
-    return Object.freeze(value) as T
 }

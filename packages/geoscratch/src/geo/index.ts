@@ -33,6 +33,16 @@ export {
     createGeoViewAdapter,
     createGeoViewSnapshot,
 } from './geo-view.js'
+export { createGeoFrameController } from './frame-controller.js'
+export type {
+    GeoFrameController,
+    GeoFrameControllerDescriptor,
+    GeoFrameControllerFrame,
+    GeoFrameControllerSnapshot,
+    GeoFrameControllerState,
+    GeoFrameResult,
+    GeoFrameScheduler,
+} from './frame-controller.js'
 export { mapLibrePlanarViewAdapter } from './maplibre-planar-view.js'
 export type {
     MapLibreLngLat,

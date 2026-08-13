@@ -115,6 +115,7 @@ const geoValues = [
     'cellLocalF32Codec',
     'coordinateDomain',
     'createGeoDiagnostic',
+    'createGeoFrameController',
     'createGeoViewAdapter',
     'createGeoViewSnapshot',
     'createGpuRenderPatchFrontier',

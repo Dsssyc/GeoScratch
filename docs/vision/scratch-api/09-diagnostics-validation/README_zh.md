@@ -188,6 +188,13 @@ type ScratchDiagnosticError = Error & {
 
 ## Phase Sources
 
+### Lifetime
+
+`LifetimeScope` 是页面、worker 与应用组合所使用的通用异步所有权边界。
+`SCRATCH_LIFETIME_STOPPED` 表示 acquisition、注册或显式 active-state 断言与
+dispose 发生竞争。该错误保留稳定的 scope label，但不会把问题虚构成 GPU
+Runtime、device 或原生 WebGPU 故障。
+
 ### Runtime
 
 Runtime diagnostics 覆盖 device、adapter、feature、limit、ownership、lifecycle 与 device-loss 问题。

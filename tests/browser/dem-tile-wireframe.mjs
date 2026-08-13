@@ -445,7 +445,7 @@ function validateProof(value, processState) {
 
     expect(failures,
         baseline?.graphContract?.commandIds?.drawTerrain?.shaded?.length === 2 &&
-        baseline.graphContract.commandIds.drawTerrain.tileWireframe?.length === 2 &&
+        baseline.graphContract.commandIds.drawTerrain['tile-wireframe']?.length === 2 &&
         baseline.graphContract.commandIds.renderPatches?.length === 2 &&
         baseline.graphContract.commandIds.renderPatches.every(ids => ids.length === 10) &&
         baseline.graphContract.dataMaximumMatrixLevel === 10 &&

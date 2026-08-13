@@ -196,6 +196,10 @@ const currentScratchTree = loadCurrentScratchTree()
 const baselineScratchTree = loadGitScratchTree(goalBaseline)
 const historicalScratchTree = loadGitScratchTree(historicalJavaScript)
 const currentScratchSource = Object.values(currentScratchTree).join('\n')
+const currentScratchGpuSource = Object.entries(currentScratchTree)
+    .filter(([ sourcePath ]) => sourcePath.includes('/scratch/gpu/'))
+    .map(([, source ]) => source)
+    .join('\n')
 const baselineScratchSource = Object.values(baselineScratchTree).join('\n')
 const historicalScratchSource = Object.values(historicalScratchTree).join('\n')
 const scratchOwnedInstanceofAuthorities = Object.freeze([
@@ -434,7 +438,7 @@ const runtimeProgramLifecycleAuthorityFacts = {
     runtimeInternalDispatchClosed:
         !current.runtime.includes('this.assertActive()') &&
         current.runtime.split('assertGPURuntimeActive(this)').length >= 20,
-    runtimeInternalCallSitesClosed: !currentScratchSource.includes('.assertActive()'),
+    runtimeInternalCallSitesClosed: !currentScratchGpuSource.includes('.assertActive()'),
     programPrivateEpoch: hasAll(current.program, [
         'lifecycleEpoch: number',
         'state.lifecycleEpoch += 1',

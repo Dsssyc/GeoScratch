@@ -5,6 +5,7 @@ import path from 'node:path'
 const root = process.cwd()
 const scratchRoot = path.join(root, 'packages', 'geoscratch', 'src', 'scratch')
 const gpuRoot = path.join(scratchRoot, 'gpu')
+const lifetimeRoot = path.join(scratchRoot, 'lifetime')
 const workerRoot = path.join(scratchRoot, 'worker')
 const legacyWorkerRoot = path.join(root, 'packages', 'geoscratch', 'src', 'worker')
 const sourceRoot = path.join(root, 'packages', 'geoscratch', 'src')
@@ -90,6 +91,19 @@ describe('Scratch foundation source topology', () => {
             const source = fs.readFileSync(path.join(gpuRoot, basename), 'utf8')
             expect(source, basename).not.to.match(/from ['"][^'"]*(?:worker|geo)[^'"]*['"]/)
         }
+    })
+
+    it('owns generic asynchronous lifetime under an independent Scratch domain', () => {
+
+        expect(fs.readdirSync(lifetimeRoot).filter(name => name.endsWith('.ts')).sort())
+            .to.deep.equal([ 'index.ts' ])
+        const source = fs.readFileSync(path.join(lifetimeRoot, 'index.ts'), 'utf8')
+        expect(source).not.to.match(
+            /from ['"][^'"]*(?:gpu|worker|geo|cache)[^'"]*['"]/
+        )
+        expect(source).not.to.match(
+            /\b(?:GPUDevice|GPUCanvasContext|HTMLCanvasElement|OffscreenCanvas|GPURuntime)\b/
+        )
     })
 
     it('owns Worker only under scratch/worker without GPU, Geo, Cache, or Canvas coupling', () => {

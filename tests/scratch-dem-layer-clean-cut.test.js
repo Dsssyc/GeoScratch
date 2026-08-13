@@ -309,9 +309,14 @@ describe('DEM Layer clean cut', () => {
         expect(mapAdapterSource).to.include('cameraLatitudeRadians')
         expect(mapAdapterSource).to.include('zoomHint')
         expect(mapAdapterSource).to.include('minimumElevationMeters')
-        expect(mainSourceFacts()).to.include('canvas.dataset.cpuSelectionUploadCount = \'0\'')
-        expect(mainSourceFacts()).to.include('canvas.dataset.frontier = JSON.stringify(')
-        expect(mainSourceFacts()).to.include('canvas.dataset.cameraView = JSON.stringify(')
+        const browserProofAdapter = read(
+            'tests', 'browser', 'support', 'dem-layer-proof.ts'
+        )
+        expect(browserProofAdapter).to.include(
+            'canvas.dataset.cpuSelectionUploadCount = \'0\''
+        )
+        expect(browserProofAdapter).to.include('canvas.dataset.frontier = JSON.stringify(')
+        expect(browserProofAdapter).to.include('canvas.dataset.cameraView = JSON.stringify(')
         expect(mapSource).not.to.match(/\bcenter(?:High|Low)\b|\bcameraPos\b/)
     })
 
@@ -379,9 +384,13 @@ describe('DEM Layer clean cut', () => {
         )
         const pageHideRegistration = mainSource.indexOf("window.addEventListener('pagehide'")
         const initializationStart = mainSource.indexOf(
-            'Promise.resolve().then(() => main(pageLifetime, failureProof))'
+            'loadProof().then(loadedProof => {'
         )
-        const faultNames = [ ...mainSource.matchAll(/'((?:after-map-acquisition|invalid-terrain-shader-wgsl))'/g) ]
+        const proofAdapter = read('tests', 'browser', 'support', 'dem-layer-proof.ts')
+        const frameController = read(
+            'packages', 'geoscratch', 'src', 'geo', 'frame-controller.ts'
+        )
+        const faultNames = [ ...proofAdapter.matchAll(/'((?:after-map-acquisition|invalid-terrain-shader-wgsl))'/g) ]
             .map(match => match[1])
 
         expect(faultNames).to.deep.equal([
@@ -391,10 +400,15 @@ describe('DEM Layer clean cut', () => {
         expect(lifecycleCreation).to.be.greaterThan(-1)
         expect(pageHideRegistration).to.be.greaterThan(lifecycleCreation)
         expect(initializationStart).to.be.greaterThan(pageHideRegistration)
-        expect(mainSource).to.include('FAILURE_CAPTURE_BOUNDS')
-        expect(mainSource).to.include('retainsWgslSource')
+        expect(proofAdapter).to.include('FAILURE_CAPTURE_BOUNDS')
+        expect(proofAdapter).to.include('retainsWgslSource')
+        expect(mainSource).to.include("activeProof?.reach('after-map-acquisition')")
+        expect(mainSource).to.include('activeProof?.beforeTerrainShaderModule(runtime)')
         expect(mainSource).to.include("'dem-page-initialization'")
-        expect(mainSource).to.include('`dem-render-task-${frameWorkCompleted}`')
+        expect(mainSource).to.include('const frameController = createGeoFrameController({')
+        expect(mainSource).to.include('track: (work, label) => lifetime.track(work, label)')
+        expect(mainSource).not.to.include('requestAnimationFrame(')
+        expect(frameController).to.include('`geo-frame-${frameNumber}`')
 
         for (const documentation of [
             'docs/decisions/ADR-045-dem-layer-scratch-api-clean-cut.md',
@@ -650,11 +664,6 @@ describe('DEM Layer clean cut', () => {
         await runtime.dispose()
     })
 })
-
-function mainSourceFacts() {
-
-    return read('examples', 'demLayer', 'main.ts')
-}
 
 function cameraState(zoomHint, viewport) {
 

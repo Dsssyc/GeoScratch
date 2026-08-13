@@ -1004,8 +1004,8 @@ function validateNormalProof(proof, failures) {
             'dem-control-panel',
             'dem-gpu-frontier',
             'dem-virtual-raster-streaming',
-            'maplibre-map',
             'scratch-runtime',
+            'maplibre-map',
         ], failures)
         const lifecycle = proof.cleanupPair.reports[0]?.lifecycle
         if (lifecycle?.state !== 'disposed' || lifecycle?.ownsMap || lifecycle?.ownsRuntime ||
@@ -1298,8 +1298,8 @@ function validateFailureProof(result, failures) {
         'pagehide-listener',
         'dem-control-panel',
         'dem-virtual-raster-streaming',
-        'maplibre-map',
         'scratch-runtime',
+        'maplibre-map',
     ], failures)
 }
 

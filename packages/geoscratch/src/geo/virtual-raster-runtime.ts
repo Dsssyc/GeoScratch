@@ -607,15 +607,40 @@ export async function createVirtualRasterRuntime<
 
         if (disposed) return
         disposed = true
-        await stopDemand()
+        const failures: unknown[] = []
+        try {
+            await stopDemand()
+        } catch (error) {
+            failures.push(error)
+        }
         if (activePublication !== undefined) {
-            await gpuState.abandon(activePublication.publication)
-            demandController.abandonPublication(activePublication.publication)
+            const publication = activePublication.publication
+            try {
+                await gpuState.abandon(publication)
+            } catch (error) {
+                failures.push(error)
+            }
+            try {
+                demandController.abandonPublication(publication)
+            } catch (error) {
+                failures.push(error)
+            }
             activePublication = undefined
         }
-        demandController.dispose()
-        residency.dispose()
-        gpuState.dispose()
+        for (const dispose of [
+            () => demandController.dispose(),
+            () => residency.dispose(),
+            () => gpuState.dispose(),
+        ]) {
+            try {
+                dispose()
+            } catch (error) {
+                failures.push(error)
+            }
+        }
+        if (failures.length > 0) {
+            throw new AggregateError(failures, `Virtual Raster runtime ${model.id} disposal failed`)
+        }
     }
 
     function inspect(): VirtualRasterRuntimeFacts {

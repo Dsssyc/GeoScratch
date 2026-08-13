@@ -4,9 +4,7 @@ import {
 import type {
     MapLibreLngLat,
     MapLibreMercatorCoordinate,
-    MapLibrePlanarCameraState,
     MapLibrePlanarMap,
-    MapLibrePlanarViewport,
 } from 'geoscratch/geo'
 
 type MapStyle = {
@@ -76,9 +74,6 @@ declare global {
 type DemMapOptions = Readonly<{
     proof?: boolean
 }>
-
-export type DemMapCameraState = MapLibrePlanarCameraState
-export type DemMapViewInput = DemMapCameraState
 
 const DEM_MAP_DEFAULTS = Object.freeze({
     center: Object.freeze([ 120.980697, 31.684162 ]),
@@ -168,15 +163,6 @@ export function waitForDemMap(map: DemMap, signal?: AbortSignal): Promise<DemMap
         map.once('load', onLoad)
         signal?.addEventListener('abort', onAbort, { once: true })
     })
-}
-
-export function readDemCameraState(
-    map: DemMap,
-    viewport: MapLibrePlanarViewport,
-    minimumElevationMeters: number
-): DemMapCameraState {
-
-    return demMapViewAdapter.camera({ map, viewport, minimumElevationMeters })
 }
 
 function requireMapApi(): MapApi {

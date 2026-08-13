@@ -4,7 +4,6 @@ import {
     createVirtualRasterRuntime,
     tileMatrixCoverage,
     webMercatorVirtualRasterField,
-    webMercatorVirtualRasterWgslModule,
 } from 'geoscratch/geo'
 import type { VirtualRasterPageIdentity } from 'geoscratch/geo'
 import {
@@ -271,7 +270,7 @@ export async function createDemVirtualRasterRuntime({
         let stopped = false
         let stopPromise: Promise<void> | undefined
 
-        function stopStreaming(): Promise<void> {
+        function dispose(): Promise<void> {
 
             if (stopPromise !== undefined) return stopPromise
             stopped = true
@@ -281,17 +280,26 @@ export async function createDemVirtualRasterRuntime({
 
         async function stop(): Promise<void> {
 
-            await virtualRaster.stopDemand()
-            await requestExecutor!.refreshFacts()
-            await requestExecutor!.dispose()
-            await virtualRaster.dispose()
+            const failures: unknown[] = []
+            try {
+                await virtualRaster.dispose()
+            } catch (error) {
+                failures.push(error)
+            }
+            try {
+                await requestExecutor!.dispose()
+            } catch (error) {
+                failures.push(error)
+            }
+            if (failures.length > 0) {
+                throw new AggregateError(failures, 'DEM Virtual Raster disposal failed')
+            }
         }
 
         return Object.freeze({
             ...virtualRaster,
             manifest: model.manifest,
-            executor: requestExecutor,
-            stopStreaming,
+            dispose,
             inspect: () => {
                 const facts = virtualRaster.inspect()
                 return Object.freeze({
@@ -311,22 +319,19 @@ export async function createDemVirtualRasterRuntime({
             },
         })
     } catch (error) {
-        await requestExecutor?.dispose()
+        if (requestExecutor === undefined) throw error
+        try {
+            await requestExecutor.dispose()
+        } catch (cleanupError) {
+            throw new AggregateError(
+                [ error, cleanupError ],
+                'DEM Virtual Raster initialization and cleanup failed'
+            )
+        }
         throw error
     }
 }
 
-export function demVirtualRasterWgslModule(model: DemVirtualRasterModel): string {
-
-    return webMercatorVirtualRasterWgslModule(model, {
-        namespace: 'DemHeight',
-        addressNamespace: 'DemAddress',
-        group: 2,
-        pageTableBinding: 0,
-        atlasBinding: 1,
-        transitionTexels: 16,
-    }).code
-}
 function assertOrderedBounds(value: NumberSequence, name: string): void {
 
     if (value[0] >= value[2] || value[1] >= value[3]) {
@@ -365,11 +370,6 @@ function nonNegativeInteger(value: unknown): value is number {
 function positiveFinite(value: unknown): value is number {
 
     return Number.isFinite(value) && Number(value) > 0
-}
-
-function clamp(value: number, minimum: number, maximum: number): number {
-
-    return Math.min(maximum, Math.max(minimum, value))
 }
 
 function deepFreeze<T>(value: T): T {
