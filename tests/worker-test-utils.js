@@ -130,6 +130,29 @@ export class ScriptedWorker {
 
         const { task } = message
         this.runOrder.push(task.operation)
+        const operation = this.options.operations?.[task.operation]
+        if (operation !== undefined) {
+            try {
+                this.emitMessage({
+                    kind: 'task-result',
+                    taskId: task.id,
+                    value: operation(task.input, this.contexts.get(task.contextId)),
+                })
+            } catch (error) {
+                this.emitMessage({
+                    kind: 'task-error',
+                    taskId: task.id,
+                    cancelled: false,
+                    error: {
+                        name: error.name ?? 'Error',
+                        message: error.message ?? String(error),
+                        stack: error.stack,
+                        code: error.code,
+                    },
+                })
+            }
+            return
+        }
         if (task.operation === 'hold' || task.operation === 'slow') {
             this.active.set(task.id, task)
             return

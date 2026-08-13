@@ -122,6 +122,7 @@ const geoValues = [
     'createVirtualRasterDemandController',
     'createVirtualRasterGpuState',
     'createVirtualRasterRuntime',
+    'createVirtualRasterWorkerExecutor',
     'decodeGpuRenderPatchState',
     'discardOwnedVirtualRasterPagePayload',
     'discardVirtualRasterPageTransfer',

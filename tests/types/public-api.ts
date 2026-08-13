@@ -738,6 +738,24 @@ const typedWorkerGroup: workers.WorkerGroup = typedWorkerSystem.createGroup({
     maxActiveTasks: 2,
     idleTimeoutMs: 1_000,
 })
+const typedVirtualRasterWorkerExecutor = geoApi.createVirtualRasterWorkerExecutor({
+    id: 'typed-raster-workers',
+    system: typedWorkerSystem,
+    module: {
+        id: typedWorkerModule.id,
+        version: typedWorkerModule.version,
+        url: new URL('./typed-worker-module.js', import.meta.url),
+    },
+    workerCount: 1,
+    maxRequests: 8,
+    phaseLimits: { network: 2, decode: 1 },
+    context: index => ({ key: `typed-raster-${index}`, init: { value: index } }),
+    candidate: (demand, sequence) => ({
+        candidateId: `typed-${sequence}`,
+        page: demand.page,
+    }),
+    initialFacts: () => ({ requests: 0 }),
+})
 const typedWorkerTask: workers.WorkerTaskHandle<number> = typedWorkerGroup.run<
     { value: number },
     number
@@ -766,6 +784,7 @@ typedWorkerSystem.schedule()
 typedWorkerGroup.contextControl
 void typedWorkerFacts
 void typedWorkerContext
+void typedVirtualRasterWorkerExecutor
 void typedPhaseRequest
 void typedPhaseFacts
 

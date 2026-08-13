@@ -240,6 +240,17 @@ export {
     VirtualRasterRequestScheduler,
     virtualRasterDemandSet,
 } from './virtual-raster-demand.js'
+export { createVirtualRasterWorkerExecutor } from './virtual-raster-worker-executor.js'
+export type {
+    VirtualRasterWorkerCandidate,
+    VirtualRasterWorkerContextDescriptor,
+    VirtualRasterWorkerExecutor,
+    VirtualRasterWorkerExecutorDescriptor,
+    VirtualRasterWorkerExecutorFacts,
+    VirtualRasterWorkerLookupResult,
+    VirtualRasterWorkerOperationNames,
+    VirtualRasterWorkerPhase,
+} from './virtual-raster-worker-executor.js'
 export {
     createVirtualRasterDemandController,
     createVirtualRasterRuntime,

@@ -1,37 +1,26 @@
 import {
+    createVirtualRasterWorkerExecutor,
     virtualRasterCacheAddress,
 } from 'geoscratch/geo'
 import type {
     VirtualRasterPageDemand,
-    VirtualRasterPageTransfer,
-    VirtualRasterRequestExecution,
     VirtualRasterRequestExecutor,
+    VirtualRasterWorkerExecutor,
+    VirtualRasterWorkerExecutorFacts,
 } from 'geoscratch/geo'
-import {
-    TaskPhaseBudget,
-    WorkerSystem,
-} from 'geoscratch/scratch'
+import { WorkerSystem } from 'geoscratch/scratch'
 import type {
+    PersistentCacheLifecycle,
     TaskPhaseBudgetFacts,
-    TaskPhasePermit,
-    TaskPhasePermitRequest,
-    WorkerContextHandle,
     WorkerGroupFacts,
     WorkerSystemFacts,
-    WorkerTaskHandle,
-    WorkerTaskPriority,
-    WorkerTaskState,
-    PersistentCacheLifecycle,
 } from 'geoscratch/scratch'
 import type {
-    DemTileCandidateDescriptor,
     DemCachePolicy,
-    DemTileDecodeResult,
-    DemTileFetchResult,
-    DemTileLookupResult,
+    DemTileCacheFacts,
+    DemTileCandidateDescriptor,
     DemTileWorkerFacts,
     DemTileWorkerInit,
-    DemTileCacheFacts,
 } from './dem-tile-protocol.ts'
 import demTileWorkerUrl from './dem-tile-worker-url.ts'
 
@@ -90,8 +79,6 @@ export type DemWorkerRequestExecutor = VirtualRasterRequestExecutor & Readonly<{
     dispose(): Promise<void>
 }>
 
-type DemContext = WorkerContextHandle<DemTileWorkerFacts>
-
 const MODULE_ID = 'geoscratch-dem-tile'
 const MODULE_VERSION = '2'
 let executorSequence = 0
@@ -103,50 +90,34 @@ export async function createDemWorkerRequestExecutor(
     const workerCount = descriptor.workerCount ?? defaultWorkerCount()
     const maxNetworkRequests = descriptor.maxNetworkRequests ?? workerCount
     const maxDecodeTasks = descriptor.maxDecodeTasks ?? Math.max(1, Math.ceil(workerCount / 2))
-    if (!Number.isSafeInteger(workerCount) || workerCount < 1 || workerCount > 8 ||
-        !Number.isSafeInteger(descriptor.maxRequests) || descriptor.maxRequests < 1 ||
-        !Number.isSafeInteger(maxNetworkRequests) || maxNetworkRequests < 1 ||
-        !Number.isSafeInteger(maxDecodeTasks) || maxDecodeTasks < 1) {
+    if (!positiveInteger(workerCount) || workerCount > 8 ||
+        !positiveInteger(descriptor.maxRequests) ||
+        !positiveInteger(maxNetworkRequests) || !positiveInteger(maxDecodeTasks)) {
         throw new TypeError('DEM worker executor requires finite worker and request budgets')
     }
-    const id = ++executorSequence
+    const sequence = ++executorSequence
     const system = new WorkerSystem({
         maxWorkers: workerCount,
         maxHistory: 64,
         agingIntervalMs: 50,
     })
-    const group = system.createGroup({
-        id: `dem-tile-workers-${id}`,
-        modules: [ {
-            id: MODULE_ID,
-            version: MODULE_VERSION,
-            url: new URL(demTileWorkerUrl, import.meta.url),
-        } ],
-        isolation: 'group',
-        size: { min: workerCount, max: workerCount },
-        maxQueuedTasks: Math.max(16, descriptor.maxRequests * 4),
-        maxActiveTasks: workerCount,
-        idleTimeoutMs: 30_000,
-    })
+    let core: VirtualRasterWorkerExecutor<DemTileWorkerFacts>
     try {
-        await group.ready
-    } catch (error) {
-        await system.dispose()
-        throw error
-    }
-    const contexts: DemContext[] = []
-    const phaseBudget = new TaskPhaseBudget<DemWorkerPhase>({
-        id: `dem-worker-phases-${id}`,
-        limits: {
-            network: maxNetworkRequests,
-            decode: maxDecodeTasks,
-        },
-        maxQueuedTasks: descriptor.maxRequests,
-    })
-    try {
-        for (let index = 0; index < workerCount; index++) {
-            contexts.push(await group.openContext<DemTileWorkerInit, DemTileWorkerFacts>({
-                module: MODULE_ID,
+        core = await createVirtualRasterWorkerExecutor({
+            id: `dem-tile-workers-${sequence}`,
+            system,
+            module: {
+                id: MODULE_ID,
+                version: MODULE_VERSION,
+                url: new URL(demTileWorkerUrl, import.meta.url),
+            },
+            workerCount,
+            maxRequests: descriptor.maxRequests,
+            phaseLimits: {
+                network: maxNetworkRequests,
+                decode: maxDecodeTasks,
+            },
+            context: index => ({
                 key: `dem-cache-shard-${index}`,
                 init: {
                     cache: shardCacheConfiguration(
@@ -155,317 +126,125 @@ export async function createDemWorkerRequestExecutor(
                         workerCount
                     ),
                 },
-            }))
-        }
+            }),
+            candidate: (demand, requestSequence) => createCandidate(
+                descriptor,
+                sequence,
+                requestSequence,
+                demand
+            ),
+            staleKey: candidate =>
+                `${candidate.cacheAddress.metadata.sourceId}:${candidate.page.key}`,
+            initialFacts: () => emptyWorkerFacts(descriptor.cachePolicy),
+            disposedFacts: disposedWorkerFacts,
+            classifyFailure: error => {
+                const code = remoteFailureCode(error)
+                return code === 'DEM_TILE_MISSING'
+                    ? Object.freeze({
+                        disposition: 'terminal' as const,
+                        code,
+                        detail: error instanceof Error ? error.message : String(error),
+                    })
+                    : undefined
+            },
+        })
     } catch (error) {
         await system.dispose()
         throw error
     }
 
-    let requestSequence = 0
-    let disposed = false
-    let disposePromise: Promise<void> | undefined
-    let workerFacts = contexts.map(() => emptyWorkerFacts(descriptor.cachePolicy))
-
-    const source: DemWorkerRequestExecutor = Object.freeze({
-        request(demand) {
-
-            if (disposed) throw new Error('DEM worker request executor is disposed')
-            const contextIndex = stableShard(demand.page.key, contexts.length)
-            const context = contexts[contextIndex]!
-            const tile = demand.page.tile
-            if (tile === undefined || tile.tileMatrixSetId !== descriptor.tileMatrixSetId) {
-                throw new TypeError('DEM worker requests require standard WebMercatorQuad pages')
-            }
-            const candidate: DemTileCandidateDescriptor = Object.freeze({
-                candidateId: `${id}:${++requestSequence}:${demand.generation}:${demand.page.key}`,
-                page: demand.page,
-                cacheAddress: virtualRasterCacheAddress({
-                    sourceId: descriptor.sourceId,
-                    tileMatrixSetId: descriptor.tileMatrixSetId,
-                    tileMatrixSetUri: descriptor.tileMatrixSetUri,
-                    matrixId: tile.matrixId,
-                    tileRow: tile.tileRow,
-                    tileColumn: tile.tileCol,
-                    plane: descriptor.plane,
-                    coherence: {
-                        mode: 'immutable',
-                        contentVersion: descriptor.contentVersion,
-                    },
-                    sourceRepresentation: descriptor.encodedRepresentation,
-                    payloadRepresentation: 'raw/uint8',
-                    decoderVersion: descriptor.decoderVersion,
-                    sampleType: descriptor.sampleType,
-                    schemaVersion: descriptor.cacheSchemaVersion,
-                }),
-                url: descriptor.tileUrl(demand.page),
-                contentVersion: descriptor.contentVersion,
-            })
-            return createExecution(context, contextIndex, demand, candidate, phaseBudget, facts => {
-                workerFacts[contextIndex] = facts
-            })
-        },
-        async refreshFacts() {
-
-            if (!disposed) {
-                workerFacts = await Promise.all(contexts.map(context =>
-                    context.run<null, DemTileWorkerFacts>('facts', null, {
-                        priority: { class: 'background', score: -1 },
-                        cancellation: 'cooperative',
-                    }).result
-                ))
-            }
-            return inspect()
-        },
-        inspect,
-        dispose() {
-
-            if (disposePromise !== undefined) return disposePromise
-            disposePromise = dispose()
-            return disposePromise
-        },
-    })
-    return source
+    let facts = core.inspect()
+    let disposal: Promise<void> | undefined
 
     function inspect(): DemWorkerRequestExecutorFacts {
 
-        return aggregateFacts(
-            disposed,
-            system.inspect(),
-            group.inspect(),
-            workerFacts,
-            descriptor.cachePolicy,
-            phaseBudget.inspect()
-        )
+        return aggregateFacts(facts, descriptor.cachePolicy)
     }
 
-    async function dispose(): Promise<void> {
+    async function refreshFacts(): Promise<DemWorkerRequestExecutorFacts> {
 
-        if (disposed) return
-        disposed = true
-        const failures: unknown[] = []
-        const phaseBudgetDisposal = phaseBudget.dispose()
-        const contextSettlements = await Promise.allSettled(
-            contexts.map(context => context.dispose())
-        )
-        for (const settlement of contextSettlements) {
-            if (settlement.status === 'rejected') failures.push(settlement.reason)
-        }
-        try {
-            await group.dispose()
-        } catch (error) {
-            failures.push(error)
-        }
-        try {
-            await system.dispose()
-        } catch (error) {
-            failures.push(error)
-        }
-        try {
-            await phaseBudgetDisposal
-        } catch (error) {
-            failures.push(error)
-        }
-        workerFacts = workerFacts.map(disposedWorkerFacts)
+        facts = await core.refreshFacts()
+        return inspect()
+    }
+
+    async function disposeOnce(): Promise<void> {
+
+        const settlements = await Promise.allSettled([ core.dispose() ])
+        facts = core.inspect()
+        const systemSettlement = await Promise.allSettled([ system.dispose() ])
+        facts = core.inspect()
+        const failures = [ ...settlements, ...systemSettlement ]
+            .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
+            .map(result => result.reason)
         if (failures.length > 0) {
             throw new AggregateError(failures, 'DEM Worker executor disposal failed')
         }
     }
-}
-
-function createExecution(
-    context: DemContext,
-    contextIndex: number,
-    demand: VirtualRasterPageDemand,
-    candidate: DemTileCandidateDescriptor,
-    phaseBudget: TaskPhaseBudget<DemWorkerPhase>,
-    updateFacts: (facts: DemTileWorkerFacts) => void
-): VirtualRasterRequestExecution {
-
-    let currentTask: WorkerTaskHandle<unknown> | undefined
-    let phaseRequest: TaskPhasePermitRequest<DemWorkerPhase> | undefined
-    let phasePermit: TaskPhasePermit | undefined
-    let phase: 'cache' | 'network' | 'decode' = 'cache'
-    let terminalState: WorkerTaskState = 'queued'
-    let priority = demand.priority
-    let cancelled = false
-    let settlement: 'accept' | 'discard' | undefined
-    let settlementPromise: Promise<void> | undefined
-
-    const run = async<Input, Output>(operation: string, input: Input): Promise<Output> => {
-        if (cancelled) throw cancelledError(candidate.page.key)
-        const task = context.run<Input, Output>(operation, input, {
-            priority,
-            cancellation: 'cooperative',
-            generation: demand.generation,
-            staleKey: `${candidate.cacheAddress.metadata.sourceId}:${candidate.page.key}`,
-            ...(demand.deadlineMs === undefined ? {} : { deadlineMs: demand.deadlineMs }),
-        })
-        currentTask = task as WorkerTaskHandle<unknown>
-        return await task.result
-    }
-
-    const runPhase = async<Input, Output>(
-        nextPhase: DemWorkerPhase,
-        operation: string,
-        input: Input
-    ): Promise<Output> => {
-
-        phase = nextPhase
-        currentTask = undefined
-        const request = phaseBudget.acquire(nextPhase, priority)
-        phaseRequest = request
-        const permit = await request.result
-        phasePermit = permit
-        if (cancelled) {
-            permit.release()
-            phasePermit = undefined
-            throw cancelledError(candidate.page.key)
-        }
-        try {
-            return await run<Input, Output>(operation, input)
-        } finally {
-            permit.release()
-            phasePermit = undefined
-            phaseRequest = undefined
-        }
-    }
-
-    const result = (async(): Promise<VirtualRasterPageTransfer> => {
-        try {
-            phase = 'cache'
-            const lookup = await run<DemTileCandidateDescriptor, DemTileLookupResult>(
-                'lookup',
-                candidate
-            )
-            if (lookup.status === 'miss') {
-                await runPhase<DemTileCandidateDescriptor, DemTileFetchResult>(
-                    'network',
-                    'fetch',
-                    candidate
-                )
-                const transfer = await runPhase<
-                    Readonly<{ candidateId: string }>,
-                    DemTileDecodeResult
-                >(
-                    'decode',
-                    'decode',
-                    { candidateId: candidate.candidateId }
-                )
-                terminalState = 'succeeded'
-                return transfer
-            }
-            const transfer = await run<Readonly<{ candidateId: string }>, DemTileDecodeResult>(
-                'transfer',
-                { candidateId: candidate.candidateId }
-            )
-            terminalState = 'succeeded'
-            return transfer
-        } catch (error) {
-            terminalState = currentTask?.inspect().state ?? (cancelled ? 'cancelled' : 'failed')
-            throw error
-        }
-    })()
-
-    function settle(kind: 'accept' | 'discard'): Promise<void> {
-
-        if (settlementPromise !== undefined) {
-            return settlement === kind
-                ? settlementPromise
-                : Promise.reject(new Error(`DEM candidate already settled as ${settlement}`))
-        }
-        settlement = kind
-        settlementPromise = context.run<Readonly<{ candidateId: string }>, DemTileWorkerFacts>(
-            kind,
-            { candidateId: candidate.candidateId },
-            {
-                priority: { class: 'critical', score: Number.MAX_SAFE_INTEGER },
-                cancellation: 'cooperative',
-            }
-        ).result.then(facts => {
-            updateFacts(facts)
-        })
-        return settlementPromise
-    }
 
     return Object.freeze({
-        result,
-        cancel(reason?: unknown) {
+        request: core.request,
+        refreshFacts,
+        inspect,
+        dispose() {
 
-            cancelled = true
-            const phaseCancelled = phaseRequest?.cancel(reason) ?? false
-            const taskCancellation = currentTask?.cancel(reason) ?? 'none'
-            if (taskCancellation !== 'none') return taskCancellation
-            return phaseCancelled ? 'queued' : 'none'
+            disposal ??= disposeOnce()
+            return disposal
         },
-        reprioritize(priority: Partial<WorkerTaskPriority>) {
-
-            const phaseReprioritized = phaseRequest?.reprioritize(priority) ?? false
-            const taskReprioritized = currentTask?.reprioritize(priority) ?? false
-            updatePriority(priority)
-            return phaseReprioritized || taskReprioritized
-        },
-        accept: () => settle('accept'),
-        discard: () => settle('discard'),
-        classifyFailure: error => {
-            const code = remoteFailureCode(error)
-            return code === 'DEM_TILE_MISSING'
-                ? Object.freeze({
-                    disposition: 'terminal' as const,
-                    code,
-                    detail: error instanceof Error ? error.message : String(error),
-                })
-                : undefined
-        },
-        inspect: () => Object.freeze({
-            state: phaseRequest?.inspect().state === 'queued'
-                ? 'queued'
-                : currentTask?.inspect().state ?? (phasePermit === undefined
-                    ? terminalState
-                    : 'running'),
-            phase,
-            contextIndex,
-        }),
     })
-
-    function updatePriority(next: Partial<WorkerTaskPriority>): void {
-
-        priority = Object.freeze({
-            class: next.class ?? priority.class,
-            score: next.score ?? priority.score,
-        })
-    }
 }
 
-function remoteFailureCode(error: unknown): string | undefined {
+function createCandidate(
+    descriptor: DemWorkerTileSourceDescriptor,
+    executorSequence: number,
+    requestSequence: number,
+    demand: VirtualRasterPageDemand
+): DemTileCandidateDescriptor {
 
-    if (typeof error !== 'object' || error === null) return undefined
-    const direct = (error as { code?: unknown }).code
-    if (typeof direct === 'string') return direct
-    const remote = (error as {
-        diagnostic?: { actual?: { remoteCode?: unknown } }
-    }).diagnostic?.actual?.remoteCode
-    return typeof remote === 'string' ? remote : undefined
+    const tile = demand.page.tile
+    if (tile === undefined || tile.tileMatrixSetId !== descriptor.tileMatrixSetId) {
+        throw new TypeError('DEM worker requests require standard WebMercatorQuad pages')
+    }
+    return Object.freeze({
+        candidateId: `${executorSequence}:${requestSequence}:${demand.generation}:${demand.page.key}`,
+        page: demand.page,
+        cacheAddress: virtualRasterCacheAddress({
+            sourceId: descriptor.sourceId,
+            tileMatrixSetId: descriptor.tileMatrixSetId,
+            tileMatrixSetUri: descriptor.tileMatrixSetUri,
+            matrixId: tile.matrixId,
+            tileRow: tile.tileRow,
+            tileColumn: tile.tileCol,
+            plane: descriptor.plane,
+            coherence: {
+                mode: 'immutable',
+                contentVersion: descriptor.contentVersion,
+            },
+            sourceRepresentation: descriptor.encodedRepresentation,
+            payloadRepresentation: 'raw/uint8',
+            decoderVersion: descriptor.decoderVersion,
+            sampleType: descriptor.sampleType,
+            schemaVersion: descriptor.cacheSchemaVersion,
+        }),
+        url: descriptor.tileUrl(demand.page),
+        contentVersion: descriptor.contentVersion,
+    })
 }
 
 function aggregateFacts(
-    disposed: boolean,
-    system: WorkerSystemFacts,
-    group: WorkerGroupFacts,
-    workers: readonly DemTileWorkerFacts[],
-    policy: DemCachePolicy,
-    phaseBudget: TaskPhaseBudgetFacts<DemWorkerPhase>
+    core: VirtualRasterWorkerExecutorFacts<DemTileWorkerFacts>,
+    policy: DemCachePolicy
 ): DemWorkerRequestExecutorFacts {
 
+    const workers = core.workers
     const sumCache = (read: (facts: DemTileCacheFacts) => number) =>
         workers.reduce((sum, worker) => sum + read(worker.cache), 0)
     const sum = (read: (facts: DemTileWorkerFacts) => number) =>
         workers.reduce((total, worker) => total + read(worker), 0)
     return Object.freeze({
-        disposed,
-        system,
-        group,
-        workers: Object.freeze([ ...workers ]),
+        disposed: core.disposed,
+        system: core.system,
+        group: core.group,
+        workers,
         cache: Object.freeze({
             mode: policy.mode,
             ...(policy.mode === 'none' ? {
@@ -491,9 +270,11 @@ function aggregateFacts(
         acceptedCandidateCount: sum(facts => facts.acceptedCandidateCount),
         discardedCandidateCount: sum(facts => facts.discardedCandidateCount),
         pendingCandidateCount: sum(facts => facts.pendingCandidateCount),
-        maxPendingCandidateCount: Math.max(0, ...workers.map(facts => facts.maxPendingCandidateCount)),
+        maxPendingCandidateCount: Math.max(0, ...workers.map(facts =>
+            facts.maxPendingCandidateCount
+        )),
         senderDecodedByteLength: sum(facts => facts.senderDecodedByteLength),
-        phaseBudget,
+        phaseBudget: core.phaseBudget,
     })
 }
 
@@ -515,27 +296,6 @@ function shardCacheConfiguration(
             lifecycle: policy.lifecycle,
         }),
     })
-}
-
-function dividedBudget(value: number, count: number): number {
-
-    return Math.max(1, Math.floor(value / count))
-}
-
-function stableShard(key: string, count: number): number {
-
-    let hash = 0x811c9dc5
-    for (let index = 0; index < key.length; index++) {
-        hash ^= key.charCodeAt(index)
-        hash = Math.imul(hash, 0x01000193)
-    }
-    return (hash >>> 0) % count
-}
-
-function defaultWorkerCount(): number {
-
-    const hardware = globalThis.navigator?.hardwareConcurrency ?? 2
-    return Math.max(1, Math.min(4, hardware - 1))
 }
 
 function emptyWorkerFacts(policy: DemCachePolicy): DemTileWorkerFacts {
@@ -613,9 +373,29 @@ function emptyPersistentCacheFacts(
     })
 }
 
-function cancelledError(pageKey: string): Error {
+function remoteFailureCode(error: unknown): string | undefined {
 
-    const error = new Error(`DEM tile ${pageKey} request was cancelled`)
-    error.name = 'AbortError'
-    return error
+    if (typeof error !== 'object' || error === null) return undefined
+    const direct = (error as { code?: unknown }).code
+    if (typeof direct === 'string') return direct
+    const remote = (error as {
+        diagnostic?: { actual?: { remoteCode?: unknown } }
+    }).diagnostic?.actual?.remoteCode
+    return typeof remote === 'string' ? remote : undefined
+}
+
+function dividedBudget(value: number, count: number): number {
+
+    return Math.max(1, Math.floor(value / count))
+}
+
+function defaultWorkerCount(): number {
+
+    const hardware = globalThis.navigator?.hardwareConcurrency ?? 2
+    return Math.max(1, Math.min(4, hardware - 1))
+}
+
+function positiveInteger(value: unknown): value is number {
+
+    return Number.isSafeInteger(value) && Number(value) > 0
 }
