@@ -6,15 +6,17 @@ import { GPURuntime } from 'geoscratch/scratch'
 import {
     ViewDemandProducer,
     VirtualRasterResidency,
+    createTerrainFieldRenderer,
     createVirtualRasterGpuState,
+    mapFieldLayer,
     ownedVirtualRasterPagePayload,
 } from 'geoscratch/geo'
-import { createDemLayer } from '../examples/demLayer/dem-layer.ts'
 import {
     createDemVirtualRasterModel,
     parseDemVirtualRasterManifest,
 } from '../examples/demLayer/dem-virtual-raster.ts'
 import { createDemLifecycle } from '../examples/demLayer/dem-lifecycle.ts'
+import { demMapViewAdapter } from '../examples/demLayer/dem-map.ts'
 import {
     createFakeCanvas,
     createFakeGpu,
@@ -68,6 +70,7 @@ async function createTestVirtualRaster(runtime) {
     expect(model.addressSpace.levelCount).to.equal(7)
     return Object.freeze({
         ...model,
+        kind: 'virtual-raster-runtime',
         model,
         manifest: demManifest,
         residency,
@@ -139,11 +142,63 @@ async function createTestVirtualRaster(runtime) {
     })
 }
 
+function createTestFieldLayer(virtualRaster) {
+
+    return mapFieldLayer({
+        id: 'test-dem-height-layer',
+        field: virtualRaster.field,
+        representation: virtualRaster.representation,
+        spatialProfile: virtualRaster.spatialProfile,
+        viewAdapter: demMapViewAdapter,
+        demandProducer: virtualRaster.viewDemandProducer,
+    })
+}
+
+function createTestTerrainRenderer({
+    runtime,
+    surface,
+    virtualRaster,
+    size,
+    observeProvenance,
+}) {
+
+    return createTerrainFieldRenderer({
+        runtime,
+        surface,
+        fieldLayer: createTestFieldLayer(virtualRaster),
+        virtualRaster,
+        size,
+        shader: read('examples', 'demLayer', 'shaders', 'terrain-mesh.wgsl'),
+        fieldSampling: {
+            namespace: 'DemHeight',
+            addressNamespace: 'DemAddress',
+            transitionTexels: 16,
+        },
+        elevationRangeMeters: [
+            demManifest.offset,
+            demManifest.offset + demManifest.scale * 255,
+        ].sort((left, right) => left - right),
+        exaggeration: 50,
+        presentations: [
+            { id: 'shaded', fragmentEntryPoint: 'fMain', label: 'DEM terrain pipeline' },
+            {
+                id: 'tile-wireframe',
+                fragmentEntryPoint: 'fTileWireframe',
+                label: 'DEM tile wireframe pipeline',
+            },
+        ],
+        initialPresentation: 'shaded',
+        ...(observeProvenance === undefined ? {} : { observeProvenance }),
+    })
+}
+
 describe('DEM Layer clean cut', () => {
 
     it('consumes Geo-owned projected-grid render patches after the data frontier', () => {
 
-        const layerSource = read('examples', 'demLayer', 'dem-layer.ts')
+        const layerSource = read(
+            'packages', 'geoscratch', 'src', 'geo', 'terrain-field-renderer.ts'
+        )
         const renderPatchSource = read(
             'packages', 'geoscratch', 'src', 'geo', 'gpu-render-patch-frontier.ts'
         )
@@ -229,7 +284,9 @@ describe('DEM Layer clean cut', () => {
 
     it('uses a GPU-resident frontier without a CPU selection compatibility path', () => {
 
-        const layerSource = read('examples', 'demLayer', 'dem-layer.ts')
+        const layerSource = read(
+            'packages', 'geoscratch', 'src', 'geo', 'terrain-field-renderer.ts'
+        )
         const virtualRasterSource = read('examples', 'demLayer', 'dem-virtual-raster.ts')
         const mapSource = read('examples', 'demLayer', 'dem-map.ts')
         const mapAdapterSource = read(
@@ -237,9 +294,8 @@ describe('DEM Layer clean cut', () => {
         )
 
         expect(layerSource).to.include('GpuTileFrontier.create(')
-        expect(layerSource).to.include('mapFieldLayer<DemMapViewInput>({')
-        expect(layerSource).to.include('demMapViewAdapter')
-        expect(layerSource).to.include('spatialProfile: mapField.spatialProfile')
+        expect(layerSource).to.include('fieldLayer.viewAdapter.read(input')
+        expect(layerSource).to.include('spatialProfile: fieldLayer.spatialProfile')
         expect(layerSource).to.include('frontier.encode(builder, frame)')
         expect(layerSource).to.include('feedbackRing.encode(builder, frame)')
         expect(layerSource).to.include("feedback.facts.convergenceState === 'transitioning'")
@@ -272,10 +328,12 @@ describe('DEM Layer clean cut', () => {
 
     it('uses only the current public Scratch graph and keeps persistent construction out of frames', () => {
 
-        const layerSource = read('examples', 'demLayer', 'dem-layer.ts')
+        const layerSource = read(
+            'packages', 'geoscratch', 'src', 'geo', 'terrain-field-renderer.ts'
+        )
         const mainSource = read('examples', 'demLayer', 'main.ts')
         const frameSource = layerSource.slice(
-            layerSource.indexOf('async function renderFrame(camera: DemCameraState)'),
+            layerSource.indexOf('async function renderFrame(input: ViewInput)'),
             layerSource.indexOf('async function resize(nextSize: SurfaceSize)')
         )
         const allSources = [
@@ -582,7 +640,9 @@ describe('DEM Layer clean cut', () => {
         expect(tileColorFunction).to.include('instance.tileRow')
         expect(tileColorFunction).to.include('instance.tileCol')
         expect(tileColorFunction).not.to.include('physicalSlot')
-        const layer = read('examples', 'demLayer', 'dem-layer.ts')
+        const layer = read(
+            'packages', 'geoscratch', 'src', 'geo', 'terrain-field-renderer.ts'
+        )
         const main = read('examples', 'demLayer', 'main.ts')
         expect(layer).not.to.include('createExternalImageUploadCommand')
         expect(layer).not.to.include('DEM elevation texture')
@@ -605,15 +665,12 @@ describe('DEM Layer clean cut', () => {
         })
         const provenanceFailure = new Error('injected DEM provenance mismatch')
         const virtualRaster = await createTestVirtualRaster(runtime)
-        const graph = await createDemLayer({
+        const graph = await createTestTerrainRenderer({
             runtime,
             surface,
             virtualRaster,
             size: { width: 320, height: 180 },
-            shaders: {
-                terrain: read('examples', 'demLayer', 'shaders', 'terrain-mesh.wgsl'),
-            },
-            provenanceVerifier() {
+            observeProvenance() {
                 throw provenanceFailure
             },
         })
@@ -621,7 +678,7 @@ describe('DEM Layer clean cut', () => {
         await initialized.observation
 
         const frame = await graph.renderFrame(cameraState(9, [ 320, 180 ]))
-        expect(frame.provenance).to.deep.equal([])
+        expect(frame.provenance).to.have.length(6)
         let observedFailure
         try {
             await frame.observation
@@ -648,14 +705,11 @@ describe('DEM Layer clean cut', () => {
             size: { width: 320, height: 180 },
         })
         const virtualRaster = await createTestVirtualRaster(runtime)
-        const graph = await createDemLayer({
+        const graph = await createTestTerrainRenderer({
             runtime,
             surface,
             virtualRaster,
             size: { width: 320, height: 180 },
-            shaders: {
-                terrain: read('examples', 'demLayer', 'shaders', 'terrain-mesh.wgsl'),
-            },
         })
         const initialIdentityHash = graph.stableIdentityHash
         const initialIdentities = graph.stableIdentities
@@ -668,11 +722,11 @@ describe('DEM Layer clean cut', () => {
         const first = await graph.renderFrame(cameraState(9, [ 320, 180 ]))
         await first.observation
         const shadedPipelineLabel = latestRenderPipelineLabel(fake.calls)
-        graph.setTerrainPresentation('tile-wireframe')
+        graph.setPresentation('tile-wireframe')
         const second = await graph.renderFrame(cameraState(10, [ 320, 180 ]))
         await second.observation
         const wireframePipelineLabel = latestRenderPipelineLabel(fake.calls)
-        graph.setTerrainPresentation('shaded')
+        graph.setPresentation('shaded')
         const third = await graph.renderFrame(cameraState(10, [ 320, 180 ]))
         await third.observation
         const restoredPipelineLabel = latestRenderPipelineLabel(fake.calls)
@@ -774,9 +828,9 @@ describe('DEM Layer clean cut', () => {
         expect(fake.calls.maps.filter(mapping => mapping.size === 140)).to.have.length(2)
 
         graph.dispose()
-        expect(() => graph.setTerrainPresentation('tile-wireframe'))
+        expect(() => graph.setPresentation('tile-wireframe'))
             .to.throw('disposed')
-        expect(() => graph.setTerrainPresentation('invalid'))
+        expect(() => graph.setPresentation('invalid'))
             .to.throw('presentation')
         await runtime.dispose()
     })

@@ -129,6 +129,22 @@ export type {
     GpuRenderPatchRenderTemplate,
     GpuRenderPatchSelectionFacts,
 } from './gpu-render-patch-frontier.js'
+export { createTerrainFieldRenderer } from './terrain-field-renderer.js'
+export type {
+    TerrainFieldContractFacts,
+    TerrainFieldFrame,
+    TerrainFieldIdentityFacts,
+    TerrainFieldInitialization,
+    TerrainFieldPersistentFacts,
+    TerrainFieldPresentationDescriptor,
+    TerrainFieldProvenanceFact,
+    TerrainFieldRenderer,
+    TerrainFieldRendererDescriptor,
+    TerrainFieldRendererState,
+    TerrainFieldResizeFacts,
+    TerrainFieldSamplingWgslOptions,
+    TerrainFieldSubmissionObservation,
+} from './terrain-field-renderer.js'
 export {
     coordinateDomain,
     localVector,

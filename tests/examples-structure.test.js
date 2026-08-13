@@ -261,24 +261,27 @@ describe('examples structure', () => {
 
     it('keeps the DEM layer example focused on terrain only', () => {
         const source = read('examples', 'demLayer', 'main.ts')
-        const layer = read('examples', 'demLayer', 'dem-layer.ts')
+        const renderer = read(
+            'packages', 'geoscratch', 'src', 'geo', 'terrain-field-renderer.ts'
+        )
         const mapRuntime = read('examples', 'demLayer', 'dem-map.ts')
         const mapAdapter = read(
             'packages', 'geoscratch', 'src', 'geo', 'maplibre-planar-view.ts'
         )
 
         expect(source).to.include('GPURuntime')
-        expect(source).to.include('createDemLayer')
+        expect(source).to.include('createTerrainFieldRenderer')
+        expect(source).to.include('mapFieldLayer')
         expect(source).to.include('createDemMap')
-        expect(layer).to.include('runtime.createSubmission(')
-        expect(layer).to.include("contentEpoch: 'current-at-step'")
-        expect(layer).to.include('GpuTileFrontier.create(')
-        expect(layer).to.include('VirtualRasterGpuFeedbackRing.create(frontier)')
-        expect(layer).to.include('frontier.encode(builder, frame)')
-        expect(layer).to.include('feedbackRing.encode(builder, frame)')
-        expect(layer).to.include('count: { indirect: template.drawArgument.region }')
-        expect(layer).to.not.match(/selectTerrainNodes|nodeLevels|nodeBoxes|canonicalNodes/)
-        expect(layer).to.not.match(/lodArguments\.upload|terrainArguments\.upload/)
+        expect(renderer).to.include('runtime.createSubmission(')
+        expect(renderer).to.include("contentEpoch: 'current-at-step'")
+        expect(renderer).to.include('GpuTileFrontier.create(')
+        expect(renderer).to.include('VirtualRasterGpuFeedbackRing.create(frontier)')
+        expect(renderer).to.include('frontier.encode(builder, frame)')
+        expect(renderer).to.include('feedbackRing.encode(builder, frame)')
+        expect(renderer).to.include('count: { indirect: template.drawArgument.region }')
+        expect(renderer).to.not.match(/selectTerrainNodes|nodeLevels|nodeBoxes|canonicalNodes/)
+        expect(renderer).to.not.match(/lodArguments\.upload|terrainArguments\.upload/)
         expect(mapRuntime).to.include('globalThis.maplibregl')
         expect(mapRuntime).to.include('darkMatterStyle')
         expect(mapRuntime).to.include('mapLibrePlanarViewAdapter')
@@ -297,8 +300,8 @@ describe('examples structure', () => {
         expect(source).to.not.include('../shared/scratchMap.js')
         expect(source).to.not.include('startScratchMap')
         expect(source).to.not.include('LocalTerrain')
-        expect(`${source}\n${layer}`).to.not.match(/runtime\.(?:device|queue)\b/)
-        expect(`${source}\n${layer}`).to.not.match(/mapAsync|getMappedRange/)
+        expect(`${source}\n${renderer}`).to.not.match(/runtime\.(?:device|queue)\b/)
+        expect(`${source}\n${renderer}`).to.not.match(/mapAsync|getMappedRange/)
     })
 
     it('provides a separate current-API flow layer with its own map host', () => {

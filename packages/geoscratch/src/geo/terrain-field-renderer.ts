@@ -25,14 +25,13 @@ import {
     gpuRenderPatchWgslModule,
     type GpuRenderPatchFeedback,
     type GpuRenderPatchFrontier,
+    type GpuRenderPatchFrontierFacts,
 } from './gpu-render-patch-frontier.js'
 import { GeoDiagnosticError } from './diagnostics.js'
 import { GpuTileFrontier } from './gpu-tile-frontier.js'
-import type {
-    GpuTileFrontierFacts,
-    GpuTileFrontierFrame,
-} from './gpu-tile-frontier.js'
+import type { GpuTileFrontierFrame } from './gpu-tile-frontier.js'
 import { gpuTileFrontierPolicy } from './gpu-tile-frontier-layout.js'
+import type { GpuTileFrontierFacts } from './gpu-tile-frontier-layout.js'
 import type { GeoViewSnapshot } from './geo-view.js'
 import type { MapFieldLayer } from './map-field-layer.js'
 import {
@@ -43,8 +42,15 @@ import {
 import type { WebMercatorVirtualRasterField } from './web-mercator-virtual-raster-field.js'
 import { webMercatorVirtualRasterWgslModule } from './web-mercator-virtual-raster-wgsl.js'
 import { VirtualRasterGpuFeedbackRing } from './virtual-raster-gpu-feedback.js'
-import type { VirtualRasterGpuFeedbackBatch } from './virtual-raster-gpu-feedback.js'
-import type { VirtualRasterRuntime } from './virtual-raster-runtime.js'
+import type {
+    VirtualRasterGpuFeedbackBatch,
+    VirtualRasterGpuFeedbackRingFacts,
+} from './virtual-raster-gpu-feedback.js'
+import type {
+    VirtualRasterFeedbackReconciliation,
+    VirtualRasterRuntime,
+    VirtualRasterRuntimeFacts,
+} from './virtual-raster-runtime.js'
 
 export type TerrainFieldPresentationDescriptor<Presentation extends string = string> =
     Readonly<{
@@ -74,6 +80,146 @@ export type TerrainFieldResizeFacts = Readonly<{
     staleBindSetCount: number
     preparedBindSetCount: number
     depthAllocationVersion: number
+}>
+
+export type TerrainFieldSubmissionObservation = Readonly<{
+    submissionId: string
+    nativeStatus: 'observed-succeeded'
+}>
+
+export type TerrainFieldInitialization = Readonly<{
+    submitted: SubmittedWork
+    observation: Promise<TerrainFieldSubmissionObservation>
+}>
+
+export type TerrainFieldFrame<Presentation extends string = string> = Readonly<{
+    submitted: SubmittedWork
+    observation: Promise<TerrainFieldSubmissionObservation>
+    provenance: readonly TerrainFieldProvenanceFact[]
+    feedback?: VirtualRasterGpuFeedbackBatch
+    renderPatchFeedback?: GpuRenderPatchFeedback
+    reconciliation?: VirtualRasterFeedbackReconciliation
+    residencySettlement: Promise<unknown>
+    requestedPageCount: number
+    needsFollowUp: boolean
+    terrainPresentation: Presentation
+}>
+
+export type TerrainFieldIdentityFacts = Readonly<{
+    hash: string
+    count: number
+    resources: number
+    uploads: number
+    bindLayouts: number
+    bindSets: number
+    programs: number
+    pipelines: number
+    passes: number
+    commands: number
+}>
+
+export type TerrainFieldPersistentFacts = Readonly<{
+    resources: number
+    bindLayouts: number
+    bindSets: number
+    pipelines: number
+    logicalFootprintBytes: number
+}>
+
+export type TerrainFieldContractFacts = Readonly<{
+    stageOrder: readonly string[]
+    countPath: 'gpu-produced-indirect-arguments'
+    selectionPath: 'gpu-resident-active-frontier'
+    dataMaximumMatrixLevel: number
+    renderMaximumMatrixLevel: number
+    fieldLayer: Readonly<{
+        id: string
+        fieldId: string
+        representationId: string
+        spatialProfileId: string
+        viewAdapterId: string
+        demandProducerId: string
+    }>
+    terrainVertexCount: number
+    frontier: ReturnType<GpuTileFrontier['facts']>
+    renderPatches: GpuRenderPatchFrontierFacts
+    feedback: VirtualRasterGpuFeedbackRingFacts
+    virtualRaster: Readonly<{
+        sourceRevision: string
+        pageSize: readonly number[]
+        levelCount: number
+        maxPhysicalPages: number
+        completeImageUpload: false
+        crossPageFiltering: 'logical-bilinear'
+        coordinateEncoding: WebMercatorVirtualRasterField['addressCodec']['positionCodec']['facts']['encoding']
+    }>
+    persistentIdentityCount: number
+    passIds: Readonly<{ renderPatches: string, terrain: string }>
+    commandIds: Readonly<{
+        renderPatches: readonly (readonly string[])[]
+        drawTerrain: Readonly<Record<string, readonly string[]>>
+    }>
+}>
+
+export type TerrainFieldRendererState<Presentation extends string = string> = Readonly<{
+    initialized: boolean
+    disposed: boolean
+    frame: number
+    size: SurfaceSize
+    resizeGeneration: number
+    staleBindSetPreparationCount: number
+    lastResizeFacts?: TerrainFieldResizeFacts
+    virtualSnapshotEpoch: number
+    virtualRequestedPageCount: number
+    readbackInFlightCount: number
+    staleFeedbackCount: number
+    supersededFeedbackCount: number
+    frontierCount: number
+    visibleNodeCount: number
+    demandCount: number
+    fallbackCount: number
+    staleGenerationCount: number
+    budgetLimitedCount: number
+    levelRange: readonly [number | undefined, number | undefined]
+    maximumObservedSse: number
+    renderPatchCount: number
+    renderPatchLevelRange: readonly [number | undefined, number | undefined]
+    renderPatchCellSpanRange: readonly [number | undefined, number | undefined]
+    renderPatchDescriptorOverflowCount: number
+    renderPatchLookupOverflowCount: number
+    renderPatchFrameEpoch?: number
+    renderPatchBaselineBudget: number
+    renderPatchFrameBudget: number
+    renderPatchRequestedCount: number
+    renderPatchMinimumTrialCount: number
+    renderPatchSourceRootCount: number
+    renderPatchSelectedBiasLevels: number
+    renderPatchBudgetLimitedByMinimumTrial: boolean
+    renderPatchFeedback?: GpuRenderPatchFeedback
+    convergenceState: GpuTileFrontierFacts['convergenceState']
+    frontierFacts?: GpuTileFrontierFacts
+    latestFeedbackDiagnostics: readonly unknown[]
+    terrainPresentation: Presentation
+    feedback: VirtualRasterGpuFeedbackRingFacts
+}>
+
+export type TerrainFieldRenderer<
+    ViewInput,
+    Presentation extends string = string,
+> = Readonly<{
+    initialize(): Promise<TerrainFieldInitialization>
+    renderFrame(input: ViewInput): Promise<TerrainFieldFrame<Presentation>>
+    setPresentation(presentation: Presentation): Presentation
+    resize(size: SurfaceSize): Promise<TerrainFieldResizeFacts>
+    dispose(): void
+    stableIdentities: readonly string[]
+    stableIdentityHash: string
+    stableIdentityFacts: TerrainFieldIdentityFacts
+    currentIdentityFacts(): TerrainFieldIdentityFacts
+    persistentFacts(): TerrainFieldPersistentFacts
+    contractFacts(): TerrainFieldContractFacts
+    virtualRasterFacts(): VirtualRasterRuntimeFacts
+    state(): TerrainFieldRendererState<Presentation>
 }>
 
 export type TerrainFieldRendererDescriptor<
@@ -152,7 +298,7 @@ type ProvenanceVerifier = (
     terrainPresentation: string
 ) => readonly TerrainFieldProvenanceFact[]
 
-type TerrainFieldState = {
+type TerrainFieldState<Presentation extends string = string> = {
     initialized: boolean
     disposed: boolean
     frame: number
@@ -167,16 +313,10 @@ type TerrainFieldState = {
     latestFrontierFacts?: GpuTileFrontierFacts
     latestRenderPatchFeedback?: GpuRenderPatchFeedback
     latestFeedbackDiagnostics: readonly unknown[]
-    terrainPresentation: string
+    terrainPresentation: Presentation
 }
 
-type PersistentFacts = Readonly<{
-    resources: number
-    bindLayouts: number
-    bindSets: number
-    pipelines: number
-    logicalFootprintBytes: number
-}>
+type PersistentFacts = TerrainFieldPersistentFacts
 
 type PendingFeedback = Readonly<{
     frame: GpuTileFrontierFrame
@@ -219,7 +359,9 @@ export async function createTerrainFieldRenderer<
     presentations,
     initialPresentation,
     observeProvenance,
-}: TerrainFieldRendererDescriptor<ViewInput, Presentation>) {
+}: TerrainFieldRendererDescriptor<ViewInput, Presentation>): Promise<
+    TerrainFieldRenderer<ViewInput, Presentation>
+> {
 
     if (!(runtime instanceof GPURuntime)) {
         throw new TypeError('Terrain field renderer requires GPURuntime')
@@ -231,6 +373,7 @@ export async function createTerrainFieldRenderer<
     assertFieldSampling(fieldSampling)
     assertElevation(elevationRangeMeters, exaggeration)
     const presentationTable = normalizePresentations(presentations, initialPresentation)
+    const terrainFieldLayer = fieldLayer as unknown as TerrainMapField
     if (observeProvenance !== undefined && typeof observeProvenance !== 'function') {
         throw new TypeError('Terrain field provenance observer must be a function')
     }
@@ -246,7 +389,7 @@ export async function createTerrainFieldRenderer<
     const frontier = await createFrontier(
         runtime,
         virtualRaster,
-        fieldLayer,
+        terrainFieldLayer,
         exaggeratedElevationRange
     )
     const feedbackRing = await VirtualRasterGpuFeedbackRing.create(frontier)
@@ -315,7 +458,7 @@ export async function createTerrainFieldRenderer<
         runtime,
         surface,
         virtualRaster,
-        fieldLayer,
+        fieldLayer: terrainFieldLayer,
         codecs,
         geometry,
         uniforms,
@@ -452,7 +595,7 @@ export async function createTerrainFieldRenderer<
             state.supersededFeedbackCount++
         }
         if (feedback === undefined) {
-            state.latestFrontierFacts = undefined
+            delete state.latestFrontierFacts
             state.latestFeedbackDiagnostics = Object.freeze([])
         } else {
             state.latestFrontierFacts = feedback.facts
@@ -475,14 +618,16 @@ export async function createTerrainFieldRenderer<
             submitted: submitted!,
             observation,
             provenance,
-            feedback,
-            renderPatchFeedback: consumed?.renderPatchFeedback,
-            reconciliation,
+            ...(feedback === undefined ? {} : { feedback }),
+            ...(consumed?.renderPatchFeedback === undefined
+                ? {}
+                : { renderPatchFeedback: consumed.renderPatchFeedback }),
+            ...(reconciliation === undefined ? {} : { reconciliation }),
             residencySettlement: reconciliation?.settlement ?? Promise.resolve(undefined),
             requestedPageCount: reconciliation?.requestedCount ?? 0,
             needsFollowUp,
             terrainPresentation: frameTerrainPresentation,
-        })
+        }) satisfies TerrainFieldFrame<Presentation>
     }
 
     function setPresentation(nextPresentation: Presentation) {
@@ -1064,8 +1209,8 @@ async function consumeReadyFeedback(
     return Object.freeze({
         decisionKey: ready.decisionKey,
         view: ready.view,
-        feedback,
-        renderPatchFeedback,
+        ...(feedback === undefined ? {} : { feedback }),
+        ...(renderPatchFeedback === undefined ? {} : { renderPatchFeedback }),
     })
 }
 
@@ -1246,7 +1391,7 @@ function persistentFactSnapshot(runtime: GPURuntime): PersistentFacts {
     })
 }
 
-function graphContractSnapshot(graph: TerrainFieldGraph) {
+function graphContractSnapshot(graph: TerrainFieldGraph): TerrainFieldContractFacts {
 
     const dataMaximumMatrixLevel = graph.frontier.descriptor.policy.maximumMatrixLevel
     return Object.freeze({
@@ -1295,10 +1440,10 @@ function graphContractSnapshot(graph: TerrainFieldGraph) {
     })
 }
 
-function createState(
+function createState<Presentation extends string>(
     size: SurfaceSize,
-    terrainPresentation: string
-): TerrainFieldState {
+    terrainPresentation: Presentation
+): TerrainFieldState<Presentation> {
 
     return {
         initialized: false,
@@ -1307,23 +1452,20 @@ function createState(
         size: { ...size },
         resizeGeneration: 0,
         staleBindSetPreparationCount: 0,
-        lastResizeFacts: undefined,
         virtualSnapshotEpoch: 0,
         virtualRequestedPageCount: 0,
         staleFeedbackCount: 0,
         supersededFeedbackCount: 0,
-        latestFrontierFacts: undefined,
-        latestRenderPatchFeedback: undefined,
         latestFeedbackDiagnostics: Object.freeze([]),
         terrainPresentation,
     }
 }
 
-function stateSnapshot(
-    state: TerrainFieldState,
+function stateSnapshot<Presentation extends string>(
+    state: TerrainFieldState<Presentation>,
     pendingFeedbackCount: number,
     feedbackRing: VirtualRasterGpuFeedbackRing
-) {
+): TerrainFieldRendererState<Presentation> {
 
     const latest = state.latestFrontierFacts
     const renderPatches = state.latestRenderPatchFeedback
@@ -1334,7 +1476,9 @@ function stateSnapshot(
         size: Object.freeze({ ...state.size }),
         resizeGeneration: state.resizeGeneration,
         staleBindSetPreparationCount: state.staleBindSetPreparationCount,
-        lastResizeFacts: state.lastResizeFacts,
+        ...(state.lastResizeFacts === undefined
+            ? {}
+            : { lastResizeFacts: state.lastResizeFacts }),
         virtualSnapshotEpoch: state.virtualSnapshotEpoch,
         virtualRequestedPageCount: state.virtualRequestedPageCount,
         readbackInFlightCount: pendingFeedbackCount,
@@ -1349,21 +1493,23 @@ function stateSnapshot(
         levelRange: Object.freeze([
             latest?.minimumSelectedMatrixLevel,
             latest?.maximumSelectedMatrixLevel,
-        ]),
+        ] as const),
         maximumObservedSse: latest?.maximumObservedSse ?? 0,
         renderPatchCount: renderPatches?.selectedPatchCount ?? 0,
         renderPatchLevelRange: Object.freeze([
             renderPatches?.minimumMatrixLevel,
             renderPatches?.maximumMatrixLevel,
-        ]),
+        ] as const),
         renderPatchCellSpanRange: Object.freeze([
             renderPatches?.minimumCellSpanPixels,
             renderPatches?.maximumCellSpanPixels,
-        ]),
+        ] as const),
         renderPatchDescriptorOverflowCount:
             renderPatches?.descriptorOverflowCount ?? 0,
         renderPatchLookupOverflowCount: renderPatches?.lookupOverflowCount ?? 0,
-        renderPatchFrameEpoch: renderPatches?.frameEpoch,
+        ...(renderPatches === undefined
+            ? {}
+            : { renderPatchFrameEpoch: renderPatches.frameEpoch }),
         renderPatchBaselineBudget: renderPatches?.baselinePatchBudget ?? 0,
         renderPatchFrameBudget: renderPatches?.framePatchBudget ?? 0,
         renderPatchRequestedCount: renderPatches?.requestedPatchCount ?? 0,
@@ -1372,9 +1518,9 @@ function stateSnapshot(
         renderPatchSelectedBiasLevels: renderPatches?.selectedBiasLevels ?? 0,
         renderPatchBudgetLimitedByMinimumTrial:
             renderPatches?.budgetLimitedByMinimumTrial ?? false,
-        renderPatchFeedback: renderPatches,
+        ...(renderPatches === undefined ? {} : { renderPatchFeedback: renderPatches }),
         convergenceState: latest?.convergenceState ?? 'transitioning',
-        frontierFacts: latest,
+        ...(latest === undefined ? {} : { frontierFacts: latest }),
         latestFeedbackDiagnostics: state.latestFeedbackDiagnostics,
         terrainPresentation: state.terrainPresentation,
         feedback: feedbackRing.facts(),

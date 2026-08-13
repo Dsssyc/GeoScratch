@@ -94,7 +94,6 @@ describe('workspace layout', () => {
             'examples/indirectExecution/main.ts',
             'examples/readinessPolicies/main.ts',
             'examples/demLayer/main.ts',
-            'examples/demLayer/dem-layer.ts',
             'examples/demLayer/dem-map.ts',
             'examples/flowLayer/main.ts',
             'examples/flowLayer/flow-layer.ts',

@@ -302,14 +302,16 @@ describe('scratch submission native outcome documentation', () => {
     it('moves the final DEM example onto observed current submissions', () => {
 
         const main = read('examples', 'demLayer', 'main.ts')
-        const graph = read('examples', 'demLayer', 'dem-layer.ts')
+        const renderer = read(
+            'packages', 'geoscratch', 'src', 'geo', 'terrain-field-renderer.ts'
+        )
 
-        expect(graph).to.include('submitted.nativeOutcome')
-        expect(graph).to.include('submitted.done')
-        expect(graph).to.include('observed-succeeded')
-        expect(graph).to.include('runtime.createSubmission({ validation: \'throw\' })')
-        expect(graph).to.include("contentEpoch: 'current-at-step'")
+        expect(renderer).to.include('submitted.nativeOutcome')
+        expect(renderer).to.include('submitted.done')
+        expect(renderer).to.include('observed-succeeded')
+        expect(renderer).to.include('runtime.createSubmission({ validation: \'throw\' })')
+        expect(renderer).to.include("contentEpoch: 'current-at-step'")
         expect(main).to.not.include('m_demLayer')
-        expect(graph).to.not.include('LocalTerrain')
+        expect(renderer).to.not.include('LocalTerrain')
     })
 })

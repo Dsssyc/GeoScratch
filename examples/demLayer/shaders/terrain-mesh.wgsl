@@ -1,4 +1,4 @@
-struct DemTerrainConfig {
+struct TerrainFieldConfig {
     sourceMercatorBox: vec4f,
     elevationRange: vec2f,
     coordinateBits: u32,
@@ -36,7 +36,7 @@ struct VertexOutput {
 };
 
 @group(0) @binding(0) var<uniform> mapMeta: GpuTileFrontierMapMeta;
-@group(0) @binding(1) var<uniform> terrainConfig: DemTerrainConfig;
+@group(0) @binding(1) var<uniform> terrainConfig: TerrainFieldConfig;
 
 @group(1) @binding(0) var<storage, read> indices: array<u32>;
 @group(1) @binding(1) var<storage, read> gridPositions: array<u32>;

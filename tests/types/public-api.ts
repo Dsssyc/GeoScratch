@@ -390,12 +390,36 @@ const typedMapField: MapFieldLayer<{ frameEpoch: number }> = mapFieldLayer({
     viewAdapter: typedViewAdapter,
     demandProducer: typedViewDemandProducer,
 })
+declare const typedTerrainSurface: scr.Surface
+declare const typedTerrainRuntime: scr.GPURuntime
+declare const typedTerrainVirtualRaster: geoApi.VirtualRasterRuntime<WebMercatorVirtualRasterField>
+const typedTerrainRendererCreation: Promise<
+    geoApi.TerrainFieldRenderer<{ frameEpoch: number }, 'shaded' | 'wireframe'>
+> = geoApi.createTerrainFieldRenderer({
+    runtime: typedTerrainRuntime,
+    surface: typedTerrainSurface,
+    fieldLayer: typedMapField,
+    virtualRaster: typedTerrainVirtualRaster,
+    size: { width: 1920, height: 1080 },
+    shader: '',
+    fieldSampling: {
+        namespace: 'TypedHeight',
+        addressNamespace: 'TypedAddress',
+    },
+    elevationRangeMeters: [ -100, 8_000 ],
+    presentations: [
+        { id: 'shaded', fragmentEntryPoint: 'fMain' },
+        { id: 'wireframe', fragmentEntryPoint: 'fWireframe' },
+    ],
+    initialPresentation: 'shaded',
+})
 // @ts-expect-error MapFieldLayer does not own resource scheduling.
 typedMapField.scheduler
 // @ts-expect-error MapFieldLayer does not own a GPU runtime.
 typedMapField.runtime
 void typedViewDemands
 void typedMapLibreView
+void typedTerrainRendererCreation
 declare const typedFrontierGpuState: VirtualRasterGpuState
 const typedFrontierPolicy: GpuTileFrontierPolicy = gpuTileFrontierPolicy({
     refineErrorPixels: 2,

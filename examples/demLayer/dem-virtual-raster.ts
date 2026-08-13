@@ -295,6 +295,7 @@ export async function createDemVirtualRasterRuntime({
             inspect: () => {
                 const facts = virtualRaster.inspect()
                 return Object.freeze({
+                    ...facts,
                     contentVersion: model.manifest.contentVersion,
                     coordinateEncoding: model.addressCodec.positionCodec.facts.encoding,
                     coordinateBits: model.addressCodec.coordinateBits,
@@ -304,13 +305,8 @@ export async function createDemVirtualRasterRuntime({
                     sourceOrientation: model.manifest.pixelOrientation.source,
                     cachePolicy: cachePolicy.mode,
                     cacheConfiguration: cachePolicy,
-                    demandStopped: facts.demandStopped,
                     stopped,
-                    residency: facts.residency,
-                    scheduler: facts.scheduler,
-                    demand: facts.demand,
                     worker: requestExecutor!.inspect(),
-                    gpu: facts.gpu,
                 })
             },
         })

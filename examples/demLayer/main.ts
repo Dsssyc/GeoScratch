@@ -6,12 +6,16 @@ import type {
     SurfaceSize,
 } from 'geoscratch/scratch'
 import {
-    DEM_STAGE_ORDER,
-    TERRAIN_EXAGGERATION,
-    createDemLayer,
-} from './dem-layer.ts'
+    createTerrainFieldRenderer,
+    mapFieldLayer,
+} from 'geoscratch/geo'
 import { createDemLifecycle } from './dem-lifecycle.ts'
-import { createDemMap, readDemCameraState, waitForDemMap } from './dem-map.ts'
+import {
+    createDemMap,
+    demMapViewAdapter,
+    readDemCameraState,
+    waitForDemMap,
+} from './dem-map.ts'
 import type { DemMap } from './dem-map.ts'
 import {
     createDemVirtualRasterRuntime,
@@ -22,7 +26,6 @@ import { readDemCachePolicy } from './dem-cache-policy.ts'
 import type { DemCachePolicy } from './dem-tile-protocol.ts'
 import terrainShader from './shaders/terrain-mesh.wgsl?raw'
 
-type DemLayer = Awaited<ReturnType<typeof createDemLayer>>
 type DemLifecycle = ReturnType<typeof createDemLifecycle>
 type CleanupReport = Awaited<ReturnType<DemLifecycle['dispose']>>
 type FrameProvenance = Awaited<ReturnType<DemLayer['renderFrame']>>['provenance']
@@ -39,6 +42,10 @@ type PageSettlement = Promise<FailureProof | CleanupProof | void | undefined>
 type PageContext = { graph: DemLayer; runtime: GPURuntime }
 type CameraMoveOptions = Parameters<DemMap['jumpTo']>[0]
 type DemCameraView = ReturnType<typeof readDemCameraState>
+type DemTerrainPresentation = 'shaded' | 'tile-wireframe'
+type DemLayer = Awaited<ReturnType<
+    typeof createTerrainFieldRenderer<DemCameraView, DemTerrainPresentation>
+>>
 type FrameWork = {
     scheduled: number
     completed: number
@@ -67,6 +74,7 @@ declare global {
 
 const canvas = document.getElementById('GPUFrame') as HTMLCanvasElement
 const controlPanelContainer = document.getElementById('DemControlPanel') as HTMLElement
+const TERRAIN_EXAGGERATION = 50
 const FAILURE_RUNTIME_EVIDENCE_MAX_BYTES = 512 * 1024
 const FAILURE_CAPTURE_BOUNDS = Object.freeze({
     maxOperations: 1,
@@ -191,20 +199,46 @@ async function main(lifetime: DemLifecycle, proof: FailureProofController) {
         label: 'dem-virtual-raster-streaming',
         run: virtualRaster.stopStreaming,
     })
-    const graph = await createDemLayer({
+    const fieldLayer = mapFieldLayer({
+        id: 'dem-height-layer',
+        field: virtualRaster.field,
+        representation: virtualRaster.representation,
+        spatialProfile: virtualRaster.spatialProfile,
+        viewAdapter: demMapViewAdapter,
+        demandProducer: virtualRaster.viewDemandProducer,
+    })
+    const elevationRangeMeters = [
+        virtualRaster.manifest.offset,
+        virtualRaster.manifest.offset + virtualRaster.manifest.scale * 255,
+    ].sort((left, right) => left - right) as [number, number]
+    proof.beforeTerrainShaderModule(runtime)
+    const graph = await createTerrainFieldRenderer({
         runtime,
         surface,
+        fieldLayer,
         virtualRaster,
         size: initialSize,
-        shaders: {
-            terrain: terrainShader,
+        shader: proof.terrainShader(terrainShader),
+        fieldSampling: {
+            namespace: 'DemHeight',
+            addressNamespace: 'DemAddress',
+            transitionTexels: 16,
         },
-        terrainPresentation: tileWireframeEnabled ? 'tile-wireframe' : 'shaded',
-        failureProof: proof,
+        elevationRangeMeters,
+        exaggeration: TERRAIN_EXAGGERATION,
+        presentations: [
+            { id: 'shaded', fragmentEntryPoint: 'fMain', label: 'DEM terrain pipeline' },
+            {
+                id: 'tile-wireframe',
+                fragmentEntryPoint: 'fTileWireframe',
+                label: 'DEM tile wireframe pipeline',
+            },
+        ],
+        initialPresentation: tileWireframeEnabled ? 'tile-wireframe' : 'shaded',
     })
     lifetime.deferRelease({ label: 'dem-gpu-frontier', run: graph.dispose })
     lifetime.assertActive()
-    const minimumTerrainElevationMeters = virtualRaster.manifest.offset * TERRAIN_EXAGGERATION
+    const minimumTerrainElevationMeters = elevationRangeMeters[0] * TERRAIN_EXAGGERATION
 
     const initialized = await graph.initialize()
     await lifetime.track(initialized.observation, 'dem-initial-submission')
@@ -245,10 +279,10 @@ async function main(lifetime: DemLifecycle, proof: FailureProofController) {
     }
 
     applyTerrainPresentation = enabled => {
-        graph.setTerrainPresentation(enabled ? 'tile-wireframe' : 'shaded')
+        graph.setPresentation(enabled ? 'tile-wireframe' : 'shaded')
         requestRender()
     }
-    graph.setTerrainPresentation(tileWireframeEnabled ? 'tile-wireframe' : 'shaded')
+    graph.setPresentation(tileWireframeEnabled ? 'tile-wireframe' : 'shaded')
     lifetime.deferStop({
         label: 'dem-terrain-presentation-control',
         run: () => { applyTerrainPresentation = undefined },
@@ -395,8 +429,8 @@ function publishGraphFacts(runtime: GPURuntime, graph: DemLayer) {
 
     const contract = graph.contractFacts()
     canvas.dataset.proofMode = String(proofMode)
-    canvas.dataset.stageOrder = DEM_STAGE_ORDER.join('|')
-    canvas.dataset.stageCount = String(DEM_STAGE_ORDER.length)
+    canvas.dataset.stageOrder = contract.stageOrder.join('|')
+    canvas.dataset.stageCount = String(contract.stageOrder.length)
     canvas.dataset.stableIdentityCount = String(graph.stableIdentities.length)
     canvas.dataset.stableIdentityHash = graph.stableIdentityHash
     canvas.dataset.graphContract = JSON.stringify(contract)
