@@ -15,7 +15,6 @@ import {
     createDemVirtualRasterModel,
     parseDemVirtualRasterManifest,
 } from '../examples/demLayer/dem-virtual-raster.ts'
-import { createDemLifecycle } from '../examples/demLayer/dem-lifecycle.ts'
 import { demMapViewAdapter } from '../examples/demLayer/dem-map.ts'
 import {
     createFakeCanvas,
@@ -340,7 +339,6 @@ describe('DEM Layer clean cut', () => {
             layerSource,
             mainSource,
             read('examples', 'demLayer', 'dem-map.ts'),
-            read('examples', 'demLayer', 'dem-lifecycle.ts'),
         ].join('\n')
 
         for (const call of [
@@ -376,7 +374,9 @@ describe('DEM Layer clean cut', () => {
     it('locks the finite initialization faults and required migration documentation', () => {
 
         const mainSource = read('examples', 'demLayer', 'main.ts')
-        const lifecycleCreation = mainSource.indexOf('const pageLifetime = createDemLifecycle()')
+        const lifecycleCreation = mainSource.indexOf(
+            "const pageLifetime = new LifetimeScope({ label: 'dem-page' })"
+        )
         const pageHideRegistration = mainSource.indexOf("window.addEventListener('pagehide'")
         const initializationStart = mainSource.indexOf(
             'Promise.resolve().then(() => main(pageLifetime, failureProof))'
@@ -420,191 +420,6 @@ describe('DEM Layer clean cut', () => {
             expect(source).not.to.include('DEM Layer (legacy)')
             expect(source).not.to.include('m_demLayer')
         }
-    })
-
-    it('settles work and releases page-owned resources in explicit order at most once', async() => {
-
-        const actions = []
-        const lifecycle = createDemLifecycle()
-        let settleObservation
-        const observation = new Promise(resolve => { settleObservation = resolve })
-        const map = { remove: () => { actions.push('map') } }
-        const runtime = { dispose: () => { actions.push('runtime') } }
-
-        lifecycle.deferStop({ label: 'scheduler', run: () => { actions.push('stop') } })
-        lifecycle.ownMap(map)
-        lifecycle.ownRuntime(runtime)
-        lifecycle.track(observation.then(() => { actions.push('settled') }), 'frame')
-
-        const firstDisposal = lifecycle.dispose()
-        const secondDisposal = lifecycle.dispose()
-        expect(secondDisposal).to.equal(firstDisposal)
-        settleObservation()
-        const report = await firstDisposal
-
-        expect(actions).to.deep.equal([ 'stop', 'settled', 'map', 'runtime' ])
-        expect(report).to.include({
-            cleanupInvocationCount: 1,
-            pendingObservationsBefore: 1,
-            pendingObservationsAfter: 0,
-            retainedActionCount: 0,
-        })
-        expect(report.cleanupFailures).to.deep.equal([])
-        expect(lifecycle.snapshot()).to.deep.include({
-            state: 'disposed',
-            pendingObservationCount: 0,
-            ownsMap: false,
-            ownsRuntime: false,
-        })
-    })
-
-    it('releases a runtime that settles after disposal and preserves the primary failure', async() => {
-
-        const lifecycle = createDemLifecycle()
-        let resolveRuntime
-        let lateRuntimeDisposals = 0
-        const acquisition = new Promise(resolve => { resolveRuntime = resolve })
-        const primaryFailure = new Error('primary DEM failure')
-        const guarded = lifecycle.acquireRuntime(acquisition)
-
-        const disposal = lifecycle.dispose(primaryFailure)
-        resolveRuntime({ dispose: () => { lateRuntimeDisposals++ } })
-
-        let guardedFailure
-        try {
-            await guarded
-        } catch (error) {
-            guardedFailure = error
-        }
-        const report = await disposal
-
-        expect(guardedFailure).to.be.instanceOf(Error)
-        expect(guardedFailure.message).to.equal('DEM lifecycle disposal has started')
-        expect(lateRuntimeDisposals).to.equal(1)
-        expect(report.primaryFailure).to.equal(primaryFailure)
-        expect(report.cleanupActions).to.deep.include({
-            phase: 'release',
-            label: 'late-scratch-runtime',
-            status: 'fulfilled',
-        })
-        expect(report.cleanupInvocationCount).to.equal(1)
-    })
-
-    it('settles tracked initialization and resize work before releasing page owners', async() => {
-
-        const actions = []
-        const lifecycle = createDemLifecycle()
-        let resolveInitialization
-        let resolveResize
-        const initialization = new Promise(resolve => { resolveInitialization = resolve })
-        const resize = new Promise(resolve => { resolveResize = resolve })
-        lifecycle.track(
-            initialization.then(() => { actions.push('initialization') }),
-            'dem-page-initialization'
-        )
-        lifecycle.track(
-            resize.then(() => { actions.push('resize') }),
-            'dem-render-task-1'
-        )
-        lifecycle.ownMap({ remove: () => { actions.push('map') } })
-        lifecycle.ownRuntime({ dispose: () => { actions.push('runtime') } })
-
-        const disposal = lifecycle.dispose()
-        await Promise.resolve()
-        expect(actions).to.deep.equal([])
-        resolveInitialization()
-        await Promise.resolve()
-        expect(actions).to.deep.equal([ 'initialization' ])
-        resolveResize()
-        const report = await disposal
-
-        expect(actions).to.deep.equal([
-            'initialization',
-            'resize',
-            'map',
-            'runtime',
-        ])
-        expect(report).to.include({
-            pendingObservationsBefore: 2,
-            pendingObservationsAfter: 0,
-            cleanupInvocationCount: 1,
-        })
-        expect(report.cleanupFailures).to.deep.equal([])
-    })
-
-    it('drains child work registered by a tracked task during disposal', async() => {
-
-        const lifecycle = createDemLifecycle()
-        const actions = []
-        let resumeParent
-        let resolveChild
-        const parentGate = new Promise(resolve => { resumeParent = resolve })
-        const child = new Promise(resolve => { resolveChild = resolve })
-        lifecycle.deferRelease({
-            label: 'runtime',
-            run: () => { actions.push('release') },
-        })
-        lifecycle.track((async() => {
-            await parentGate
-            await lifecycle.track(child, 'late-child')
-            actions.push('child-settled')
-        })(), 'parent')
-
-        let disposalSettled = false
-        const disposal = lifecycle.dispose().then(report => {
-            disposalSettled = true
-            return report
-        })
-        resumeParent()
-        await new Promise(resolve => setImmediate(resolve))
-
-        expect(disposalSettled).to.equal(false)
-        expect(actions).to.deep.equal([])
-        resolveChild()
-        const report = await disposal
-
-        expect(actions).to.deep.equal([ 'child-settled', 'release' ])
-        expect(report).to.include({
-            pendingObservationsBefore: 1,
-            pendingObservationsAfter: 0,
-        })
-        expect(report.cleanupFailures).to.deep.equal([])
-    })
-
-    it('does not duplicate a tracked primary failure as a cleanup failure', async() => {
-
-        const lifecycle = createDemLifecycle()
-        const primaryFailure = new Error('tracked initialization failed')
-        let rejectInitialization
-        const initialization = new Promise((resolve, reject) => {
-            rejectInitialization = reject
-        })
-        lifecycle.track(initialization, 'dem-page-initialization')
-
-        const disposal = lifecycle.dispose(primaryFailure)
-        rejectInitialization(primaryFailure)
-        const report = await disposal
-
-        expect(report.primaryFailure).to.equal(primaryFailure)
-        expect(report.cleanupFailures).to.deep.equal([])
-    })
-
-    it('reports cleanup failures without replacing the primary failure', async() => {
-
-        const lifecycle = createDemLifecycle()
-        const primaryFailure = new Error('terrain pipeline failed')
-        const cleanupFailure = new Error('map cleanup failed')
-        lifecycle.ownMap({ remove: () => { throw cleanupFailure } })
-
-        const report = await lifecycle.dispose(primaryFailure)
-
-        expect(report.primaryFailure).to.equal(primaryFailure)
-        expect(report.cleanupFailures).to.have.length(1)
-        expect(report.cleanupFailures[0]).to.include({
-            phase: 'release',
-            label: 'maplibre-map',
-            error: cleanupFailure,
-        })
     })
 
     it('preserves the DEM payload and enumerates every reachable WGSL correction', () => {

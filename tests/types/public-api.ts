@@ -89,6 +89,7 @@ declare const typedVideoElement: HTMLVideoElement
 declare const typedVideoFrame: VideoFrame
 declare const typedCanvasElement: HTMLCanvasElement
 declare const typedOffscreenCanvas: OffscreenCanvas
+declare const typedOwnedValue: { dispose(): void }
 declare const typedPipelineCreationReport: scr.PipelineCreationReport
 declare const typedBufferResourceDescriptor: scr.BufferResourceDescriptor
 declare const typedMappedBufferResourceDescriptor: scr.MappedBufferResourceDescriptor
@@ -145,6 +146,21 @@ const compatTextureUploadLayout: scratchCompat.TextureUploadLayout = typedTextur
 const compatTextureUploadOrigin: scratchCompat.TextureUploadOrigin = typedTextureUploadOrigin
 const compatTextureUploadSize: scratchCompat.TextureUploadSize = typedTextureUploadSize
 const typedPendingOperationKind: scr.GPUPendingOperationFact['kind'] = 'buffer-allocation'
+const typedLifetime = new scr.LifetimeScope({ label: 'typed-lifetime' })
+const typedLifetimeOwnedValue = typedLifetime.own(typedOwnedValue, {
+    label: 'typed-value',
+    release: value => value.dispose(),
+})
+const typedLifetimeAcquisition: Promise<typeof typedOwnedValue> = typedLifetime.acquire(
+    Promise.resolve(typedOwnedValue),
+    { label: 'typed-async-value', release: value => value.dispose() },
+)
+const typedLifetimeReport: Promise<scr.LifetimeCleanupReport> = typedLifetime.dispose()
+const typedLifetimeSnapshot: scr.LifetimeScopeSnapshot = typedLifetime.snapshot()
+void typedLifetimeOwnedValue
+void typedLifetimeAcquisition
+void typedLifetimeReport
+void typedLifetimeSnapshot
 // @ts-expect-error Disposal records are instantaneous and cannot be pending
 const invalidPendingOperationKind: scr.GPUPendingOperationFact['kind'] = 'resource-disposal'
 // @ts-expect-error Program Pipeline-fact snapshots are package-internal preparation artifacts

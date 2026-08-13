@@ -17,6 +17,20 @@ export type {
     ScratchDiagnosticSubject,
     ScratchDiagnosticSuggestion,
 } from './diagnostics/index.js'
+export { LifetimeScope } from './lifetime.js'
+export type {
+    LifetimeActionRun,
+    LifetimeCleanupAction,
+    LifetimeCleanupFailure,
+    LifetimeCleanupPhase,
+    LifetimeCleanupReport,
+    LifetimeDeferredAction,
+    LifetimeOwnership,
+    LifetimeScopeOptions,
+    LifetimeScopeSnapshot,
+    LifetimeState,
+    LifetimeStoppedError,
+} from './lifetime.js'
 export type { GPUDiagnostic, GPUDiagnosticPhase } from './gpu/diagnostics.js'
 export {
     PersistentCache,

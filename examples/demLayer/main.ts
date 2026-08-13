@@ -1,4 +1,4 @@
-import { GPURuntime } from 'geoscratch/scratch'
+import { GPURuntime, LifetimeScope } from 'geoscratch/scratch'
 import type {
     GPUDiagnosticCapture,
     GPUDiagnosticCaptureReport,
@@ -9,7 +9,6 @@ import {
     createTerrainFieldRenderer,
     mapFieldLayer,
 } from 'geoscratch/geo'
-import { createDemLifecycle } from './dem-lifecycle.ts'
 import {
     createDemMap,
     demMapViewAdapter,
@@ -26,7 +25,7 @@ import { readDemCachePolicy } from './dem-cache-policy.ts'
 import type { DemCachePolicy } from './dem-tile-protocol.ts'
 import terrainShader from './shaders/terrain-mesh.wgsl?raw'
 
-type DemLifecycle = ReturnType<typeof createDemLifecycle>
+type DemLifecycle = LifetimeScope
 type CleanupReport = Awaited<ReturnType<DemLifecycle['dispose']>>
 type FrameProvenance = Awaited<ReturnType<DemLayer['renderFrame']>>['provenance']
 type FailureConfiguration = Readonly<{ scenario?: string }>
@@ -106,7 +105,7 @@ const failureConfiguration = Object.freeze({
         ? requestedFailureScenario
         : undefined,
 })
-const pageLifetime = createDemLifecycle()
+const pageLifetime = new LifetimeScope({ label: 'dem-page' })
 let tileWireframeEnabled = preparedControlPanel.renderingPreference.tileWireframe
 let applyTerrainPresentation: ((enabled: boolean) => void) | undefined
 const controlPanel = preparedControlPanel.mount({
@@ -145,12 +144,15 @@ void pageInitialization.catch(error => {
 async function main(lifetime: DemLifecycle, proof: FailureProofController) {
 
     proof.assertConfiguration()
-    const map = lifetime.ownMap(createDemMap(canvas, { proof: proofMode }))
+    const map = lifetime.own(createDemMap(canvas, { proof: proofMode }), {
+        label: 'maplibre-map',
+        release: value => value.remove(),
+    })
     proof.mapAcquired()
     proof.reach(FAILURE_SCENARIOS[0])
 
     const mapReady = waitForDemMap(map, lifetime.signal)
-    const runtimeReady = lifetime.acquireRuntime(GPURuntime.create({
+    const runtimeReady = lifetime.acquire(GPURuntime.create({
         label: 'DEM Layer runtime',
         powerPreference: 'high-performance',
         diagnostics: {
@@ -160,7 +162,10 @@ async function main(lifetime: DemLifecycle, proof: FailureProofController) {
             submissionScopes: 'summary',
             maxPendingNativeObservations: 8,
         },
-    }))
+    }), {
+        label: 'scratch-runtime',
+        release: value => value.dispose(),
+    })
     const manifestReady = lifetime.track(
         fetchDemVirtualRasterManifest(tileServerUrl, lifetime.signal),
         'dem-virtual-raster-manifest'

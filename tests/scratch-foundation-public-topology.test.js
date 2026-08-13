@@ -26,6 +26,7 @@ const scratchValues = [
     'GPURuntime',
     'GPURuntimeDiagnostics',
     'LayoutCodec',
+    'LifetimeScope',
     'MappedBufferLease',
     'MappedReadbackLease',
     'PersistentCache',
