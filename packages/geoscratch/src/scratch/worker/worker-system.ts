@@ -13,8 +13,9 @@ import type {
     WorkerRemoteError,
     WorkerTaskOutboundMessage,
 } from './protocol.js'
-import type { WorkerModuleContract } from './module.js'
+import type { WorkerModuleContractIdentity } from './module.js'
 import { isWorkerModuleContract } from './module.js'
+import { recommendedWorkerCount } from './utilities.js'
 
 type WorkerFailure = ScratchDiagnosticError<WorkerDiagnostic>
 
@@ -43,10 +44,10 @@ export type WorkerModuleDescriptor = Readonly<{
     url: URL
 }>
 
-export type WorkerModuleReference = WorkerModuleDescriptor | WorkerModuleContract
+export type WorkerModuleReference = WorkerModuleDescriptor | WorkerModuleContractIdentity
 
 export type WorkerModuleResolver = Readonly<{
-    resolve(contract: WorkerModuleContract): WorkerModuleDescriptor
+    resolve(contract: WorkerModuleContractIdentity): WorkerModuleDescriptor
 }>
 
 export type WorkerEndpoint = {
@@ -387,7 +388,15 @@ export class WorkerContextHandle<State = unknown> {
     /** @internal */
     async disposeFromGroup(): Promise<void> {
 
-        await this.dispose()
+        try {
+            await this.dispose()
+        } finally {
+            if (this.#state !== 'disposed') {
+                this.#state = 'disposed'
+                this.#host.contextIds.delete(this.#id)
+                this.#group.removeContext(this)
+            }
+        }
     }
 
     async #dispose(): Promise<void> {
@@ -1162,7 +1171,10 @@ export class WorkerSystem {
     constructor(options: WorkerSystemOptions = {}) {
 
         this.id = `worker-system-${++systemSequence}`
-        this.maxWorkers = positiveInteger(options.maxWorkers ?? defaultWorkerCount(), 'maxWorkers')
+        this.maxWorkers = positiveInteger(
+            options.maxWorkers ?? recommendedWorkerCount({ reserve: 0 }),
+            'maxWorkers'
+        )
         this.maxHistory = nonNegativeInteger(options.maxHistory ?? 64, 'maxHistory')
         this.agingIntervalMs = positiveInteger(options.agingIntervalMs ?? 2_000, 'agingIntervalMs')
         this.bootstrapUrl = options.bootstrapUrl ?? new URL('./worker-bootstrap.js', import.meta.url)
@@ -1810,7 +1822,7 @@ function captureModuleResolver(
         )
     }
     return Object.freeze({
-        resolve: (contract: WorkerModuleContract) => resolve.call(resolver, contract),
+        resolve: (contract: WorkerModuleContractIdentity) => resolve.call(resolver, contract),
     })
 }
 
@@ -2075,12 +2087,6 @@ function positiveSafeInteger(value: unknown): value is number {
 function nonNegativeSafeInteger(value: unknown): value is number {
 
     return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
-}
-
-function defaultWorkerCount(): number {
-
-    const concurrency = typeof navigator === 'undefined' ? 4 : navigator.hardwareConcurrency || 4
-    return Math.max(1, Math.min(concurrency, 4))
 }
 
 function defaultWorkerFactory(

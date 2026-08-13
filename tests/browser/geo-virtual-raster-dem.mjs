@@ -742,16 +742,22 @@ function validateProof(value, processState) {
             worker?.cache?.mode !== 'persistent' ||
             worker?.cache?.payloadBytes > 128 * 1024 * 1024 ||
             worker?.cache?.entryCount > 2048 ||
-            phaseBudget?.network?.limit !== 2 || phaseBudget?.decode?.limit !== 1 ||
-            phaseBudget?.network?.activeCount !== 0 ||
-            phaseBudget?.network?.queuedCount !== 0 ||
-            phaseBudget?.decode?.activeCount !== 0 || phaseBudget?.decode?.queuedCount !== 0 ||
-            phaseBudget?.network?.maxActiveCount < 1 ||
-            phaseBudget?.network?.maxActiveCount > phaseBudget?.network?.limit ||
-            phaseBudget?.decode?.maxActiveCount < 1 ||
-            phaseBudget?.decode?.maxActiveCount > phaseBudget?.decode?.limit ||
-            phaseBudget?.network?.maxQueuedCount > 24 ||
-            phaseBudget?.decode?.maxQueuedCount > 24 ||
+            phaseBudget?.lanes?.network?.limit !== 2 ||
+            phaseBudget?.lanes?.decode?.limit !== 1 ||
+            phaseBudget?.lanes?.network?.activeCount !== 0 ||
+            phaseBudget?.lanes?.network?.queuedCount !== 0 ||
+            phaseBudget?.lanes?.decode?.activeCount !== 0 ||
+            phaseBudget?.lanes?.decode?.queuedCount !== 0 ||
+            phaseBudget?.lanes?.network?.maxActiveCount < 1 ||
+            phaseBudget?.lanes?.network?.maxActiveCount > phaseBudget?.lanes?.network?.limit ||
+            phaseBudget?.lanes?.decode?.maxActiveCount < 1 ||
+            phaseBudget?.lanes?.decode?.maxActiveCount > phaseBudget?.lanes?.decode?.limit ||
+            phaseBudget?.lanes?.network?.maxQueuedCount > 24 ||
+            phaseBudget?.lanes?.decode?.maxQueuedCount > 24 ||
+            worker?.workerFactsObservation !== 'live' ||
+            worker?.contextPool?.state !== 'active' ||
+            worker?.contextPool?.systemOwnership !== 'owned' ||
+            worker?.contextPool?.contexts?.some(context => context.state !== 'active') !== false ||
             worker?.group?.queuedTaskCount !== 0 || worker?.group?.activeTaskCount !== 0 ||
             worker?.group?.failedTaskCount !== 0 ||
             worker?.group?.history?.length > 64 || worker?.system?.queuedTaskCount !== 0 ||
@@ -963,14 +969,21 @@ function validateProof(value, processState) {
         terminalVirtual?.worker?.senderDecodedByteLength !== 0 ||
         terminalVirtual?.worker?.cache?.mode !== 'persistent' ||
         terminalVirtual?.worker?.phaseBudget?.disposed !== true ||
-        terminalVirtual?.worker?.phaseBudget?.network?.activeCount !== 0 ||
-        terminalVirtual?.worker?.phaseBudget?.network?.queuedCount !== 0 ||
-        terminalVirtual?.worker?.phaseBudget?.decode?.activeCount !== 0 ||
-        terminalVirtual?.worker?.phaseBudget?.decode?.queuedCount !== 0 ||
+        terminalVirtual?.worker?.phaseBudget?.lanes?.network?.activeCount !== 0 ||
+        terminalVirtual?.worker?.phaseBudget?.lanes?.network?.queuedCount !== 0 ||
+        terminalVirtual?.worker?.phaseBudget?.lanes?.decode?.activeCount !== 0 ||
+        terminalVirtual?.worker?.phaseBudget?.lanes?.decode?.queuedCount !== 0 ||
+        terminalVirtual?.worker?.workerFactsObservation !==
+            'last-observed-before-disposal' ||
         terminalVirtual?.worker?.workers?.some(worker => (
-            worker.cache.mode !== 'persistent' || worker.cache.state !== 'disposed' ||
+            worker.cache.mode !== 'persistent' ||
             worker.cache.activeOperationCount !== 0 || worker.pendingCandidateCount !== 0 ||
             worker.senderDecodedByteLength !== 0
+        )) !== false ||
+        terminalVirtual?.worker?.contextPool?.state !== 'disposed' ||
+        terminalVirtual?.worker?.contextPool?.disposalMode !== 'remote-finalized' ||
+        terminalVirtual?.worker?.contextPool?.contexts?.some(context => (
+            context.state !== 'disposed'
         )) !== false ||
         terminalVirtual?.worker?.system?.disposed !== true ||
         terminalVirtual?.worker?.system?.workerCount !== 0 ||
@@ -1183,9 +1196,14 @@ function summarizeProof(value) {
                 senderDecodedByteLength: terminal.worker.senderDecodedByteLength,
                 cacheBytes: terminal.worker.cache.payloadBytes,
                 phaseBudget: terminal.worker.phaseBudget,
-                disposedCacheCount: terminal.worker.workers.filter(worker => (
-                    worker.cache.state === 'disposed'
-                )).length,
+                workerFactsObservation: terminal.worker.workerFactsObservation,
+                contextPool: {
+                    state: terminal.worker.contextPool.state,
+                    disposalMode: terminal.worker.contextPool.disposalMode,
+                    disposedContextCount: terminal.worker.contextPool.contexts.filter(context => (
+                        context.state === 'disposed'
+                    )).length,
+                },
                 system: {
                     disposed: terminal.worker.system.disposed,
                     workerCount: terminal.worker.system.workerCount,

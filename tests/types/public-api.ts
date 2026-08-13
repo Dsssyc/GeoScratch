@@ -733,6 +733,56 @@ const typedWorkerModule = typedWorkerContract.implement({
         },
     },
 })
+type TypedDeclaredWorkerProtocol = workers.WorkerModuleProtocol<
+    Readonly<{
+        double: workers.WorkerOperationProtocol<{ value: number }, number>
+    }>,
+    Readonly<{
+        init: { value: number }
+        operations: Readonly<{
+            increment: workers.WorkerOperationProtocol<{ by: number }, number>
+            transfer: workers.WorkerOperationProtocol<null, ArrayBuffer>
+        }>
+    }>
+>
+const typedDeclaredWorkerContract =
+    workers.defineWorkerModuleContract<TypedDeclaredWorkerProtocol>({
+        id: 'typed-declared-worker-module',
+        version: '1',
+    })
+const typedDeclaredWorkerModule = typedDeclaredWorkerContract.implement({
+    operations: {
+        double(input) {
+
+            return input.value * 2
+        },
+    },
+    context: {
+        create(init) {
+
+            return { value: init.value }
+        },
+        operations: {
+            increment(state, input) {
+
+                state.value += input.by
+                return state.value
+            },
+            transfer() {
+
+                const buffer = new ArrayBuffer(4)
+                return workers.transferWorkerResult(buffer, [ buffer ])
+            },
+        },
+    },
+})
+const typedWorkerCount: number = workers.recommendedWorkerCount({
+    hardwareConcurrency: 8,
+    reserve: 1,
+    maximum: 4,
+})
+const typedRemoteWorkerFacts: workers.WorkerRemoteErrorFacts | undefined =
+    workers.workerRemoteErrorFacts(new Error('not remote'))
 const typedWorkerBuild: workers.WorkerModuleBuild = workers.defineWorkerModuleBuild({
     outDir: './public/workers',
     modules: [ { contract: typedWorkerContract, entry: './typed-worker-module.ts' } ],
@@ -758,6 +808,36 @@ const typedWorkerSystem = new workers.WorkerSystem({
     maxWorkers: 2,
     moduleResolver: typedWorkerResolver,
 })
+const typedContextPoolCreation: Promise<workers.WorkerContextPool<
+    { value: number },
+    TypedDeclaredWorkerProtocol['context']['operations']
+>> = workers.WorkerContextPool.create<
+    TypedDeclaredWorkerProtocol['context']['init'],
+    { value: number },
+    TypedDeclaredWorkerProtocol['context']['operations']
+>({
+        id: 'typed-context-pool',
+        system: { ownership: 'borrowed', system: typedWorkerSystem },
+        module: typedDeclaredWorkerContract,
+        size: 1,
+        maxQueuedTasks: 4,
+        maxActiveTasks: 1,
+        idleTimeoutMs: 1_000,
+        context: () => ({ key: 'typed-context', init: { value: 1 } }),
+    })
+void typedContextPoolCreation.then(pool => {
+
+    const task: workers.WorkerTaskHandle<number> = pool.run(
+        0,
+        'increment',
+        { by: 1 }
+    )
+    // @ts-expect-error The retained context protocol rejects unknown operations.
+    pool.run(0, 'missing', null)
+    // @ts-expect-error The retained context protocol checks operation input shapes.
+    pool.run(0, 'increment', { value: 1 })
+    void task
+})
 const typedPhaseBudget: workers.TaskPhaseBudget<'network' | 'decode'> =
     new workers.TaskPhaseBudget({
         id: 'typed-worker-phases',
@@ -779,7 +859,7 @@ const typedWorkerGroup: workers.WorkerGroup = typedWorkerSystem.createGroup({
 })
 const typedVirtualRasterWorkerExecutor = geoApi.createVirtualRasterWorkerExecutor({
     id: 'typed-raster-workers',
-    system: typedWorkerSystem,
+    system: { ownership: 'borrowed', system: typedWorkerSystem },
     module: typedWorkerContract,
     workerCount: 1,
     maxRequests: 8,
@@ -789,7 +869,6 @@ const typedVirtualRasterWorkerExecutor = geoApi.createVirtualRasterWorkerExecuto
         candidateId: `typed-${sequence}`,
         page: demand.page,
     }),
-    initialFacts: () => ({ requests: 0 }),
 })
 const typedWorkerTask: workers.WorkerTaskHandle<number> = typedWorkerGroup.run<
     { value: number },

@@ -17,9 +17,17 @@ export type {
     WorkerMaybePromise,
     WorkerModuleDefinition,
     WorkerModuleContract,
+    WorkerModuleContractIdentity,
     WorkerModuleImplementation,
+    WorkerModuleProtocol,
+    WorkerNoOperations,
     WorkerOperation,
     WorkerOperationContext,
+    WorkerOperationProtocol,
+    WorkerOperationProtocolInput,
+    WorkerOperationProtocolMap,
+    WorkerOperationProtocolOutput,
+    WorkerContextProtocol,
     WorkerTransferResult,
 } from './module.js'
 export { defineWorkerModuleBuild } from './module-build.js'
@@ -72,3 +80,17 @@ export type {
     WorkerTaskPriorityClass,
     WorkerTaskState,
 } from './worker-system.js'
+export { WorkerContextPool } from './context-pool.js'
+export type {
+    WorkerContextPoolDescriptor,
+    WorkerContextPoolDisposalMode,
+    WorkerContextPoolEntry,
+    WorkerContextPoolFacts,
+    WorkerContextPoolSystem,
+} from './context-pool.js'
+export {
+    recommendedWorkerCount,
+    workerRemoteErrorCode,
+    workerRemoteErrorFacts,
+} from './utilities.js'
+export type { RecommendedWorkerCountOptions } from './utilities.js'

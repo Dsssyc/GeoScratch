@@ -258,8 +258,9 @@ export type {
     VirtualRasterWorkerExecutorDescriptor,
     VirtualRasterWorkerExecutorFacts,
     VirtualRasterWorkerLookupResult,
-    VirtualRasterWorkerOperationNames,
     VirtualRasterWorkerPhase,
+    VirtualRasterWorkerModuleProtocol,
+    VirtualRasterWorkerProtocol,
 } from './virtual-raster-worker-executor.js'
 export {
     createVirtualRasterDemandController,

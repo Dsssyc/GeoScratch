@@ -2981,7 +2981,7 @@
           "packages/geoscratch/src/scratch/worker/module.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/worker/module.ts:84"
+          "packages/geoscratch/src/scratch/worker/module.ts:190"
         ],
         "summary": "Validates and freezes one Worker implementation with optional retained context operations.",
         "declaration": "Function defineWorkerModule",
@@ -3015,12 +3015,12 @@
           "packages/geoscratch/src/scratch/worker/module.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/worker/module.ts:123"
+          "packages/geoscratch/src/scratch/worker/module.ts:229"
         ],
         "summary": "Creates a stable typed identity shared by Worker callers, implementations, and builds.",
         "declaration": "Function defineWorkerModuleContract",
         "signatures": [
-          "defineWorkerModuleContract(identity: Readonly<{ id: string; version: string }>): WorkerModuleContract"
+          "defineWorkerModuleContract<Protocol extends Readonly<{ context: Readonly<{ init: unknown; operations: Operations }> | undefined; operations: Operations }> | undefined = undefined>(identity: Readonly<{ id: string; version: string }>): WorkerModuleContract<Protocol>"
         ]
       },
       {
@@ -10697,6 +10697,37 @@
         "declaration": "type ReadbackState = \"requested\" | \"scheduled\" | \"submitted\" | \"mapping\" | \"mapped\" | \"ready\" | \"consumed\" | \"cancelled\" | \"failed\" | \"disposed\""
       },
       {
+        "id": "geoscratch/scratch#recommendedWorkerCount",
+        "name": "recommendedWorkerCount",
+        "kind": "Function",
+        "source": "packages/geoscratch/src/scratch/worker/utilities.ts",
+        "sources": [
+          "packages/geoscratch/src/scratch/worker/utilities.ts"
+        ],
+        "locations": [
+          "packages/geoscratch/src/scratch/worker/utilities.ts:13"
+        ],
+        "summary": "Derives a bounded Worker count from explicit or host-reported concurrency facts.",
+        "declaration": "Function recommendedWorkerCount",
+        "signatures": [
+          "recommendedWorkerCount(options: RecommendedWorkerCountOptions = {}): number"
+        ]
+      },
+      {
+        "id": "geoscratch/scratch#RecommendedWorkerCountOptions",
+        "name": "RecommendedWorkerCountOptions",
+        "kind": "Type Alias",
+        "source": "packages/geoscratch/src/scratch/worker/utilities.ts",
+        "sources": [
+          "packages/geoscratch/src/scratch/worker/utilities.ts"
+        ],
+        "locations": [
+          "packages/geoscratch/src/scratch/worker/utilities.ts:5"
+        ],
+        "summary": "",
+        "declaration": "type RecommendedWorkerCountOptions = Readonly<{ hardwareConcurrency?: number; maximum?: number; minimum?: number; reserve?: number }>"
+      },
+      {
         "id": "geoscratch/scratch#RenderBundle",
         "name": "RenderBundle",
         "kind": "Class",
@@ -11555,7 +11586,7 @@
           "packages/geoscratch/src/scratch/worker/worker-system.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/worker/worker-system.ts:83"
+          "packages/geoscratch/src/scratch/worker/worker-system.ts:84"
         ],
         "summary": "",
         "declaration": "type ResolvedWorkerGroupOptions = Omit<WorkerGroupOptions, \"modules\"> & Readonly<{ modules: readonly WorkerModuleDescriptor[] }>"
@@ -16076,7 +16107,7 @@
           "packages/geoscratch/src/scratch/worker/module.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/worker/module.ts:157"
+          "packages/geoscratch/src/scratch/worker/module.ts:265"
         ],
         "summary": "Marks a Worker result and the unique transferable objects whose ownership moves with it.",
         "declaration": "Function transferWorkerResult",
@@ -16391,7 +16422,7 @@
           "packages/geoscratch/src/scratch/worker/diagnostics.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/worker/diagnostics.ts:44"
+          "packages/geoscratch/src/scratch/worker/diagnostics.ts:45"
         ],
         "summary": "",
         "declaration": "type WorkerCancellationKind = \"queued\" | \"cooperative\" | \"stale\" | \"hard\""
@@ -16405,10 +16436,10 @@
           "packages/geoscratch/src/scratch/worker/module.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/worker/module.ts:25"
+          "packages/geoscratch/src/scratch/worker/module.ts:64"
         ],
         "summary": "",
-        "declaration": "type WorkerContextDefinition<State = unknown, Init = never, Snapshot = unknown> = Readonly<{ operations: Readonly<Record<string, WorkerContextOperation<State, never, unknown>>>; create: any; dispose?: any; restore?: any; snapshot?: any }>"
+        "declaration": "type WorkerContextDefinition<State = unknown, Init = never, Snapshot = unknown, Operations extends Readonly<Record<string, WorkerContextOperation<State, never, unknown>>> = Readonly<Record<string, WorkerContextOperation<State, never, unknown>>>> = Readonly<{ operations: Operations; create: any; dispose?: any; restore?: any; snapshot?: any }>"
       },
       {
         "id": "geoscratch/scratch#WorkerContextFacts",
@@ -16419,7 +16450,7 @@
           "packages/geoscratch/src/scratch/worker/worker-system.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/worker/worker-system.ts:126"
+          "packages/geoscratch/src/scratch/worker/worker-system.ts:127"
         ],
         "summary": "",
         "declaration": "type WorkerContextFacts = Readonly<{ groupId: string; id: string; key: string; moduleId: string; moduleVersion: string; state: \"active\" | \"lost\" | \"disposed\"; workerId: string }>"
@@ -16433,7 +16464,7 @@
           "packages/geoscratch/src/scratch/worker/worker-system.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/worker/worker-system.ts:280"
+          "packages/geoscratch/src/scratch/worker/worker-system.ts:281"
         ],
         "summary": "Owns one retained module context pinned to a Worker host until disposal or host loss.",
         "declaration": "class WorkerContextHandle<State = unknown>",
@@ -16489,7 +16520,7 @@
           "packages/geoscratch/src/scratch/worker/worker-system.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/worker/worker-system.ts:119"
+          "packages/geoscratch/src/scratch/worker/worker-system.ts:120"
         ],
         "summary": "",
         "declaration": "type WorkerContextOpenDescriptor<Init> = Readonly<{ init: Init; key: string; module: string; restore?: unknown }>"
@@ -16503,10 +16534,162 @@
           "packages/geoscratch/src/scratch/worker/module.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/worker/module.ts:19"
+          "packages/geoscratch/src/scratch/worker/module.ts:58"
         ],
         "summary": "",
         "declaration": "type WorkerContextOperation<State = unknown, Input = never, Output = unknown> = (state: State, input: Input, context: WorkerOperationContext) => WorkerMaybePromise<Output>"
+      },
+      {
+        "id": "geoscratch/scratch#WorkerContextPool",
+        "name": "WorkerContextPool",
+        "kind": "Class",
+        "source": "packages/geoscratch/src/scratch/worker/context-pool.ts",
+        "sources": [
+          "packages/geoscratch/src/scratch/worker/context-pool.ts"
+        ],
+        "locations": [
+          "packages/geoscratch/src/scratch/worker/context-pool.ts:73"
+        ],
+        "summary": "Owns one fixed set of retained Worker contexts and optionally its WorkerSystem.",
+        "declaration": "class WorkerContextPool<State = unknown, Operations extends WorkerOperationProtocolMap = WorkerOperationProtocolMap>",
+        "members": [
+          {
+            "name": "create",
+            "kind": "Method",
+            "modifiers": [
+              "static"
+            ],
+            "summary": "",
+            "declaration": "Method create",
+            "signatures": [
+              "create<Init, State = unknown, Operations extends Readonly<Record<string, Readonly<{ input: unknown; output: unknown }>>> = Readonly<Record<string, Readonly<{ input: unknown; output: unknown }>>>>(descriptor: WorkerContextPoolDescriptor<Init>): Promise<WorkerContextPool<State, Operations>>"
+            ]
+          },
+          {
+            "name": "dispose",
+            "kind": "Method",
+            "modifiers": [],
+            "summary": "",
+            "declaration": "Method dispose",
+            "signatures": [
+              "dispose(): Promise<void>"
+            ]
+          },
+          {
+            "name": "inspect",
+            "kind": "Method",
+            "modifiers": [],
+            "summary": "",
+            "declaration": "Method inspect",
+            "signatures": [
+              "inspect(): WorkerContextPoolFacts"
+            ]
+          },
+          {
+            "name": "run",
+            "kind": "Method",
+            "modifiers": [],
+            "summary": "",
+            "declaration": "Method run",
+            "signatures": [
+              "run<Name extends string>(index: number, operation: Name, input: WorkerOperationProtocolInput<Operations[Name]>, options: Omit<WorkerTaskDescriptor<WorkerOperationProtocolInput<Operations[Name]>>, \"module\" | \"operation\" | \"input\"> = {}): WorkerTaskHandle<WorkerOperationProtocolOutput<Operations[Name]>>"
+            ]
+          },
+          {
+            "name": "snapshot",
+            "kind": "Method",
+            "modifiers": [],
+            "summary": "",
+            "declaration": "Method snapshot",
+            "signatures": [
+              "snapshot<Snapshot = State>(index: number): Promise<Snapshot>"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "geoscratch/scratch#WorkerContextPoolDescriptor",
+        "name": "WorkerContextPoolDescriptor",
+        "kind": "Type Alias",
+        "source": "packages/geoscratch/src/scratch/worker/context-pool.ts",
+        "sources": [
+          "packages/geoscratch/src/scratch/worker/context-pool.ts"
+        ],
+        "locations": [
+          "packages/geoscratch/src/scratch/worker/context-pool.ts:31"
+        ],
+        "summary": "",
+        "declaration": "type WorkerContextPoolDescriptor<Init> = Readonly<{ disposeGraceMs?: number; id: string; idleTimeoutMs: number; maxActiveTasks: number; maxQueuedTasks: number; module: WorkerModuleReference; size: number; system: WorkerContextPoolSystem; context: any }>"
+      },
+      {
+        "id": "geoscratch/scratch#WorkerContextPoolDisposalMode",
+        "name": "WorkerContextPoolDisposalMode",
+        "kind": "Type Alias",
+        "source": "packages/geoscratch/src/scratch/worker/context-pool.ts",
+        "sources": [
+          "packages/geoscratch/src/scratch/worker/context-pool.ts"
+        ],
+        "locations": [
+          "packages/geoscratch/src/scratch/worker/context-pool.ts:49"
+        ],
+        "summary": "",
+        "declaration": "type WorkerContextPoolDisposalMode = \"remote-finalized\" | \"remote-finalizer-failed\" | \"forced-pending-work\" | \"forced-timeout\""
+      },
+      {
+        "id": "geoscratch/scratch#WorkerContextPoolEntry",
+        "name": "WorkerContextPoolEntry",
+        "kind": "Type Alias",
+        "source": "packages/geoscratch/src/scratch/worker/context-pool.ts",
+        "sources": [
+          "packages/geoscratch/src/scratch/worker/context-pool.ts"
+        ],
+        "locations": [
+          "packages/geoscratch/src/scratch/worker/context-pool.ts:43"
+        ],
+        "summary": "",
+        "declaration": "type WorkerContextPoolEntry<Init> = Readonly<{ init: Init; key: string; restore?: unknown }>"
+      },
+      {
+        "id": "geoscratch/scratch#WorkerContextPoolFacts",
+        "name": "WorkerContextPoolFacts",
+        "kind": "Type Alias",
+        "source": "packages/geoscratch/src/scratch/worker/context-pool.ts",
+        "sources": [
+          "packages/geoscratch/src/scratch/worker/context-pool.ts"
+        ],
+        "locations": [
+          "packages/geoscratch/src/scratch/worker/context-pool.ts:55"
+        ],
+        "summary": "",
+        "declaration": "type WorkerContextPoolFacts = Readonly<{ contexts: readonly WorkerContextFacts[]; disposalMode?: WorkerContextPoolDisposalMode; disposeGraceMs: number; group: WorkerGroupFacts; id: string; kind: \"worker-context-pool\"; size: number; state: \"active\" | \"disposing\" | \"disposed\"; system: WorkerSystemFacts; systemOwnership: WorkerContextPoolSystem[\"ownership\"] }>"
+      },
+      {
+        "id": "geoscratch/scratch#WorkerContextPoolSystem",
+        "name": "WorkerContextPoolSystem",
+        "kind": "Type Alias",
+        "source": "packages/geoscratch/src/scratch/worker/context-pool.ts",
+        "sources": [
+          "packages/geoscratch/src/scratch/worker/context-pool.ts"
+        ],
+        "locations": [
+          "packages/geoscratch/src/scratch/worker/context-pool.ts:21"
+        ],
+        "summary": "",
+        "declaration": "type WorkerContextPoolSystem = Readonly<{ ownership: \"borrowed\"; system: WorkerSystem }> | Readonly<{ options?: WorkerSystemOptions; ownership: \"owned\" }>"
+      },
+      {
+        "id": "geoscratch/scratch#WorkerContextProtocol",
+        "name": "WorkerContextProtocol",
+        "kind": "Type Alias",
+        "source": "packages/geoscratch/src/scratch/worker/module.ts",
+        "sources": [
+          "packages/geoscratch/src/scratch/worker/module.ts"
+        ],
+        "locations": [
+          "packages/geoscratch/src/scratch/worker/module.ts:41"
+        ],
+        "summary": "",
+        "declaration": "type WorkerContextProtocol<Init = never, Operations extends WorkerOperationProtocolMap = WorkerOperationProtocolMap> = Readonly<{ init: Init; operations: Operations }>"
       },
       {
         "id": "geoscratch/scratch#WorkerDiagnostic",
@@ -16517,7 +16700,7 @@
           "packages/geoscratch/src/scratch/worker/diagnostics.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/worker/diagnostics.ts:58"
+          "packages/geoscratch/src/scratch/worker/diagnostics.ts:59"
         ],
         "summary": "",
         "declaration": "type WorkerDiagnostic = ScratchDiagnosticBase<\"worker\", WorkerDiagnosticCode, WorkerDiagnosticPhase, WorkerDiagnosticSubject> & WorkerDiagnosticFacts"
@@ -16534,7 +16717,7 @@
           "packages/geoscratch/src/scratch/worker/diagnostics.ts:20"
         ],
         "summary": "",
-        "declaration": "type WorkerDiagnosticCode = \"WORKER_MODULE_LOAD_FAILED\" | \"WORKER_MODULE_NOT_FOUND\" | \"WORKER_MANIFEST_INVALID\" | \"WORKER_MANIFEST_FETCH_FAILED\" | \"WORKER_OPERATION_NOT_FOUND\" | \"WORKER_TASK_CANCELLED\" | \"WORKER_TASK_FAILED\" | \"WORKER_TASK_STALE\" | \"WORKER_QUEUE_SATURATED\" | \"WORKER_TERMINATED\" | \"WORKER_CONTEXT_LOST\" | \"WORKER_TRANSFER_INVALID\" | \"WORKER_GROUP_DISPOSED\" | \"WORKER_SYSTEM_DISPOSED\" | \"WORKER_DESCRIPTOR_INVALID\""
+        "declaration": "type WorkerDiagnosticCode = \"WORKER_MODULE_LOAD_FAILED\" | \"WORKER_MODULE_NOT_FOUND\" | \"WORKER_MANIFEST_INVALID\" | \"WORKER_MANIFEST_FETCH_FAILED\" | \"WORKER_OPERATION_NOT_FOUND\" | \"WORKER_TASK_CANCELLED\" | \"WORKER_TASK_FAILED\" | \"WORKER_TASK_STALE\" | \"WORKER_QUEUE_SATURATED\" | \"WORKER_TERMINATED\" | \"WORKER_CONTEXT_LOST\" | \"WORKER_CONTEXT_DISPOSE_TIMEOUT\" | \"WORKER_TRANSFER_INVALID\" | \"WORKER_GROUP_DISPOSED\" | \"WORKER_SYSTEM_DISPOSED\" | \"WORKER_DESCRIPTOR_INVALID\""
       },
       {
         "id": "geoscratch/scratch#WorkerDiagnosticInput",
@@ -16545,7 +16728,7 @@
           "packages/geoscratch/src/scratch/worker/diagnostics.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/worker/diagnostics.ts:65"
+          "packages/geoscratch/src/scratch/worker/diagnostics.ts:66"
         ],
         "summary": "",
         "declaration": "type WorkerDiagnosticInput = Readonly<{ actual?: unknown; code: WorkerDiagnosticCode; expected?: unknown; hints?: readonly string[]; message: string; phase: WorkerDiagnosticPhase; related?: readonly WorkerDiagnosticSubject[]; severity: ScratchDiagnosticSeverity; subject: WorkerDiagnosticSubject }> & WorkerDiagnosticFacts"
@@ -16573,10 +16756,10 @@
           "packages/geoscratch/src/scratch/worker/diagnostics.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/worker/diagnostics.ts:37"
+          "packages/geoscratch/src/scratch/worker/diagnostics.ts:38"
         ],
         "summary": "",
-        "declaration": "type WorkerDiagnosticSubject = Readonly<{ id: string; kind: \"WorkerSystem\" | \"WorkerGroup\" | \"WorkerHost\" | \"WorkerModule\" | \"WorkerTask\" | \"WorkerContext\" | \"TaskPhaseBudget\"; label?: string }>"
+        "declaration": "type WorkerDiagnosticSubject = Readonly<{ id: string; kind: \"WorkerSystem\" | \"WorkerGroup\" | \"WorkerHost\" | \"WorkerModule\" | \"WorkerTask\" | \"WorkerContext\" | \"WorkerContextPool\" | \"TaskPhaseBudget\"; label?: string }>"
       },
       {
         "id": "geoscratch/scratch#WorkerEndpoint",
@@ -16587,7 +16770,7 @@
           "packages/geoscratch/src/scratch/worker/worker-system.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/worker/worker-system.ts:52"
+          "packages/geoscratch/src/scratch/worker/worker-system.ts:53"
         ],
         "summary": "",
         "declaration": "type WorkerEndpoint = unknown",
@@ -16643,7 +16826,7 @@
           "packages/geoscratch/src/scratch/worker/worker-system.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/worker/worker-system.ts:59"
+          "packages/geoscratch/src/scratch/worker/worker-system.ts:60"
         ],
         "summary": "",
         "declaration": "type WorkerEndpointFactory = (url: URL, options: Readonly<{ name: string; type: \"module\" }>) => WorkerEndpoint"
@@ -16657,7 +16840,7 @@
           "packages/geoscratch/src/scratch/worker/worker-system.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/worker/worker-system.ts:439"
+          "packages/geoscratch/src/scratch/worker/worker-system.ts:448"
         ],
         "summary": "Schedules an allowlisted module set within explicit capacity, isolation, and history bounds.",
         "declaration": "class WorkerGroup",
@@ -16740,7 +16923,7 @@
           "packages/geoscratch/src/scratch/worker/worker-system.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/worker/worker-system.ts:153"
+          "packages/geoscratch/src/scratch/worker/worker-system.ts:154"
         ],
         "summary": "",
         "declaration": "type WorkerGroupFacts = Readonly<{ activeTaskCount: number; cancelledTaskCount: number; completedTaskCount: number; contextCount: number; failedTaskCount: number; history: readonly WorkerHistoryEntry[]; id: string; isolation: WorkerGroupIsolation; maxActiveTasks: number; maxQueuedTasks: number; queuedTaskCount: number; staleTaskCount: number; state: \"active\" | \"disposing\" | \"disposed\"; terminatedWorkerCount: number; workerCount: number }>"
@@ -16754,7 +16937,7 @@
           "packages/geoscratch/src/scratch/worker/worker-system.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/worker/worker-system.ts:38"
+          "packages/geoscratch/src/scratch/worker/worker-system.ts:39"
         ],
         "summary": "",
         "declaration": "type WorkerGroupIsolation = \"shared\" | \"group\" | \"task\""
@@ -16768,7 +16951,7 @@
           "packages/geoscratch/src/scratch/worker/worker-system.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/worker/worker-system.ts:73"
+          "packages/geoscratch/src/scratch/worker/worker-system.ts:74"
         ],
         "summary": "",
         "declaration": "type WorkerGroupOptions = Readonly<{ id: string; idleTimeoutMs: number; isolation: WorkerGroupIsolation; maxActiveTasks: number; maxQueuedTasks: number; modules: readonly WorkerModuleReference[]; size: Readonly<{ max: number; min: number }> }>"
@@ -16782,7 +16965,7 @@
           "packages/geoscratch/src/scratch/worker/worker-system.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/worker/worker-system.ts:142"
+          "packages/geoscratch/src/scratch/worker/worker-system.ts:143"
         ],
         "summary": "",
         "declaration": "type WorkerHistoryEntry = Readonly<{ code?: string; contextId?: string; groupId: string; kind: \"queued\" | \"started\" | \"completed\" | \"cancelled\" | \"stale\" | \"worker-created\" | \"worker-terminated\" | \"context-opened\" | \"context-disposed\" | \"diagnostic\"; sequence: number; taskId?: string; workerId?: string }>"
@@ -16855,7 +17038,7 @@
           "packages/geoscratch/src/scratch/worker/module-build.ts:4"
         ],
         "summary": "",
-        "declaration": "type WorkerModuleBuildEntry = Readonly<{ contract: WorkerModuleContract; entry: string }>"
+        "declaration": "type WorkerModuleBuildEntry = Readonly<{ contract: WorkerModuleContractIdentity; entry: string }>"
       },
       {
         "id": "geoscratch/scratch#WorkerModuleCatalog",
@@ -16912,7 +17095,7 @@
             "summary": "",
             "declaration": "Method resolve",
             "signatures": [
-              "resolve(contract: WorkerModuleContract): WorkerModuleDescriptor"
+              "resolve(contract: WorkerModuleContractIdentity): WorkerModuleDescriptor"
             ]
           }
         ]
@@ -16954,10 +17137,24 @@
           "packages/geoscratch/src/scratch/worker/module.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/worker/module.ts:65"
+          "packages/geoscratch/src/scratch/worker/module.ts:175"
         ],
         "summary": "",
-        "declaration": "type WorkerModuleContract = Readonly<{ id: string; kind: \"worker-module-contract\"; version: string; implement: any }>"
+        "declaration": "type WorkerModuleContract<Protocol extends WorkerModuleProtocol | undefined = undefined> = WorkerModuleContractIdentity & (Protocol extends WorkerModuleProtocol ? DeclaredWorkerModuleContract<Protocol> : InferredWorkerModuleContract)"
+      },
+      {
+        "id": "geoscratch/scratch#WorkerModuleContractIdentity",
+        "name": "WorkerModuleContractIdentity",
+        "kind": "Type Alias",
+        "source": "packages/geoscratch/src/scratch/worker/module.ts",
+        "sources": [
+          "packages/geoscratch/src/scratch/worker/module.ts"
+        ],
+        "locations": [
+          "packages/geoscratch/src/scratch/worker/module.ts:110"
+        ],
+        "summary": "",
+        "declaration": "type WorkerModuleContractIdentity = Readonly<{ id: string; kind: \"worker-module-contract\"; version: string }>"
       },
       {
         "id": "geoscratch/scratch#WorkerModuleDefinition",
@@ -16968,7 +17165,7 @@
           "packages/geoscratch/src/scratch/worker/module.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/worker/module.ts:41"
+          "packages/geoscratch/src/scratch/worker/module.ts:86"
         ],
         "summary": "",
         "declaration": "type WorkerModuleDefinition<Operations extends Readonly<Record<string, WorkerOperation<never, unknown>>> = Readonly<Record<string, WorkerOperation<never, unknown>>>, Context extends WorkerContextDefinitionShape | undefined = WorkerContextDefinitionShape | undefined> = Readonly<{ context?: Context; id: string; operations: Operations; version: string; reset?: any }>"
@@ -16982,7 +17179,7 @@
           "packages/geoscratch/src/scratch/worker/worker-system.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/worker/worker-system.ts:40"
+          "packages/geoscratch/src/scratch/worker/worker-system.ts:41"
         ],
         "summary": "",
         "declaration": "type WorkerModuleDescriptor = Readonly<{ id: string; url: URL; version: string }>"
@@ -16996,7 +17193,7 @@
           "packages/geoscratch/src/scratch/worker/module.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/worker/module.ts:54"
+          "packages/geoscratch/src/scratch/worker/module.ts:99"
         ],
         "summary": "",
         "declaration": "type WorkerModuleImplementation<Operations extends Readonly<Record<string, WorkerOperation<never, unknown>>> = Readonly<Record<string, WorkerOperation<never, unknown>>>, Context extends WorkerContextDefinitionShape | undefined = WorkerContextDefinitionShape | undefined> = Readonly<{ context?: Context; operations: Operations; reset?: any }>"
@@ -17016,6 +17213,20 @@
         "declaration": "type WorkerModuleManifest = Readonly<{ kind: \"geoscratch-worker-module-manifest\"; modules: readonly WorkerModuleArtifact[]; schemaVersion: 1 }>"
       },
       {
+        "id": "geoscratch/scratch#WorkerModuleProtocol",
+        "name": "WorkerModuleProtocol",
+        "kind": "Type Alias",
+        "source": "packages/geoscratch/src/scratch/worker/module.ts",
+        "sources": [
+          "packages/geoscratch/src/scratch/worker/module.ts"
+        ],
+        "locations": [
+          "packages/geoscratch/src/scratch/worker/module.ts:49"
+        ],
+        "summary": "",
+        "declaration": "type WorkerModuleProtocol<Operations extends WorkerOperationProtocolMap = WorkerOperationProtocolMap, Context extends WorkerContextProtocol<unknown, WorkerOperationProtocolMap> | undefined = WorkerContextProtocol<unknown, WorkerOperationProtocolMap> | undefined> = Readonly<{ context: Context; operations: Operations }>"
+      },
+      {
         "id": "geoscratch/scratch#WorkerModuleReference",
         "name": "WorkerModuleReference",
         "kind": "Type Alias",
@@ -17024,10 +17235,10 @@
           "packages/geoscratch/src/scratch/worker/worker-system.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/worker/worker-system.ts:46"
+          "packages/geoscratch/src/scratch/worker/worker-system.ts:47"
         ],
         "summary": "",
-        "declaration": "type WorkerModuleReference = WorkerModuleDescriptor | WorkerModuleContract"
+        "declaration": "type WorkerModuleReference = WorkerModuleDescriptor | WorkerModuleContractIdentity"
       },
       {
         "id": "geoscratch/scratch#WorkerModuleResolver",
@@ -17038,10 +17249,24 @@
           "packages/geoscratch/src/scratch/worker/worker-system.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/worker/worker-system.ts:48"
+          "packages/geoscratch/src/scratch/worker/worker-system.ts:49"
         ],
         "summary": "",
         "declaration": "type WorkerModuleResolver = Readonly<{ resolve: any }>"
+      },
+      {
+        "id": "geoscratch/scratch#WorkerNoOperations",
+        "name": "WorkerNoOperations",
+        "kind": "Type Alias",
+        "source": "packages/geoscratch/src/scratch/worker/module.ts",
+        "sources": [
+          "packages/geoscratch/src/scratch/worker/module.ts"
+        ],
+        "locations": [
+          "packages/geoscratch/src/scratch/worker/module.ts:29"
+        ],
+        "summary": "",
+        "declaration": "type WorkerNoOperations = Readonly<Record<never, never>>"
       },
       {
         "id": "geoscratch/scratch#WorkerOperation",
@@ -17072,6 +17297,96 @@
         "declaration": "type WorkerOperationContext = Readonly<{ generation?: number; groupId: string; moduleId: string; moduleVersion: string; operation: string; signal: AbortSignal; taskId: string; workerId: string }>"
       },
       {
+        "id": "geoscratch/scratch#WorkerOperationProtocol",
+        "name": "WorkerOperationProtocol",
+        "kind": "Type Alias",
+        "source": "packages/geoscratch/src/scratch/worker/module.ts",
+        "sources": [
+          "packages/geoscratch/src/scratch/worker/module.ts"
+        ],
+        "locations": [
+          "packages/geoscratch/src/scratch/worker/module.ts:19"
+        ],
+        "summary": "",
+        "declaration": "type WorkerOperationProtocol<Input = never, Output = unknown> = Readonly<{ input: Input; output: Output }>"
+      },
+      {
+        "id": "geoscratch/scratch#WorkerOperationProtocolInput",
+        "name": "WorkerOperationProtocolInput",
+        "kind": "Type Alias",
+        "source": "packages/geoscratch/src/scratch/worker/module.ts",
+        "sources": [
+          "packages/geoscratch/src/scratch/worker/module.ts"
+        ],
+        "locations": [
+          "packages/geoscratch/src/scratch/worker/module.ts:31"
+        ],
+        "summary": "",
+        "declaration": "type WorkerOperationProtocolInput<Protocol extends WorkerOperationProtocol<unknown, unknown>> = Protocol[\"input\"]"
+      },
+      {
+        "id": "geoscratch/scratch#WorkerOperationProtocolMap",
+        "name": "WorkerOperationProtocolMap",
+        "kind": "Type Alias",
+        "source": "packages/geoscratch/src/scratch/worker/module.ts",
+        "sources": [
+          "packages/geoscratch/src/scratch/worker/module.ts"
+        ],
+        "locations": [
+          "packages/geoscratch/src/scratch/worker/module.ts:24"
+        ],
+        "summary": "",
+        "declaration": "type WorkerOperationProtocolMap = Readonly<Record<string, WorkerOperationProtocol<unknown, unknown>>>"
+      },
+      {
+        "id": "geoscratch/scratch#WorkerOperationProtocolOutput",
+        "name": "WorkerOperationProtocolOutput",
+        "kind": "Type Alias",
+        "source": "packages/geoscratch/src/scratch/worker/module.ts",
+        "sources": [
+          "packages/geoscratch/src/scratch/worker/module.ts"
+        ],
+        "locations": [
+          "packages/geoscratch/src/scratch/worker/module.ts:36"
+        ],
+        "summary": "",
+        "declaration": "type WorkerOperationProtocolOutput<Protocol extends WorkerOperationProtocol<unknown, unknown>> = Protocol[\"output\"]"
+      },
+      {
+        "id": "geoscratch/scratch#workerRemoteErrorCode",
+        "name": "workerRemoteErrorCode",
+        "kind": "Function",
+        "source": "packages/geoscratch/src/scratch/worker/utilities.ts",
+        "sources": [
+          "packages/geoscratch/src/scratch/worker/utilities.ts"
+        ],
+        "locations": [
+          "packages/geoscratch/src/scratch/worker/utilities.ts:49"
+        ],
+        "summary": "Returns the application-defined remote code carried by a genuine Worker diagnostic error.",
+        "declaration": "Function workerRemoteErrorCode",
+        "signatures": [
+          "workerRemoteErrorCode(error: unknown): string | undefined"
+        ]
+      },
+      {
+        "id": "geoscratch/scratch#workerRemoteErrorFacts",
+        "name": "workerRemoteErrorFacts",
+        "kind": "Function",
+        "source": "packages/geoscratch/src/scratch/worker/utilities.ts",
+        "sources": [
+          "packages/geoscratch/src/scratch/worker/utilities.ts"
+        ],
+        "locations": [
+          "packages/geoscratch/src/scratch/worker/utilities.ts:31"
+        ],
+        "summary": "Returns immutable remote error facts from a genuine Worker diagnostic error.",
+        "declaration": "Function workerRemoteErrorFacts",
+        "signatures": [
+          "workerRemoteErrorFacts(error: unknown): Readonly<{ remoteCode?: string; remoteMessage: string; remoteName: string }> | undefined"
+        ]
+      },
+      {
         "id": "geoscratch/scratch#WorkerRemoteErrorFacts",
         "name": "WorkerRemoteErrorFacts",
         "kind": "Type Alias",
@@ -17080,7 +17395,7 @@
           "packages/geoscratch/src/scratch/worker/worker-system.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/worker/worker-system.ts:136"
+          "packages/geoscratch/src/scratch/worker/worker-system.ts:137"
         ],
         "summary": "",
         "declaration": "type WorkerRemoteErrorFacts = Readonly<{ remoteCode?: string; remoteMessage: string; remoteName: string }>"
@@ -17094,7 +17409,7 @@
           "packages/geoscratch/src/scratch/worker/worker-system.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/worker/worker-system.ts:1140"
+          "packages/geoscratch/src/scratch/worker/worker-system.ts:1149"
         ],
         "summary": "Owns a bounded pool of Worker hosts and the independently configured groups that share it.",
         "declaration": "class WorkerSystem",
@@ -17195,7 +17510,7 @@
           "packages/geoscratch/src/scratch/worker/worker-system.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/worker/worker-system.ts:171"
+          "packages/geoscratch/src/scratch/worker/worker-system.ts:172"
         ],
         "summary": "",
         "declaration": "type WorkerSystemFacts = Readonly<{ activeTaskCount: number; contextCount: number; disposed: boolean; groupCount: number; history: readonly WorkerHistoryEntry[]; id: string; maxWorkers: number; queuedTaskCount: number; workerCount: number }>"
@@ -17209,7 +17524,7 @@
           "packages/geoscratch/src/scratch/worker/worker-system.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/worker/worker-system.ts:64"
+          "packages/geoscratch/src/scratch/worker/worker-system.ts:65"
         ],
         "summary": "",
         "declaration": "type WorkerSystemOptions = Readonly<{ agingIntervalMs?: number; bootstrapUrl?: URL; maxHistory?: number; maxWorkers?: number; moduleResolver?: WorkerModuleResolver; workerFactory?: WorkerEndpointFactory }>"
@@ -17223,7 +17538,7 @@
           "packages/geoscratch/src/scratch/worker/worker-system.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/worker/worker-system.ts:37"
+          "packages/geoscratch/src/scratch/worker/worker-system.ts:38"
         ],
         "summary": "",
         "declaration": "type WorkerTaskCancellationMode = \"cooperative\" | \"non-cooperative\" | \"hard\""
@@ -17237,7 +17552,7 @@
           "packages/geoscratch/src/scratch/worker/worker-system.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/worker/worker-system.ts:87"
+          "packages/geoscratch/src/scratch/worker/worker-system.ts:88"
         ],
         "summary": "",
         "declaration": "type WorkerTaskDescriptor<Input> = Readonly<{ cancellation?: WorkerTaskCancellationMode; deadlineMs?: number; generation?: number; input: Input; module: string; operation: string; priority?: Partial<WorkerTaskPriority>; staleKey?: string; transfer?: readonly Transferable[] }>"
@@ -17251,7 +17566,7 @@
           "packages/geoscratch/src/scratch/worker/worker-system.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/worker/worker-system.ts:99"
+          "packages/geoscratch/src/scratch/worker/worker-system.ts:100"
         ],
         "summary": "",
         "declaration": "type WorkerTaskFacts = Readonly<{ cancellation: WorkerTaskCancellationMode; cancellationKind?: WorkerCancellationKind; completedAt?: number; deadlineMs?: number; enqueuedAt: number; enqueueSequence: number; generation?: number; groupId: string; id: string; moduleId: string; moduleVersion: string; operation: string; priority: WorkerTaskPriority; staleKey?: string; startedAt?: number; state: WorkerTaskState; workerId?: string }>"
@@ -17265,7 +17580,7 @@
           "packages/geoscratch/src/scratch/worker/worker-system.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/worker/worker-system.ts:243"
+          "packages/geoscratch/src/scratch/worker/worker-system.ts:244"
         ],
         "summary": "Exposes one queued or active Worker task's result, cancellation, and immutable facts.",
         "declaration": "class WorkerTaskHandle<Output>",
@@ -17320,7 +17635,7 @@
           "packages/geoscratch/src/scratch/worker/worker-system.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/worker/worker-system.ts:23"
+          "packages/geoscratch/src/scratch/worker/worker-system.ts:24"
         ],
         "summary": "",
         "declaration": "type WorkerTaskPriority = Readonly<{ class: WorkerTaskPriorityClass; score: number }>"
@@ -17334,7 +17649,7 @@
           "packages/geoscratch/src/scratch/worker/worker-system.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/worker/worker-system.ts:21"
+          "packages/geoscratch/src/scratch/worker/worker-system.ts:22"
         ],
         "summary": "",
         "declaration": "type WorkerTaskPriorityClass = \"background\" | \"user-visible\" | \"critical\""
@@ -17348,7 +17663,7 @@
           "packages/geoscratch/src/scratch/worker/worker-system.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/worker/worker-system.ts:28"
+          "packages/geoscratch/src/scratch/worker/worker-system.ts:29"
         ],
         "summary": "",
         "declaration": "type WorkerTaskState = \"queued\" | \"running\" | \"succeeded\" | \"failed\" | \"cancelled\" | \"stale\" | \"terminated\""
@@ -17362,7 +17677,7 @@
           "packages/geoscratch/src/scratch/worker/module.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/worker/module.ts:77"
+          "packages/geoscratch/src/scratch/worker/module.ts:183"
         ],
         "summary": "",
         "declaration": "type WorkerTransferResult<T> = Readonly<{ kind: \"worker-transfer-result\"; transfer: readonly Transferable[]; value: T }>"

@@ -2,7 +2,7 @@
 
 # geoscratch/scratch API Reference
 
-Public symbols: 507.
+Public symbols: 525.
 
 ## `packages/geoscratch/src/scratch/cache/diagnostics.ts`
 
@@ -5713,6 +5713,71 @@ Kind: `Type Alias`.
 type LifetimeStoppedError = Error & Readonly<{ code: "SCRATCH_LIFETIME_STOPPED"; scopeLabel: string }>
 ```
 
+## `packages/geoscratch/src/scratch/worker/context-pool.ts`
+
+### `WorkerContextPool`
+
+Kind: `Class`.
+
+Owns one fixed set of retained Worker contexts and optionally its WorkerSystem.
+
+```ts
+class WorkerContextPool<State = unknown, Operations extends WorkerOperationProtocolMap = WorkerOperationProtocolMap>
+```
+
+Members:
+
+- `create`: `Method create` (static)
+  - `create<Init, State = unknown, Operations extends Readonly<Record<string, Readonly<{ input: unknown; output: unknown }>>> = Readonly<Record<string, Readonly<{ input: unknown; output: unknown }>>>>(descriptor: WorkerContextPoolDescriptor<Init>): Promise<WorkerContextPool<State, Operations>>`
+- `dispose`: `Method dispose`
+  - `dispose(): Promise<void>`
+- `inspect`: `Method inspect`
+  - `inspect(): WorkerContextPoolFacts`
+- `run`: `Method run`
+  - `run<Name extends string>(index: number, operation: Name, input: WorkerOperationProtocolInput<Operations[Name]>, options: Omit<WorkerTaskDescriptor<WorkerOperationProtocolInput<Operations[Name]>>, "module" | "operation" | "input"> = {}): WorkerTaskHandle<WorkerOperationProtocolOutput<Operations[Name]>>`
+- `snapshot`: `Method snapshot`
+  - `snapshot<Snapshot = State>(index: number): Promise<Snapshot>`
+
+### `WorkerContextPoolDescriptor`
+
+Kind: `Type Alias`.
+
+```ts
+type WorkerContextPoolDescriptor<Init> = Readonly<{ disposeGraceMs?: number; id: string; idleTimeoutMs: number; maxActiveTasks: number; maxQueuedTasks: number; module: WorkerModuleReference; size: number; system: WorkerContextPoolSystem; context: any }>
+```
+
+### `WorkerContextPoolDisposalMode`
+
+Kind: `Type Alias`.
+
+```ts
+type WorkerContextPoolDisposalMode = "remote-finalized" | "remote-finalizer-failed" | "forced-pending-work" | "forced-timeout"
+```
+
+### `WorkerContextPoolEntry`
+
+Kind: `Type Alias`.
+
+```ts
+type WorkerContextPoolEntry<Init> = Readonly<{ init: Init; key: string; restore?: unknown }>
+```
+
+### `WorkerContextPoolFacts`
+
+Kind: `Type Alias`.
+
+```ts
+type WorkerContextPoolFacts = Readonly<{ contexts: readonly WorkerContextFacts[]; disposalMode?: WorkerContextPoolDisposalMode; disposeGraceMs: number; group: WorkerGroupFacts; id: string; kind: "worker-context-pool"; size: number; state: "active" | "disposing" | "disposed"; system: WorkerSystemFacts; systemOwnership: WorkerContextPoolSystem["ownership"] }>
+```
+
+### `WorkerContextPoolSystem`
+
+Kind: `Type Alias`.
+
+```ts
+type WorkerContextPoolSystem = Readonly<{ ownership: "borrowed"; system: WorkerSystem }> | Readonly<{ options?: WorkerSystemOptions; ownership: "owned" }>
+```
+
 ## `packages/geoscratch/src/scratch/worker/diagnostics.ts`
 
 ### `WorkerCancellationKind`
@@ -5736,7 +5801,7 @@ type WorkerDiagnostic = ScratchDiagnosticBase<"worker", WorkerDiagnosticCode, Wo
 Kind: `Type Alias`.
 
 ```ts
-type WorkerDiagnosticCode = "WORKER_MODULE_LOAD_FAILED" | "WORKER_MODULE_NOT_FOUND" | "WORKER_MANIFEST_INVALID" | "WORKER_MANIFEST_FETCH_FAILED" | "WORKER_OPERATION_NOT_FOUND" | "WORKER_TASK_CANCELLED" | "WORKER_TASK_FAILED" | "WORKER_TASK_STALE" | "WORKER_QUEUE_SATURATED" | "WORKER_TERMINATED" | "WORKER_CONTEXT_LOST" | "WORKER_TRANSFER_INVALID" | "WORKER_GROUP_DISPOSED" | "WORKER_SYSTEM_DISPOSED" | "WORKER_DESCRIPTOR_INVALID"
+type WorkerDiagnosticCode = "WORKER_MODULE_LOAD_FAILED" | "WORKER_MODULE_NOT_FOUND" | "WORKER_MANIFEST_INVALID" | "WORKER_MANIFEST_FETCH_FAILED" | "WORKER_OPERATION_NOT_FOUND" | "WORKER_TASK_CANCELLED" | "WORKER_TASK_FAILED" | "WORKER_TASK_STALE" | "WORKER_QUEUE_SATURATED" | "WORKER_TERMINATED" | "WORKER_CONTEXT_LOST" | "WORKER_CONTEXT_DISPOSE_TIMEOUT" | "WORKER_TRANSFER_INVALID" | "WORKER_GROUP_DISPOSED" | "WORKER_SYSTEM_DISPOSED" | "WORKER_DESCRIPTOR_INVALID"
 ```
 
 ### `WorkerDiagnosticInput`
@@ -5760,7 +5825,7 @@ type WorkerDiagnosticPhase = "worker-system" | "worker-group" | "worker-module" 
 Kind: `Type Alias`.
 
 ```ts
-type WorkerDiagnosticSubject = Readonly<{ id: string; kind: "WorkerSystem" | "WorkerGroup" | "WorkerHost" | "WorkerModule" | "WorkerTask" | "WorkerContext" | "TaskPhaseBudget"; label?: string }>
+type WorkerDiagnosticSubject = Readonly<{ id: string; kind: "WorkerSystem" | "WorkerGroup" | "WorkerHost" | "WorkerModule" | "WorkerTask" | "WorkerContext" | "WorkerContextPool" | "TaskPhaseBudget"; label?: string }>
 ```
 
 ## `packages/geoscratch/src/scratch/worker/module-build.ts`
@@ -5792,7 +5857,7 @@ type WorkerModuleBuild = Readonly<{ kind: "worker-module-build"; modules: readon
 Kind: `Type Alias`.
 
 ```ts
-type WorkerModuleBuildEntry = Readonly<{ contract: WorkerModuleContract; entry: string }>
+type WorkerModuleBuildEntry = Readonly<{ contract: WorkerModuleContractIdentity; entry: string }>
 ```
 
 ## `packages/geoscratch/src/scratch/worker/module-catalog.ts`
@@ -5832,7 +5897,7 @@ Members:
 - `load`: `Method load` (static)
   - `load(manifestUrl: URL, options: WorkerModuleCatalogLoadOptions = {}): Promise<WorkerModuleCatalog>`
 - `resolve`: `Method resolve`
-  - `resolve(contract: WorkerModuleContract): WorkerModuleDescriptor`
+  - `resolve(contract: WorkerModuleContractIdentity): WorkerModuleDescriptor`
 
 ### `WorkerModuleCatalogFacts`
 
@@ -5885,7 +5950,7 @@ Function defineWorkerModuleContract
 ```
 
 ```ts
-defineWorkerModuleContract(identity: Readonly<{ id: string; version: string }>): WorkerModuleContract
+defineWorkerModuleContract<Protocol extends Readonly<{ context: Readonly<{ init: unknown; operations: Operations }> | undefined; operations: Operations }> | undefined = undefined>(identity: Readonly<{ id: string; version: string }>): WorkerModuleContract<Protocol>
 ```
 
 ### `transferWorkerResult`
@@ -5907,7 +5972,7 @@ transferWorkerResult<T>(value: T, transfer: readonly Transferable[]): WorkerTran
 Kind: `Type Alias`.
 
 ```ts
-type WorkerContextDefinition<State = unknown, Init = never, Snapshot = unknown> = Readonly<{ operations: Readonly<Record<string, WorkerContextOperation<State, never, unknown>>>; create: any; dispose?: any; restore?: any; snapshot?: any }>
+type WorkerContextDefinition<State = unknown, Init = never, Snapshot = unknown, Operations extends Readonly<Record<string, WorkerContextOperation<State, never, unknown>>> = Readonly<Record<string, WorkerContextOperation<State, never, unknown>>>> = Readonly<{ operations: Operations; create: any; dispose?: any; restore?: any; snapshot?: any }>
 ```
 
 ### `WorkerContextOperation`
@@ -5916,6 +5981,14 @@ Kind: `Type Alias`.
 
 ```ts
 type WorkerContextOperation<State = unknown, Input = never, Output = unknown> = (state: State, input: Input, context: WorkerOperationContext) => WorkerMaybePromise<Output>
+```
+
+### `WorkerContextProtocol`
+
+Kind: `Type Alias`.
+
+```ts
+type WorkerContextProtocol<Init = never, Operations extends WorkerOperationProtocolMap = WorkerOperationProtocolMap> = Readonly<{ init: Init; operations: Operations }>
 ```
 
 ### `WorkerMaybePromise`
@@ -5931,7 +6004,15 @@ type WorkerMaybePromise<T> = T | PromiseLike<T>
 Kind: `Type Alias`.
 
 ```ts
-type WorkerModuleContract = Readonly<{ id: string; kind: "worker-module-contract"; version: string; implement: any }>
+type WorkerModuleContract<Protocol extends WorkerModuleProtocol | undefined = undefined> = WorkerModuleContractIdentity & (Protocol extends WorkerModuleProtocol ? DeclaredWorkerModuleContract<Protocol> : InferredWorkerModuleContract)
+```
+
+### `WorkerModuleContractIdentity`
+
+Kind: `Type Alias`.
+
+```ts
+type WorkerModuleContractIdentity = Readonly<{ id: string; kind: "worker-module-contract"; version: string }>
 ```
 
 ### `WorkerModuleDefinition`
@@ -5950,6 +6031,22 @@ Kind: `Type Alias`.
 type WorkerModuleImplementation<Operations extends Readonly<Record<string, WorkerOperation<never, unknown>>> = Readonly<Record<string, WorkerOperation<never, unknown>>>, Context extends WorkerContextDefinitionShape | undefined = WorkerContextDefinitionShape | undefined> = Readonly<{ context?: Context; operations: Operations; reset?: any }>
 ```
 
+### `WorkerModuleProtocol`
+
+Kind: `Type Alias`.
+
+```ts
+type WorkerModuleProtocol<Operations extends WorkerOperationProtocolMap = WorkerOperationProtocolMap, Context extends WorkerContextProtocol<unknown, WorkerOperationProtocolMap> | undefined = WorkerContextProtocol<unknown, WorkerOperationProtocolMap> | undefined> = Readonly<{ context: Context; operations: Operations }>
+```
+
+### `WorkerNoOperations`
+
+Kind: `Type Alias`.
+
+```ts
+type WorkerNoOperations = Readonly<Record<never, never>>
+```
+
 ### `WorkerOperation`
 
 Kind: `Type Alias`.
@@ -5964,6 +6061,38 @@ Kind: `Type Alias`.
 
 ```ts
 type WorkerOperationContext = Readonly<{ generation?: number; groupId: string; moduleId: string; moduleVersion: string; operation: string; signal: AbortSignal; taskId: string; workerId: string }>
+```
+
+### `WorkerOperationProtocol`
+
+Kind: `Type Alias`.
+
+```ts
+type WorkerOperationProtocol<Input = never, Output = unknown> = Readonly<{ input: Input; output: Output }>
+```
+
+### `WorkerOperationProtocolInput`
+
+Kind: `Type Alias`.
+
+```ts
+type WorkerOperationProtocolInput<Protocol extends WorkerOperationProtocol<unknown, unknown>> = Protocol["input"]
+```
+
+### `WorkerOperationProtocolMap`
+
+Kind: `Type Alias`.
+
+```ts
+type WorkerOperationProtocolMap = Readonly<Record<string, WorkerOperationProtocol<unknown, unknown>>>
+```
+
+### `WorkerOperationProtocolOutput`
+
+Kind: `Type Alias`.
+
+```ts
+type WorkerOperationProtocolOutput<Protocol extends WorkerOperationProtocol<unknown, unknown>> = Protocol["output"]
 ```
 
 ### `WorkerTransferResult`
@@ -6038,6 +6167,58 @@ Kind: `Type Alias`.
 
 ```ts
 type TaskPhasePermitRequest<Phase extends string> = Readonly<{ result: Promise<TaskPhasePermit>; cancel: any; inspect: any; reprioritize: any }>
+```
+
+## `packages/geoscratch/src/scratch/worker/utilities.ts`
+
+### `recommendedWorkerCount`
+
+Kind: `Function`.
+
+Derives a bounded Worker count from explicit or host-reported concurrency facts.
+
+```ts
+Function recommendedWorkerCount
+```
+
+```ts
+recommendedWorkerCount(options: RecommendedWorkerCountOptions = {}): number
+```
+
+### `RecommendedWorkerCountOptions`
+
+Kind: `Type Alias`.
+
+```ts
+type RecommendedWorkerCountOptions = Readonly<{ hardwareConcurrency?: number; maximum?: number; minimum?: number; reserve?: number }>
+```
+
+### `workerRemoteErrorCode`
+
+Kind: `Function`.
+
+Returns the application-defined remote code carried by a genuine Worker diagnostic error.
+
+```ts
+Function workerRemoteErrorCode
+```
+
+```ts
+workerRemoteErrorCode(error: unknown): string | undefined
+```
+
+### `workerRemoteErrorFacts`
+
+Kind: `Function`.
+
+Returns immutable remote error facts from a genuine Worker diagnostic error.
+
+```ts
+Function workerRemoteErrorFacts
+```
+
+```ts
+workerRemoteErrorFacts(error: unknown): Readonly<{ remoteCode?: string; remoteMessage: string; remoteName: string }> | undefined
 ```
 
 ## `packages/geoscratch/src/scratch/worker/worker-system.ts`
@@ -6183,7 +6364,7 @@ type WorkerModuleDescriptor = Readonly<{ id: string; url: URL; version: string }
 Kind: `Type Alias`.
 
 ```ts
-type WorkerModuleReference = WorkerModuleDescriptor | WorkerModuleContract
+type WorkerModuleReference = WorkerModuleDescriptor | WorkerModuleContractIdentity
 ```
 
 ### `WorkerModuleResolver`

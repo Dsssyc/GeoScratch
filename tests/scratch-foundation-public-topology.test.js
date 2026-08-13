@@ -54,6 +54,7 @@ const scratchValues = [
     'TextureViewSpec',
     'UploadCommand',
     'WorkerContextHandle',
+    'WorkerContextPool',
     'WorkerGroup',
     'WorkerModuleCatalog',
     'WorkerSystem',
@@ -81,8 +82,11 @@ const scratchValues = [
     'layoutCodec',
     'persistentCacheKey',
     'plane',
+    'recommendedWorkerCount',
     'sphere',
     'transferWorkerResult',
+    'workerRemoteErrorCode',
+    'workerRemoteErrorFacts',
 ]
 
 const geoValues = [

@@ -56,15 +56,16 @@ describe('asset layout', () => {
     it('keeps DEM Worker deployment independent from Vite-specific URL modules', () => {
 
         const config = read('examples', 'vite.config.ts')
-        const workerSource = read('examples', 'demLayer', 'dem-worker-source.ts')
+        const workerExecutor = read('examples', 'demLayer', 'dem-tile-executor.ts')
 
         expect(exists('examples', 'demLayer', 'dem-tile-worker-url.ts')).to.equal(false)
+        expect(exists('examples', 'demLayer', 'dem-worker-source.ts')).to.equal(false)
         expect(config).to.not.include('workerModuleUrlPlugin')
         expect(config).to.not.include('demWorkerUrlModule')
         expect(config).to.not.include('demWorkerModule')
-        expect(workerSource).to.include('DEM_TILE_WORKER')
-        expect(workerSource).to.include('moduleResolver: descriptor.workerModules')
-        expect(workerSource).to.include('module: DEM_TILE_WORKER')
+        expect(workerExecutor).to.include('DEM_TILE_WORKER')
+        expect(workerExecutor).to.include('moduleResolver: descriptor.workerModules')
+        expect(workerExecutor).to.include('module: DEM_TILE_WORKER')
         expect(read('examples', 'worker-modules.ts')).to.include('defineWorkerModuleBuild')
         expect(JSON.parse(read('examples', 'package.json')).scripts).to.deep.include({
             'workers:build': 'geoscratch-worker build --config ./worker-modules.ts',

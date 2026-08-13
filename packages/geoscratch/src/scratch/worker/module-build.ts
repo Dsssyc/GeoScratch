@@ -1,8 +1,8 @@
-import type { WorkerModuleContract } from './module.js'
+import type { WorkerModuleContractIdentity } from './module.js'
 import { isWorkerModuleContract } from './module.js'
 
 export type WorkerModuleBuildEntry = Readonly<{
-    contract: WorkerModuleContract
+    contract: WorkerModuleContractIdentity
     entry: string
 }>
 

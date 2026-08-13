@@ -64,7 +64,7 @@ describe('Geo Virtual Raster Worker executor', () => {
         })
         const executor = await createVirtualRasterWorkerExecutor({
             id: 'test-raster-workers',
-            system,
+            system: { ownership: 'borrowed', system },
             module: {
                 id: 'fixture',
                 version: '1',
@@ -78,8 +78,8 @@ describe('Geo Virtual Raster Worker executor', () => {
                 candidateId: `candidate-${sequence}`,
                 page: demand.page,
             }),
-            initialFacts: () => ({ accepted: 0, discarded: 0 }),
         })
+        expect(executor.inspect().workers).to.deep.equal([ { accepted: 0, discarded: 0 } ])
         const execution = executor.request({
             page,
             generation: 1,
@@ -95,8 +95,15 @@ describe('Geo Virtual Raster Worker executor', () => {
             kind: 'virtual-raster-worker-executor',
             disposed: false,
         })
+        expect(executor.inspect().contextPool).to.deep.include({
+            kind: 'worker-context-pool',
+            systemOwnership: 'borrowed',
+            size: 1,
+        })
+        expect(executor.inspect().workerFactsObservation).to.equal('live')
         expect(executor.inspect().workers).to.deep.equal([ { accepted: 1, discarded: 0 } ])
         expect(ScriptedWorker.instances[0].runOrder).to.deep.equal([
+            'facts',
             'lookup',
             'fetch',
             'decode',
@@ -140,7 +147,7 @@ describe('Geo Virtual Raster Worker executor', () => {
         })
         const executor = await createVirtualRasterWorkerExecutor({
             id: 'test-raster-cache-workers',
-            system,
+            system: { ownership: 'borrowed', system },
             module: {
                 id: 'fixture',
                 version: '1',
@@ -151,7 +158,6 @@ describe('Geo Virtual Raster Worker executor', () => {
             phaseLimits: { network: 1, decode: 1 },
             context: () => ({ key: 'cache', init: null }),
             candidate: demand => ({ candidateId: 'cached', page: demand.page }),
-            initialFacts: () => ({ settled: 'none' }),
         })
         const execution = executor.request({
             page,
@@ -171,6 +177,7 @@ describe('Geo Virtual Raster Worker executor', () => {
         }
         expect(settlementFailure).to.be.instanceOf(Error)
         expect(ScriptedWorker.instances[0].runOrder).to.deep.equal([
+            'facts',
             'lookup',
             'transfer',
             'discard',
@@ -178,5 +185,121 @@ describe('Geo Virtual Raster Worker executor', () => {
 
         await executor.dispose()
         await system.dispose()
+    })
+
+    it('can own the complete WorkerSystem lifecycle explicitly', async() => {
+
+        const addressSpace = virtualRasterAddressSpace({
+            id: 'worker-executor-owned-test',
+            dimensions: 2,
+            extent: [ 1, 1 ],
+            pageSize: [ 1, 1 ],
+            levelCount: 1,
+        })
+        const page = addressSpace.page({ level: 0, x: 0, y: 0 })
+        const executor = await createVirtualRasterWorkerExecutor({
+            id: 'owned-raster-workers',
+            system: {
+                ownership: 'owned',
+                options: {
+                    maxWorkers: 1,
+                    workerFactory: scriptedWorkerFactory({
+                        operations: {
+                            lookup: candidate => ({
+                                status: 'hit',
+                                candidateId: candidate.candidateId,
+                            }),
+                            transfer: () => prepareVirtualRasterPageTransfer({
+                                page,
+                                width: 1,
+                                height: 1,
+                                channels: 1,
+                                data: new Uint8Array([ 3 ]),
+                                contentVersion: 'owned-v1',
+                            }).value,
+                            accept: () => ({ accepted: true }),
+                            discard: () => ({ accepted: false }),
+                            facts: () => ({ accepted: false }),
+                        },
+                    }),
+                },
+            },
+            module: {
+                id: 'fixture',
+                version: '1',
+                url: new URL('https://example.invalid/fixture-worker.js'),
+            },
+            workerCount: 1,
+            maxRequests: 2,
+            phaseLimits: { network: 1, decode: 1 },
+            context: () => ({ key: 'owned', init: null }),
+            candidate: demand => ({ candidateId: 'owned', page: demand.page }),
+        })
+        const request = executor.request({
+            page,
+            generation: 1,
+            priority: { class: 'critical', score: 1 },
+            reason: 'owned',
+            usage: 'required',
+        })
+
+        await request.result
+        await request.accept()
+        await executor.dispose()
+
+        expect(executor.inspect().contextPool).to.deep.include({
+            state: 'disposed',
+            systemOwnership: 'owned',
+            disposalMode: 'remote-finalized',
+        })
+        expect(executor.inspect().workerFactsObservation)
+            .to.equal('last-observed-before-disposal')
+        expect(executor.inspect().system).to.deep.include({
+            disposed: true,
+            workerCount: 0,
+            groupCount: 0,
+        })
+    })
+
+    it('rolls back an owned pool when initial Worker facts fail', async() => {
+
+        let failure
+        try {
+            await createVirtualRasterWorkerExecutor({
+                id: 'failing-owned-raster-workers',
+                system: {
+                    ownership: 'owned',
+                    options: {
+                        maxWorkers: 1,
+                        workerFactory: scriptedWorkerFactory({
+                            operations: {
+                                facts() {
+
+                                    throw Object.assign(new Error('facts failed'), {
+                                        code: 'FIXTURE_FACTS_FAILED',
+                                    })
+                                },
+                            },
+                        }),
+                    },
+                },
+                module: {
+                    id: 'fixture',
+                    version: '1',
+                    url: new URL('https://example.invalid/fixture-worker.js'),
+                },
+                workerCount: 1,
+                maxRequests: 2,
+                phaseLimits: { network: 1, decode: 1 },
+                context: () => ({ key: 'failing', init: null }),
+                candidate: demand => ({ candidateId: 'failing', page: demand.page }),
+            })
+        } catch (error) {
+            failure = error
+        }
+
+        expect(failure).to.be.instanceOf(Error)
+        expect(ScriptedWorker.instances.at(-1).terminated).to.equal(true)
+        expect(ScriptedWorker.instances.at(-1).contexts.size).to.equal(0)
     })
 })

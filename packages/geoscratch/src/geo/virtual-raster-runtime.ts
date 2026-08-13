@@ -86,6 +86,8 @@ export type VirtualRasterDemandControllerFacts = Readonly<{
     generation: number
     lastDecisionFrameEpoch: number
     acknowledgedSnapshotEpoch: number
+    feedbackDemandGraceGenerations: number
+    deferredDemandCount: number
     activeDemandCount: number
     transitionCount: number
     lease: ReturnType<VirtualRasterResidencyLease['facts']>
@@ -168,6 +170,18 @@ type TransitionLeaseRecord = {
     acknowledged: boolean
 }
 
+type DeferredFeedbackDemand = Readonly<{
+    page: VirtualRasterPageIdentity
+    priority: Readonly<{
+        class: 'background' | 'user-visible'
+        score: number
+    }>
+    intent: 'prefetch' | 'refinement'
+    reason: string
+}>
+
+const FEEDBACK_DEMAND_GRACE_GENERATIONS = 1
+
 /** Coordinates safety cover, view demand, feedback acknowledgement, and publication retention. */
 export function createVirtualRasterDemandController<
     Model extends VirtualRasterRuntimeModel,
@@ -208,6 +222,8 @@ export function createVirtualRasterDemandController<
     })
     const safetyKeys = new Set(model.safetyCoverPages.map(page => page.key))
     const transitions = new Map<string, TransitionLeaseRecord>()
+    let previousFeedbackDemands = new Map<string, DeferredFeedbackDemand>()
+    let deferredDemandCount = 0
     let activeDemandKeys = new Set(safetyKeys)
     let disposed = false
     let generation = 0
@@ -299,10 +315,9 @@ export function createVirtualRasterDemandController<
             transitions.delete(retirement.page.key)
         }
         const demandGeneration = ++generation
-        const viewDemands = viewDemandProducer.produce({
-            view,
-            generation: demandGeneration,
-            demands: canonical.demands.map(demand => Object.freeze({
+        const currentFeedbackDemands = new Map<string, DeferredFeedbackDemand>()
+        for (const demand of canonical.demands) {
+            const candidate = Object.freeze({
                 page: demand.page,
                 priority: Object.freeze({
                     class: 'user-visible' as const,
@@ -310,9 +325,42 @@ export function createVirtualRasterDemandController<
                 }),
                 intent: 'refinement' as const,
                 reason: `gpu-frontier:${feedback.frameEpoch}`,
-            })),
+            })
+            const existing = currentFeedbackDemands.get(demand.page.key)
+            if (existing === undefined || candidate.priority.score > existing.priority.score) {
+                currentFeedbackDemands.set(demand.page.key, candidate)
+            }
+        }
+        const deferredFeedbackDemands = [ ...previousFeedbackDemands.values() ]
+            .filter(demand => !currentFeedbackDemands.has(demand.page.key))
+            .map(demand => Object.freeze({
+                ...demand,
+                priority: Object.freeze({
+                    class: 'background' as const,
+                    score: demand.priority.score,
+                }),
+                intent: 'prefetch' as const,
+                reason: `gpu-frontier-grace:${feedback.frameEpoch}`,
+            }))
+        const viewDemands = viewDemandProducer.produce({
+            view,
+            generation: demandGeneration,
+            demands: [
+                ...currentFeedbackDemands.values(),
+                ...deferredFeedbackDemands,
+            ],
         })
+        const feedbackBudget = Math.max(0, scheduler.maxRequests - safetyKeys.size)
         const requested = virtualRasterDemandSetFromViewDemands(viewDemands).demands
+            .filter(demand => !safetyKeys.has(demand.page.key))
+            .slice(0, feedbackBudget)
+        deferredDemandCount = requested.filter(demand =>
+            demand.reason.startsWith('gpu-frontier-grace:')
+        ).length
+        previousFeedbackDemands = new Map(requested.flatMap(demand => {
+            const current = currentFeedbackDemands.get(demand.page.key)
+            return current === undefined ? [] : [ [ demand.page.key, current ] ]
+        }))
         activeDemandKeys = new Set([
             ...safetyKeys,
             ...requested.map(demand => demand.page.key),
@@ -414,6 +462,8 @@ export function createVirtualRasterDemandController<
             generation,
             lastDecisionFrameEpoch,
             acknowledgedSnapshotEpoch,
+            feedbackDemandGraceGenerations: FEEDBACK_DEMAND_GRACE_GENERATIONS,
+            deferredDemandCount,
             activeDemandCount: activeDemandKeys.size,
             transitionCount: transitions.size,
             lease: lease.facts(),
@@ -426,6 +476,8 @@ export function createVirtualRasterDemandController<
         disposed = true
         for (const page of model.safetyCoverPages) residency.unpin(page)
         transitions.clear()
+        previousFeedbackDemands.clear()
+        deferredDemandCount = 0
         activeDemandKeys.clear()
         lease.dispose()
     }

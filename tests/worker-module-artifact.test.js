@@ -60,6 +60,31 @@ describe('Worker module artifacts', () => {
         expect(versionReads).to.equal(1)
     })
 
+    it('accepts a deployment-only contract identity at runtime boundaries', () => {
+
+        const catalog = WorkerModuleCatalog.fromManifest({
+            kind: 'geoscratch-worker-module-manifest',
+            schemaVersion: 1,
+            modules: [ {
+                id: 'fixture.worker',
+                version: '3',
+                url: './fixture.worker-ABC123.js',
+                byteLength: 321,
+                sha256: HASH,
+            } ],
+        }, new URL('https://example.test/assets/workers/manifest.json'))
+
+        expect(catalog.resolve({
+            kind: 'worker-module-contract',
+            id: 'fixture.worker',
+            version: '3',
+        })).to.deep.equal({
+            id: 'fixture.worker',
+            version: '3',
+            url: new URL('https://example.test/assets/workers/fixture.worker-ABC123.js'),
+        })
+    })
+
     it('resolves a contract through a strict manifest relative to the manifest URL', () => {
 
         const contract = defineWorkerModuleContract({ id: 'fixture.worker', version: '3' })

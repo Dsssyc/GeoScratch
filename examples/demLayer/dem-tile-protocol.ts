@@ -3,6 +3,8 @@ import type {
     VirtualRasterCacheMetadata,
     VirtualRasterPageIdentity,
     VirtualRasterPageTransfer,
+    VirtualRasterWorkerLookupResult,
+    VirtualRasterWorkerModuleProtocol,
 } from 'geoscratch/geo'
 import { defineWorkerModuleContract } from 'geoscratch/scratch'
 import type {
@@ -10,11 +12,6 @@ import type {
     PersistentCacheFacts,
     PersistentCacheLifecycle,
 } from 'geoscratch/scratch'
-
-export const DEM_TILE_WORKER = defineWorkerModuleContract({
-    id: 'geoscratch-dem-tile',
-    version: '2',
-})
 
 export type DemCachePolicy =
     | Readonly<{ mode: 'none' }>
@@ -46,10 +43,7 @@ export type DemTileCandidateDescriptor = Readonly<{
     contentVersion: string
 }>
 
-export type DemTileLookupResult = Readonly<{
-    status: 'hit' | 'miss'
-    candidateId?: string
-}>
+export type DemTileLookupResult = VirtualRasterWorkerLookupResult
 
 export type DemTileFetchResult = Readonly<{
     candidateId: string
@@ -91,3 +85,15 @@ export type DemTileCacheFacts =
         quotaFailureCount: 0
     }>
     | (PersistentCacheFacts & Readonly<{ mode: 'persistent' }>)
+
+type DemTileWorkerProtocol = VirtualRasterWorkerModuleProtocol<
+    DemTileCandidateDescriptor,
+    DemTileWorkerInit,
+    DemTileWorkerFacts,
+    DemTileFetchResult
+>
+
+export const DEM_TILE_WORKER = defineWorkerModuleContract<DemTileWorkerProtocol>({
+    id: 'geoscratch-dem-tile',
+    version: '2',
+})

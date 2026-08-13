@@ -2,7 +2,7 @@
 
 # geoscratch/geo API Reference
 
-Public symbols: 295.
+Public symbols: 296.
 
 ## `packages/geoscratch/src/geo/coordinate-domain.ts`
 
@@ -2250,7 +2250,7 @@ type VirtualRasterDemandControllerDescriptor<Model extends VirtualRasterRuntimeM
 Kind: `Type Alias`.
 
 ```ts
-type VirtualRasterDemandControllerFacts = Readonly<{ acknowledgedSnapshotEpoch: number; activeDemandCount: number; disposed: boolean; generation: number; lastDecisionFrameEpoch: number; lease: ReturnType<VirtualRasterResidencyLease["facts"]>; transitionCount: number }>
+type VirtualRasterDemandControllerFacts = Readonly<{ acknowledgedSnapshotEpoch: number; activeDemandCount: number; deferredDemandCount: number; disposed: boolean; feedbackDemandGraceGenerations: number; generation: number; lastDecisionFrameEpoch: number; lease: ReturnType<VirtualRasterResidencyLease["facts"]>; transitionCount: number }>
 ```
 
 ### `VirtualRasterFeedbackReconciliation`
@@ -2458,7 +2458,7 @@ type VirtualRasterWorkerExecutor<WorkerFacts> = VirtualRasterRequestExecutor & R
 Kind: `Type Alias`.
 
 ```ts
-type VirtualRasterWorkerExecutorDescriptor<Candidate extends VirtualRasterWorkerCandidate, Init, WorkerFacts> = Readonly<{ id: string; idleTimeoutMs?: number; maxHistory?: number; maxRequests: number; module: WorkerModuleReference; operations?: Partial<VirtualRasterWorkerOperationNames>; phaseLimits: Readonly<Record<VirtualRasterWorkerPhase, number>>; system: WorkerSystem; workerCount: number; candidate: any; classifyFailure?: any; context: any; disposedFacts?: any; initialFacts: any; staleKey?: any }>
+type VirtualRasterWorkerExecutorDescriptor<Candidate extends VirtualRasterWorkerCandidate, Init, WorkerFacts> = Readonly<{ disposeGraceMs?: number; id: string; idleTimeoutMs?: number; maxRequests: number; module: WorkerModuleReference; phaseLimits: Readonly<Record<VirtualRasterWorkerPhase, number>>; system: WorkerContextPoolSystem; workerCount: number; candidate: any; classifyFailure?: any; context: any; staleKey?: any }>
 ```
 
 ### `VirtualRasterWorkerExecutorFacts`
@@ -2466,7 +2466,7 @@ type VirtualRasterWorkerExecutorDescriptor<Candidate extends VirtualRasterWorker
 Kind: `Type Alias`.
 
 ```ts
-type VirtualRasterWorkerExecutorFacts<WorkerFacts> = Readonly<{ disposed: boolean; group: WorkerGroupFacts; id: string; kind: "virtual-raster-worker-executor"; phaseBudget: TaskPhaseBudgetFacts<VirtualRasterWorkerPhase>; system: WorkerSystemFacts; workers: readonly WorkerFacts[] }>
+type VirtualRasterWorkerExecutorFacts<WorkerFacts> = Readonly<{ contextPool: WorkerContextPoolFacts; disposed: boolean; group: WorkerGroupFacts; id: string; kind: "virtual-raster-worker-executor"; phaseBudget: TaskPhaseBudgetFacts<VirtualRasterWorkerPhase>; system: WorkerSystemFacts; workerFactsObservation: "live" | "last-observed-before-disposal"; workers: readonly WorkerFacts[] }>
 ```
 
 ### `VirtualRasterWorkerLookupResult`
@@ -2477,12 +2477,12 @@ Kind: `Type Alias`.
 type VirtualRasterWorkerLookupResult = Readonly<{ candidateId?: string; status: "hit" | "miss" }>
 ```
 
-### `VirtualRasterWorkerOperationNames`
+### `VirtualRasterWorkerModuleProtocol`
 
 Kind: `Type Alias`.
 
 ```ts
-type VirtualRasterWorkerOperationNames = Readonly<{ accept: string; decode: string; discard: string; facts: string; fetch: string; lookup: string; transfer: string }>
+type VirtualRasterWorkerModuleProtocol<Candidate extends VirtualRasterWorkerCandidate, Init, WorkerFacts, FetchResult = unknown> = WorkerModuleProtocol<WorkerNoOperations, WorkerContextProtocol<Init, VirtualRasterWorkerProtocol<Candidate, WorkerFacts, FetchResult>>>
 ```
 
 ### `VirtualRasterWorkerPhase`
@@ -2491,6 +2491,14 @@ Kind: `Type Alias`.
 
 ```ts
 type VirtualRasterWorkerPhase = "network" | "decode"
+```
+
+### `VirtualRasterWorkerProtocol`
+
+Kind: `Type Alias`.
+
+```ts
+type VirtualRasterWorkerProtocol<Candidate extends VirtualRasterWorkerCandidate, WorkerFacts, FetchResult = unknown> = Readonly<{ accept: WorkerOperationProtocol<Readonly<{ candidateId: string }>, WorkerFacts>; decode: WorkerOperationProtocol<Readonly<{ candidateId: string }>, VirtualRasterPageTransfer>; discard: WorkerOperationProtocol<Readonly<{ candidateId: string }>, WorkerFacts>; facts: WorkerOperationProtocol<null, WorkerFacts>; fetch: WorkerOperationProtocol<Candidate, FetchResult>; lookup: WorkerOperationProtocol<Candidate, VirtualRasterWorkerLookupResult>; transfer: WorkerOperationProtocol<Readonly<{ candidateId: string }>, VirtualRasterPageTransfer> }>
 ```
 
 ## `packages/geoscratch/src/geo/virtual-raster.ts`

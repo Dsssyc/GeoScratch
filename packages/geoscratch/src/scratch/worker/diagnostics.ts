@@ -29,6 +29,7 @@ export type WorkerDiagnosticCode =
     | 'WORKER_QUEUE_SATURATED'
     | 'WORKER_TERMINATED'
     | 'WORKER_CONTEXT_LOST'
+    | 'WORKER_CONTEXT_DISPOSE_TIMEOUT'
     | 'WORKER_TRANSFER_INVALID'
     | 'WORKER_GROUP_DISPOSED'
     | 'WORKER_SYSTEM_DISPOSED'
@@ -36,7 +37,7 @@ export type WorkerDiagnosticCode =
 
 export type WorkerDiagnosticSubject = Readonly<{
     kind: 'WorkerSystem' | 'WorkerGroup' | 'WorkerHost' | 'WorkerModule' |
-        'WorkerTask' | 'WorkerContext' | 'TaskPhaseBudget'
+        'WorkerTask' | 'WorkerContext' | 'WorkerContextPool' | 'TaskPhaseBudget'
     id: string
     label?: string
 }>

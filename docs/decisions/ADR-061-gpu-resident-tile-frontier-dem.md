@@ -79,7 +79,15 @@ before resolving the transient virtual-raster sample address.
 
 GPU feedback uses a fixed three-slot readback ring. Feedback is accepted only when its
 camera/residency decision key still matches the current frame. Superseded feedback is
-consumed and counted but cannot reconcile demand.
+consumed and counted but cannot reconcile demand. Because successive accepted frontier
+transactions need not repeat every still-missing page, CPU lowering carries an
+in-flight demand through exactly one absent feedback generation. The carried demand
+is background prefetch and cannot displace current refinement or the safety cover;
+two consecutive omissions cancel it. This bounded temporal envelope prevents
+alternating feedback from repeatedly aborting the same page without weakening view
+change cancellation into an unbounded cache. Only a current feedback demand admitted
+after reserving the safety-cover budget can enter the next grace generation, and grace
+facts count only demands admitted to the bounded scheduler set.
 
 ### Clean cut
 

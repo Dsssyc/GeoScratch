@@ -1,13 +1,18 @@
 import {
     TaskPhaseBudget,
+    WorkerContextPool,
     WorkerSystem,
     type TaskPhaseBudgetFacts,
     type TaskPhasePermit,
     type TaskPhasePermitRequest,
-    type WorkerContextHandle,
-    type WorkerGroup,
     type WorkerGroupFacts,
+    type WorkerContextPoolFacts,
+    type WorkerContextPoolSystem,
+    type WorkerContextProtocol,
     type WorkerModuleReference,
+    type WorkerModuleProtocol,
+    type WorkerNoOperations,
+    type WorkerOperationProtocol,
     type WorkerSystemFacts,
     type WorkerTaskHandle,
     type WorkerTaskPriority,
@@ -41,15 +46,38 @@ export type VirtualRasterWorkerContextDescriptor<Init> = Readonly<{
     restore?: unknown
 }>
 
-export type VirtualRasterWorkerOperationNames = Readonly<{
-    lookup: string
-    fetch: string
-    decode: string
-    transfer: string
-    accept: string
-    discard: string
-    facts: string
+export type VirtualRasterWorkerProtocol<
+    Candidate extends VirtualRasterWorkerCandidate,
+    WorkerFacts,
+    FetchResult = unknown,
+> = Readonly<{
+    lookup: WorkerOperationProtocol<Candidate, VirtualRasterWorkerLookupResult>
+    fetch: WorkerOperationProtocol<Candidate, FetchResult>
+    decode: WorkerOperationProtocol<
+        Readonly<{ candidateId: string }>,
+        VirtualRasterPageTransfer
+    >
+    transfer: WorkerOperationProtocol<
+        Readonly<{ candidateId: string }>,
+        VirtualRasterPageTransfer
+    >
+    accept: WorkerOperationProtocol<Readonly<{ candidateId: string }>, WorkerFacts>
+    discard: WorkerOperationProtocol<Readonly<{ candidateId: string }>, WorkerFacts>
+    facts: WorkerOperationProtocol<null, WorkerFacts>
 }>
+
+export type VirtualRasterWorkerModuleProtocol<
+    Candidate extends VirtualRasterWorkerCandidate,
+    Init,
+    WorkerFacts,
+    FetchResult = unknown,
+> = WorkerModuleProtocol<
+    WorkerNoOperations,
+    WorkerContextProtocol<
+        Init,
+        VirtualRasterWorkerProtocol<Candidate, WorkerFacts, FetchResult>
+    >
+>
 
 export type VirtualRasterWorkerExecutorDescriptor<
     Candidate extends VirtualRasterWorkerCandidate,
@@ -57,23 +85,20 @@ export type VirtualRasterWorkerExecutorDescriptor<
     WorkerFacts,
 > = Readonly<{
     id: string
-    system: WorkerSystem
+    system: WorkerContextPoolSystem
     module: WorkerModuleReference
     workerCount: number
     maxRequests: number
     phaseLimits: Readonly<Record<VirtualRasterWorkerPhase, number>>
     context(index: number, count: number): VirtualRasterWorkerContextDescriptor<Init>
     candidate(demand: VirtualRasterPageDemand, sequence: number): Candidate
-    initialFacts(index: number): WorkerFacts
-    operations?: Partial<VirtualRasterWorkerOperationNames>
     staleKey?(candidate: Candidate): string
     classifyFailure?(
         error: unknown,
         candidate: Candidate
     ): VirtualRasterRequestFailureClassification | undefined
-    disposedFacts?(facts: WorkerFacts, index: number): WorkerFacts
-    maxHistory?: number
     idleTimeoutMs?: number
+    disposeGraceMs?: number
 }>
 
 export type VirtualRasterWorkerExecutorFacts<WorkerFacts> = Readonly<{
@@ -82,6 +107,8 @@ export type VirtualRasterWorkerExecutorFacts<WorkerFacts> = Readonly<{
     disposed: boolean
     system: WorkerSystemFacts
     group: WorkerGroupFacts
+    contextPool: WorkerContextPoolFacts
+    workerFactsObservation: 'live' | 'last-observed-before-disposal'
     workers: readonly WorkerFacts[]
     phaseBudget: TaskPhaseBudgetFacts<VirtualRasterWorkerPhase>
 }>
@@ -92,24 +119,12 @@ export type VirtualRasterWorkerExecutor<WorkerFacts> = VirtualRasterRequestExecu
     dispose(): Promise<void>
 }>
 
-type WorkerExecutorContext<WorkerFacts> = WorkerContextHandle<WorkerFacts>
-
 type ExecutorState<WorkerFacts> = {
     disposed: boolean
     disposePromise?: Promise<void>
     workerFacts: WorkerFacts[]
     requestSequence: number
 }
-
-const DEFAULT_OPERATIONS: VirtualRasterWorkerOperationNames = Object.freeze({
-    lookup: 'lookup',
-    fetch: 'fetch',
-    decode: 'decode',
-    transfer: 'transfer',
-    accept: 'accept',
-    discard: 'discard',
-    facts: 'facts',
-})
 
 /** Adapts retained Scratch Worker contexts and phase budgets into raster page requests. */
 export async function createVirtualRasterWorkerExecutor<
@@ -121,49 +136,76 @@ export async function createVirtualRasterWorkerExecutor<
 ): Promise<VirtualRasterWorkerExecutor<WorkerFacts>> {
 
     validateDescriptor(descriptor)
-    const operations = normalizeOperations(descriptor.operations)
-    const group = createWorkerGroup(descriptor)
-    try {
-        await group.ready
-    } catch (error) {
-        await group.dispose()
-        throw error
-    }
-    const contexts: WorkerExecutorContext<WorkerFacts>[] = []
-    try {
-        for (let index = 0; index < descriptor.workerCount; index++) {
-            const context = descriptor.context(index, descriptor.workerCount)
-            validateContextDescriptor(descriptor.id, context, index)
-            contexts.push(await group.openContext<Init, WorkerFacts>({
-                module: descriptor.module.id,
-                key: context.key,
-                init: context.init,
-                ...(context.restore === undefined ? {} : { restore: context.restore }),
-            }))
-        }
-    } catch (error) {
-        await group.dispose()
-        throw error
-    }
     const phaseBudget = new TaskPhaseBudget<VirtualRasterWorkerPhase>({
         id: `${descriptor.id}.phases`,
         limits: descriptor.phaseLimits,
         maxQueuedTasks: descriptor.maxRequests,
     })
+    type Operations = VirtualRasterWorkerProtocol<Candidate, WorkerFacts>
+    let contextPool: WorkerContextPool<WorkerFacts, Operations> | undefined
+    let workerFacts: WorkerFacts[]
+    try {
+        contextPool = await WorkerContextPool.create<Init, WorkerFacts, Operations>({
+            id: descriptor.id,
+            system: descriptor.system,
+            module: descriptor.module,
+            size: descriptor.workerCount,
+            maxQueuedTasks: Math.max(16, descriptor.maxRequests * 4),
+            maxActiveTasks: descriptor.workerCount,
+            idleTimeoutMs: descriptor.idleTimeoutMs ?? 30_000,
+            ...(descriptor.disposeGraceMs === undefined
+                ? {}
+                : { disposeGraceMs: descriptor.disposeGraceMs }),
+            context: descriptor.context,
+        })
+        workerFacts = await Promise.all(Array.from(
+            { length: descriptor.workerCount },
+            (_value, index) => contextPool!.run(
+                index,
+                'facts',
+                null,
+                {
+                    priority: { class: 'background', score: -1 },
+                    cancellation: 'cooperative',
+                }
+            ).result
+        ))
+    } catch (error) {
+        const cleanup = await Promise.allSettled([
+            ...(contextPool === undefined ? [] : [ contextPool.dispose() ]),
+            phaseBudget.dispose(),
+        ])
+        const cleanupFailures = cleanup
+            .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
+            .map(result => result.reason)
+        if (cleanupFailures.length > 0) {
+            throw new AggregateError(
+                [ error, ...cleanupFailures ],
+                `Virtual Raster Worker executor ${descriptor.id} initialization and cleanup failed`
+            )
+        }
+        throw error
+    }
+    const activeContextPool = contextPool
     const state: ExecutorState<WorkerFacts> = {
         disposed: false,
-        workerFacts: contexts.map((_context, index) => descriptor.initialFacts(index)),
+        workerFacts,
         requestSequence: 0,
     }
 
     function inspect(): VirtualRasterWorkerExecutorFacts<WorkerFacts> {
 
+        const poolFacts = activeContextPool.inspect()
         return Object.freeze({
             kind: 'virtual-raster-worker-executor',
             id: descriptor.id,
             disposed: state.disposed,
-            system: descriptor.system.inspect(),
-            group: group.inspect(),
+            system: poolFacts.system,
+            group: poolFacts.group,
+            contextPool: poolFacts,
+            workerFactsObservation: state.disposed
+                ? 'last-observed-before-disposal'
+                : 'live',
             workers: Object.freeze([ ...state.workerFacts ]),
             phaseBudget: phaseBudget.inspect(),
         })
@@ -172,8 +214,8 @@ export async function createVirtualRasterWorkerExecutor<
     async function refreshFacts(): Promise<VirtualRasterWorkerExecutorFacts<WorkerFacts>> {
 
         if (!state.disposed) {
-            state.workerFacts = await Promise.all(contexts.map(context =>
-                context.run<null, WorkerFacts>(operations.facts, null, {
+            state.workerFacts = await Promise.all(state.workerFacts.map((_facts, index) =>
+                activeContextPool.run(index, 'facts', null, {
                     priority: { class: 'background', score: -1 },
                     cancellation: 'cooperative',
                 }).result
@@ -188,14 +230,8 @@ export async function createVirtualRasterWorkerExecutor<
         state.disposed = true
         const failures: unknown[] = []
         const phaseBudgetDisposal = phaseBudget.dispose()
-        const contextSettlements = await Promise.allSettled(
-            contexts.map(context => context.dispose())
-        )
-        for (const settlement of contextSettlements) {
-            if (settlement.status === 'rejected') failures.push(settlement.reason)
-        }
         try {
-            await group.dispose()
+            await activeContextPool.dispose()
         } catch (error) {
             failures.push(error)
         }
@@ -203,9 +239,6 @@ export async function createVirtualRasterWorkerExecutor<
             await phaseBudgetDisposal
         } catch (error) {
             failures.push(error)
-        }
-        if (descriptor.disposedFacts !== undefined) {
-            state.workerFacts = state.workerFacts.map(descriptor.disposedFacts)
         }
         if (failures.length > 0) {
             throw new AggregateError(
@@ -225,17 +258,16 @@ export async function createVirtualRasterWorkerExecutor<
                     { disposed: true, pageKey: demand?.page?.key }
                 )
             }
-            const contextIndex = stableShard(demand.page.key, contexts.length)
+            const contextIndex = stableShard(demand.page.key, state.workerFacts.length)
             const candidate = descriptor.candidate(demand, ++state.requestSequence)
             validateCandidate(descriptor.id, demand, candidate)
             return createExecution({
                 id: descriptor.id,
-                context: contexts[contextIndex]!,
+                contextPool: activeContextPool,
                 contextIndex,
                 demand,
                 candidate,
                 phaseBudget,
-                operations,
                 staleKey: descriptor.staleKey?.(candidate) ?? candidate.page.key,
                 ...(descriptor.classifyFailure === undefined
                     ? {}
@@ -255,23 +287,24 @@ export async function createVirtualRasterWorkerExecutor<
 
 function createExecution<Candidate extends VirtualRasterWorkerCandidate, WorkerFacts>({
     id,
-    context,
+    contextPool,
     contextIndex,
     demand,
     candidate,
     phaseBudget,
-    operations,
     staleKey,
     classifyFailure,
     updateFacts,
 }: Readonly<{
     id: string
-    context: WorkerExecutorContext<WorkerFacts>
+    contextPool: WorkerContextPool<
+        WorkerFacts,
+        VirtualRasterWorkerProtocol<Candidate, WorkerFacts>
+    >
     contextIndex: number
     demand: VirtualRasterPageDemand
     candidate: Candidate
     phaseBudget: TaskPhaseBudget<VirtualRasterWorkerPhase>
-    operations: VirtualRasterWorkerOperationNames
     staleKey: string
     classifyFailure?: (
         error: unknown,
@@ -290,10 +323,14 @@ function createExecution<Candidate extends VirtualRasterWorkerCandidate, WorkerF
     let settlement: 'accept' | 'discard' | undefined
     let settlementPromise: Promise<void> | undefined
 
-    const run = async<Input, Output>(operation: string, input: Input): Promise<Output> => {
+    type Operations = VirtualRasterWorkerProtocol<Candidate, WorkerFacts>
+    const run = async<Name extends keyof Operations & string>(
+        operation: Name,
+        input: Operations[Name]['input']
+    ): Promise<Operations[Name]['output']> => {
 
         if (cancelled) throw cancelledError(candidate.page.key)
-        const task = context.run<Input, Output>(operation, input, {
+        const task = contextPool.run(contextIndex, operation, input, {
             priority,
             cancellation: 'cooperative',
             generation: demand.generation,
@@ -304,11 +341,11 @@ function createExecution<Candidate extends VirtualRasterWorkerCandidate, WorkerF
         return await task.result
     }
 
-    const runPhase = async<Input, Output>(
+    const runPhase = async<Name extends 'fetch' | 'decode'>(
         nextPhase: VirtualRasterWorkerPhase,
-        operation: string,
-        input: Input
-    ): Promise<Output> => {
+        operation: Name,
+        input: Operations[Name]['input']
+    ): Promise<Operations[Name]['output']> => {
 
         phase = nextPhase
         currentTask = undefined
@@ -322,7 +359,7 @@ function createExecution<Candidate extends VirtualRasterWorkerCandidate, WorkerF
             throw cancelledError(candidate.page.key)
         }
         try {
-            return await run<Input, Output>(operation, input)
+            return await run(operation, input)
         } finally {
             permit.release()
             phasePermit = undefined
@@ -333,23 +370,16 @@ function createExecution<Candidate extends VirtualRasterWorkerCandidate, WorkerF
     const result = (async(): Promise<VirtualRasterPageTransfer> => {
 
         try {
-            const lookup = await run<Candidate, VirtualRasterWorkerLookupResult>(
-                operations.lookup,
-                candidate
-            )
+            const lookup = await run('lookup', candidate)
             validateLookup(id, candidate, lookup)
             let transfer: VirtualRasterPageTransfer
             if (lookup.status === 'miss') {
-                await runPhase<Candidate, unknown>('network', operations.fetch, candidate)
-                transfer = await runPhase<
-                    Readonly<{ candidateId: string }>,
-                    VirtualRasterPageTransfer
-                >('decode', operations.decode, { candidateId: candidate.candidateId })
+                await runPhase('network', 'fetch', candidate)
+                transfer = await runPhase('decode', 'decode', {
+                    candidateId: candidate.candidateId,
+                })
             } else {
-                transfer = await run<
-                    Readonly<{ candidateId: string }>,
-                    VirtualRasterPageTransfer
-                >(operations.transfer, {
+                transfer = await run('transfer', {
                     candidateId: lookup.candidateId ?? candidate.candidateId,
                 })
             }
@@ -371,8 +401,9 @@ function createExecution<Candidate extends VirtualRasterWorkerCandidate, WorkerF
                 ))
         }
         settlement = kind
-        settlementPromise = context.run<Readonly<{ candidateId: string }>, WorkerFacts>(
-            operations[kind],
+        settlementPromise = contextPool.run(
+            contextIndex,
+            kind,
             { candidateId: candidate.candidateId },
             {
                 priority: { class: 'critical', score: Number.MAX_SAFE_INTEGER },
@@ -419,23 +450,6 @@ function createExecution<Candidate extends VirtualRasterWorkerCandidate, WorkerF
     })
 }
 
-function createWorkerGroup<
-    Candidate extends VirtualRasterWorkerCandidate,
-    Init,
-    WorkerFacts,
->(descriptor: VirtualRasterWorkerExecutorDescriptor<Candidate, Init, WorkerFacts>): WorkerGroup {
-
-    return descriptor.system.createGroup({
-        id: descriptor.id,
-        modules: [ descriptor.module ],
-        isolation: 'group',
-        size: { min: descriptor.workerCount, max: descriptor.workerCount },
-        maxQueuedTasks: Math.max(16, descriptor.maxRequests * 4),
-        maxActiveTasks: descriptor.workerCount,
-        idleTimeoutMs: descriptor.idleTimeoutMs ?? 30_000,
-    })
-}
-
 function validateDescriptor<
     Candidate extends VirtualRasterWorkerCandidate,
     Init,
@@ -443,42 +457,41 @@ function validateDescriptor<
 >(descriptor: VirtualRasterWorkerExecutorDescriptor<Candidate, Init, WorkerFacts>): void {
 
     const valid = typeof descriptor?.id === 'string' && descriptor.id.length > 0 &&
-        descriptor.system instanceof WorkerSystem &&
+        validWorkerSystemOwnership(descriptor.system) &&
         typeof descriptor.module?.id === 'string' && descriptor.module.id.length > 0 &&
         typeof descriptor.module?.version === 'string' && descriptor.module.version.length > 0 &&
         positiveInteger(descriptor.workerCount) &&
-        descriptor.workerCount <= descriptor.system.maxWorkers &&
+        workerCountFitsSystem(descriptor.workerCount, descriptor.system) &&
         positiveInteger(descriptor.maxRequests) &&
         positiveInteger(descriptor.phaseLimits?.network) &&
         positiveInteger(descriptor.phaseLimits?.decode) &&
         typeof descriptor.context === 'function' &&
         typeof descriptor.candidate === 'function' &&
-        typeof descriptor.initialFacts === 'function' &&
-        (descriptor.maxHistory === undefined || nonNegativeInteger(descriptor.maxHistory)) &&
-        (descriptor.idleTimeoutMs === undefined || positiveInteger(descriptor.idleTimeoutMs))
+        (descriptor.idleTimeoutMs === undefined || positiveInteger(descriptor.idleTimeoutMs)) &&
+        (descriptor.disposeGraceMs === undefined || positiveInteger(descriptor.disposeGraceMs))
     if (valid) return
     invalidExecutor(
         typeof descriptor?.id === 'string' && descriptor.id.length > 0
             ? descriptor.id
             : 'invalid-virtual-raster-worker-executor',
-        'A Virtual Raster Worker executor requires one borrowed WorkerSystem and finite worker, request, and phase budgets.',
+        'A Virtual Raster Worker executor requires explicit WorkerSystem ownership and finite worker, request, and phase budgets.',
         descriptor
     )
 }
 
-function validateContextDescriptor<Init>(
-    id: string,
-    context: VirtualRasterWorkerContextDescriptor<Init>,
-    index: number
-): void {
+function workerCountFitsSystem(count: number, system: WorkerContextPoolSystem): boolean {
 
-    if (context !== null && typeof context === 'object' &&
-        typeof context.key === 'string' && context.key.length > 0 &&
-        'init' in context) return
-    invalidExecutor(id, 'A Virtual Raster Worker context requires a key and init payload.', {
-        index,
-        context,
-    })
+    if (system.ownership === 'borrowed') return count <= system.system.maxWorkers
+    return system.options?.maxWorkers === undefined || count <= system.options.maxWorkers
+}
+
+function validWorkerSystemOwnership(system: WorkerContextPoolSystem | undefined): boolean {
+
+    return system?.ownership === 'borrowed'
+        ? system.system instanceof WorkerSystem
+        : system?.ownership === 'owned' &&
+            (system.options === undefined ||
+                (typeof system.options === 'object' && system.options !== null))
 }
 
 function validateCandidate<Candidate extends VirtualRasterWorkerCandidate>(
@@ -513,21 +526,6 @@ function validateLookup<Candidate extends VirtualRasterWorkerCandidate>(
     })
 }
 
-function normalizeOperations(
-    operations: Partial<VirtualRasterWorkerOperationNames> | undefined
-): VirtualRasterWorkerOperationNames {
-
-    const result = { ...DEFAULT_OPERATIONS, ...operations }
-    if (Object.values(result).every(value => typeof value === 'string' && value.length > 0)) {
-        return Object.freeze(result)
-    }
-    return invalidExecutor(
-        'invalid-virtual-raster-worker-operations',
-        'Virtual Raster Worker operation names must be non-empty strings.',
-        operations
-    )
-}
-
 function stableShard(key: string, count: number): number {
 
     let hash = 0x811c9dc5
@@ -559,9 +557,4 @@ function invalidExecutor(id: string, message: string, actual: unknown): never {
 function positiveInteger(value: unknown): value is number {
 
     return Number.isSafeInteger(value) && Number(value) > 0
-}
-
-function nonNegativeInteger(value: unknown): value is number {
-
-    return Number.isSafeInteger(value) && Number(value) >= 0
 }

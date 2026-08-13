@@ -12,6 +12,7 @@ export class ScriptedWorker {
         this.terminated = false
         this.hostId = undefined
         this.detachmentFacts = []
+        this.contextDisposeCount = 0
         ScriptedWorker.instances.push(this)
     }
 
@@ -91,6 +92,19 @@ export class ScriptedWorker {
             return
         }
         if (message.kind === 'context-open') {
+            if (message.init?.failOpen === true) {
+                this.emitMessage({
+                    kind: 'control-error',
+                    requestId: message.requestId,
+                    error: {
+                        name: 'FixtureContextOpenError',
+                        message: 'remote fixture context open failed',
+                        stack: 'remote fixture context open stack',
+                        code: 'FIXTURE_CONTEXT_OPEN_FAILED',
+                    },
+                })
+                return
+            }
             this.contexts.set(message.contextId, {
                 value: Number(message.init?.value ?? 0),
                 key: message.key,
@@ -112,6 +126,21 @@ export class ScriptedWorker {
             return
         }
         if (message.kind === 'context-dispose') {
+            this.contextDisposeCount++
+            if (this.options.holdContextDispose === true) return
+            if (this.options.failContextDispose === true) {
+                this.emitMessage({
+                    kind: 'control-error',
+                    requestId: message.requestId,
+                    error: {
+                        name: 'FixtureDisposeError',
+                        message: 'remote fixture disposal failed',
+                        stack: 'remote fixture disposal stack',
+                        code: 'FIXTURE_DISPOSE_FAILED',
+                    },
+                })
+                return
+            }
             this.contexts.delete(message.contextId)
             this.emitMessage({
                 kind: 'context-disposed',

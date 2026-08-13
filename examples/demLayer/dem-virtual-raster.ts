@@ -8,8 +8,8 @@ import {
 import type { VirtualRasterPageIdentity } from 'geoscratch/geo'
 import {
     createDemWorkerRequestExecutor,
-} from './dem-worker-source.ts'
-import type { DemWorkerRequestExecutor } from './dem-worker-source.ts'
+} from './dem-tile-executor.ts'
+import type { DemWorkerRequestExecutor } from './dem-tile-executor.ts'
 import type { DemCachePolicy } from './dem-tile-protocol.ts'
 
 type NumberSequence = ArrayLike<number> & Iterable<number>

@@ -1,5 +1,5 @@
 import { workerDiagnosticError } from './diagnostics.js'
-import type { WorkerModuleContract } from './module.js'
+import type { WorkerModuleContractIdentity } from './module.js'
 import { isWorkerModuleContract, validWorkerModuleIdentity } from './module.js'
 import type { WorkerModuleDescriptor, WorkerModuleResolver } from './worker-system.js'
 
@@ -109,7 +109,7 @@ export class WorkerModuleCatalog implements WorkerModuleResolver {
         return WorkerModuleCatalog.fromManifest(manifest, capturedManifestUrl)
     }
 
-    resolve(contract: WorkerModuleContract): WorkerModuleDescriptor {
+    resolve(contract: WorkerModuleContractIdentity): WorkerModuleDescriptor {
 
         if (!isWorkerModuleContract(contract)) {
             return missingModule('Worker module resolution requires a contract.', contract)

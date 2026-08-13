@@ -62,6 +62,7 @@ const gpuBasenames = [
 ]
 
 const workerBasenames = [
+    'context-pool.ts',
     'diagnostics.ts',
     'index.ts',
     'module-build.ts',
@@ -69,6 +70,7 @@ const workerBasenames = [
     'module.ts',
     'protocol.ts',
     'task-phase-budget.ts',
+    'utilities.ts',
     'worker-bootstrap.ts',
     'worker-system.ts',
 ]

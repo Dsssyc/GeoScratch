@@ -476,7 +476,7 @@ describe('DEM WebMercator virtual raster', () => {
         })
     })
 
-    it('reconciles canonical GPU demand, cancellation, and stale epochs', async() => {
+    it('keeps one feedback window of request continuity before cancellation', async() => {
 
         const fixture = await createGpuDemandFixture()
         const child = fixture.model.addressSpace.pageFromTile({
@@ -516,9 +516,26 @@ describe('DEM WebMercator virtual raster', () => {
             viewAt(secondFeedback)
         )
         expect(second.generation).to.be.greaterThan(first.generation)
+        expect(fixture.scheduler.inspect().activeRequestCount).to.equal(1)
+        expect(fixture.executor.requests.get(child.key).cancelled).to.equal(false)
+        expect(fixture.adapter.facts()).to.deep.include({
+            feedbackDemandGraceGenerations: 1,
+            deferredDemandCount: 1,
+        })
+
+        const thirdFeedback = feedbackAt(
+            9,
+            fixture.acknowledgedSnapshotEpoch(),
+            []
+        )
+        const third = fixture.adapter.reconcileFeedback(
+            thirdFeedback,
+            viewAt(thirdFeedback)
+        )
         expect(fixture.scheduler.inspect().activeRequestCount).to.equal(0)
         expect(fixture.executor.requests.get(child.key).cancelled).to.equal(true)
-        await second.settlement
+        expect(fixture.adapter.facts().deferredDemandCount).to.equal(0)
+        await Promise.all([ second.settlement, third.settlement ])
 
         let staleFailure
         try {
@@ -532,6 +549,106 @@ describe('DEM WebMercator virtual raster', () => {
             phase: 'selection',
         })
         expect(fixture.scheduler.inspect().activeRequestCount).to.equal(0)
+        await fixture.dispose()
+    })
+
+    it('coalesces alternating GPU feedback without restarting page requests', async() => {
+
+        const fixture = await createGpuDemandFixture()
+        const firstChild = fixture.model.addressSpace.pageFromTile({
+            matrixId: '5',
+            tileRow: 12,
+            tileCol: 26,
+        })
+        const secondChild = fixture.model.addressSpace.pageFromTile({
+            matrixId: '5',
+            tileRow: 13,
+            tileCol: 26,
+        })
+        const firstParent = fixture.model.addressSpace.parent(firstChild)
+        const secondParent = fixture.model.addressSpace.parent(secondChild)
+
+        const feedback = (frameEpoch, child, parent) => feedbackAt(
+            frameEpoch,
+            fixture.acknowledgedSnapshotEpoch(),
+            [ gpuDemand(fixture, child, parent, 50) ]
+        )
+        fixture.adapter.reconcileFeedback(feedback(7, firstChild, firstParent), viewAt(
+            feedback(7, firstChild, firstParent)
+        ))
+        const firstRequest = fixture.executor.requests.get(firstChild.key)
+        fixture.adapter.reconcileFeedback(feedback(8, secondChild, secondParent), viewAt(
+            feedback(8, secondChild, secondParent)
+        ))
+        const secondRequest = fixture.executor.requests.get(secondChild.key)
+        fixture.adapter.reconcileFeedback(feedback(9, firstChild, firstParent), viewAt(
+            feedback(9, firstChild, firstParent)
+        ))
+        fixture.adapter.reconcileFeedback(feedback(10, secondChild, secondParent), viewAt(
+            feedback(10, secondChild, secondParent)
+        ))
+
+        expect(fixture.scheduler.inspect()).to.deep.include({
+            activeRequestCount: 2,
+            cancellationCount: 0,
+        })
+        expect(fixture.executor.requests.get(firstChild.key)).to.equal(firstRequest)
+        expect(fixture.executor.requests.get(secondChild.key)).to.equal(secondRequest)
+        expect(firstRequest.cancelled).to.equal(false)
+        expect(secondRequest.cancelled).to.equal(false)
+
+        const firstEmpty = feedbackAt(11, fixture.acknowledgedSnapshotEpoch(), [])
+        fixture.adapter.reconcileFeedback(firstEmpty, viewAt(firstEmpty))
+        expect(firstRequest.cancelled).to.equal(true)
+        expect(secondRequest.cancelled).to.equal(false)
+        const secondEmpty = feedbackAt(12, fixture.acknowledgedSnapshotEpoch(), [])
+        fixture.adapter.reconcileFeedback(secondEmpty, viewAt(secondEmpty))
+        expect(secondRequest.cancelled).to.equal(true)
+        expect(fixture.scheduler.inspect().activeRequestCount).to.equal(0)
+
+        await fixture.dispose()
+    })
+
+    it('never lets deferred feedback displace current demand under budget pressure', async() => {
+
+        const fixture = await createGpuDemandFixture({ maxRequests: 2 })
+        const deferredChild = fixture.model.addressSpace.pageFromTile({
+            matrixId: '5',
+            tileRow: 12,
+            tileCol: 26,
+        })
+        const currentChild = fixture.model.addressSpace.pageFromTile({
+            matrixId: '5',
+            tileRow: 13,
+            tileCol: 26,
+        })
+        const firstFeedback = feedbackAt(
+            7,
+            fixture.acknowledgedSnapshotEpoch(),
+            [ gpuDemand(fixture, deferredChild, fixture.model.addressSpace.parent(deferredChild), 100) ]
+        )
+        fixture.adapter.reconcileFeedback(firstFeedback, viewAt(firstFeedback))
+        const deferredRequest = fixture.executor.requests.get(deferredChild.key)
+
+        const secondFeedback = feedbackAt(
+            8,
+            fixture.acknowledgedSnapshotEpoch(),
+            [ gpuDemand(fixture, currentChild, fixture.model.addressSpace.parent(currentChild), 1) ]
+        )
+        fixture.adapter.reconcileFeedback(secondFeedback, viewAt(secondFeedback))
+
+        expect(deferredRequest.cancelled).to.equal(true)
+        expect(fixture.executor.requests.has(currentChild.key)).to.equal(true)
+        expect(fixture.scheduler.inspect()).to.deep.include({
+            activeRequestCount: 1,
+            demandedPageCount: 2,
+        })
+        expect(fixture.adapter.facts()).to.deep.include({
+            feedbackDemandGraceGenerations: 1,
+            deferredDemandCount: 0,
+            activeDemandCount: 2,
+        })
+
         await fixture.dispose()
     })
 
@@ -836,7 +953,7 @@ async function expectRejectedName(promise, name) {
     expect(failure.name).to.equal(name)
 }
 
-async function createGpuDemandFixture({ maxPhysicalPages = 6 } = {}) {
+async function createGpuDemandFixture({ maxPhysicalPages = 6, maxRequests = 24 } = {}) {
 
     const model = createDemVirtualRasterModel(parseDemVirtualRasterManifest(manifest))
     const residency = new VirtualRasterResidency({
@@ -850,7 +967,7 @@ async function createGpuDemandFixture({ maxPhysicalPages = 6 } = {}) {
     const scheduler = new VirtualRasterRequestScheduler({
         residency,
         executor,
-        maxRequests: 24,
+        maxRequests,
         maxHistory: 16,
     })
     const viewDemandProducer = new ViewDemandProducer({
