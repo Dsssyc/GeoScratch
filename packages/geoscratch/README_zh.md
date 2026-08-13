@@ -63,6 +63,39 @@ Scratch 是领域无关的 TypeScript source-first 基础能力层，Geo 在其�
 `PersistentCache` 与 `GPURuntime` 保持独立构造，不共享可变状态或 lifecycle
 authority。
 
+## Scratch Worker 模块
+
+Worker 源码与部署共享一个不可变 contract。Worker 实现导出
+`contract.implement(...)`，而框架无关的构建注册表生成独立、内容寻址的 ESM
+artifact 和严格 manifest：
+
+```ts
+import {
+    defineWorkerModuleBuild,
+    defineWorkerModuleContract,
+} from 'geoscratch/scratch'
+
+export const IMAGE_WORKER = defineWorkerModuleContract({
+    id: 'example.image-worker',
+    version: '1',
+})
+
+export default defineWorkerModuleBuild({
+    outDir: './public/scratch-workers',
+    modules: [ { contract: IMAGE_WORKER, entry: './image-worker.ts' } ],
+})
+```
+
+```bash
+geoscratch-worker build --config ./worker-modules.ts
+```
+
+将输出作为静态文件托管，通过 `WorkerModuleCatalog.load()` 加载，把 catalog 传给
+`new WorkerSystem({ moduleResolver: catalog })`，并在 group `modules` 中直接列出
+contract。该流程不需要 Vite 插件、Blob URL、全局 registry 或逐模块 URL 文件。
+CLI 要求 Node.js 18 或更高版本；应用仍显式拥有 manifest 加载及全部 Worker
+lifecycle。
+
 ## Scratch Persistent Cache
 
 ```js

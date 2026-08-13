@@ -7,6 +7,7 @@ export type {
     WorkerDiagnosticSubject,
 } from './diagnostics.js'
 export {
+    defineWorkerModuleContract,
     defineWorkerModule,
     transferWorkerResult,
 } from './module.js'
@@ -15,10 +16,25 @@ export type {
     WorkerContextOperation,
     WorkerMaybePromise,
     WorkerModuleDefinition,
+    WorkerModuleContract,
+    WorkerModuleImplementation,
     WorkerOperation,
     WorkerOperationContext,
     WorkerTransferResult,
 } from './module.js'
+export { defineWorkerModuleBuild } from './module-build.js'
+export type {
+    WorkerModuleBuild,
+    WorkerModuleBuildEntry,
+} from './module-build.js'
+export { WorkerModuleCatalog } from './module-catalog.js'
+export type {
+    WorkerModuleArtifact,
+    WorkerModuleArtifactSourceMap,
+    WorkerModuleCatalogFacts,
+    WorkerModuleCatalogLoadOptions,
+    WorkerModuleManifest,
+} from './module-catalog.js'
 export {
     WorkerContextHandle,
     WorkerGroup,
@@ -43,7 +59,10 @@ export type {
     WorkerGroupIsolation,
     WorkerGroupOptions,
     WorkerModuleDescriptor,
+    WorkerModuleReference,
+    WorkerModuleResolver,
     WorkerRemoteErrorFacts,
+    ResolvedWorkerGroupOptions,
     WorkerSystemFacts,
     WorkerSystemOptions,
     WorkerTaskCancellationMode,

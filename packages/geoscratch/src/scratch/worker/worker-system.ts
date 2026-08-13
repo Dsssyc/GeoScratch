@@ -13,6 +13,8 @@ import type {
     WorkerRemoteError,
     WorkerTaskOutboundMessage,
 } from './protocol.js'
+import type { WorkerModuleContract } from './module.js'
+import { isWorkerModuleContract } from './module.js'
 
 type WorkerFailure = ScratchDiagnosticError<WorkerDiagnostic>
 
@@ -41,6 +43,12 @@ export type WorkerModuleDescriptor = Readonly<{
     url: URL
 }>
 
+export type WorkerModuleReference = WorkerModuleDescriptor | WorkerModuleContract
+
+export type WorkerModuleResolver = Readonly<{
+    resolve(contract: WorkerModuleContract): WorkerModuleDescriptor
+}>
+
 export type WorkerEndpoint = {
     postMessage(message: unknown, transfer?: readonly Transferable[]): void
     terminate(): void
@@ -59,16 +67,21 @@ export type WorkerSystemOptions = Readonly<{
     agingIntervalMs?: number
     workerFactory?: WorkerEndpointFactory
     bootstrapUrl?: URL
+    moduleResolver?: WorkerModuleResolver
 }>
 
 export type WorkerGroupOptions = Readonly<{
     id: string
-    modules: readonly WorkerModuleDescriptor[]
+    modules: readonly WorkerModuleReference[]
     isolation: WorkerGroupIsolation
     size: Readonly<{ min: number, max: number }>
     maxQueuedTasks: number
     maxActiveTasks: number
     idleTimeoutMs: number
+}>
+
+export type ResolvedWorkerGroupOptions = Omit<WorkerGroupOptions, 'modules'> & Readonly<{
+    modules: readonly WorkerModuleDescriptor[]
 }>
 
 export type WorkerTaskDescriptor<Input> = Readonly<{
@@ -423,7 +436,7 @@ export class WorkerContextHandle<State = unknown> {
 export class WorkerGroup {
 
     readonly id: string
-    readonly options: WorkerGroupOptions
+    readonly options: ResolvedWorkerGroupOptions
     readonly ready: Promise<void>
     readonly #system: WorkerSystem
     readonly #modules: ReadonlyMap<string, WorkerModuleDescriptor>
@@ -444,20 +457,28 @@ export class WorkerGroup {
     #terminatedWorkerCount = 0
     #disposePromise: Promise<void> | undefined
 
-    private constructor(system: WorkerSystem, options: WorkerGroupOptions) {
+    private constructor(
+        system: WorkerSystem,
+        options: WorkerGroupOptions,
+        modules: readonly WorkerModuleDescriptor[]
+    ) {
 
-        validateGroupOptions(options)
+        validateGroupOptions(options, modules)
         this.#system = system
-        this.options = freezeGroupOptions(options)
+        this.options = freezeGroupOptions(options, modules)
         this.id = options.id
-        this.#modules = new Map(options.modules.map(module => [ module.id, freezeModule(module) ]))
+        this.#modules = new Map(modules.map(module => [ module.id, freezeModule(module) ]))
         this.ready = this.#warm()
     }
 
     /** @internal */
-    static create(system: WorkerSystem, options: WorkerGroupOptions): WorkerGroup {
+    static create(
+        system: WorkerSystem,
+        options: WorkerGroupOptions,
+        modules: readonly WorkerModuleDescriptor[]
+    ): WorkerGroup {
 
-        return new WorkerGroup(system, options)
+        return new WorkerGroup(system, options, modules)
     }
 
     run<Input, Output>(descriptor: WorkerTaskDescriptor<Input>): WorkerTaskHandle<Output> {
@@ -1120,6 +1141,7 @@ export class WorkerSystem {
     readonly agingIntervalMs: number
     readonly bootstrapUrl: URL
     readonly #workerFactory: WorkerEndpointFactory
+    readonly #moduleResolver: WorkerModuleResolver | undefined
     readonly #groups = new Map<string, WorkerGroup>()
     readonly #hosts = new Set<WorkerHost>()
     readonly #history: WorkerHistoryEntry[] = []
@@ -1141,6 +1163,7 @@ export class WorkerSystem {
         this.agingIntervalMs = positiveInteger(options.agingIntervalMs ?? 2_000, 'agingIntervalMs')
         this.bootstrapUrl = options.bootstrapUrl ?? new URL('./worker-bootstrap.js', import.meta.url)
         this.#workerFactory = options.workerFactory ?? defaultWorkerFactory
+        this.#moduleResolver = captureModuleResolver(options.moduleResolver, this.id)
     }
 
     createGroup(options: WorkerGroupOptions): WorkerGroup {
@@ -1160,9 +1183,43 @@ export class WorkerSystem {
                 { requestedMinimum: reservedMinimum }
             )
         }
-        const group = WorkerGroup.create(this, options)
+        const modules = options.modules.map(module => this.#resolveModule(module))
+        const group = WorkerGroup.create(this, options, modules)
         this.#groups.set(group.id, group)
         return group
+    }
+
+    #resolveModule(module: WorkerModuleReference): WorkerModuleDescriptor {
+
+        if (!isWorkerModuleContract(module)) return module
+        if (this.#moduleResolver === undefined) {
+            throw workerDiagnosticError({
+                code: 'WORKER_DESCRIPTOR_INVALID',
+                severity: 'error',
+                phase: 'worker-module',
+                subject: { kind: 'WorkerModule', id: module.id },
+                message: `Worker module ${module.id}@${module.version} requires a module resolver.`,
+                expected: { moduleResolver: 'WorkerModuleResolver' },
+                actual: { moduleResolver: undefined },
+                retriable: false,
+            })
+        }
+        const resolved = this.#moduleResolver.resolve(module)
+        if (resolved === null || typeof resolved !== 'object' ||
+            resolved.id !== module.id || resolved.version !== module.version ||
+            !(resolved.url instanceof URL)) {
+            throw workerDiagnosticError({
+                code: 'WORKER_DESCRIPTOR_INVALID',
+                severity: 'error',
+                phase: 'worker-module',
+                subject: { kind: 'WorkerModule', id: module.id },
+                message: 'Worker module resolver returned a different module identity.',
+                expected: { id: module.id, version: module.version },
+                actual: resolved,
+                retriable: false,
+            })
+        }
+        return resolved
     }
 
     inspect(): WorkerSystemFacts {
@@ -1667,7 +1724,10 @@ function effectivePriority(record: TaskRecord, agingIntervalMs: number) {
     }
 }
 
-function validateGroupOptions(options: WorkerGroupOptions): void {
+function validateGroupOptions(
+    options: WorkerGroupOptions,
+    modules: readonly WorkerModuleDescriptor[]
+): void {
 
     const ids = new Set<string>()
     const valid = typeof options.id === 'string' && options.id.length > 0 &&
@@ -1675,8 +1735,8 @@ function validateGroupOptions(options: WorkerGroupOptions): void {
         nonNegativeSafeInteger(options.size.min) && positiveSafeInteger(options.size.max) &&
         options.size.min <= options.size.max && positiveSafeInteger(options.maxQueuedTasks) &&
         positiveSafeInteger(options.maxActiveTasks) && options.maxActiveTasks <= options.size.max &&
-        nonNegativeSafeInteger(options.idleTimeoutMs) && options.modules.length > 0 &&
-        options.modules.every(module => {
+        nonNegativeSafeInteger(options.idleTimeoutMs) && modules.length > 0 &&
+        modules.every(module => {
             const accepted = typeof module.id === 'string' && module.id.length > 0 &&
                 typeof module.version === 'string' && module.version.length > 0 &&
                 module.url instanceof URL && !ids.has(module.id)
@@ -1712,11 +1772,14 @@ function validateTaskDescriptor<Input>(descriptor: WorkerTaskDescriptor<Input>):
     }
 }
 
-function freezeGroupOptions(options: WorkerGroupOptions): WorkerGroupOptions {
+function freezeGroupOptions(
+    options: WorkerGroupOptions,
+    modules: readonly WorkerModuleDescriptor[]
+): ResolvedWorkerGroupOptions {
 
     return Object.freeze({
         ...options,
-        modules: Object.freeze(options.modules.map(freezeModule)),
+        modules: Object.freeze(modules.map(freezeModule)),
         size: Object.freeze({ ...options.size }),
     })
 }
@@ -1724,6 +1787,27 @@ function freezeGroupOptions(options: WorkerGroupOptions): WorkerGroupOptions {
 function freezeModule(module: WorkerModuleDescriptor): WorkerModuleDescriptor {
 
     return Object.freeze({ id: module.id, version: module.version, url: new URL(module.url.href) })
+}
+
+function captureModuleResolver(
+    resolver: WorkerModuleResolver | undefined,
+    systemId: string
+): WorkerModuleResolver | undefined {
+
+    if (resolver === undefined) return undefined
+    const resolve = resolver?.resolve
+    if (typeof resolve !== 'function') {
+        throw descriptorError(
+            'WorkerSystem',
+            systemId,
+            'Worker module resolver must provide resolve(contract).',
+            { resolve: 'function' },
+            resolver
+        )
+    }
+    return Object.freeze({
+        resolve: (contract: WorkerModuleContract) => resolve.call(resolver, contract),
+    })
 }
 
 function taskFacts(record: TaskRecord): WorkerTaskFacts {

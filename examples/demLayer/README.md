@@ -5,6 +5,11 @@ a bounded GPU virtual-raster atlas. Start the local tile service as documented i
 [`tile-server/README.md`](./tile-server/README.md), then run `npm run dev` from the
 repository root.
 
+The root `npm run dev` and `npm run build` commands first run the generic
+`geoscratch-worker` build declared by [`../worker-modules.ts`](../worker-modules.ts).
+It emits an ignored `public/scratch-workers/` manifest and standalone ESM artifact;
+the DEM source does not depend on a Vite Worker URL plugin or a generated URL module.
+
 Disk caching is disabled by default:
 
 ```text

@@ -7,7 +7,7 @@ import {
     type WorkerContextHandle,
     type WorkerGroup,
     type WorkerGroupFacts,
-    type WorkerModuleDescriptor,
+    type WorkerModuleReference,
     type WorkerSystemFacts,
     type WorkerTaskHandle,
     type WorkerTaskPriority,
@@ -58,7 +58,7 @@ export type VirtualRasterWorkerExecutorDescriptor<
 > = Readonly<{
     id: string
     system: WorkerSystem
-    module: WorkerModuleDescriptor
+    module: WorkerModuleReference
     workerCount: number
     maxRequests: number
     phaseLimits: Readonly<Record<VirtualRasterWorkerPhase, number>>
@@ -445,7 +445,6 @@ function validateDescriptor<
         descriptor.system instanceof WorkerSystem &&
         typeof descriptor.module?.id === 'string' && descriptor.module.id.length > 0 &&
         typeof descriptor.module?.version === 'string' && descriptor.module.version.length > 0 &&
-        descriptor.module.url instanceof URL &&
         positiveInteger(descriptor.workerCount) &&
         descriptor.workerCount <= descriptor.system.maxWorkers &&
         positiveInteger(descriptor.maxRequests) &&

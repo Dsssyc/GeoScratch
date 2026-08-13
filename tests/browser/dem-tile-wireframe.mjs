@@ -11,6 +11,10 @@ const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const examplesRoot = resolve(repositoryRoot, 'examples')
 const tileServerRoot = resolve(examplesRoot, 'demLayer/tile-server')
 const viteEntry = resolve(repositoryRoot, 'node_modules/vite/bin/vite.js')
+const workerBuildEntry = resolve(
+    repositoryRoot,
+    'packages/geoscratch/bin/geoscratch-worker.mjs'
+)
 const tileBuildEntry = resolve(tileServerRoot, '.venv/bin/dem-tile-build')
 const tileServeEntry = resolve(tileServerRoot, '.venv/bin/dem-tile-serve')
 const timeout = positiveInteger(process.env.DEM_TILE_WIREFRAME_TIMEOUT_MS, 120_000)
@@ -42,6 +46,12 @@ let fatalError
 const cleanupFailures = []
 
 try {
+    await runCommand(process.execPath, [
+        workerBuildEntry,
+        'build',
+        '--config',
+        './worker-modules.ts',
+    ], examplesRoot)
     build = await runCommand(tileBuildEntry, [], tileServerRoot)
     tileServer = startProcess(tileServeEntry, [ '--port', String(tilePort) ], tileServerRoot)
     await waitForHttpProcess(tileServer, `${tileBaseUrl}/health`, 'DEM tile server')

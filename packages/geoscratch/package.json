@@ -2,8 +2,18 @@
   "name": "geoscratch",
   "version": "0.0.22",
   "description": "Tiny 3D library for geovisualization, powered by WebGPU",
+  "sideEffects": [
+    "./dist/scratch/worker/worker-bootstrap.js",
+    "./src/scratch/worker/worker-bootstrap.ts"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "bin": {
+    "geoscratch-worker": "./bin/geoscratch-worker.mjs"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -23,7 +33,8 @@
     "README.md",
     "README_zh.md",
     "dist",
-    "src"
+    "src",
+    "bin"
   ],
   "scripts": {
     "build": "node scripts/clean-dist.mjs && node ../../node_modules/typescript/bin/tsc -p tsconfig.build.json"
@@ -47,6 +58,7 @@
   "dependencies": {
     "@webgpu/types": "^0.1.71",
     "webgpu-utils": "1.11.0",
-    "wgpu-matrix": "2.5.1"
+    "wgpu-matrix": "2.5.1",
+    "esbuild": "0.28.2"
   }
 }

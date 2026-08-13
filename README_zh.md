@@ -82,6 +82,78 @@ page 转移到有限 atlas，并在 vertex shader 中进行跨页逻辑过滤和
 仍受源数据细节上限约束，独立的 GPU 屏幕空间误差前沿则按距离选择地形 patch，并以
 全局逻辑瓦片身份查询 mesh-stitching 邻居。
 
+## Scratch Worker 模块
+
+Scratch Worker 模块从 TypeScript 源码到部署共用同一个 contract，不依赖 Vite
+URL import 或 bundler 插件：
+
+```ts
+// image-worker-contract.ts
+import { defineWorkerModuleContract } from 'geoscratch/scratch'
+
+export const IMAGE_WORKER = defineWorkerModuleContract({
+    id: 'example.image-worker',
+    version: '1',
+})
+```
+
+```ts
+// image-worker.ts
+import { IMAGE_WORKER } from './image-worker-contract.js'
+
+export default IMAGE_WORKER.implement({
+    operations: {
+        decode(input: ArrayBuffer) {
+            return { byteLength: input.byteLength }
+        },
+    },
+})
+```
+
+在一个构建配置中注册 entry，再生成独立的浏览器 ESM artifact：
+
+```ts
+// worker-modules.ts
+import { defineWorkerModuleBuild } from 'geoscratch/scratch'
+import { IMAGE_WORKER } from './image-worker-contract.js'
+
+export default defineWorkerModuleBuild({
+    outDir: './public/scratch-workers',
+    modules: [ { contract: IMAGE_WORKER, entry: './image-worker.ts' } ],
+})
+```
+
+```bash
+geoscratch-worker build --config ./worker-modules.ts
+```
+
+将生成目录作为普通静态文件托管，然后显式解析 contract：
+
+```ts
+import { WorkerModuleCatalog, WorkerSystem } from 'geoscratch/scratch'
+import { IMAGE_WORKER } from './image-worker-contract.js'
+
+const modules = await WorkerModuleCatalog.load(
+    new URL('/scratch-workers/manifest.json', location.href)
+)
+const workers = new WorkerSystem({ maxWorkers: 4, moduleResolver: modules })
+const group = workers.createGroup({
+    id: 'images',
+    modules: [ IMAGE_WORKER ],
+    isolation: 'group',
+    size: { min: 0, max: 4 },
+    maxQueuedTasks: 64,
+    maxActiveTasks: 4,
+    idleTimeoutMs: 30_000,
+})
+```
+
+CLI 要求 Node.js 18 或更高版本。它生成内容寻址的 JavaScript、source map 与
+`manifest.json`；这些文件应当一起部署，但无需提交到 Git。Manifest hash 是部署
+事实，不代表 runtime 执行了 Subresource Integrity。Manifest 同时标记该目录为
+CLI 所有的构建输出，因此命令会拒绝替换普通目录。应用仍显式拥有 catalog 加载、
+`WorkerSystem`、group 与 dispose。
+
 ## Scratch Persistent Cache
 
 `PersistentCache` 与 Worker、GPU、Geo 相互独立。IndexedDB 保存结构化 metadata 并

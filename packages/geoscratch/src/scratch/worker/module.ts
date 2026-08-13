@@ -51,6 +51,29 @@ export type WorkerModuleDefinition<
     reset?(): WorkerMaybePromise<void>
 }>
 
+export type WorkerModuleImplementation<
+    Operations extends Readonly<Record<string, WorkerOperation<never, unknown>>> =
+        Readonly<Record<string, WorkerOperation<never, unknown>>>,
+    Context extends WorkerContextDefinitionShape | undefined =
+        WorkerContextDefinitionShape | undefined,
+> = Readonly<{
+    operations: Operations
+    context?: Context
+    reset?(): WorkerMaybePromise<void>
+}>
+
+export type WorkerModuleContract = Readonly<{
+    kind: 'worker-module-contract'
+    id: string
+    version: string
+    implement<
+        const Operations extends Readonly<Record<string, WorkerOperation<never, unknown>>>,
+        const Context extends WorkerContextDefinitionShape | undefined,
+    >(
+        implementation: WorkerModuleImplementation<Operations, Context>
+    ): WorkerModuleDefinition<Operations, Context>
+}>
+
 export type WorkerTransferResult<T> = Readonly<{
     kind: 'worker-transfer-result'
     value: T
@@ -62,8 +85,7 @@ export function defineWorkerModule<
     const Context extends WorkerContextDefinitionShape | undefined,
 >(definition: WorkerModuleDefinition<Operations, Context>): WorkerModuleDefinition<Operations, Context> {
 
-    if (typeof definition.id !== 'string' || definition.id.length === 0 ||
-        typeof definition.version !== 'string' || definition.version.length === 0 ||
+    if (!validWorkerModuleIdentity(definition.id, definition.version) ||
         definition.operations === null || typeof definition.operations !== 'object') {
         throw new TypeError('A worker module requires a stable id, version, and operation map.')
     }
@@ -96,6 +118,39 @@ export function defineWorkerModule<
     })
 }
 
+export function defineWorkerModuleContract(
+    identity: Readonly<{ id: string, version: string }>
+): WorkerModuleContract {
+
+    if (identity === null || typeof identity !== 'object') {
+        throw new TypeError('A Worker module identity requires a stable id and version.')
+    }
+    const id = identity.id
+    const version = identity.version
+    if (!validWorkerModuleIdentity(id, version)) {
+        throw new TypeError('A Worker module identity requires a stable id and version.')
+    }
+    const contract: WorkerModuleContract = Object.freeze({
+        kind: 'worker-module-contract',
+        id,
+        version,
+        implement<
+            const Operations extends Readonly<Record<string, WorkerOperation<never, unknown>>>,
+            const Context extends WorkerContextDefinitionShape | undefined,
+        >(
+            implementation: WorkerModuleImplementation<Operations, Context>
+        ): WorkerModuleDefinition<Operations, Context> {
+
+            return defineWorkerModule({
+                ...implementation,
+                id,
+                version,
+            })
+        },
+    })
+    return contract
+}
+
 export function transferWorkerResult<T>(
     value: T,
     transfer: readonly Transferable[]
@@ -125,4 +180,20 @@ export function isWorkerTransferResult(value: unknown): value is WorkerTransferR
 function isOperationName(value: string): boolean {
 
     return /^[A-Za-z][A-Za-z0-9._-]*$/.test(value)
+}
+
+export function isWorkerModuleContract(value: unknown): value is WorkerModuleContract {
+
+    return value !== null && typeof value === 'object' &&
+        (value as { kind?: unknown }).kind === 'worker-module-contract' &&
+        validWorkerModuleIdentity(
+            (value as { id?: unknown }).id,
+            (value as { version?: unknown }).version
+        ) && typeof (value as { implement?: unknown }).implement === 'function'
+}
+
+export function validWorkerModuleIdentity(id: unknown, version: unknown): boolean {
+
+    return typeof id === 'string' && /^[A-Za-z][A-Za-z0-9._-]*$/.test(id) &&
+        typeof version === 'string' && /^[A-Za-z0-9][A-Za-z0-9._+-]*$/.test(version)
 }

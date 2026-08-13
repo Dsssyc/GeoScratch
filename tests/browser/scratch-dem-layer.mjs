@@ -10,6 +10,10 @@ import { chromium } from 'playwright'
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const examplesRoot = resolve(repositoryRoot, 'examples')
 const viteEntry = resolve(repositoryRoot, 'node_modules/vite/bin/vite.js')
+const workerBuildEntry = resolve(
+    repositoryRoot,
+    'packages/geoscratch/bin/geoscratch-worker.mjs'
+)
 const tileServerRoot = resolve(examplesRoot, 'demLayer/tile-server')
 const tileBuildEntry = resolve(tileServerRoot, '.venv/bin/dem-tile-build')
 const tileServeEntry = resolve(tileServerRoot, '.venv/bin/dem-tile-serve')
@@ -77,6 +81,12 @@ let serverClosed = false
 let tileServerClosed = false
 
 try {
+    await runCommand(process.execPath, [
+        workerBuildEntry,
+        'build',
+        '--config',
+        './worker-modules.ts',
+    ], examplesRoot)
     cogBuild = await runCommand(tileBuildEntry, [], tileServerRoot)
     tileServer = startTileServer(tilePort)
     await waitForHttpProcess(tileServer, `${tileBaseUrl}/health`, 'DEM tile server')

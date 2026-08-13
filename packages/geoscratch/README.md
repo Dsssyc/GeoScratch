@@ -63,6 +63,39 @@ adapts those contracts for geographic semantics. The one-way dependency is summa
 as **Geo from the Scratch**. `WorkerSystem`, `PersistentCache`, and `GPURuntime`
 remain independently constructed and share no mutable state or lifecycle authority.
 
+## Scratch Worker Modules
+
+Worker source and deployment share one immutable contract. A Worker implementation
+exports `contract.implement(...)`, while a framework-independent build registry emits
+standalone content-addressed ESM artifacts and a strict manifest:
+
+```ts
+import {
+    defineWorkerModuleBuild,
+    defineWorkerModuleContract,
+} from 'geoscratch/scratch'
+
+export const IMAGE_WORKER = defineWorkerModuleContract({
+    id: 'example.image-worker',
+    version: '1',
+})
+
+export default defineWorkerModuleBuild({
+    outDir: './public/scratch-workers',
+    modules: [ { contract: IMAGE_WORKER, entry: './image-worker.ts' } ],
+})
+```
+
+```bash
+geoscratch-worker build --config ./worker-modules.ts
+```
+
+Serve the output as static files. Load it with `WorkerModuleCatalog.load()`, pass the
+catalog to `new WorkerSystem({ moduleResolver: catalog })`, and list contracts in
+group `modules`. No Vite plugin, Blob URL, global registry, or per-module URL file is
+required. The CLI requires Node.js 18 or newer; the application still owns manifest
+loading and every Worker lifecycle.
+
 ## Scratch Persistent Cache
 
 ```js

@@ -3,7 +3,10 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "workers:build": "geoscratch-worker build --config ./worker-modules.ts",
+    "predev": "npm run workers:build",
     "dev": "vite --host 0.0.0.0",
+    "prebuild": "npm run workers:build",
     "build": "vite build",
     "proof:dem-wireframe": "node ../tests/browser/dem-tile-wireframe.mjs",
     "serve": "vite preview",

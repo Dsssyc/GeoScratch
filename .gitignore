@@ -47,6 +47,7 @@ dist/
 .playwright-cli/
 output/
 examples/public/json/examples/*
+examples/public/scratch-workers/
 *.bin
 examples/demLayer/tile-server/.venv/
 examples/demLayer/tile-server/cache/

@@ -64,6 +64,8 @@ const gpuBasenames = [
 const workerBasenames = [
     'diagnostics.ts',
     'index.ts',
+    'module-build.ts',
+    'module-catalog.ts',
     'module.ts',
     'protocol.ts',
     'task-phase-budget.ts',

@@ -11,6 +11,10 @@ const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const examplesRoot = resolve(repositoryRoot, 'examples')
 const tileServerRoot = resolve(examplesRoot, 'demLayer/tile-server')
 const viteEntry = resolve(repositoryRoot, 'node_modules/vite/bin/vite.js')
+const workerBuildEntry = resolve(
+    repositoryRoot,
+    'packages/geoscratch/bin/geoscratch-worker.mjs'
+)
 const tileBuildEntry = resolve(tileServerRoot, '.venv/bin/dem-tile-build')
 const tileServeEntry = resolve(tileServerRoot, '.venv/bin/dem-tile-serve')
 const timeout = positiveInteger(process.env.GEO_VIRTUAL_RASTER_DEM_TIMEOUT_MS, 120_000)
@@ -52,6 +56,14 @@ let fatalError
 const cleanupFailures = []
 
 try {
+    if (viteMode === 'dev') {
+        await runCommand(process.execPath, [
+            workerBuildEntry,
+            'build',
+            '--config',
+            './worker-modules.ts',
+        ], examplesRoot)
+    }
     build = await runCommand(tileBuildEntry, [], tileServerRoot)
     tileServer = startProcess(tileServeEntry, [ '--port', String(tilePort) ], tileServerRoot)
     await waitForHttpProcess(tileServer, `${tileBaseUrl}/health`, 'DEM tile server')
@@ -71,7 +83,9 @@ try {
         args: [ '--enable-unsafe-webgpu' ],
     })
     browserVersion = await browser.version()
-    proof = await runProof(browser)
+    proof = viteMode === 'preview'
+        ? await runStaticWorkerDeploymentSmoke(browser)
+        : await runProof(browser)
 } catch (error) {
     fatalError = serializeError(error)
 } finally {
@@ -128,6 +142,65 @@ async function runProof(activeBrowser) {
     const cancellation = await runCancellationProof(activeBrowser)
     const streaming = await runStreamingProof(activeBrowser)
     return { ...streaming, budget, terminalFailure, cancellation }
+}
+
+async function runStaticWorkerDeploymentSmoke(activeBrowser) {
+
+    const manifestUrl = new URL('/scratch-workers/manifest.json', baseUrl)
+    const manifestResponse = await fetch(manifestUrl, { cache: 'no-cache' })
+    const manifest = await manifestResponse.json()
+    const context = await activeBrowser.newContext({
+        viewport: { width: 960, height: 720 },
+        deviceScaleFactor: 1,
+    })
+    const page = await context.newPage()
+    const events = observePage(page)
+    try {
+        const url = `${baseUrl}/demLayer/index.html?cache=none` +
+            `&tileServer=${encodeURIComponent(tileBaseUrl)}`
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout })
+        const facts = await waitForStaticWorkerDeployment(page, events)
+        const captureFacts = await capture(page, 'static-worker-deployment')
+        return {
+            kind: 'static-worker-deployment-smoke',
+            facts,
+            manifest: {
+                url: manifestUrl.href,
+                status: manifestResponse.status,
+                contentType: manifestResponse.headers.get('content-type') ?? '',
+                body: manifest,
+            },
+            capture: captureFacts,
+            events,
+        }
+    } finally {
+        await context.close()
+    }
+}
+
+async function waitForStaticWorkerDeployment(page, events) {
+
+    const deadline = Date.now() + timeout
+    let lastFacts
+    while (Date.now() < deadline) {
+        const facts = await readFacts(page)
+        lastFacts = facts
+        if (facts.status === 'error') throw new Error(facts.error ?? 'DEM page failed')
+        if (facts.status === 'ready' && events.workerManifestResponses.length > 0 &&
+            events.workerArtifactResponses.length > 0 &&
+            events.workerBootstrapResponses.length > 0 && events.tileRequests.length > 0) {
+            return facts
+        }
+        await delay(16)
+    }
+    throw new Error(`Timed out waiting for static Worker deployment: ${JSON.stringify({
+        status: lastFacts?.status,
+        error: lastFacts?.error,
+        workerManifestResponses: events.workerManifestResponses,
+        workerArtifactResponses: events.workerArtifactResponses,
+        workerBootstrapResponses: events.workerBootstrapResponses,
+        tileRequestCount: events.tileRequests.length,
+    })}`)
 }
 
 async function runBudgetLimitedProof(activeBrowser) {
@@ -609,6 +682,9 @@ async function inspectPixels(page, png) {
 
 function validateProof(value, processState) {
 
+    if (value?.kind === 'static-worker-deployment-smoke') {
+        return validateStaticWorkerDeployment(value, processState)
+    }
     const failures = []
     if (value === undefined) return [ 'DEM virtual-raster proof was not produced' ]
     const samples = Object.entries(value.facts).filter(([ name ]) => name !== 'drained')
@@ -934,9 +1010,83 @@ function validateProof(value, processState) {
     return failures
 }
 
+function validateStaticWorkerDeployment(value, processState) {
+
+    const failures = []
+    const manifest = value.manifest?.body
+    const module = manifest?.modules?.[0]
+    const expectedArtifactUrl = typeof module?.url === 'string'
+        ? new URL(module.url, value.manifest.url).href
+        : undefined
+    const successfulJavaScript = response => response.status === 200 &&
+        /(?:java|ecma)script/i.test(response.contentType)
+    if (value.facts?.status !== 'ready') failures.push('production DEM page was not ready')
+    if (value.manifest?.status !== 200 ||
+        !/application\/json/i.test(value.manifest?.contentType ?? '') ||
+        manifest?.kind !== 'geoscratch-worker-module-manifest' ||
+        manifest?.schemaVersion !== 1 || manifest?.modules?.length !== 1 ||
+        module?.id !== 'geoscratch-dem-tile' || module?.version !== '2' ||
+        !/^\.\/geoscratch-dem-tile-[0-9a-f]{12}\.js$/.test(module?.url ?? '') ||
+        !/^[0-9a-f]{64}$/.test(module?.sha256 ?? '')) {
+        failures.push('production Worker manifest was not the strict content-addressed DEM catalog')
+    }
+    if (!value.events.workerManifestResponses.some(response => (
+        response.status === 200 && /application\/json/i.test(response.contentType)
+    ))) {
+        failures.push('production application did not load the Worker manifest')
+    }
+    if (expectedArtifactUrl === undefined ||
+        !value.events.workerArtifactResponses.some(response => (
+            response.url === expectedArtifactUrl && successfulJavaScript(response)
+        ))) {
+        failures.push('production Worker did not import the manifest-selected hashed artifact')
+    }
+    if (!value.events.workerBootstrapResponses.some(successfulJavaScript)) {
+        failures.push('production Worker bootstrap did not load as JavaScript')
+    }
+    if (value.events.tileRequests.length < 1 || value.events.legacyTileRequests.length !== 0 ||
+        value.events.completeImageRequests.length !== 0) {
+        failures.push('production DEM Worker did not issue the clean WebMercatorQuad tile path')
+    }
+    if (value.capture?.pixels?.nonBackground < 5_000 ||
+        value.capture?.pixels?.channelRange < 8 ||
+        value.capture?.pixels?.transparentPixels !== 0) {
+        failures.push('production DEM canvas was blank, uniform, or transparent')
+    }
+    if (unexpectedEvents(value.events).length !== 0) {
+        failures.push('production Worker deployment emitted browser or network failures')
+    }
+    if (!processState.browserClosed || !processState.viteClosed || !processState.tileServerClosed) {
+        failures.push('production deployment smoke retained a managed browser or service')
+    }
+    return failures
+}
+
 function summarizeProof(value) {
 
     if (value === undefined) return undefined
+    if (value.kind === 'static-worker-deployment-smoke') {
+        return {
+            kind: value.kind,
+            status: value.facts?.status,
+            manifest: {
+                status: value.manifest?.status,
+                contentType: value.manifest?.contentType,
+                kind: value.manifest?.body?.kind,
+                schemaVersion: value.manifest?.body?.schemaVersion,
+                modules: value.manifest?.body?.modules,
+            },
+            workerManifestResponses: value.events.workerManifestResponses,
+            workerArtifactResponses: value.events.workerArtifactResponses,
+            workerBootstrapResponses: value.events.workerBootstrapResponses,
+            tileRequestCount: value.events.tileRequests.length,
+            capture: value.capture,
+            eventCounts: Object.fromEntries(Object.entries(value.events).map(([ name, events ]) => [
+                name,
+                events.length,
+            ])),
+        }
+    }
     const terminal = value.cleanupPair.reports?.[0]?.virtualRaster
     const summarizeFacts = facts => {
         const virtualRaster = parseJson(facts.virtualRaster)
@@ -947,7 +1097,7 @@ function summarizeProof(value) {
             frames: Number(facts.frames),
             visibleNodeCount: Number(facts.visibleNodeCount),
             camera,
-            frontier: frontier === undefined ? undefined : {
+            frontier: frontier == null ? undefined : {
                 activeFrontierCount: frontier.activeFrontierCount,
                 visibleInstanceCount: frontier.visibleInstanceCount,
                 demandCount: frontier.demandCount,
@@ -1083,6 +1233,9 @@ function observePage(page) {
         tileRequests: [],
         legacyTileRequests: [],
         completeImageRequests: [],
+        workerManifestResponses: [],
+        workerArtifactResponses: [],
+        workerBootstrapResponses: [],
     }
     page.on('console', (message) => {
         if (message.type() === 'error') pushBounded(events.consoleFailures, message.text())
@@ -1102,6 +1255,22 @@ function observePage(page) {
         pushBounded(events.requestFailures, failure)
     })
     page.on('response', (response) => {
+        const url = new URL(response.url())
+        const responseFacts = {
+            url: url.href,
+            status: response.status(),
+            contentType: response.headers()['content-type'] ?? '',
+            resourceType: response.request().resourceType(),
+        }
+        if (url.pathname === '/scratch-workers/manifest.json') {
+            pushBounded(events.workerManifestResponses, responseFacts)
+        }
+        if (/\/scratch-workers\/[A-Za-z0-9._-]+-[0-9a-f]{12}\.js$/.test(url.pathname)) {
+            pushBounded(events.workerArtifactResponses, responseFacts)
+        }
+        if (/\/assets\/worker-bootstrap-[A-Za-z0-9_-]+\.js$/.test(url.pathname)) {
+            pushBounded(events.workerBootstrapResponses, responseFacts)
+        }
         if (response.status() >= 400) {
             pushBounded(events.httpFailures, `${response.status()} ${response.url()}`)
         }

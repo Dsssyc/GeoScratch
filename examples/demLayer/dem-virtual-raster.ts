@@ -1,4 +1,4 @@
-import type { GPURuntime } from 'geoscratch/scratch'
+import type { GPURuntime, WorkerModuleResolver } from 'geoscratch/scratch'
 import {
     WebMercatorQuad,
     createVirtualRasterRuntime,
@@ -83,6 +83,7 @@ type DemVirtualRasterRuntimeOptions = Readonly<{
     manifest: DemVirtualRasterManifest
     tileServerUrl: string
     cachePolicy: DemCachePolicy
+    workerModules: WorkerModuleResolver
     workerCount?: number
     maxNetworkRequests?: number
     maxDecodeTasks?: number
@@ -228,6 +229,7 @@ export async function createDemVirtualRasterRuntime({
     manifest,
     tileServerUrl,
     cachePolicy,
+    workerModules,
     workerCount,
     maxNetworkRequests,
     maxDecodeTasks,
@@ -251,6 +253,7 @@ export async function createDemVirtualRasterRuntime({
             sampleType: manifest.source.sampleType,
             cacheSchemaVersion: DEM_CACHE_SCHEMA_VERSION,
             cachePolicy,
+            workerModules,
             ...(workerCount === undefined ? {} : { workerCount }),
             ...(maxNetworkRequests === undefined ? {} : { maxNetworkRequests }),
             ...(maxDecodeTasks === undefined ? {} : { maxDecodeTasks }),

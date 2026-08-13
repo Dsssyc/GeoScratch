@@ -19,6 +19,9 @@ export type WorkerDiagnosticPhase =
 
 export type WorkerDiagnosticCode =
     | 'WORKER_MODULE_LOAD_FAILED'
+    | 'WORKER_MODULE_NOT_FOUND'
+    | 'WORKER_MANIFEST_INVALID'
+    | 'WORKER_MANIFEST_FETCH_FAILED'
     | 'WORKER_OPERATION_NOT_FOUND'
     | 'WORKER_TASK_CANCELLED'
     | 'WORKER_TASK_FAILED'

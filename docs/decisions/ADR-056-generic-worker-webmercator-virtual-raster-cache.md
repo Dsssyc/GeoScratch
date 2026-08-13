@@ -4,8 +4,10 @@
 
 Partially superseded. ADR-057 supersedes the Worker public subpath. ADR-058 and
 ADR-059 supersede the Geo-owned cache runtime, cache tiers, encoded persistent
-records, and OPFS non-goal. The Worker scheduling, WebMercatorQuad, virtual-raster
-demand, transfer, residency, and publication decisions remain accepted.
+records, and OPFS non-goal. ADR-070 supersedes direct application-authored Worker
+module URLs and the URL-only coherence identity. The Worker scheduling,
+WebMercatorQuad, virtual-raster demand, transfer, residency, and publication
+decisions remain accepted.
 
 ## Date
 

@@ -2,7 +2,10 @@ import { expect } from 'chai'
 import {
     ScratchDiagnosticError,
     WorkerGroup,
+    WorkerModuleCatalog,
     WorkerSystem,
+    defineWorkerModuleBuild,
+    defineWorkerModuleContract,
     defineWorkerModule,
 } from 'geoscratch/scratch'
 import fs from 'node:fs'
@@ -20,6 +23,9 @@ describe('generic WorkerSystem public contract', () => {
 
         expect(WorkerSystem).to.be.a('function')
         expect(WorkerGroup).to.be.a('function')
+        expect(WorkerModuleCatalog).to.be.a('function')
+        expect(defineWorkerModuleContract).to.be.a('function')
+        expect(defineWorkerModuleBuild).to.be.a('function')
         expect(defineWorkerModule).to.be.a('function')
         expect(ScratchDiagnosticError).to.be.a('function')
     })

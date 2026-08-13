@@ -53,6 +53,26 @@ describe('asset layout', () => {
         expect(config).to.not.include("publicDir: path.resolve(projectRoot, 'public')")
     })
 
+    it('keeps DEM Worker deployment independent from Vite-specific URL modules', () => {
+
+        const config = read('examples', 'vite.config.ts')
+        const workerSource = read('examples', 'demLayer', 'dem-worker-source.ts')
+
+        expect(exists('examples', 'demLayer', 'dem-tile-worker-url.ts')).to.equal(false)
+        expect(config).to.not.include('workerModuleUrlPlugin')
+        expect(config).to.not.include('demWorkerUrlModule')
+        expect(config).to.not.include('demWorkerModule')
+        expect(workerSource).to.include('DEM_TILE_WORKER')
+        expect(workerSource).to.include('moduleResolver: descriptor.workerModules')
+        expect(workerSource).to.include('module: DEM_TILE_WORKER')
+        expect(read('examples', 'worker-modules.ts')).to.include('defineWorkerModuleBuild')
+        expect(JSON.parse(read('examples', 'package.json')).scripts).to.deep.include({
+            'workers:build': 'geoscratch-worker build --config ./worker-modules.ts',
+            predev: 'npm run workers:build',
+            prebuild: 'npm run workers:build',
+        })
+    })
+
     it('keeps npm package files focused on library source', () => {
 
         const pkg = JSON.parse(read('packages', 'geoscratch', 'package.json'))
@@ -62,6 +82,7 @@ describe('asset layout', () => {
             'README_zh.md',
             'dist',
             'src',
+            'bin',
         ])
     })
 

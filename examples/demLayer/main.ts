@@ -1,4 +1,4 @@
-import { GPURuntime, LifetimeScope } from 'geoscratch/scratch'
+import { GPURuntime, LifetimeScope, WorkerModuleCatalog } from 'geoscratch/scratch'
 import type { SurfaceSize } from 'geoscratch/scratch'
 import {
     createGeoFrameController,
@@ -36,6 +36,10 @@ const preparedControlPanel = prepareDemControlPanel({
 const parameters = preparedControlPanel.parameters
 const proofMode = parameters.get('proof') === '1'
 const tileServerUrl = parameters.get('tileServer') ?? 'http://127.0.0.1:8787'
+const workerModuleManifestUrl = new URL(
+    '../scratch-workers/manifest.json',
+    window.location.href
+)
 const cachePolicy = readDemCachePolicy(parameters)
 const maxPhysicalPages = boundedIntegerParameter(parameters.get('atlasPages'), 64, 2, 64)
 let tileWireframeEnabled = preparedControlPanel.renderingPreference.tileWireframe
@@ -99,7 +103,7 @@ async function main(lifetime: LifetimeScope, activeProof?: DemLayerProof) {
     activeProof?.mapAcquired()
     activeProof?.reach('after-map-acquisition')
 
-    const [ runtime, , manifest ] = await Promise.all([
+    const [ runtime, , manifest, workerModules ] = await Promise.all([
         lifetime.acquire(GPURuntime.create({
             label: 'DEM Layer runtime',
             powerPreference: 'high-performance',
@@ -119,6 +123,10 @@ async function main(lifetime: LifetimeScope, activeProof?: DemLayerProof) {
             fetchDemVirtualRasterManifest(tileServerUrl, lifetime.signal),
             'dem-virtual-raster-manifest'
         ),
+        lifetime.track(
+            WorkerModuleCatalog.load(workerModuleManifestUrl, { signal: lifetime.signal }),
+            'worker-module-catalog'
+        ),
     ])
     activeProof?.observeRuntime(runtime)
     lifetime.assertActive()
@@ -136,6 +144,7 @@ async function main(lifetime: LifetimeScope, activeProof?: DemLayerProof) {
             manifest,
             tileServerUrl,
             cachePolicy,
+            workerModules,
             workerCount: 3,
             maxNetworkRequests: 2,
             maxDecodeTasks: 1,

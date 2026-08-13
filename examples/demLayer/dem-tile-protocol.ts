@@ -4,11 +4,17 @@ import type {
     VirtualRasterPageIdentity,
     VirtualRasterPageTransfer,
 } from 'geoscratch/geo'
+import { defineWorkerModuleContract } from 'geoscratch/scratch'
 import type {
     PersistentCacheDescriptor,
     PersistentCacheFacts,
     PersistentCacheLifecycle,
 } from 'geoscratch/scratch'
+
+export const DEM_TILE_WORKER = defineWorkerModuleContract({
+    id: 'geoscratch-dem-tile',
+    version: '2',
+})
 
 export type DemCachePolicy =
     | Readonly<{ mode: 'none' }>

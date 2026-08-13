@@ -6,8 +6,6 @@ import { fileURLToPath } from 'node:url'
 const examplesRoot = path.dirname(fileURLToPath(import.meta.url))
 const projectRoot = path.resolve(examplesRoot, '..')
 const examplesPublic = path.resolve(examplesRoot, 'public')
-const demWorkerUrlModule = path.resolve(examplesRoot, 'demLayer/dem-tile-worker-url.ts')
-const demWorkerModule = path.resolve(examplesRoot, 'demLayer/dem-tile-worker.ts')
 const packageSource = path.resolve(projectRoot, 'packages/geoscratch/src')
 
 function sourceRuntimeUrlPlugin(): Plugin {
@@ -43,23 +41,6 @@ function sourceRuntimeRequestUrl(requestUrl: string): string {
   const sourcePath = `${requestedPath.slice(0, -'.js'.length)}.ts`
   if (!existsSync(sourcePath)) return requestUrl
   return `${pathname.slice(0, -'.js'.length)}.ts${suffix}`
-}
-
-function workerModuleUrlPlugin(): Plugin {
-  return {
-    name: 'geoscratch-worker-module-url',
-    apply: 'build' as const,
-    load(id: string) {
-      if (path.resolve(id) !== demWorkerUrlModule) return undefined
-      const reference = this.emitFile({
-        type: 'chunk',
-        id: demWorkerModule,
-        name: 'dem-tile-worker-module',
-        preserveSignature: 'strict',
-      })
-      return `export default import.meta.ROLLUP_FILE_URL_${reference};`
-    },
-  }
 }
 
 const examplePages = {
@@ -108,7 +89,6 @@ export default defineConfig(({ command }) => ({
   } : {}),
   plugins: [
     ...(command === 'serve' ? [ sourceRuntimeUrlPlugin() ] : []),
-    workerModuleUrlPlugin(),
   ],
   build: {
     outDir: path.resolve(projectRoot, 'dist/examples'),

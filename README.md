@@ -87,6 +87,79 @@ fallback. Raster residency remains capped by source detail while a separate GPU
 projected-grid frontier selects perspective-aware terrain patches and resolves
 mesh-stitching neighbors through global logical tile identity.
 
+## Scratch Worker Modules
+
+Scratch Worker modules use one contract from TypeScript source through deployment;
+they do not require Vite URL imports or a bundler plugin:
+
+```ts
+// image-worker-contract.ts
+import { defineWorkerModuleContract } from 'geoscratch/scratch'
+
+export const IMAGE_WORKER = defineWorkerModuleContract({
+    id: 'example.image-worker',
+    version: '1',
+})
+```
+
+```ts
+// image-worker.ts
+import { IMAGE_WORKER } from './image-worker-contract.js'
+
+export default IMAGE_WORKER.implement({
+    operations: {
+        decode(input: ArrayBuffer) {
+            return { byteLength: input.byteLength }
+        },
+    },
+})
+```
+
+Register entries once in a build config and emit standalone browser ESM artifacts:
+
+```ts
+// worker-modules.ts
+import { defineWorkerModuleBuild } from 'geoscratch/scratch'
+import { IMAGE_WORKER } from './image-worker-contract.js'
+
+export default defineWorkerModuleBuild({
+    outDir: './public/scratch-workers',
+    modules: [ { contract: IMAGE_WORKER, entry: './image-worker.ts' } ],
+})
+```
+
+```bash
+geoscratch-worker build --config ./worker-modules.ts
+```
+
+Serve the generated directory as static files, then resolve contracts explicitly:
+
+```ts
+import { WorkerModuleCatalog, WorkerSystem } from 'geoscratch/scratch'
+import { IMAGE_WORKER } from './image-worker-contract.js'
+
+const modules = await WorkerModuleCatalog.load(
+    new URL('/scratch-workers/manifest.json', location.href)
+)
+const workers = new WorkerSystem({ maxWorkers: 4, moduleResolver: modules })
+const group = workers.createGroup({
+    id: 'images',
+    modules: [ IMAGE_WORKER ],
+    isolation: 'group',
+    size: { min: 0, max: 4 },
+    maxQueuedTasks: 64,
+    maxActiveTasks: 4,
+    idleTimeoutMs: 30_000,
+})
+```
+
+The CLI requires Node.js 18 or newer. It produces content-addressed JavaScript,
+source maps, and `manifest.json`; generated files should be deployed together but
+need not be committed. Manifest hashes are deployment facts, not a claim that the
+runtime performs Subresource Integrity. The manifest also marks the directory as
+CLI-owned build output, so the command refuses to replace a non-generated directory.
+The application still owns catalog loading, `WorkerSystem`, groups, and disposal.
+
 ## Scratch Persistent Cache
 
 `PersistentCache` is independent from Worker, GPU, and Geo. IndexedDB stores

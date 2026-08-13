@@ -37,6 +37,11 @@ describe('workspace layout', () => {
         expect(pkg.name).to.equal('geoscratch')
         expect(pkg.main).to.equal('dist/index.js')
         expect(pkg.types).to.equal('dist/index.d.ts')
+        expect(pkg.sideEffects).to.deep.equal([
+            './dist/scratch/worker/worker-bootstrap.js',
+            './src/scratch/worker/worker-bootstrap.ts',
+        ])
+        expect(pkg.engines).to.deep.equal({ node: '>=18' })
         expect(pkg.exports['.'].import).to.equal('./dist/index.js')
         expect(pkg.exports['.'].types).to.equal('./dist/index.d.ts')
         expect(pkg.exports['./scratch'].import).to.equal('./dist/scratch.js')
@@ -47,10 +52,12 @@ describe('workspace layout', () => {
             'README_zh.md',
             'dist',
             'src',
+            'bin',
         ])
         expect(pkg.scripts.build).to.equal('node scripts/clean-dist.mjs && node ../../node_modules/typescript/bin/tsc -p tsconfig.build.json')
         expect(pkg.dependencies).to.deep.equal({
             '@webgpu/types': '^0.1.71',
+            'esbuild': '0.28.2',
             'webgpu-utils': '1.11.0',
             'wgpu-matrix': '2.5.1',
         })

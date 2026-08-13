@@ -2,7 +2,6 @@ import {
     prepareVirtualRasterPageTransfer,
 } from 'geoscratch/geo'
 import {
-    defineWorkerModule,
     PersistentCache,
     transferWorkerResult,
 } from 'geoscratch/scratch'
@@ -16,6 +15,7 @@ import type {
     DemTileWorkerInit,
     DemRawTileCacheMetadata,
 } from './dem-tile-protocol.ts'
+import { DEM_TILE_WORKER } from './dem-tile-protocol.ts'
 
 type DemTileCandidate = DemTileCandidateDescriptor & Readonly<{
     source: 'cache' | 'network' | 'decoded'
@@ -38,9 +38,7 @@ type DemTileWorkerState = {
 
 const TILE_SIZE = 256
 
-export default defineWorkerModule({
-    id: 'geoscratch-dem-tile',
-    version: '2',
+export default DEM_TILE_WORKER.implement({
     operations: {},
     context: {
         async create(init: DemTileWorkerInit) {

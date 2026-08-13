@@ -7,6 +7,7 @@ import type {
     VirtualRasterWorkerExecutor,
 } from 'geoscratch/geo'
 import { WorkerSystem } from 'geoscratch/scratch'
+import type { WorkerModuleResolver } from 'geoscratch/scratch'
 import type {
     DemCachePolicy,
     DemTileCacheFacts,
@@ -14,7 +15,7 @@ import type {
     DemTileWorkerFacts,
     DemTileWorkerInit,
 } from './dem-tile-protocol.ts'
-import demTileWorkerUrl from './dem-tile-worker-url.ts'
+import { DEM_TILE_WORKER } from './dem-tile-protocol.ts'
 
 type DemWorkerTileSourceDescriptor = Readonly<{
     sourceId: string
@@ -27,6 +28,7 @@ type DemWorkerTileSourceDescriptor = Readonly<{
     sampleType: 'uint8'
     cacheSchemaVersion: number
     cachePolicy: DemCachePolicy
+    workerModules: WorkerModuleResolver
     workerCount?: number
     maxNetworkRequests?: number
     maxDecodeTasks?: number
@@ -36,8 +38,6 @@ type DemWorkerTileSourceDescriptor = Readonly<{
 
 export type DemWorkerRequestExecutor = VirtualRasterWorkerExecutor<DemTileWorkerFacts>
 
-const MODULE_ID = 'geoscratch-dem-tile'
-const MODULE_VERSION = '2'
 let executorSequence = 0
 
 export async function createDemWorkerRequestExecutor(
@@ -57,17 +57,14 @@ export async function createDemWorkerRequestExecutor(
         maxWorkers: workerCount,
         maxHistory: 64,
         agingIntervalMs: 50,
+        moduleResolver: descriptor.workerModules,
     })
     let core: VirtualRasterWorkerExecutor<DemTileWorkerFacts>
     try {
         core = await createVirtualRasterWorkerExecutor({
             id: `dem-tile-workers-${sequence}`,
             system,
-            module: {
-                id: MODULE_ID,
-                version: MODULE_VERSION,
-                url: new URL(demTileWorkerUrl, import.meta.url),
-            },
+            module: DEM_TILE_WORKER,
             workerCount,
             maxRequests: descriptor.maxRequests,
             phaseLimits: {

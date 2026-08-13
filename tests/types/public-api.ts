@@ -699,9 +699,12 @@ void typedFrontierInvalidDraw
 const planeGeometry = plane(2)
 const sphereGeometry = sphere(1, 8, 4)
 
-const typedWorkerModule = workers.defineWorkerModule({
-    id: 'typed-worker-module',
-    version: '1',
+const typedWorkerContract: workers.WorkerModuleContract =
+    workers.defineWorkerModuleContract({
+        id: 'typed-worker-module',
+        version: '1',
+    })
+const typedWorkerModule = typedWorkerContract.implement({
     operations: {
         double(input: { value: number }, context: workers.WorkerOperationContext) {
 
@@ -730,7 +733,31 @@ const typedWorkerModule = workers.defineWorkerModule({
         },
     },
 })
-const typedWorkerSystem = new workers.WorkerSystem({ maxWorkers: 2 })
+const typedWorkerBuild: workers.WorkerModuleBuild = workers.defineWorkerModuleBuild({
+    outDir: './public/workers',
+    modules: [ { contract: typedWorkerContract, entry: './typed-worker-module.ts' } ],
+})
+const typedWorkerManifest: workers.WorkerModuleManifest = {
+    kind: 'geoscratch-worker-module-manifest',
+    schemaVersion: 1,
+    modules: [ {
+        id: typedWorkerContract.id,
+        version: typedWorkerContract.version,
+        url: './typed-worker-module.js',
+        byteLength: 128,
+        sha256: '0123456789abcdef'.repeat(4),
+    } ],
+}
+const typedWorkerCatalog: workers.WorkerModuleCatalog =
+    workers.WorkerModuleCatalog.fromManifest(
+        typedWorkerManifest,
+        new URL('./workers/manifest.json', import.meta.url)
+    )
+const typedWorkerResolver: workers.WorkerModuleResolver = typedWorkerCatalog
+const typedWorkerSystem = new workers.WorkerSystem({
+    maxWorkers: 2,
+    moduleResolver: typedWorkerResolver,
+})
 const typedPhaseBudget: workers.TaskPhaseBudget<'network' | 'decode'> =
     new workers.TaskPhaseBudget({
         id: 'typed-worker-phases',
@@ -743,11 +770,7 @@ const typedPhaseFacts: workers.TaskPhaseBudgetFacts<'network' | 'decode'> =
     typedPhaseBudget.inspect()
 const typedWorkerGroup: workers.WorkerGroup = typedWorkerSystem.createGroup({
     id: 'typed-worker-group',
-    modules: [ {
-        id: typedWorkerModule.id,
-        version: typedWorkerModule.version,
-        url: new URL('./typed-worker-module.js', import.meta.url),
-    } ],
+    modules: [ typedWorkerContract ],
     isolation: 'group',
     size: { min: 0, max: 2 },
     maxQueuedTasks: 8,
@@ -757,11 +780,7 @@ const typedWorkerGroup: workers.WorkerGroup = typedWorkerSystem.createGroup({
 const typedVirtualRasterWorkerExecutor = geoApi.createVirtualRasterWorkerExecutor({
     id: 'typed-raster-workers',
     system: typedWorkerSystem,
-    module: {
-        id: typedWorkerModule.id,
-        version: typedWorkerModule.version,
-        url: new URL('./typed-worker-module.js', import.meta.url),
-    },
+    module: typedWorkerContract,
     workerCount: 1,
     maxRequests: 8,
     phaseLimits: { network: 2, decode: 1 },
@@ -800,6 +819,9 @@ typedWorkerSystem.schedule()
 typedWorkerGroup.contextControl
 void typedWorkerFacts
 void typedWorkerContext
+void typedWorkerBuild
+void typedWorkerModule
+void typedWorkerCatalog
 void typedVirtualRasterWorkerExecutor
 void typedPhaseRequest
 void typedPhaseFacts
