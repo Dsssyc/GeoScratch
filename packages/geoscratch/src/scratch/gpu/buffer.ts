@@ -80,6 +80,7 @@ const BUFFER_ALLOCATION_CODES = Object.freeze({
     nativeException: 'SCRATCH_BUFFER_ALLOCATION_NATIVE_FAILED',
 })
 
+/** Owns a replaceable GPUBuffer allocation while preserving logical identity and content history. */
 export class BufferResource extends Resource {
 
     #gpuBuffer: GPUBuffer
@@ -181,6 +182,7 @@ export class BufferResource extends Resource {
 
 }
 
+/** Describes a validated byte range and optional layout view over a buffer without owning it. */
 export class BufferRegion {
 
     readonly buffer: BufferResource

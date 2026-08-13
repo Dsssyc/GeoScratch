@@ -65,6 +65,7 @@ const PRIORITY_RANK: Readonly<Record<WorkerTaskPriorityClass, number>> = Object.
     critical: 2,
 })
 
+/** Enforces independent prioritized concurrency limits for named phases of asynchronous tasks. */
 export class TaskPhaseBudget<Phase extends string> {
 
     readonly kind = 'task-phase-budget' as const

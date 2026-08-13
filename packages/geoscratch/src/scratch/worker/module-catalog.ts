@@ -40,6 +40,7 @@ type ResolvedArtifact = Readonly<{
     url: URL
 }>
 
+/** Resolves typed Worker contracts to immutable standalone artifacts from one manifest. */
 export class WorkerModuleCatalog implements WorkerModuleResolver {
 
     readonly #manifestUrl: URL

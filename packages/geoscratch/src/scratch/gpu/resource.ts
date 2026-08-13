@@ -134,6 +134,7 @@ export function setResourceContentState(
     updateRuntimeResourceFact(resource.runtime, resource)
 }
 
+/** Provides runtime ownership, logical identity, allocation version, content epoch, and disposal. */
 export abstract class Resource {
 
     #runtime: GPURuntime

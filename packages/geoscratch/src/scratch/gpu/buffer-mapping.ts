@@ -118,6 +118,7 @@ const eventTargetRemoveEventListener = typeof globalThis.EventTarget === 'functi
     : undefined
 let mappingSequence = 0
 
+/** Holds exclusive host-mapping authority for a buffer until the lease is released. */
 export class MappedBufferLease {
 
     private constructor(token: symbol) {

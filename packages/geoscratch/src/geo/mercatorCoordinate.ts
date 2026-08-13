@@ -1,3 +1,4 @@
+/** Provides stateless longitude/latitude conversion to normalized Web Mercator coordinates. */
 export class MercatorCoordinate {
 
     static mercatorXfromLon(lon: number): number {

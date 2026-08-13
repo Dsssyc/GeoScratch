@@ -139,6 +139,7 @@ export interface RenderPipeline {
     getBindLayout(descriptor: BindLayoutDescriptor): Promise<BindLayout>
 }
 
+/** Owns an asynchronously created render pipeline and its derived layout provenance. */
 export class RenderPipeline {
 
     private constructor(token: symbol, state?: RenderPipelineState) {
@@ -937,6 +938,7 @@ export interface ComputePipeline {
     getBindLayout(descriptor: BindLayoutDescriptor): Promise<BindLayout>
 }
 
+/** Owns an asynchronously created compute pipeline and its derived layout provenance. */
 export class ComputePipeline {
 
     private constructor(token: symbol, state?: ComputePipelineState) {

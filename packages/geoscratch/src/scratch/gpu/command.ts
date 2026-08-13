@@ -711,6 +711,7 @@ export interface DrawCommand {
     readonly fallback?: DrawCommand
 }
 
+/** Describes one validated render draw, including explicit resources, state, and fallback policy. */
 export class DrawCommand {
 
     readonly #producesDeclaredWrites: boolean
@@ -1001,6 +1002,7 @@ export interface BeginOcclusionQueryCommand {
     readonly index: number
 }
 
+/** Begins one validated occlusion-query slot within an enclosing render pass. */
 export class BeginOcclusionQueryCommand {
 
     #isDisposed = false
@@ -1150,6 +1152,7 @@ export interface EndOcclusionQueryCommand {
     readonly commandKind: 'end-occlusion-query'
 }
 
+/** Ends the currently active occlusion query within an enclosing render pass. */
 export class EndOcclusionQueryCommand {
 
     #isDisposed = false
@@ -1281,6 +1284,7 @@ export interface DispatchCommand {
     readonly fallback?: DispatchCommand
 }
 
+/** Describes one validated direct or indirect compute dispatch and its resource accesses. */
 export class DispatchCommand {
 
     readonly #producesDeclaredWrites: boolean
@@ -2442,6 +2446,7 @@ export interface UploadCommand {
     readonly byteLength: number
 }
 
+/** Describes an ordered queue write from immutable immediate bytes into a buffer region. */
 export class UploadCommand {
 
     #isDisposed = false
@@ -2564,6 +2569,7 @@ export interface ClearBufferCommand {
     readonly target: BufferRegion
 }
 
+/** Describes an encoded zero-fill over a validated buffer region. */
 export class ClearBufferCommand {
 
     #isDisposed = false
@@ -2721,6 +2727,7 @@ export interface CopyCommand {
     readonly whenMissing: 'throw'
 }
 
+/** Describes a native GPU copy between supported buffer and texture endpoints without CPU staging. */
 export class CopyCommand {
 
     #isDisposed = false
@@ -3111,6 +3118,7 @@ const emptyReadbackStagingCleanupResult: ReadbackStagingCleanupResult = Object.f
     failures: Object.freeze([]),
 })
 
+/** Owns an ordered staging slot that links one encoded copy to a later readback operation. */
 export class ReadbackCommand {
 
     private constructor(
@@ -3780,6 +3788,7 @@ export interface ResolveQuerySetCommand {
     readonly whenMissing: 'throw'
 }
 
+/** Describes resolving a validated range of query slots into a destination buffer region. */
 export class ResolveQuerySetCommand {
 
     readonly #source: ResolveQuerySetSourceDescriptor
@@ -3955,6 +3964,7 @@ export interface TextureUploadCommand {
     readonly aspect: GPUTextureAspect
 }
 
+/** Describes an ordered queue write from immediate texel bytes into a texture subresource. */
 export class TextureUploadCommand {
 
     #isDisposed = false
@@ -4113,6 +4123,7 @@ export interface ExternalImageUploadCommand {
     readonly size: Readonly<{ width: number, height: number, depthOrArrayLayers: 1 }>
 }
 
+/** Describes an ordered copy from a browser external-image source into a texture. */
 export class ExternalImageUploadCommand {
 
     #isDisposed = false

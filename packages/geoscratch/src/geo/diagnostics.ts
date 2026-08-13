@@ -45,6 +45,7 @@ export type GeoDiagnosticInput = Readonly<{
 
 const geoDiagnosticErrors = new WeakSet<GeoDiagnosticError>()
 
+/** Carries one immutable Geo diagnostic through exception control flow. */
 export class GeoDiagnosticError extends Error {
 
     readonly diagnostic: GeoDiagnostic
@@ -58,6 +59,7 @@ export class GeoDiagnosticError extends Error {
     }
 }
 
+/** Recognizes genuine Geo diagnostic errors without trusting structural lookalikes. */
 export function isGeoDiagnosticError(value: unknown): value is GeoDiagnosticError {
 
     return typeof value === 'object' &&
@@ -65,6 +67,7 @@ export function isGeoDiagnosticError(value: unknown): value is GeoDiagnosticErro
         geoDiagnosticErrors.has(value as GeoDiagnosticError)
 }
 
+/** Creates an immutable machine-readable diagnostic for geographic contracts. */
 export function createGeoDiagnostic(input: GeoDiagnosticInput): GeoDiagnostic {
 
     const diagnostic: {

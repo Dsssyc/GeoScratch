@@ -68,6 +68,7 @@ const SUPPORTED_SHADER_BINDING_TYPES: ShaderBindingResourceType[] = [
 
 const SUPPORTED_SHADER_BINDING_TYPE_SET = new Set<ShaderBindingResourceType>(SUPPORTED_SHADER_BINDING_TYPES)
 
+/** Conservatively inspects WGSL bindings and returns diagnostics without claiming native validation. */
 export function inspectShader(input: ShaderInspectionInput, options: ShaderInspectionOptions = {}): ShaderInspection {
 
     return new ShaderInspectionResult(input, options)

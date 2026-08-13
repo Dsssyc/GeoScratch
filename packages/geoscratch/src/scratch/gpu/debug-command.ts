@@ -35,6 +35,7 @@ export interface DebugCommand {
     readonly isDisposed: boolean
 }
 
+/** Describes a debug marker or group action encoded at an explicit command position. */
 export class DebugCommand {
 
     private constructor(

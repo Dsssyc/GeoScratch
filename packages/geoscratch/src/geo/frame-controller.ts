@@ -61,6 +61,7 @@ type MutableState = {
     rendering: boolean
 }
 
+/** Coordinates invalidation, asynchronous preparation, rendering, and bounded follow-up frames. */
 export function createGeoFrameController<Value>(
     descriptor: GeoFrameControllerDescriptor<Value>
 ): GeoFrameController {

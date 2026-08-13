@@ -153,6 +153,7 @@ export interface RenderPassSpec {
     readonly isDisposed: boolean
 }
 
+/** Owns an immutable render-pass attachment, query, and timestamp specification. */
 export class RenderPassSpec {
 
     constructor(runtime: GPURuntime, descriptor: RenderPassSpecDescriptor) {
@@ -306,6 +307,7 @@ export interface ComputePassSpec {
     readonly isDisposed: boolean
 }
 
+/** Owns an immutable compute-pass timestamp and debug specification. */
 export class ComputePassSpec {
 
     constructor(runtime: GPURuntime, descriptor: ComputePassSpecDescriptor = {}) {

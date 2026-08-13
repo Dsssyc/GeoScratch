@@ -32,6 +32,7 @@ export type TileTopology = Readonly<{
 
 const MAX_ROOTS = 65_536
 
+/** Builds regular parent, child, and neighbor relations over a compatible tile matrix set. */
 export function regularQuadTileTopology(
     descriptor: RegularQuadTileTopologyDescriptor
 ): TileTopology {
@@ -227,4 +228,3 @@ function invalidTopology(message: string, expected: unknown, actual: unknown): n
         actual,
     })
 }
-

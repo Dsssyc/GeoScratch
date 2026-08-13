@@ -50,6 +50,7 @@ type SubmissionAuthorityConsumptionClaimState = {
     released: boolean
 }
 
+/** Issues one-shot revision stamps that prevent stale asynchronous work from being consumed. */
 export class SubmissionAuthority {
 
     readonly id!: string

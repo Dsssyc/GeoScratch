@@ -28,6 +28,18 @@ npm run dev
 | `npm test` | 先构建库包，再运行 `tests/` 中的 Mocha 测试。 |
 | `npm run build` | 构建库包，并将示例浏览器和独立示例页面构建到 `dist/examples/`。 |
 | `npm run serve` | 本地预览构建后的示例。 |
+| `npm run docs:generate` | 根据 TypeScript 入口重新生成并提交 API 事实与参考。 |
+| `npm run docs:translations` | 确认已审阅的中文译文对应当前英文正文。 |
+| `npm run docs:check` | 只读校验 API 事实、覆盖、链接与译文新鲜度。 |
+
+## API 文档
+
+[API 知识根目录](./docs/api/README_zh.md)记录完整的当前 Scratch 与 Geo 拓扑。英文页面
+是事实基准，每页都有对应中文译文。自动生成的参考跟随真实包导出，语义页说明所有权、
+生命周期、组合、诊断与子系统边界。
+
+公开 API 变更必须同步源码 TSDoc、生成事实与双语页面。根目录
+[agent contract](./AGENTS.md)规定了事实优先级和验证规则。
 
 ## 项目结构
 

@@ -71,6 +71,7 @@ export type WebMercatorPlanarTileSpatialProfile = TileSpatialProfile & Readonly<
     addressCodec: WebMercatorQuadAddressCodec
 }>
 
+/** Defines planar bounds, camera encoding, and frontier encoding for one tiled topology. */
 export function planarTileSpatialProfile(
     descriptor: PlanarTileSpatialProfileDescriptor
 ): TileSpatialProfile {
@@ -257,6 +258,7 @@ export function planarTileSpatialProfile(
     return Object.freeze(profile)
 }
 
+/** Specializes a planar tile profile with WebMercatorQuad addressing and bounds. */
 export function webMercatorPlanarTileSpatialProfile(
     descriptor: WebMercatorPlanarTileSpatialProfileDescriptor
 ): WebMercatorPlanarTileSpatialProfile {

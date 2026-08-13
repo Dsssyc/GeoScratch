@@ -60,6 +60,7 @@ const residencySubmissionAuthorities = new WeakMap<
 >()
 const acknowledgedSnapshots = new WeakMap<VirtualRasterGpuState, VirtualRasterSnapshot>()
 
+/** Owns the finite atlas and mapping buffers that publish coherent Virtual Raster snapshots. */
 export class VirtualRasterGpuState {
 
     readonly runtime: GPURuntime
@@ -662,6 +663,7 @@ function encodeSlotTable(
     }
 }
 
+/** Asynchronously allocates GPU residency state for one address space and physical plane. */
 export function createVirtualRasterGpuState(
     runtime: GPURuntime,
     descriptor: VirtualRasterGpuStateDescriptor

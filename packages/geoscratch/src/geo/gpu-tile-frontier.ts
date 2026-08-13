@@ -257,6 +257,7 @@ type FrontierFeedbackRecord = {
 
 const frontierFeedbackRecords = new WeakMap<GpuTileFrontier, FrontierFeedbackRecord>()
 
+/** Owns GPU resources that select a bounded resident tile cut and indirect draw arguments. */
 export class GpuTileFrontier {
 
     readonly runtime: GPURuntime

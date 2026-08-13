@@ -98,6 +98,7 @@ export interface ShaderModule {
     readonly gpuShaderModule: GPUShaderModule
 }
 
+/** Owns normalized WGSL source parts, native shader-module identity, and compilation evidence. */
 export class ShaderModule {
 
     private constructor(token: symbol, state?: Readonly<{

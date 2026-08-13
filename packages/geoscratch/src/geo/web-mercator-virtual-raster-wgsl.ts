@@ -26,6 +26,7 @@ export type WebMercatorVirtualRasterWgslModule = Readonly<{
     }>
 }>
 
+/** Generates precision-aware WGSL for logical Web Mercator raster sampling in any shader stage. */
 export function webMercatorVirtualRasterWgslModule(
     model: WebMercatorVirtualRasterField,
     options: WebMercatorVirtualRasterWgslOptions

@@ -52,6 +52,7 @@ export type LocalVectorOptions = Readonly<{
     basis: string
 }>
 
+/** Validates and freezes a coordinate domain independently from storage or projection policy. */
 export function coordinateDomain(descriptor: CoordinateDomainDescriptor): CoordinateDomain {
 
     if (!isDimension(descriptor.intrinsicDimensions) ||
@@ -103,6 +104,7 @@ export function coordinateDomain(descriptor: CoordinateDomainDescriptor): Coordi
     })
 }
 
+/** Creates a two-dimensional surface domain embedded in three-dimensional space. */
 export function surfaceDomain(descriptor: SurfaceDomainDescriptor): CoordinateDomain {
 
     return coordinateDomain({
@@ -115,6 +117,7 @@ export function surfaceDomain(descriptor: SurfaceDomainDescriptor): CoordinateDo
     })
 }
 
+/** Creates a translation-invariant vector with explicit unit and basis in one domain. */
 export function localVector(
     domain: CoordinateDomain,
     values: readonly number[],

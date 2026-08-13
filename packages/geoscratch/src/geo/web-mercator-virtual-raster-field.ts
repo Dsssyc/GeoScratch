@@ -62,6 +62,7 @@ export type WebMercatorVirtualRasterField = Readonly<{
     safetyCoverPages: readonly VirtualRasterPageIdentity[]
 }>
 
+/** Composes WebMercatorQuad addressing, field semantics, coverage, and Virtual Raster storage. */
 export function webMercatorVirtualRasterField(
     descriptor: WebMercatorVirtualRasterFieldDescriptor
 ): WebMercatorVirtualRasterField {

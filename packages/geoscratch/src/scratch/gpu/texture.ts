@@ -204,6 +204,7 @@ type NormalizedTextureDescriptor = Readonly<{
     textureBindingViewDimension?: GPUTextureViewDimension
 }>
 
+/** Owns a replaceable GPUTexture allocation while preserving logical identity and content history. */
 export class TextureResource extends Resource {
 
     #gpuTexture: GPUTexture
@@ -411,6 +412,7 @@ export function isTextureResource(value: unknown): value is TextureResource {
     return typeof value === 'object' && value !== null && textureResources.has(value as TextureResource)
 }
 
+/** Describes a normalized reusable view over a texture without owning native view lifetime. */
 export class TextureViewSpec {
 
     readonly texture: TextureResource

@@ -93,6 +93,7 @@ export type QuerySetResourceDescriptor = {
     count: number
 }
 
+/** Owns a runtime-scoped GPUQuerySet and tracks per-slot availability across submissions. */
 export class QuerySetResource extends Resource {
 
     readonly #type: QuerySetType

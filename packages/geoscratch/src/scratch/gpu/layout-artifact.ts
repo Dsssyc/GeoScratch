@@ -594,12 +594,14 @@ export function createLayoutArtifact(
     return Object.freeze({ spec: normalizedSpec, artifact })
 }
 
+/** Recognizes immutable layout artifacts created by Scratch rather than structural lookalikes. */
 export function isLayoutArtifact(value: unknown): value is LayoutArtifact {
 
     return typeof value === 'object' && value !== null &&
         layoutArtifacts.has(value as LayoutArtifact)
 }
 
+/** Recognizes a validated buffer-view contract derived from a Scratch layout artifact. */
 export function isLayoutBufferViewContract(
     value: unknown
 ): value is LayoutBufferViewContract {
@@ -608,6 +610,7 @@ export function isLayoutBufferViewContract(
         layoutBufferViewContracts.has(value as LayoutBufferViewContract)
 }
 
+/** Tests whether two artifacts share the same byte-level storage ABI. */
 export function layoutArtifactsAbiCompatible(
     left: LayoutArtifact,
     right: LayoutArtifact
@@ -621,6 +624,7 @@ export function layoutArtifactsAbiCompatible(
         leftSignatures.abi === rightSignatures.abi
 }
 
+/** Tests whether two artifacts preserve the same named logical schema as well as layout. */
 export function layoutArtifactsSchemaCompatible(
     left: LayoutArtifact,
     right: LayoutArtifact
@@ -634,6 +638,7 @@ export function layoutArtifactsSchemaCompatible(
         leftSignatures.schema === rightSignatures.schema
 }
 
+/** Returns the first machine-readable ABI or schema difference between two artifacts. */
 export function describeLayoutCompatibilityDifference(
     expected: LayoutArtifact,
     actual: LayoutArtifact,
@@ -673,6 +678,7 @@ export function layoutArtifactSubject(artifact: LayoutArtifact): ScratchDiagnost
     return subject
 }
 
+/** Resolves a fixed or runtime-sized artifact's required byte length. */
 export function layoutArtifactByteLength(
     artifact: LayoutArtifact,
     options?: LayoutRuntimeExtent
@@ -706,6 +712,7 @@ export function layoutArtifactByteLength(
     )
 }
 
+/** Derives a runtime-array element count when a byte length is valid for the artifact. */
 export function layoutArtifactRuntimeElementCount(
     artifact: LayoutArtifact,
     byteLength: number
@@ -728,6 +735,7 @@ export function layoutArtifactRuntimeElementCount(
     )
 }
 
+/** Checks whether a byte range satisfies WebGPU binding-size rules for the artifact. */
 export function layoutArtifactAcceptsBindingByteLength(
     artifact: LayoutArtifact,
     byteLength: number
@@ -748,6 +756,7 @@ export function layoutArtifactAcceptsBindingByteLength(
     return byteLength >= artifact.minimumBindingSize
 }
 
+/** Checks whether a byte range can be interpreted as a complete compatible layout view. */
 export function layoutArtifactAcceptsViewByteLength(
     artifact: LayoutArtifact,
     byteLength: number

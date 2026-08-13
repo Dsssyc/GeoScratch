@@ -23,6 +23,7 @@ export type MapFieldLayer<Input = unknown> = Readonly<{
     demandProducer: ViewDemandProducer
 }>
 
+/** Composes a planar field representation, view adapter, and demand producer without owning them. */
 export function mapFieldLayer<Input = unknown>(
     descriptor: MapFieldLayerDescriptor<Input>
 ): MapFieldLayer<Input> {
@@ -60,4 +61,3 @@ export function mapFieldLayer<Input = unknown>(
         demandProducer: descriptor.demandProducer,
     })
 }
-

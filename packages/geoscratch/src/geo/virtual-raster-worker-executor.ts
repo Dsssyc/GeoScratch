@@ -111,6 +111,7 @@ const DEFAULT_OPERATIONS: VirtualRasterWorkerOperationNames = Object.freeze({
     facts: 'facts',
 })
 
+/** Adapts retained Scratch Worker contexts and phase budgets into raster page requests. */
 export async function createVirtualRasterWorkerExecutor<
     Candidate extends VirtualRasterWorkerCandidate,
     Init,

@@ -97,6 +97,7 @@ export type VirtualRasterGpuFeedbackBatch = Readonly<{
     diagnostics: readonly GeoDiagnostic[]
 }>
 
+/** Owns bounded rotating readbacks for delayed GPU tile-frontier demand and retirement feedback. */
 export class VirtualRasterGpuFeedbackRing {
 
     readonly id: string

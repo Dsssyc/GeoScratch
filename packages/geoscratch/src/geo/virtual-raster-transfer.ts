@@ -47,6 +47,7 @@ type PayloadOwnership = {
 
 const payloadOwnership = new WeakMap<OwnedVirtualRasterPagePayload, PayloadOwnership>()
 
+/** Wraps decoded page bytes in single-owner lifecycle tracking without copying them. */
 export function ownedVirtualRasterPagePayload(
     descriptor: VirtualRasterPagePayloadDescriptor
 ): OwnedVirtualRasterPagePayload {
@@ -65,6 +66,7 @@ export function ownedVirtualRasterPagePayload(
     return payload
 }
 
+/** Prepares decoded page bytes and their backing buffer for one ownership-moving postMessage. */
 export function prepareVirtualRasterPageTransfer(
     descriptor: VirtualRasterPagePayloadDescriptor
 ): PreparedVirtualRasterPageTransfer {
@@ -86,6 +88,7 @@ export function prepareVirtualRasterPageTransfer(
     })
 }
 
+/** Adopts one received transfer as a live locally owned raster-page payload. */
 export function adoptVirtualRasterPageTransfer(
     transfer: VirtualRasterPageTransfer
 ): OwnedVirtualRasterPagePayload {
@@ -113,6 +116,7 @@ export function adoptVirtualRasterPageTransfer(
     })
 }
 
+/** Discards an unadopted transfer by detaching its live backing buffer. */
 export function discardVirtualRasterPageTransfer(transfer: VirtualRasterPageTransfer): void {
 
     if (transfer.kind !== 'virtual-raster-page-transfer' ||
@@ -127,6 +131,7 @@ export function discardVirtualRasterPageTransfer(transfer: VirtualRasterPageTran
     detachBuffer(transfer.buffer)
 }
 
+/** Releases an unclaimed owned payload and detaches its backing buffer. */
 export function discardOwnedVirtualRasterPagePayload(
     payload: OwnedVirtualRasterPagePayload
 ): void {

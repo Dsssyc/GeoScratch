@@ -193,6 +193,7 @@ export const gpuTileFrontierVisibleInstanceCodec = layoutCodec({
     ],
 })
 
+/** Produces WGSL accessors for map metadata and visible tile instances. */
 export function gpuTileFrontierRenderWgslModule(
     options: GpuTileFrontierRenderWgslOptions = {}
 ): GpuTileFrontierRenderWgslModule {
@@ -265,6 +266,7 @@ export const gpuTileFrontierLayouts = Object.freeze({
     diagnostics: layoutFacts(gpuTileFrontierDiagnosticsCodec),
 })
 
+/** Validates and freezes screen-error, distance, capacity, and transition policy. */
 export function gpuTileFrontierPolicy(
     input: GpuTileFrontierPolicy
 ): GpuTileFrontierPolicy {

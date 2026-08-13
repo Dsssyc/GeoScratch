@@ -205,6 +205,7 @@ export interface GPURuntime {
     _surfaces: Set<Surface>
 }
 
+/** Owns one WebGPU adapter/device/queue authority and every Scratch object created from it. */
 export class GPURuntime {
 
     #diagnosticsController: GPURuntimeDiagnosticsController

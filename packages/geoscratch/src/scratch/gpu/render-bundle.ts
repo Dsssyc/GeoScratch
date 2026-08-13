@@ -103,6 +103,7 @@ export interface BundleDrawCommand {
     readonly isDisposed: boolean
 }
 
+/** Describes a render-bundle-compatible draw with static resources and strict readiness. */
 export class BundleDrawCommand {
 
     private constructor(
@@ -270,6 +271,7 @@ export interface RenderBundle {
     readonly isDisposed: boolean
 }
 
+/** Owns a lazily realized GPURenderBundle and the versions that validate its reuse. */
 export class RenderBundle {
 
     private constructor(
@@ -504,6 +506,7 @@ export interface ExecuteRenderBundlesCommand {
     readonly isDisposed: boolean
 }
 
+/** Describes execution of validated render bundles inside a compatible render pass. */
 export class ExecuteRenderBundlesCommand {
 
     private constructor(

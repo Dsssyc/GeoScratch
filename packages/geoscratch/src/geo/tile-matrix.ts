@@ -91,6 +91,7 @@ type CoverageRecord = Readonly<{
 
 const MAX_GPU_COMPACT_ENTRIES = 0xffff_fffen
 
+/** Indexes finite per-level TileMatrix limits into compact logical and GPU addresses. */
 export class TileMatrixCoverage {
 
     readonly kind = 'tile-matrix-coverage'
@@ -273,6 +274,7 @@ export class TileMatrixCoverage {
     }
 }
 
+/** Validates and freezes an OGC-style ordered tile matrix set. */
 export function tileMatrixSet(descriptor: TileMatrixSetDescriptor): TileMatrixSet {
 
     if (typeof descriptor.id !== 'string' || descriptor.id.length === 0 ||
@@ -380,6 +382,7 @@ export function tileMatrixSet(descriptor: TileMatrixSetDescriptor): TileMatrixSe
     return Object.freeze(result)
 }
 
+/** Creates finite source coverage over an existing tile matrix set. */
 export function tileMatrixCoverage(descriptor: TileMatrixCoverageDescriptor): TileMatrixCoverage {
 
     return new TileMatrixCoverage(descriptor)

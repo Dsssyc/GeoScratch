@@ -239,6 +239,7 @@ const WORKER_CODES = new Set<string>([
 
 let systemSequence = 0
 
+/** Exposes one queued or active Worker task's result, cancellation, and immutable facts. */
 export class WorkerTaskHandle<Output> {
 
     readonly result: Promise<Output>
@@ -275,6 +276,7 @@ export class WorkerTaskHandle<Output> {
     }
 }
 
+/** Owns one retained module context pinned to a Worker host until disposal or host loss. */
 export class WorkerContextHandle<State = unknown> {
 
     readonly #group: WorkerGroup
@@ -433,6 +435,7 @@ export class WorkerContextHandle<State = unknown> {
     }
 }
 
+/** Schedules an allowlisted module set within explicit capacity, isolation, and history bounds. */
 export class WorkerGroup {
 
     readonly id: string
@@ -1133,6 +1136,7 @@ export class WorkerGroup {
     }
 }
 
+/** Owns a bounded pool of Worker hosts and the independently configured groups that share it. */
 export class WorkerSystem {
 
     readonly id: string

@@ -56,6 +56,7 @@ const priorityClasses = new Set<WorkerTaskPriorityClass>([
     'critical',
 ])
 
+/** Converts view-derived candidates into bounded prioritized tile-demand intent. */
 export class ViewDemandProducer {
 
     readonly kind = 'view-demand-producer'
@@ -125,6 +126,7 @@ export class ViewDemandProducer {
     }
 }
 
+/** Lowers one view-demand generation into Virtual Raster request semantics. */
 export function virtualRasterDemandSetFromViewDemands(
     demandSet: ViewTileDemandSet
 ): VirtualRasterDemandSet {

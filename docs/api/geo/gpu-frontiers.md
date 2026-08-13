@@ -1,0 +1,28 @@
+---
+docId: geo.gpu-frontiers
+canonical: true
+apiSources:
+  - packages/geoscratch/src/geo/gpu-render-patch-frontier.ts
+  - packages/geoscratch/src/geo/gpu-tile-frontier-layout.ts
+  - packages/geoscratch/src/geo/gpu-tile-frontier.ts
+---
+# GPU Frontiers
+
+[简体中文](./gpu-frontiers_zh.md) | [Geo overview](./README.md)
+
+GPU frontiers keep bounded spatial selection and draw preparation on the GPU.
+`GpuTileFrontier` evaluates resident tile metadata against view and policy buffers,
+emits compact demand/visibility feedback, and prepares indirect arguments. CPU code
+updates map/view metadata and consumes delayed feedback; it does not traverse an
+unbounded world quadtree every frame.
+
+The render-patch frontier is separate from raster residency. It refines terrain mesh
+patches by projected grid spacing and distance even when source raster detail has
+reached its maximum. A normalized budget, bounded balancing passes, hysteresis, and
+revision tokens keep selection stable. The balanced cut enforces edge-adjacent level
+difference at most one before mesh-stitching flags are produced.
+
+Only resident or seedable metadata can participate in a GPU pass, so delayed demand
+may affect later frames. This is deliberate eventual refinement, not a claim that every
+desired tile is already loaded. Feedback decoders validate counters and budget facts;
+stale or inconsistent results are rejected rather than corrupting the active frontier.

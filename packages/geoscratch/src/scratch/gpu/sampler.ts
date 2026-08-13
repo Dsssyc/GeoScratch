@@ -54,6 +54,7 @@ type NormalizedSamplerResourceDescriptor = Readonly<{
     maxAnisotropy: number
 }>
 
+/** Owns an immutable runtime-scoped GPUSampler with normalized descriptor facts. */
 export class SamplerResource extends Resource {
 
     readonly #gpuSampler: GPUSampler

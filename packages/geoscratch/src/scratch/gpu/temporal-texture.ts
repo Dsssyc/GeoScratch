@@ -60,6 +60,7 @@ export interface ExternalTextureBinding {
     readonly colorSpace: PredefinedColorSpace
 }
 
+/** Describes an attempt-local external texture import without retaining native texture identity. */
 export class ExternalTextureBinding {
 
     private constructor(
@@ -179,6 +180,7 @@ export interface SurfaceTextureLease {
     readonly state: SurfaceTextureLeaseState
 }
 
+/** Holds attempt-local authority over one current surface texture during submission assembly. */
 export class SurfaceTextureLease {
 
     private constructor(
@@ -275,6 +277,7 @@ type SurfaceTextureViewInternalState = Readonly<{
     descriptor: Readonly<TextureViewDescriptor>
 }>
 
+/** Describes a view derived from one surface-texture lease and sharing its temporal authority. */
 export class SurfaceTextureView {
 
     private constructor(

@@ -52,10 +52,10 @@ device calls and are excluded. Every actual `device.createBuffer()` and
 
 | ID | Native call site | Native object | Classification | Fact |
 | --- | --- | --- | --- | --- |
-| N1 | `packages/geoscratch/src/scratch/gpu/buffer.ts:611` | Buffer | Covered by this goal | Public persistent initial buffer transaction. |
+| N1 | `packages/geoscratch/src/scratch/gpu/buffer.ts:613` | Buffer | Covered by this goal | Public persistent initial buffer transaction. |
 | N2 | `packages/geoscratch/src/scratch/gpu/readback-staging.ts:143` | Buffer | Acknowledged readback staging | Shared direct and ordered staging allocation transaction covered by ADR-034. |
-| N3 | `packages/geoscratch/src/scratch/gpu/texture.ts:361` | Texture | Covered by this goal | Public persistent texture replacement transaction. |
-| N4 | `packages/geoscratch/src/scratch/gpu/texture.ts:545` | Texture | Covered by this goal | Public persistent initial texture transaction. |
+| N3 | `packages/geoscratch/src/scratch/gpu/texture.ts:362` | Texture | Covered by this goal | Public persistent texture replacement transaction. |
+| N4 | `packages/geoscratch/src/scratch/gpu/texture.ts:547` | Texture | Covered by this goal | Public persistent initial texture transaction. |
 
 Inventory totals:
 

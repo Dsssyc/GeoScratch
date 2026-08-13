@@ -115,6 +115,7 @@ export interface Program {
     readonly sourcePartDependencies: readonly LayoutArtifact[]
 }
 
+/** Binds shader entry points to one runtime and explicit buffer-layout requirements. */
 export class Program {
 
     constructor(runtime: GPURuntime, descriptor: ProgramDescriptor) {

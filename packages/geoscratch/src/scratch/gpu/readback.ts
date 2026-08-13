@@ -172,6 +172,7 @@ const readbackOperationPaths = new WeakMap<ReadbackOperation, 'direct' | 'ordere
 const registeredReadbackOperations = new WeakSet<ReadbackOperation>()
 const readbackOperationStates = new WeakMap<ReadbackOperation, ReadbackOperationPrivateState>()
 
+/** Coordinates explicit GPU staging, asynchronous mapping, provenance, and retention for readback. */
 export class ReadbackOperation {
 
     private constructor(

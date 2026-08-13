@@ -54,6 +54,7 @@ export type VirtualRasterCacheAddress = Readonly<{
     invalidationPrefixes: VirtualRasterCacheInvalidationPrefixes
 }>
 
+/** Maps one versioned raster page and coherence contract into generic persistent-cache addresses. */
 export function virtualRasterCacheAddress(
     descriptor: VirtualRasterCacheAddressDescriptor
 ): VirtualRasterCacheAddress {

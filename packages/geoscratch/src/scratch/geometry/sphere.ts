@@ -5,6 +5,7 @@ export interface SphereGeometry {
     uvs: number[]
 }
 
+/** Generates indexed CPU-side sphere geometry for explicit application-owned upload. */
 export function sphere(
     radius = 1,
     widthSegments = 32,

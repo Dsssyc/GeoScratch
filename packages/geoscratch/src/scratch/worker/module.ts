@@ -80,6 +80,7 @@ export type WorkerTransferResult<T> = Readonly<{
     transfer: readonly Transferable[]
 }>
 
+/** Validates and freezes one Worker implementation with optional retained context operations. */
 export function defineWorkerModule<
     const Operations extends Readonly<Record<string, WorkerOperation<never, unknown>>>,
     const Context extends WorkerContextDefinitionShape | undefined,
@@ -118,6 +119,7 @@ export function defineWorkerModule<
     })
 }
 
+/** Creates a stable typed identity shared by Worker callers, implementations, and builds. */
 export function defineWorkerModuleContract(
     identity: Readonly<{ id: string, version: string }>
 ): WorkerModuleContract {
@@ -151,6 +153,7 @@ export function defineWorkerModuleContract(
     return contract
 }
 
+/** Marks a Worker result and the unique transferable objects whose ownership moves with it. */
 export function transferWorkerResult<T>(
     value: T,
     transfer: readonly Transferable[]

@@ -13,9 +13,13 @@ import {
     type TileMatrixSet,
 } from './tile-matrix.js'
 
+/** Maximum latitude representable by the Web Mercator projection. */
 export const WEB_MERCATOR_QUAD_MAX_LATITUDE = 85.0511287798066
+/** Projected meter distance from the central meridian to either world edge. */
 export const WEB_MERCATOR_QUAD_HALF_WORLD = 20_037_508.3427892
+/** Full projected Web Mercator world width in meters. */
 export const WEB_MERCATOR_QUAD_WORLD_WIDTH = WEB_MERCATOR_QUAD_HALF_WORLD * 2
+/** Highest matrix level defined by the built-in WebMercatorQuad model. */
 export const WEB_MERCATOR_QUAD_MAX_ZOOM = 24
 
 export type GeographicPosition2D = readonly [longitude: number, latitude: number]
@@ -154,6 +158,7 @@ const baseWebMercatorQuad = tileMatrixSet({
     }),
 })
 
+/** OGC-compatible WebMercatorQuad matrices with projection and tile-bound helpers. */
 export const WebMercatorQuad: WebMercatorQuadModel = Object.freeze({
     ...baseWebMercatorQuad,
     maxLatitude: WEB_MERCATOR_QUAD_MAX_LATITUDE,
@@ -241,6 +246,7 @@ export const WebMercatorQuad: WebMercatorQuadModel = Object.freeze({
     },
 })
 
+/** Encodes precise world positions and compact covered tile addresses for WebMercatorQuad. */
 export class WebMercatorQuadAddressCodec {
 
     readonly coverage: TileMatrixCoverage
@@ -545,6 +551,7 @@ export class WebMercatorQuadAddressCodec {
     }
 }
 
+/** Creates a WebMercatorQuad address codec over finite source coverage. */
 export function webMercatorQuadAddressCodec(
     descriptor: WebMercatorQuadAddressCodecDescriptor
 ): WebMercatorQuadAddressCodec {

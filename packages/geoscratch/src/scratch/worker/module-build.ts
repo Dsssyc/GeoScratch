@@ -12,6 +12,7 @@ export type WorkerModuleBuild = Readonly<{
     modules: readonly WorkerModuleBuildEntry[]
 }>
 
+/** Validates a bundler-independent set of typed Worker module source entries. */
 export function defineWorkerModuleBuild(
     descriptor: Readonly<{
         outDir: string

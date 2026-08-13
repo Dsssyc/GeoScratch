@@ -538,6 +538,7 @@ type CaptureState = {
 const controllerByRuntime = new WeakMap<object, GPURuntimeDiagnosticsController>()
 const captureStates = new WeakMap<GPUDiagnosticCapture, CaptureState>()
 
+/** Exposes bounded, read-only operation and incident evidence owned by one GPU runtime. */
 export class GPURuntimeDiagnostics {
 
     #controller: GPURuntimeDiagnosticsController
@@ -585,6 +586,7 @@ export class GPURuntimeDiagnostics {
     }
 }
 
+/** Defines an explicit bounded interval for collecting one runtime's diagnostic evidence. */
 export class GPUDiagnosticCapture {
 
     private constructor(token: symbol) {

@@ -77,6 +77,7 @@ export type CacheDiagnosticInput = Readonly<{
     retriable?: boolean
 }>
 
+/** Creates an immutable cache diagnostic while preserving storage-stage evidence. */
 export function createCacheDiagnostic(input: CacheDiagnosticInput): CacheDiagnostic {
 
     const base = createScratchDiagnostic({

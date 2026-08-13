@@ -190,6 +190,7 @@ export type VirtualRasterPhysicalPage = Readonly<{
     contentVersion: string
 }>
 
+/** Maps finite logical raster coordinates or tile coverage into compact page identities. */
 export class VirtualRasterAddressSpace {
 
     readonly kind = 'virtual-raster-address-space'
@@ -549,6 +550,7 @@ export class VirtualRasterAddressSpace {
     }
 }
 
+/** Freezes one coherent logical-to-physical page-table epoch and its physical mappings. */
 export class VirtualRasterSnapshot {
 
     readonly kind = 'virtual-raster-snapshot'
@@ -588,6 +590,7 @@ export class VirtualRasterSnapshot {
     }
 }
 
+/** Resolves CPU samples and generates shader accessors without exposing atlas placement to callers. */
 export class VirtualRasterAccessor {
 
     readonly addressSpace: VirtualRasterAddressSpace
@@ -844,6 +847,7 @@ type ResolvedCpuTexel = {
     physicalSlot?: number
 }
 
+/** Creates a regular finite-dimensional Virtual Raster address space. */
 export function virtualRasterAddressSpace(
     descriptor: VirtualRasterAddressSpaceDescriptor
 ): VirtualRasterAddressSpace {
@@ -851,6 +855,7 @@ export function virtualRasterAddressSpace(
     return new VirtualRasterAddressSpace(descriptor)
 }
 
+/** Creates a compact Virtual Raster address space from finite tile-matrix coverage. */
 export function virtualRasterTileAddressSpace(
     descriptor: VirtualRasterTileAddressSpaceDescriptor
 ): VirtualRasterAddressSpace {
@@ -858,6 +863,7 @@ export function virtualRasterTileAddressSpace(
     return new VirtualRasterAddressSpace(descriptor)
 }
 
+/** Defines physical channel, sample, format, and missing-data semantics for one raster plane. */
 export function virtualRasterPlane(descriptor: VirtualRasterPlaneDescriptor): VirtualRasterPlane {
 
     if (descriptor.addressSpace.dimensions !== 2 ||
@@ -901,6 +907,7 @@ export function virtualRasterPlane(descriptor: VirtualRasterPlaneDescriptor): Vi
     return Object.freeze(plane)
 }
 
+/** Defines a stable asynchronous logical page source without choosing scheduling or cache policy. */
 export function virtualRasterSource(descriptor: VirtualRasterSourceDescriptor): VirtualRasterSource {
 
     if (typeof descriptor.id !== 'string' || descriptor.id.length === 0 ||
@@ -921,6 +928,7 @@ export function virtualRasterSource(descriptor: VirtualRasterSourceDescriptor): 
     })
 }
 
+/** Defines level, filtering, parent fallback, and outer-boundary behavior for sampling. */
 export function virtualRasterSamplingProfile(
     descriptor: VirtualRasterSamplingProfileDescriptor
 ): VirtualRasterSamplingProfile {
@@ -940,6 +948,7 @@ export function virtualRasterSamplingProfile(
     return Object.freeze({ kind: 'virtual-raster-sampling-profile', ...descriptor })
 }
 
+/** Creates a logical CPU and WGSL accessor over one address space and plane. */
 export function virtualRasterAccessor(
     descriptor: VirtualRasterAccessorDescriptor
 ): VirtualRasterAccessor {

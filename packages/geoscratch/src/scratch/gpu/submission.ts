@@ -634,6 +634,7 @@ const submissionBuilderOpaqueSequenceRecords = new WeakMap<
     }>
 >()
 
+/** Orders passes and queue actions, validates their shared timeline, and submits them once. */
 export class SubmissionBuilder {
 
     constructor(runtime: GPURuntime, options: SubmissionBuilderOptions = {}) {
@@ -4165,6 +4166,7 @@ function createCommandReadEpochDiagnostic(
     })
 }
 
+/** Records immutable submission provenance, resource epochs, outcomes, and native completion evidence. */
 export class SubmittedWork {
 
     #runtime: GPURuntime

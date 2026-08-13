@@ -433,6 +433,7 @@ export interface BindLayout {
     readonly gpuBindGroupLayout: GPUBindGroupLayout
 }
 
+/** Owns one runtime-scoped bind-group layout and its normalized binding contract. */
 export class BindLayout {
 
     private constructor(
@@ -744,6 +745,7 @@ export interface BindSet {
     readonly bindings: ReadonlyMap<string, NormalizedBindSetBinding>
 }
 
+/** Tracks logical bindings and realizes bind groups against current allocation and attempt authority. */
 export class BindSet {
 
     private constructor(

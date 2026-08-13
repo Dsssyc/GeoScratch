@@ -125,6 +125,7 @@ type RequestRecord = {
     current: boolean
 }
 
+/** Reconciles generation-tagged page demand with bounded asynchronous request execution. */
 export class VirtualRasterRequestScheduler {
 
     readonly residency: VirtualRasterResidency
@@ -470,6 +471,7 @@ function terminalFailureDetail(
     return classification.code === undefined ? detail : `${classification.code}: ${detail}`
 }
 
+/** Validates and freezes one uniquely keyed generation of prioritized raster-page intent. */
 export function virtualRasterDemandSet(
     descriptor: VirtualRasterDemandSetDescriptor
 ): VirtualRasterDemandSet {

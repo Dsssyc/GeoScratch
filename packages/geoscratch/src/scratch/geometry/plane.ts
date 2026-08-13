@@ -12,6 +12,7 @@ export interface PlaneGeometry {
     indices: number[]
 }
 
+/** Generates a recursively subdivided CPU-side plane without allocating GPU resources. */
 export function plane(time = 5): PlaneGeometry {
 
     function middle(v1: PlaneVertex, v2: PlaneVertex): PlaneVertex {

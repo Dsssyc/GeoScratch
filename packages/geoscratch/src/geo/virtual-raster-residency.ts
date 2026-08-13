@@ -186,6 +186,7 @@ const residencyLeaseToken = Symbol('VirtualRasterResidencyLease')
 const residencyLeaseStates = new WeakMap<VirtualRasterResidencyLease, ResidencyLeaseState>()
 const MAX_U32 = 0xffff_ffff
 
+/** Represents a staged snapshot that becomes visible only after explicit commit. */
 export class VirtualRasterPublication {
 
     readonly kind = 'virtual-raster-publication'
@@ -283,6 +284,7 @@ export function uploadPagesForPublication(
     return publicationUploads.get(publication) ?? Object.freeze([])
 }
 
+/** Pins referenced physical slots until all submissions that may sample them are retired. */
 export class VirtualRasterResidencyLease {
 
     private constructor(token: symbol, state: ResidencyLeaseState) {
@@ -396,6 +398,7 @@ export class VirtualRasterResidencyLease {
     }
 }
 
+/** Owns bounded CPU staging, slot allocation, coherent snapshots, and residency history. */
 export class VirtualRasterResidency {
 
     readonly addressSpace: VirtualRasterAddressSpace

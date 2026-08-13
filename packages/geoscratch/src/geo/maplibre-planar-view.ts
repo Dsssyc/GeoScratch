@@ -106,6 +106,7 @@ export type MapLibrePlanarViewAdapter = GeoViewAdapter<MapLibrePlanarCameraState
     camera(input: MapLibrePlanarCameraInput): MapLibrePlanarCameraState
 }>
 
+/** Adapts MapLibre-compatible camera state into precision-preserving planar Geo snapshots. */
 export function mapLibrePlanarViewAdapter(
     descriptor: MapLibrePlanarViewAdapterDescriptor
 ): MapLibrePlanarViewAdapter {

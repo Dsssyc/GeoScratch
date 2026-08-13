@@ -30,10 +30,15 @@ import {
 } from './diagnostics.js'
 import { GPU_RENDER_PATCH_FRONTIER_WGSL } from './gpu-render-patch-frontier-wgsl.js'
 
+/** Highest matrix level representable by the current compact render-patch key. */
 export const GPU_RENDER_PATCH_MAXIMUM_MATRIX_LEVEL = 14
+/** Maximum geometry-only refinement levels beyond available raster detail. */
 export const GPU_RENDER_PATCH_MAXIMUM_EXTRA_LEVELS = 4
+/** Default terrain grid resolution along each render-patch edge. */
 export const GPU_RENDER_PATCH_DEFAULT_CELLS_PER_EDGE = 64
+/** Default screen-space cell span that triggers geometry refinement. */
 export const GPU_RENDER_PATCH_DEFAULT_MAXIMUM_CELL_SPAN_PIXELS = 8
+/** Bounded pass count used to enforce adjacent render-patch level balance. */
 export const GPU_RENDER_PATCH_BALANCE_PASS_COUNT = GPU_RENDER_PATCH_MAXIMUM_MATRIX_LEVEL
 const GPU_RENDER_PATCH_DEFAULT_MAXIMUM_COUNT_RATIO = 3
 const GPU_RENDER_PATCH_BIAS_STEPS_PER_LEVEL = 4
@@ -221,6 +226,7 @@ export type GpuRenderPatchFeedback = Readonly<GpuRenderPatchSelectionFacts & {
     submissionId: string
 }>
 
+/** Reports feedback whose frame epoch no longer matches the requested render-patch decision. */
 export class GpuRenderPatchFeedbackStaleError extends GeoDiagnosticError {
 
     constructor(expectedFrameEpoch: number, actualFrameEpoch: number) {
@@ -277,6 +283,7 @@ export type GpuRenderPatchFrontierDescriptor = Readonly<{
 
 let nextRenderPatchFrontierId = 1
 
+/** Decodes and validates bounded render-patch counters copied from GPU state. */
 export function decodeGpuRenderPatchState(
     bytes: Uint8Array,
     options: Readonly<{
@@ -431,6 +438,7 @@ function gpuRenderPatchLookupCapacity(
     return capacity
 }
 
+/** Produces WGSL accessors and lookup helpers for GPU-selected render patches. */
 export function gpuRenderPatchWgslModule() {
 
     const frontier = gpuTileFrontierRenderWgslModule()
@@ -459,6 +467,7 @@ fn GpuRenderPatch_lookupSlot(key: u32, probe: u32, capacity: u32) -> u32 {
     })
 }
 
+/** Creates a GPU-owned balanced terrain-mesh frontier independent of raster source detail. */
 export async function createGpuRenderPatchFrontier(
     runtime: GPURuntime,
     options: GpuRenderPatchFrontierDescriptor

@@ -343,6 +343,7 @@ const BUFFER_UNIFORM = 0x40
 const BUFFER_STORAGE = 0x80
 const TEXTURE_RENDER_ATTACHMENT = 0x10
 
+/** Assembles a view-driven Virtual Raster terrain renderer with GPU frontiers and explicit lifetime. */
 export async function createTerrainFieldRenderer<
     ViewInput,
     Presentation extends string,

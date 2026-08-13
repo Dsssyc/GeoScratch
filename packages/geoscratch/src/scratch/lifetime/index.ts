@@ -68,6 +68,7 @@ type ObservationEntry = {
     rejectionReported: boolean
 }
 
+/** Coordinates abort, ordered cleanup, and observation settlement for explicitly owned work. */
 export class LifetimeScope {
 
     readonly #abortController = new AbortController()

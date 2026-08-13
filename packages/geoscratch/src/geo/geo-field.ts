@@ -51,6 +51,7 @@ export type TiledFieldRepresentation = Readonly<{
     sourceRevision: string
 }>
 
+/** Defines immutable value, interpolation, and missing-data semantics over a coordinate domain. */
 export function geoField(descriptor: GeoFieldDescriptor): GeoField {
 
     if (typeof descriptor?.id !== 'string' || descriptor.id.length === 0 ||
@@ -88,6 +89,7 @@ export function geoField(descriptor: GeoFieldDescriptor): GeoField {
     })
 }
 
+/** Associates a Geo field with one tiled Virtual Raster plane and spatial profile. */
 export function tiledFieldRepresentation(
     descriptor: TiledFieldRepresentationDescriptor
 ): TiledFieldRepresentation {
@@ -148,4 +150,3 @@ function invalidField(message: string, expected: unknown, actual: unknown): neve
         actual,
     })
 }
-

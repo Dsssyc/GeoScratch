@@ -168,6 +168,7 @@ type TransitionLeaseRecord = {
     acknowledged: boolean
 }
 
+/** Coordinates safety cover, view demand, feedback acknowledgement, and publication retention. */
 export function createVirtualRasterDemandController<
     Model extends VirtualRasterRuntimeModel,
 >({
@@ -447,6 +448,7 @@ export function createVirtualRasterDemandController<
     })
 }
 
+/** Assembles request scheduling, CPU residency, GPU publication, and demand authority. */
 export async function createVirtualRasterRuntime<
     Model extends VirtualRasterRuntimeModel,
 >({

@@ -71,6 +71,7 @@ const I64_MIN = -(1n << 63n)
 const I64_MAX = (1n << 63n) - 1n
 const U64_MODULUS = 1n << 64n
 
+/** Encodes positions as integer cells plus bounded f32 locals for stable dynamic shader work. */
 export class CellLocalF32Codec {
 
     readonly domain: CoordinateDomain
@@ -305,6 +306,7 @@ export class CellLocalF32Codec {
     }
 }
 
+/** Quantizes canonical positions into signed 64-bit axes represented by portable word pairs. */
 export class WideFixedCodec {
 
     readonly domain: CoordinateDomain
@@ -483,11 +485,13 @@ export class WideFixedCodec {
     }
 }
 
+/** Creates a cell-local f32 codec for one coordinate domain. */
 export function cellLocalF32Codec(options: CellLocalF32CodecOptions): CellLocalF32Codec {
 
     return new CellLocalF32Codec(options)
 }
 
+/** Creates a wide fixed-point codec for one coordinate domain and quantum. */
 export function wideFixedCodec(options: WideFixedCodecOptions): WideFixedCodec {
 
     return new WideFixedCodec(options)

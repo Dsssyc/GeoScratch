@@ -74,6 +74,7 @@ type DirectoryWithEntries = FileSystemDirectoryHandle & Readonly<{
     entries(): AsyncIterableIterator<[string, FileSystemHandle]>
 }>
 
+/** Owns one IndexedDB metadata store and OPFS payload namespace with explicit lifecycle policy. */
 export class PersistentCache<Metadata extends object = Readonly<Record<string, unknown>>> {
 
     readonly namespace: string
@@ -1005,6 +1006,7 @@ export class PersistentCache<Metadata extends object = Readonly<Record<string, u
     }
 }
 
+/** Validates and freezes the logical id and revision that identify one cache record. */
 export function persistentCacheKey(
     descriptor: PersistentCacheKeyDescriptor
 ): PersistentCacheKey {

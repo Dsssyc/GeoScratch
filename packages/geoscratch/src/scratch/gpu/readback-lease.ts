@@ -32,6 +32,7 @@ export type MappedReadbackLeaseConstruction = Readonly<{
 const mappedReadbackLeaseToken = Symbol('MappedReadbackLease')
 const mappedReadbackLeaseFacts = new WeakMap<MappedReadbackLease, MappedReadbackLeaseFacts>()
 
+/** Owns temporary access to a mapped staging range until explicit release. */
 export class MappedReadbackLease {
 
     private constructor(token: symbol) {

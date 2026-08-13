@@ -122,6 +122,7 @@ export interface Surface {
     readonly isDisposed: boolean
 }
 
+/** Owns one canvas presentation context independently from its borrowed GPU runtime. */
 export class Surface {
 
     constructor(runtime: GPURuntime, canvas: GPUCanvas, options: SurfaceOptions = {}) {

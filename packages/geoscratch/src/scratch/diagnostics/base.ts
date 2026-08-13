@@ -102,6 +102,7 @@ export type ScratchDiagnosticErrorOptions<
     context?: DiagnosticContext<Diagnostic>
 }>
 
+/** Creates the immutable domain-neutral diagnostic envelope used by every Scratch subsystem. */
 export function createScratchDiagnostic<
     const Domain extends ScratchDiagnosticDomain,
     const Code extends string,
@@ -146,6 +147,7 @@ export function createScratchDiagnostic<
     return Object.freeze(diagnostic)
 }
 
+/** Aggregates immutable diagnostics and severity counts without losing individual evidence. */
 export function createScratchDiagnosticReport<
     const Diagnostic extends AnyScratchDiagnostic,
 >(diagnostics: readonly Diagnostic[] = []): ScratchDiagnosticReport<Diagnostic> {
@@ -170,6 +172,7 @@ export function createScratchDiagnosticReport<
 
 const scratchDiagnosticErrors = new WeakSet<object>()
 
+/** Carries a structured Scratch diagnostic through exception control flow. */
 export class ScratchDiagnosticError<
     Diagnostic extends AnyScratchDiagnostic = AnyScratchDiagnostic,
 > extends Error {
@@ -212,6 +215,7 @@ export class ScratchDiagnosticError<
     }
 }
 
+/** Recognizes genuine Scratch diagnostic errors without trusting a mutable structural lookalike. */
 export function isScratchDiagnosticError(value: unknown): value is ScratchDiagnosticError {
 
     return typeof value === 'object' && value !== null && scratchDiagnosticErrors.has(value as ScratchDiagnosticError)

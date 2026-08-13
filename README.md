@@ -28,6 +28,19 @@ Open the Vite URL to browse examples. A WebGPU-capable browser is required for r
 | `npm test` | Build the library package, then run Mocha tests in `tests/`. |
 | `npm run build` | Build the library package and standalone example pages into `dist/examples/`. |
 | `npm run serve` | Preview the built examples locally. |
+| `npm run docs:generate` | Regenerate committed API facts and references from TypeScript entrypoints. |
+| `npm run docs:translations` | Confirm reviewed Chinese translations against current English bodies. |
+| `npm run docs:check` | Read-only verification of API facts, coverage, links, and translation freshness. |
+
+## API Documentation
+
+The [API knowledge root](./docs/api/README.md) documents the complete current Scratch
+and Geo topology. English pages are canonical and every page has a paired Chinese
+translation. Generated references follow the real package exports, while semantic
+pages explain ownership, lifecycle, composition, diagnostics, and subsystem boundaries.
+
+Public API changes must update source TSDoc, generated facts, and both language pages.
+The root [agent contract](./AGENTS.md) defines the authority and verification rules.
 
 ## Project Structure
 

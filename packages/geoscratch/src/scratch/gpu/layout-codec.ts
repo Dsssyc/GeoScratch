@@ -84,6 +84,7 @@ export type LayoutWgslBufferViewOptions = Readonly<{
 const layoutCodecs = new WeakSet<LayoutCodec>()
 const float64BitScratch = new DataView(new ArrayBuffer(8))
 
+/** Couples an immutable WGSL layout artifact with validated CPU packing and readback operations. */
 export class LayoutCodec {
 
     readonly spec: LayoutCanonicalSpec
@@ -232,6 +233,7 @@ export class LayoutCodec {
     }
 }
 
+/** Recognizes LayoutCodec instances created by the current Scratch implementation. */
 export function isLayoutCodec(value: unknown): value is LayoutCodec {
 
     return typeof value === 'object' &&
@@ -240,6 +242,7 @@ export function isLayoutCodec(value: unknown): value is LayoutCodec {
         layoutCodecs.has(value as LayoutCodec)
 }
 
+/** Creates a layout codec from a declarative fixed or runtime-sized WGSL schema. */
 export function layoutCodec(
     spec: LayoutSpec,
     options?: LayoutCodecOptions
@@ -248,6 +251,7 @@ export function layoutCodec(
     return new LayoutCodec(spec, options)
 }
 
+/** Checks whether a value is a validated byte view paired with a layout artifact. */
 export function isLayoutUploadView(value: unknown): value is LayoutUploadView {
 
     return isRecord(value) &&
@@ -261,6 +265,7 @@ export function isLayoutUploadView(value: unknown): value is LayoutUploadView {
         isLayoutArtifact(value.artifact)
 }
 
+/** Creates a read-only structured decoder over caller-owned readback bytes. */
 export function createLayoutReadbackView(
     artifact: LayoutArtifact,
     bytes: ArrayBuffer | ArrayBufferView

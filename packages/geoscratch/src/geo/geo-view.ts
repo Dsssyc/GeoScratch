@@ -48,6 +48,7 @@ export type GeoViewAdapter<Input = unknown> = Readonly<{
 const U32_MAX = 0xffff_ffff
 const geoViewSnapshots = new WeakSet<object>()
 
+/** Freezes one revisioned camera and viewport observation in a relative-world frame. */
 export function createGeoViewSnapshot(
     descriptor: GeoViewSnapshotDescriptor
 ): GeoViewSnapshot {
@@ -117,6 +118,7 @@ export function createGeoViewSnapshot(
     return snapshot
 }
 
+/** Wraps an external camera reader as a stable Geo view-snapshot producer. */
 export function createGeoViewAdapter<Input>(
     descriptor: GeoViewAdapterDescriptor<Input>
 ): GeoViewAdapter<Input> {

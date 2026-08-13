@@ -9,8 +9,13 @@
   "scripts": {
     "dev": "npm --workspace geoscratch run build && npm --workspace examples run dev",
     "build": "npm --workspace geoscratch run build && npm --workspace examples run build",
+    "docs:generate": "node scripts/api-docs.mjs generate",
+    "docs:translations": "node scripts/api-docs.mjs translations",
+    "docs:check": "node scripts/api-docs.mjs check",
     "serve": "npm --workspace examples run serve",
+    "pretest": "npm run docs:check",
     "test": "npm --workspace geoscratch run build && mocha \"tests/**/*.test.js\"",
+    "pretypecheck": "npm run docs:check",
     "typecheck": "npm --workspace geoscratch run build && node node_modules/typescript/bin/tsc -p tsconfig.types.json && npm --workspace examples run typecheck && npm run typecheck:webgpu",
     "typecheck:webgpu": "node node_modules/typescript-webgpu/bin/tsc -p tsconfig.webgpu-types.json"
   },
@@ -18,6 +23,7 @@
     "chai": "^5.1.0",
     "mocha": "^10.3.0",
     "playwright": "^1.60.0",
+    "typedoc": "^0.28.20",
     "typescript": "^6.0.3",
     "typescript-webgpu": "npm:typescript@^5.9.3"
   }
