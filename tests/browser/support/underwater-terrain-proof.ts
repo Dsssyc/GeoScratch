@@ -13,18 +13,18 @@ import type {
     VirtualRasterRuntimeFacts,
     VirtualRasterWorkerExecutorFacts,
 } from 'geoscratch/geo'
-import type { DemMap } from '../../../examples/demLayer/dem-map.ts'
-import type { DemTileSourceFacts } from '../../../examples/demLayer/dem-source.ts'
+import type { UnderwaterTerrainMap } from '../../../examples/underwaterTerrain/map.ts'
+import type { DemTileSourceFacts } from '../../../examples/underwaterTerrain/dem-source.ts'
 import type {
     DemCachePolicy,
     DemTileCacheFacts,
     DemTileWorkerFacts,
-} from '../../../examples/demLayer/dem-tile-protocol.ts'
+} from '../../../examples/underwaterTerrain/dem-tile-protocol.ts'
 
-type DemTerrainPresentation = 'shaded' | 'tile-wireframe'
-type DemLayer = WebMercatorTerrainRenderer<
+type UnderwaterTerrainPresentation = 'shaded' | 'tile-wireframe'
+type UnderwaterTerrain = WebMercatorTerrainRenderer<
     MapLibrePlanarCameraState,
-    DemTerrainPresentation
+    UnderwaterTerrainPresentation
 >
 type DemVirtualRasterFacts = Readonly<{
     runtime: VirtualRasterRuntimeFacts
@@ -32,7 +32,7 @@ type DemVirtualRasterFacts = Readonly<{
     worker: VirtualRasterWorkerExecutorFacts<DemTileWorkerFacts>
 }>
 type CleanupReport = Awaited<ReturnType<LifetimeScope['dispose']>>
-type CameraMoveOptions = Parameters<DemMap['jumpTo']>[0]
+type CameraMoveOptions = Parameters<UnderwaterTerrainMap['jumpTo']>[0]
 type FailureDetails = Error & {
     code?: unknown
     scenario?: unknown
@@ -42,7 +42,7 @@ type FailureDetails = Error & {
 type CleanupProof = Readonly<{
     report: ReturnType<typeof serializeCleanupReport>
     lifecycle: ReturnType<LifetimeScope['snapshot']>
-    graphState?: ReturnType<DemLayer['state']>
+    graphState?: ReturnType<UnderwaterTerrain['state']>
     virtualRaster?: ReturnType<typeof demVirtualRasterProofFacts>
 }>
 type FailureProof = NonNullable<ReturnType<typeof finalizeFailureProof>>
@@ -63,7 +63,7 @@ type ProofConfiguration = Readonly<{
 
 type GraphBinding = Readonly<{
     runtime: GPURuntime
-    graph: DemLayer
+    graph: UnderwaterTerrain
     lifetime: LifetimeScope
     frameController: GeoFrameController
     virtualRasterFacts(): DemVirtualRasterFacts
@@ -74,14 +74,14 @@ type GraphBinding = Readonly<{
 
 declare global {
     interface Window {
-        __DEM_LAYER_PROOF__: Readonly<{
+        __UNDERWATER_TERRAIN_PROOF__: Readonly<{
             pauseAndDrain(): Promise<Readonly<DOMStringMap>>
             dispose(): Promise<unknown>
             facts(): Readonly<DOMStringMap>
             moveCamera(options: CameraMoveOptions): void
         }>
-        __DEM_LAYER_INIT_FAILURE_PROOF__: FailureProof
-        __DEM_LAYER_CLEANUP_PROOF__: CleanupProof
+        __UNDERWATER_TERRAIN_INIT_FAILURE_PROOF__: FailureProof
+        __UNDERWATER_TERRAIN_CLEANUP_PROOF__: CleanupProof
     }
 }
 
@@ -98,7 +98,7 @@ const FAILURE_SCENARIOS = Object.freeze([
     'invalid-terrain-shader-wgsl',
 ])
 
-export function createDemLayerProof(configuration: ProofConfiguration) {
+export function createUnderwaterTerrainProof(configuration: ProofConfiguration) {
 
     const { canvas } = configuration
     let runtime: GPURuntime | undefined
@@ -121,7 +121,7 @@ export function createDemLayerProof(configuration: ProofConfiguration) {
         if (configuration.scenario !== undefined &&
             !FAILURE_SCENARIOS.includes(configuration.scenario)) {
             throw new Error(
-                `Unsupported DEM Layer failure scenario: ${configuration.scenario}`
+                `Unsupported Underwater Terrain failure scenario: ${configuration.scenario}`
             )
         }
     }
@@ -131,10 +131,10 @@ export function createDemLayerProof(configuration: ProofConfiguration) {
         if (configuration.scenario !== scenario) return
         reachedCount++
         const error = new Error(
-            `Injected DEM Layer initialization failure: ${scenario}`
+            `Injected Underwater Terrain initialization failure: ${scenario}`
         ) as FailureDetails
-        error.name = 'DemLayerInjectedFailure'
-        error.code = 'DEM_LAYER_INJECTED_FAILURE'
+        error.name = 'UnderwaterTerrainInjectedFailure'
+        error.code = 'UNDERWATER_TERRAIN_INJECTED_FAILURE'
         error.scenario = scenario
         throw error
     }
@@ -142,7 +142,7 @@ export function createDemLayerProof(configuration: ProofConfiguration) {
     function terrainShader(source: string) {
 
         if (configuration.scenario !== FAILURE_SCENARIOS[1]) return source
-        return `${source}\n@vertex fn demInjectedFailure( {`
+        return `${source}\n@vertex fn underwaterTerrainInjectedFailure( {`
     }
 
     function beforeTerrainShaderModule(value: GPURuntime) {
@@ -159,7 +159,7 @@ export function createDemLayerProof(configuration: ProofConfiguration) {
         runtime = binding.runtime
         publishGraphFacts(configuration, binding.runtime, binding.graph)
         publish()
-        window.__DEM_LAYER_PROOF__ = Object.freeze({
+        window.__UNDERWATER_TERRAIN_PROOF__ = Object.freeze({
             async pauseAndDrain() {
                 binding.frameController.stop()
                 await binding.lifetime.drain()
@@ -201,7 +201,7 @@ export function createDemLayerProof(configuration: ProofConfiguration) {
                     .encode(JSON.stringify(runtimeEvidence)).byteLength
                 if (runtimeEvidenceByteLength > FAILURE_RUNTIME_EVIDENCE_MAX_BYTES) {
                     throw new Error(
-                        `DEM runtime evidence exceeded ${FAILURE_RUNTIME_EVIDENCE_MAX_BYTES} bytes`
+                        `Underwater Terrain runtime evidence exceeded ${FAILURE_RUNTIME_EVIDENCE_MAX_BYTES} bytes`
                     )
                 }
             }
@@ -227,7 +227,7 @@ export function createDemLayerProof(configuration: ProofConfiguration) {
         runtime = undefined
         capture = undefined
         if (proof !== undefined) {
-            window.__DEM_LAYER_INIT_FAILURE_PROOF__ = proof
+            window.__UNDERWATER_TERRAIN_INIT_FAILURE_PROOF__ = proof
             canvas.dataset.initFailureProof = JSON.stringify(proof)
             canvas.dataset.failureScenario = proof.scenario
         }
@@ -247,7 +247,7 @@ export function createDemLayerProof(configuration: ProofConfiguration) {
                     configuration.cachePolicy
                 ),
         }) as CleanupProof
-        window.__DEM_LAYER_CLEANUP_PROOF__ = cleanupProof
+        window.__UNDERWATER_TERRAIN_CLEANUP_PROOF__ = cleanupProof
         canvas.dataset.cleanupProof = JSON.stringify(cleanupProof)
         return cleanupProof
     }
@@ -284,7 +284,7 @@ export function createDemLayerProof(configuration: ProofConfiguration) {
 function publishGraphFacts(
     configuration: ProofConfiguration,
     runtime: GPURuntime,
-    graph: DemLayer
+    graph: UnderwaterTerrain
 ) {
 
     const { canvas, cachePolicy, controlPanel } = configuration
@@ -336,7 +336,7 @@ function publishFrameFacts({
 }: {
     canvas: HTMLCanvasElement
     runtime: GPURuntime
-    graph: DemLayer
+    graph: UnderwaterTerrain
     lifetime: LifetimeScope
     submittedFrames: number
     observedFrames: number

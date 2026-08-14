@@ -49,9 +49,9 @@ output/
 examples/public/json/examples/*
 examples/public/scratch-workers/
 *.bin
-examples/demLayer/tile-server/.venv/
-examples/demLayer/tile-server/cache/
-examples/demLayer/tile-server/.pytest_cache/
-examples/demLayer/tile-server/**/__pycache__/
-examples/demLayer/tile-server/**/*.py[cod]
-examples/demLayer/tile-server/src/*.egg-info/
+examples/underwaterTerrain/tile-server/.venv/
+examples/underwaterTerrain/tile-server/cache/
+examples/underwaterTerrain/tile-server/.pytest_cache/
+examples/underwaterTerrain/tile-server/**/__pycache__/
+examples/underwaterTerrain/tile-server/**/*.py[cod]
+examples/underwaterTerrain/tile-server/src/*.egg-info/

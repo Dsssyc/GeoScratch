@@ -357,7 +357,7 @@ Run `npm run dev` and open the examples browser. Each demo also has a standalone
 | Render To Texture | `examples/renderToTexture/` |
 | Indirect Execution | `examples/indirectExecution/` |
 | Readiness Policies | `examples/readinessPolicies/` |
-| DEM Layer | `examples/demLayer/` |
+| Underwater Terrain | `examples/underwaterTerrain/` |
 | Flow Layer | `examples/flowLayer/` |
 | Hello GAW | `examples/helloGAW/` |
 

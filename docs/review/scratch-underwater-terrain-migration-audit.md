@@ -1,4 +1,13 @@
-# Scratch DEM Layer Migration Audit
+# Scratch Underwater Terrain Migration Audit
+
+## Naming Supersession
+
+On 2026-08-15 the active example was renamed from `DEM Layer` / `examples/demLayer`
+to `Underwater Terrain` / `examples/underwaterTerrain`. The new name describes the
+visible underwater terrain rather than its elevation-raster encoding. `DEM` remains in
+this audit only when it identifies the raster data, tile protocol, or removed legacy
+`m_demLayer` source. Current routes, page labels, controls, and browser proofs use
+`Underwater Terrain` exclusively.
 
 ## Current Architecture Supersession
 
@@ -66,7 +75,7 @@ The fixed source is the complete `26ed35f` state of:
 - `packages/geoscratch/src/applications/terrain/`;
 - the `LocalTerrain` public export.
 
-The target is `examples/demLayer/`. The audit follows executable behavior and owners,
+The target is `examples/underwaterTerrain/`. The audit follows executable behavior and owners,
 not old class names. `preserved` means reachable behavior remains; `replaced` means the
 same responsibility is expressed by current primitives; `removed` means repository
 and shader reachability proved no active consumer; `corrected` means a mechanical
@@ -76,12 +85,12 @@ current-contract change is enumerated.
 
 | Legacy source fact | Reachable in example | Existing owner | Target owner | Result | Code evidence | Browser evidence | Remaining limitation |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `m_demLayer/index.html` standalone canvas, MapLibre 4.7.1, title `DEM Layer` | Yes | Legacy page | `demLayer/index.html` | Preserved and neutrally renamed | Same canvas, MapLibre assets, CSS, and visible title; route is `demLayer` | Final headed proof loads this route | CDN still supplies MapLibre itself |
+| `m_demLayer/index.html` standalone canvas, MapLibre 4.7.1, title `DEM Layer` | Yes | Legacy page | `underwaterTerrain/index.html` | Preserved and neutrally renamed | Same canvas and MapLibre assets; the visible title is `Underwater Terrain` and the route is `underwaterTerrain` | Final headed proof loads this route | CDN still supplies MapLibre itself |
 | `m_demLayer/main.js` starts a map and adds `TerrainLayer(14)` | Yes | Legacy page/custom layer | `main.js`, `dem-map.js`, `dem-layer.js` | Replaced | One lifecycle, map, runtime, Surface, selector, and graph are explicit | Initialization and controlled camera proof | No generic custom-layer API retained |
-| `terrainLayer.js` MapLibre custom-layer wrapper | Yes | `TerrainLayer` | Geo view adapter and frame controller | Replaced | `demMapViewAdapter.camera()` feeds the public Geo terrain renderer | Camera pan/zoom changes selection and pixels | DEM remains a standalone example while camera, frame, and terrain orchestration are public Geo APIs |
-| Shared CARTO dark style | Yes in normal mode | `ScratchMap` | `dem-map.js` | Preserved | Same four CARTO endpoints and opacity 0.92 | Normal route retains style; proof uses local background | Deterministic proof intentionally does not test CARTO availability |
-| Center, zoom 9, Mercator, max zoom 18, antialias | Yes | `ScratchMap` | `DEM_MAP_DEFAULTS` and `createDemMap()` | Preserved | Constants and constructor descriptor | Initial proof selection is zoom-9 baseline | MapLibre internal camera math remains external |
-| Underwater far-plane anchor and relative-to-eye matrix | Yes | `ScratchMap.update()` | `demMapViewAdapter.camera()` | Preserved | Public MapLibre adapter keeps the relative-eye high/low split and matrix sequence | Nonblank underwater terrain | Uses the current MapLibre transform surface through the Geo adapter |
+| `terrainLayer.js` MapLibre custom-layer wrapper | Yes | `TerrainLayer` | Geo view adapter and frame controller | Replaced | `underwaterTerrainViewAdapter.camera()` feeds the public Geo terrain renderer | Camera pan/zoom changes selection and pixels | Underwater Terrain remains a standalone example while camera, frame, and terrain orchestration are public Geo APIs |
+| Shared CARTO dark style | Yes in normal mode | `ScratchMap` | `map.ts` | Preserved | Same four CARTO endpoints and opacity 0.92 | Normal route retains style; proof uses local background | Deterministic proof intentionally does not test CARTO availability |
+| Center, zoom 9, Mercator, max zoom 18, antialias | Yes | `ScratchMap` | `UNDERWATER_TERRAIN_MAP_DEFAULTS` and `createUnderwaterTerrainMap()` | Preserved | Constants and constructor descriptor | Initial proof selection is zoom-9 baseline | MapLibre internal camera math remains external |
+| Underwater far-plane anchor and relative-to-eye matrix | Yes | `ScratchMap.update()` | `underwaterTerrainViewAdapter.camera()` | Preserved | Public MapLibre adapter keeps the relative-eye high/low split and matrix sequence | Nonblank underwater terrain | Uses the current MapLibre transform surface through the Geo adapter |
 | Global `StartDash`, `director`, `screen` | Yes as execution mechanism | Shared legacy runtime | GPURuntime, Surface, SubmissionBuilder | Replaced | No legacy symbol remains; explicit two-stage submission | Stage order and observations published | None |
 | Shared legacy depth attachment and implicit pipeline depth defaults | Yes; `createTargetState()` changed undefined `depthTest` to true when the pass supplied depth | Shared map output pass and legacy pipeline wrapper | DEM-owned depth TextureResource, terrain PassSpec, and explicit terrain pipeline state | Preserved and made explicit | `depth32float`, `depthWriteEnabled: true`, `depthCompare: 'less'`; stable logical depth and explicit resize | Native attachment compatibility and resize allocation version | The current API refuses the legacy wrapper's implicit pass-to-pipeline mutation |
 | `LocalTerrain` constructor constants | Yes | Library application class | `dem-layer.js` and selector constants | Preserved | max 14, capacity 5000, sector 64, exaggeration 50, elevation and terrain bounds | Facts published in graph/selection | Constants remain example policy |
@@ -197,7 +206,7 @@ Exactly two proof faults exist:
 
 ## Managed Browser Evidence
 
-`node tests/browser/scratch-dem-layer.mjs` passed in headed Chrome
+`node tests/browser/scratch-underwater-terrain.mjs` passed in headed Chrome
 `150.0.7871.125` on the Apple `metal-3` adapter. The runtime reported 23 features and
 `maxTextureDimension2D = 16384`.
 
@@ -236,7 +245,7 @@ remain executable assertions; current numeric browser evidence is deferred to th
 Phase 6 rerun rather than copied from the superseded pipeline path.
 
 The script closed headed Chrome, Vite, and its selected port. Screenshots are managed
-ephemeral proof artifacts under `/tmp/geoscratch-dem-layer-browser`; they are not
+ephemeral proof artifacts under `/tmp/geoscratch-underwater-terrain-browser`; they are not
 repository assets.
 
 The final combined-tree rerun on headed Chrome `150.0.7871.130` again passed with 24

@@ -2,11 +2,16 @@
 
 ## Status
 
-Accepted
+Accepted; active example naming superseded by ADR-075
 
 ## Date
 
 2026-07-18
+
+ADR-075 later renamed the active route and title to
+`examples/underwaterTerrain` / `Underwater Terrain`. Names and paths below record the
+state accepted by this historical clean-cut decision; its execution-model decision
+remains accepted.
 
 ## Context
 

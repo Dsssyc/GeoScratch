@@ -14,21 +14,24 @@ const workerBuildEntry = resolve(
     repositoryRoot,
     'packages/geoscratch/bin/geoscratch-worker.mjs'
 )
-const tileServerRoot = resolve(examplesRoot, 'demLayer/tile-server')
+const tileServerRoot = resolve(examplesRoot, 'underwaterTerrain/tile-server')
 const tileBuildEntry = resolve(tileServerRoot, '.venv/bin/dem-tile-build')
 const tileServeEntry = resolve(tileServerRoot, '.venv/bin/dem-tile-serve')
-const timeout = positiveInteger(process.env.DEM_LAYER_BROWSER_TIMEOUT_MS, 120_000)
+const timeout = positiveInteger(
+    process.env.UNDERWATER_TERRAIN_BROWSER_TIMEOUT_MS,
+    120_000
+)
 const headless = process.env.GEO_VIRTUAL_RASTER_DEM_HEADLESS === '1'
 const outputDirectory = resolve(
-    process.env.DEM_LAYER_BROWSER_OUTPUT ?? '/tmp/geoscratch-dem-layer-browser'
+    process.env.UNDERWATER_TERRAIN_BROWSER_OUTPUT ?? '/tmp/geoscratch-underwater-terrain-browser'
 )
-const port = process.env.DEM_LAYER_BROWSER_PORT === undefined
+const port = process.env.UNDERWATER_TERRAIN_BROWSER_PORT === undefined
     ? await findAvailablePort()
-    : positiveInteger(process.env.DEM_LAYER_BROWSER_PORT)
+    : positiveInteger(process.env.UNDERWATER_TERRAIN_BROWSER_PORT)
 const baseUrl = `http://127.0.0.1:${port}`
-const tilePort = process.env.DEM_LAYER_TILE_PORT === undefined
+const tilePort = process.env.UNDERWATER_TERRAIN_TILE_PORT === undefined
     ? await findAvailablePort()
-    : positiveInteger(process.env.DEM_LAYER_TILE_PORT)
+    : positiveInteger(process.env.UNDERWATER_TERRAIN_TILE_PORT)
 const tileBaseUrl = `http://127.0.0.1:${tilePort}`
 const expectedStageOrder = Object.freeze([
     'frontier-compute',
@@ -91,14 +94,14 @@ try {
     tileServer = startTileServer(tilePort)
     await waitForHttpProcess(tileServer, `${tileBaseUrl}/health`, 'DEM tile server')
     vite = startVite(port)
-    await waitForVite(vite, `${baseUrl}/demLayer/index.html`)
+    await waitForVite(vite, `${baseUrl}/underwaterTerrain/index.html`)
     browser = await chromium.launch({
         channel: 'chrome',
         headless,
         args: [ '--enable-unsafe-webgpu' ],
     })
     browserVersion = await browser.version()
-    const verified = await verifyNormalDem(browser)
+    const verified = await verifyUnderwaterTerrain(browser)
     adapter = verified.adapter
     normalProof = verified.proof
     failureProofs = []
@@ -184,7 +187,7 @@ const result = {
 process.stdout.write(`${JSON.stringify(result, null, 2)}\n`)
 if (failures.length > 0) process.exitCode = 1
 
-async function verifyNormalDem(activeBrowser) {
+async function verifyUnderwaterTerrain(activeBrowser) {
 
     const context = await activeBrowser.newContext({
         viewport: { width: 1024, height: 768 },
@@ -195,13 +198,13 @@ async function verifyNormalDem(activeBrowser) {
 
     try {
         await page.goto(
-            `${baseUrl}/demLayer/index.html?proof=1&tileServer=${encodeURIComponent(tileBaseUrl)}`,
+            `${baseUrl}/underwaterTerrain/index.html?proof=1&tileServer=${encodeURIComponent(tileBaseUrl)}`,
             {
             waitUntil: 'domcontentloaded',
             timeout,
             }
         )
-        const loadedFacts = await waitForDemFacts(page, facts => (
+        const loadedFacts = await waitForUnderwaterTerrainFacts(page, facts => (
             facts.status === 'ready' && Number(facts.observedFrames) >= 1
         ))
         const adapterFacts = await readRuntimeAdapterFacts(page, loadedFacts)
@@ -217,15 +220,15 @@ async function verifyNormalDem(activeBrowser) {
         const resizedFacts = await waitForConvergedFacts(page, facts => (
             Number(facts.resizeGeneration) > resizeGeneration
         ))
-        const resizedPath = resolve(outputDirectory, 'dem-resized.png')
+        const resizedPath = resolve(outputDirectory, 'underwater-terrain-resized.png')
         const resizedPng = await page.locator('#GPUFrame').screenshot({ path: resizedPath })
         const resizedPixels = await inspectPixels(page, resizedPng)
         const drainedFacts = await page.evaluate(async() => {
-            return await window.__DEM_LAYER_PROOF__.pauseAndDrain()
+            return await window.__UNDERWATER_TERRAIN_PROOF__.pauseAndDrain()
         })
         const cleanupPair = await page.evaluate(async() => {
-            const first = window.__DEM_LAYER_PROOF__.dispose()
-            const second = window.__DEM_LAYER_PROOF__.dispose()
+            const first = window.__UNDERWATER_TERRAIN_PROOF__.dispose()
+            const second = window.__UNDERWATER_TERRAIN_PROOF__.dispose()
             const reports = await Promise.all([ first, second ])
             return {
                 reports,
@@ -262,12 +265,12 @@ async function verifyNormalDem(activeBrowser) {
 
 async function captureRapidCameraTransition(page) {
 
-    const beforeResize = await readDemFacts(page)
+    const beforeResize = await readUnderwaterTerrainFacts(page)
     await page.setViewportSize({ width: 1512, height: 982 })
     await waitForConvergedFacts(page, facts => (
         Number(facts.resizeGeneration) > Number(beforeResize.resizeGeneration)
     ))
-    const beforeSequence = await readDemFacts(page)
+    const beforeSequence = await readUnderwaterTerrainFacts(page)
     let finalCamera
     const stepCount = 84
     for (let index = 0; index < stepCount; index++) {
@@ -281,7 +284,7 @@ async function captureRapidCameraTransition(page) {
             pitch: phase < 14 ? phase * 6.2 : (27 - phase) * 6.2,
             bearing: ((index * 47) % 360) - 180,
         }
-        await page.evaluate(camera => window.__DEM_LAYER_PROOF__.moveCamera(camera), finalCamera)
+        await page.evaluate(camera => window.__UNDERWATER_TERRAIN_PROOF__.moveCamera(camera), finalCamera)
         await delay(5)
     }
     const finalFacts = await waitForConvergedFacts(page, facts => (
@@ -313,17 +316,17 @@ function scenario(name, zoom, pitch, bearing, viewport) {
 async function captureConvergedCamera(page, definition) {
 
     if (definition.viewport !== undefined) {
-        const current = await readDemFacts(page)
+        const current = await readUnderwaterTerrainFacts(page)
         const resizeGeneration = Number(current.resizeGeneration)
         await page.setViewportSize(definition.viewport)
         await waitForConvergedFacts(page, facts => (
             Number(facts.resizeGeneration) > resizeGeneration
         ))
     }
-    const before = await readDemFacts(page)
+    const before = await readUnderwaterTerrainFacts(page)
     const facts = []
     const signatures = []
-    await page.evaluate(camera => window.__DEM_LAYER_PROOF__.moveCamera(camera), definition.camera)
+    await page.evaluate(camera => window.__UNDERWATER_TERRAIN_PROOF__.moveCamera(camera), definition.camera)
     let current = await waitForConvergedFacts(page, value => (
         Number(value.observedFrames) > Number(before.observedFrames) &&
         cameraMatches(value, definition.camera)
@@ -335,7 +338,7 @@ async function captureConvergedCamera(page, definition) {
 
     for (let repetition = 0; repetition < 2; repetition++) {
         const previousFrames = Number(current.observedFrames)
-        await page.evaluate(camera => window.__DEM_LAYER_PROOF__.moveCamera(camera), definition.camera)
+        await page.evaluate(camera => window.__UNDERWATER_TERRAIN_PROOF__.moveCamera(camera), definition.camera)
         current = await waitForConvergedFacts(page, value => (
             Number(value.observedFrames) > previousFrames && cameraMatches(value, definition.camera)
         ))
@@ -357,7 +360,7 @@ async function captureConvergedCamera(page, definition) {
 
 async function waitForConvergedFacts(page, additional = () => true) {
 
-    return await waitForDemFacts(page, facts => {
+    return await waitForUnderwaterTerrainFacts(page, facts => {
         const frontier = parseJsonOrUndefined(facts.frontier)
         const virtualRaster = parseJsonOrUndefined(facts.virtualRaster)
         return facts.status === 'ready' &&
@@ -435,13 +438,13 @@ async function verifyFailureScenario(activeBrowser, scenario) {
     const events = observePage(page)
 
     try {
-        const url = `${baseUrl}/demLayer/index.html?proof=1&fault=${scenario}` +
+        const url = `${baseUrl}/underwaterTerrain/index.html?proof=1&fault=${scenario}` +
             `&tileServer=${encodeURIComponent(tileBaseUrl)}`
         await page.goto(url, { waitUntil: 'domcontentloaded', timeout })
         await page.waitForFunction(() => {
             return document.querySelector('#GPUFrame')?.dataset.initFailureProof !== undefined
         }, undefined, { timeout })
-        const facts = await readDemFacts(page)
+        const facts = await readUnderwaterTerrainFacts(page)
         return {
             scenario,
             facts,
@@ -518,16 +521,16 @@ async function readRuntimeAdapterFacts(page, facts) {
     }), facts.adapter)
 }
 
-async function waitForDemFacts(page, predicate) {
+async function waitForUnderwaterTerrainFacts(page, predicate) {
 
     const deadline = Date.now() + timeout
     let lastFacts
     while (Date.now() < deadline) {
-        const facts = await readDemFacts(page)
+        const facts = await readUnderwaterTerrainFacts(page)
         lastFacts = facts
         if (facts.status === 'error') {
             throw new Error([
-                facts.error ?? 'DEM Layer failed.',
+                facts.error ?? 'Underwater Terrain failed.',
                 facts.diagnostic === undefined ? undefined : `diagnostic=${facts.diagnostic}`,
             ].filter(Boolean).join('\n'))
         }
@@ -535,7 +538,7 @@ async function waitForDemFacts(page, predicate) {
         await delay(16)
     }
     throw new Error(
-        `Timed out waiting for DEM Layer proof facts: ${JSON.stringify(waitFacts(lastFacts))}`
+        `Timed out waiting for Underwater Terrain proof facts: ${JSON.stringify(waitFacts(lastFacts))}`
     )
 }
 
@@ -605,11 +608,11 @@ function selectFacts(value, names) {
     return Object.fromEntries(names.map(name => [ name, value[name] ]))
 }
 
-async function readDemFacts(page) {
+async function readUnderwaterTerrainFacts(page) {
 
     return await page.evaluate(() => {
         const target = document.querySelector('#GPUFrame')
-        if (!(target instanceof HTMLCanvasElement)) throw new Error('DEM Layer canvas is missing.')
+        if (!(target instanceof HTMLCanvasElement)) throw new Error('Underwater Terrain canvas is missing.')
         return { ...target.dataset }
     })
 }
@@ -807,7 +810,7 @@ async function inspectPixelPair(page, firstPng, secondPng) {
         const first = await decode(firstBase64)
         const second = await decode(secondBase64)
         if (first.width !== second.width || first.height !== second.height) {
-            throw new Error('DEM movement screenshots have different dimensions.')
+            throw new Error('Underwater Terrain movement screenshots have different dimensions.')
         }
         let changedPixels = 0
         let totalRgbDelta = 0
@@ -850,7 +853,7 @@ function validateResult(result) {
         failures.push('GPURuntime did not acquire a WebGPU adapter')
     }
     if (result.normalProof === undefined) {
-        failures.push('normal DEM proof was not produced')
+        failures.push('normal Underwater Terrain proof was not produced')
     } else {
         validateNormalProof(result.normalProof, failures)
     }
@@ -872,7 +875,7 @@ function validateNormalProof(proof, failures) {
     const resized = proof.resizedFacts
     const drained = proof.drainedFacts
     if (scenarios.length !== cameraScenarios.length) {
-        failures.push('normal DEM proof did not run every camera scenario')
+        failures.push('normal Underwater Terrain proof did not run every camera scenario')
     }
     const allFacts = []
     if (rapidCameraTransition?.stepCount !== 84 ||
@@ -882,12 +885,12 @@ function validateNormalProof(proof, failures) {
         )) {
         failures.push('rapid pitched-to-top-down camera transition did not complete')
     } else {
-        validateDemFacts(
+        validateUnderwaterTerrainFacts(
             'rapid pitched-to-top-down transition',
             rapidCameraTransition.finalFacts,
             failures
         )
-        validateDemFacts(
+        validateUnderwaterTerrainFacts(
             'rapid transition restored viewport',
             rapidCameraTransition.restoredFacts,
             failures
@@ -903,7 +906,9 @@ function validateNormalProof(proof, failures) {
             continue
         }
         allFacts.push(...result.facts)
-        for (const facts of result.facts) validateDemFacts(result.name, facts, failures)
+        for (const facts of result.facts) {
+            validateUnderwaterTerrainFacts(result.name, facts, failures)
+        }
         if (new Set(result.signatures).size !== 1) {
             failures.push(
                 `${result.name} frontier facts changed across identical camera frames: ` +
@@ -956,15 +961,15 @@ function validateNormalProof(proof, failures) {
     if (balanceProofs.length === 0) {
         failures.push('no camera scenario exercised final render-patch balancing')
     }
-    validateDemFacts('resized', resized, failures)
-    validateDemFacts('drained', drained, failures, 'stopped')
+    validateUnderwaterTerrainFacts('resized', resized, failures)
+    validateUnderwaterTerrainFacts('drained', drained, failures, 'stopped')
     allFacts.push(resized, drained)
     const initial = allFacts[0]
     for (const facts of allFacts) {
         if (facts.currentStableIdentityHash !== initial?.currentStableIdentityHash ||
             facts.currentStableIdentityCount !== initial?.currentStableIdentityCount ||
             facts.currentIdentityFacts !== initial?.currentIdentityFacts) {
-            failures.push('persistent DEM graph identity changed')
+            failures.push('persistent Underwater Terrain graph identity changed')
             break
         }
     }
@@ -999,20 +1004,22 @@ function validateNormalProof(proof, failures) {
         failures.push('effectful SubmittedWork remained after drain')
     }
     const frameWork = parseJson(drained.frameWork, 'drained frame work', failures)
-    if (frameWork?.active !== 0) failures.push('DEM frame scheduler remained active after drain')
+    if (frameWork?.active !== 0) {
+        failures.push('Underwater Terrain frame scheduler remained active after drain')
+    }
 
     if (!proof.cleanupPair?.equivalentReports || proof.cleanupPair.reports?.length !== 2) {
         failures.push('double disposal did not return two equivalent cleanup reports')
     } else {
         validateCleanup(proof.cleanupPair.reports[0], [
-            'dem-frame-scheduler',
+            'underwater-terrain-frame-scheduler',
             'window-resize-listener',
             'map-render-listener',
-            'dem-terrain-presentation-control',
+            'underwater-terrain-presentation-control',
             'dem-virtual-raster-demand',
             'pagehide-listener',
-            'dem-control-panel',
-            'dem-gpu-frontier',
+            'underwater-terrain-control-panel',
+            'underwater-terrain-gpu-frontier',
             'dem-virtual-raster-streaming',
             'scratch-runtime',
             'maplibre-map',
@@ -1030,22 +1037,22 @@ function validateNormalProof(proof, failures) {
     for (const [ label, sample ] of [ [ 'resized', proof.pixels.resized ] ]) {
         if (sample.nonBackgroundPixels < 1_000 || sample.nonTransparentPixels < 100 ||
             sample.channelRange < 8 || sample.meanLuma < 0.05) {
-            failures.push(`${label} DEM screenshot was blank or visually uniform`)
+            failures.push(`${label} Underwater Terrain screenshot was blank or visually uniform`)
         }
     }
     if (scenarios.length >= 2 && scenarios[0].pixelHashes.final === scenarios[1].pixelHashes.final) {
         failures.push('zoom 9 and zoom 10 produced identical terrain pixels')
     }
     if (proof.completeImageRequests.length > 0) {
-        failures.push('normal DEM page requested the complete dem.png asset')
+        failures.push('normal Underwater Terrain page requested the complete dem.png asset')
     }
     if (proof.tileRequests.length === 0) {
-        failures.push('normal DEM page did not request COG-backed HTTP tiles')
+        failures.push('normal Underwater Terrain page did not request COG-backed HTTP tiles')
     }
-    validateCleanEvents('normal DEM page', proof, failures, 0)
+    validateCleanEvents('normal Underwater Terrain page', proof, failures, 0)
 }
 
-function validateDemFacts(label, facts, failures, expectedStatus = 'ready') {
+function validateUnderwaterTerrainFacts(label, facts, failures, expectedStatus = 'ready') {
 
     if (facts.status !== expectedStatus) failures.push(`${label} status was ${facts.status}`)
     if (facts.proofMode !== 'true') failures.push(`${label} deterministic proof mode was not active`)
@@ -1251,7 +1258,7 @@ function validateFailureProof(result, failures) {
 
     if (result.scenario === 'after-map-acquisition') {
         if (proof?.rasterAcquiredCount !== 0 ||
-            proof?.primaryFailure?.code !== 'DEM_LAYER_INJECTED_FAILURE') {
+            proof?.primaryFailure?.code !== 'UNDERWATER_TERRAIN_INJECTED_FAILURE') {
             failures.push(`${prefix} lost the pre-runtime acquisition boundary or primary failure`)
         }
         if (proof?.runtimeEvidence !== undefined || proof?.captureReport !== undefined) {
@@ -1259,7 +1266,7 @@ function validateFailureProof(result, failures) {
         }
         validateCleanup(proof, [
             'pagehide-listener',
-            'dem-control-panel',
+            'underwater-terrain-control-panel',
             'maplibre-map',
         ], failures)
         return
@@ -1300,13 +1307,13 @@ function validateFailureProof(result, failures) {
     }
     if (proof?.retainsWgslSource !== false) failures.push(`${prefix} retained WGSL source`)
     const evidenceText = JSON.stringify(proof?.runtimeEvidence)
-    if (evidenceText.includes('demInjectedFailure') || /"source"\s*:/.test(evidenceText)) {
+    if (evidenceText.includes('underwaterTerrainInjectedFailure') || /"source"\s*:/.test(evidenceText)) {
         failures.push(`${prefix} exported raw WGSL source evidence`)
     }
     validateCleanup(proof, [
         'dem-virtual-raster-demand',
         'pagehide-listener',
-        'dem-control-panel',
+        'underwater-terrain-control-panel',
         'dem-virtual-raster-streaming',
         'scratch-runtime',
         'maplibre-map',

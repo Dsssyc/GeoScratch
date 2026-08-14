@@ -100,7 +100,7 @@ The package has three non-overlapping owners:
 - Scratch remains the explicit GPU execution kernel. It does not acquire worker,
   tile, cache, camera, CRS, or DEM concepts.
 
-The DEM example owns source bounds and revisions, COG construction and service,
+The Underwater Terrain example owns source bounds and revisions, COG construction and service,
 terrain selection, cache-policy choice, lifecycle composition, and presentation.
 
 ### Generic Worker System
@@ -306,7 +306,7 @@ The old `/tiles/{z}/{x}/{y}.png` route has no alias. Tiles are read on demand fr
 the deterministic COG through a standard TMS implementation. The source and COG are
 north-up, OGC rows are top-down, and the client performs no second vertical flip.
 
-The browser's normal DEM path is terrain demand, generic WorkerGroup scheduling,
+The browser's normal Underwater Terrain path is terrain demand, generic WorkerGroup scheduling,
 selected cache lookup, worker fetch/decode, transferred owned bytes, finite staging,
 Scratch upload, immutable compact page table, and vertex-stage logical sampling.
 There is no full-image fallback, main-thread tile decode, legacy/new feature flag,

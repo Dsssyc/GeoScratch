@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "geoscratch-dem-tiles"
 version = "0.1.0"
-description = "Deterministic local COG tile adapter for the GeoScratch DEM example"
+description = "Deterministic local COG tile adapter for the GeoScratch Underwater Terrain example"
 requires-python = ">=3.12,<3.15"
 dependencies = [
     "fastapi==0.141.1",

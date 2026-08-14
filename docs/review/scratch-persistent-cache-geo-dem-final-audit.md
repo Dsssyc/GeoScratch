@@ -34,7 +34,7 @@ budget, runtime, or lifecycle. The former `VirtualRasterCache` runtime/store/pol
 surface was removed without compatibility aliases. Component and composed-key
 failures remain in the structured Geo diagnostic domain.
 
-The DEM example supports only `cache=none|persistent`. Persistent misses fetch PNG,
+The Underwater Terrain example supports only `cache=none|persistent`. Persistent misses fetch PNG,
 decode one raw uint8 height page, retain one request-bounded snapshot until stale
 acceptance, and then persist it. Hits transfer caller-owned raw bytes directly into
 residency without another network request or image decode. Cache, Worker, page,
@@ -79,8 +79,8 @@ Environment:
 | `npm test -- --reporter dot` | 1,262 passing, 2 intentionally pending |
 | `npm run build` | Passed package and production examples build; existing >500 kB Vite chunk warning only |
 | `node tests/browser/scratch-persistent-cache.mjs` | Passed raw/meta records, immutable put, LRU, reload, invalidation, GC, lifecycle, and all three deterministic cross-context races |
-| DEM browser proof, Vite dev | Passed; return reached 3 hits while decode/network remained 7/11; reload reached 2 hits with 0 decode and 0 network |
-| DEM browser proof, production preview | Passed with the same raw-hit and zero-repeat-decode guarantees |
+| Underwater Terrain browser proof, Vite dev | Passed; return reached 3 hits while decode/network remained 7/11; reload reached 2 hits with 0 decode and 0 network |
+| Underwater Terrain browser proof, production preview | Passed with the same raw-hit and zero-repeat-decode guarantees |
 | `node tests/browser/scratch-hello-gaw.mjs` | Passed 240 proof frames, resize generation 1, no incidents or browser failures |
 | `node tests/browser/scratch-flow-layer.mjs` | Passed 660-frame target, camera reprojection, estuary boundary, two failure injections, and terminal disposal |
 | DEM tile-server pytest | 11 passed |

@@ -18,6 +18,12 @@ Before changing Worker, tile-matrix, virtual-raster, cache, or DEM streaming beh
 
 Scratch is domain-neutral and must not depend on Geo, examples, maps, tiles, DEM, or application policy. Geo may compose Scratch into geographic semantics. Examples demonstrate source-specific assembly; they are evidence of a possibly missing primitive, not permission to move an example-shaped abstraction unchanged into Scratch or Geo. Prefer explicit ownership, lifetime, revisions, invalidation, scheduling, diagnostics, and WebGPU-native work over hidden global authority or implicit CPU round trips.
 
+The active terrain example is `examples/underwaterTerrain/`, titled `Underwater Terrain`.
+Use that name for its route, page, controls, runtime labels, tests, and current documentation.
+Reserve `DEM` names inside the example for facts that specifically describe the elevation
+raster, tile payload, source protocol, or cache identity. Historical `m_demLayer` references
+may remain only when they identify the removed legacy source.
+
 ## Build, Test, and Development Commands
 
 - `npm install`: install dependencies from `package-lock.json`.

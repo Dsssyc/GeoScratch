@@ -11,7 +11,7 @@ Accepted
 ## Context
 
 ADR-056 established a generic `WorkerSystem`; ADR-070 made Worker modules deployable
-without Vite-specific URL glue. The DEM application still repeated a lower-level
+without Vite-specific URL glue. The Underwater Terrain example still repeated a lower-level
 assembly sequence: construct a system, construct one fixed group, open one retained
 context per shard, manufacture initial facts on the main thread, interpret remote
 errors structurally, and coordinate two layers of disposal. Geo's Virtual Raster
@@ -52,7 +52,7 @@ fabricate initial and disposed facts. Its business snapshots are explicitly labe
 `live` or `last-observed-before-disposal`; terminal context, group, and system facts
 remain the lifecycle authority.
 
-The DEM example keeps its Worker module, cache policy, URL construction, candidate
+The Underwater Terrain example keeps its Worker module, cache policy, URL construction, candidate
 metadata, sharding values, and missing-tile classification. Its thin executor assembly
 chooses the owned-system policy and supplies those source-specific values to Geo.
 

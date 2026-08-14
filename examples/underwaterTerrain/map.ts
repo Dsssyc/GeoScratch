@@ -32,7 +32,7 @@ type MapStyle = {
     )[]
 }
 
-export type DemMap = MapLibrePlanarMap & Readonly<{
+export type UnderwaterTerrainMap = MapLibrePlanarMap & Readonly<{
     loaded(): boolean
     once(event: 'load', listener: () => void): void
     off(event: 'render' | 'load', listener: () => void): void
@@ -57,7 +57,7 @@ type MapApi = {
         maxPitch: number
         container: HTMLElement
         antialias: boolean
-    }) => DemMap
+    }) => UnderwaterTerrainMap
     MercatorCoordinate: {
         fromLngLat(
             lngLat: MapLibreLngLat,
@@ -71,11 +71,11 @@ declare global {
     var mapboxgl: MapApi | undefined
 }
 
-type DemMapOptions = Readonly<{
+type UnderwaterTerrainMapOptions = Readonly<{
     proof?: boolean
 }>
 
-const DEM_MAP_DEFAULTS = Object.freeze({
+const UNDERWATER_TERRAIN_MAP_DEFAULTS = Object.freeze({
     center: Object.freeze([ 120.980697, 31.684162 ]),
     zoom: 9,
     projection: 'mercator',
@@ -106,24 +106,24 @@ const darkMatterStyle = Object.freeze({
     } ],
 })
 
-const demProofStyle = Object.freeze({
+const underwaterTerrainProofStyle = Object.freeze({
     version: 8,
     sources: {},
     layers: [ {
-        id: 'dem-proof-background',
+        id: 'underwater-terrain-proof-background',
         type: 'background',
         paint: { 'background-color': '#101418' },
     } ],
 })
 
-export const demMapViewAdapter = mapLibrePlanarViewAdapter({
-    id: 'dem-maplibre-view-adapter',
-    viewId: 'dem-map-view',
+export const underwaterTerrainViewAdapter = mapLibrePlanarViewAdapter({
+    id: 'underwater-terrain-maplibre-view-adapter',
+    viewId: 'underwater-terrain-map-view',
     mercatorCoordinateFromLngLat: (lngLat, altitude) =>
         requireMapApi().MercatorCoordinate.fromLngLat(lngLat, altitude),
 })
 
-export function createDemMap(canvas: HTMLCanvasElement, options: DemMapOptions = {}) {
+export function createUnderwaterTerrainMap(canvas: HTMLCanvasElement, options: UnderwaterTerrainMapOptions = {}) {
 
     const mapApi = requireMapApi()
     const { proof = false, ...mapOptions } = options
@@ -135,23 +135,23 @@ export function createDemMap(canvas: HTMLCanvasElement, options: DemMapOptions =
     document.body.appendChild(mapContainer)
 
     return new mapApi.Map({
-        style: (proof ? demProofStyle : darkMatterStyle) as MapStyle,
-        center: DEM_MAP_DEFAULTS.center,
-        zoom: DEM_MAP_DEFAULTS.zoom,
-        projection: DEM_MAP_DEFAULTS.projection,
-        maxZoom: DEM_MAP_DEFAULTS.maxZoom,
-        maxPitch: DEM_MAP_DEFAULTS.maxPitch,
+        style: (proof ? underwaterTerrainProofStyle : darkMatterStyle) as MapStyle,
+        center: UNDERWATER_TERRAIN_MAP_DEFAULTS.center,
+        zoom: UNDERWATER_TERRAIN_MAP_DEFAULTS.zoom,
+        projection: UNDERWATER_TERRAIN_MAP_DEFAULTS.projection,
+        maxZoom: UNDERWATER_TERRAIN_MAP_DEFAULTS.maxZoom,
+        maxPitch: UNDERWATER_TERRAIN_MAP_DEFAULTS.maxPitch,
         container: mapContainer,
         antialias: true,
         ...mapOptions,
     })
 }
 
-export function waitForDemMap(map: DemMap, signal?: AbortSignal): Promise<DemMap> {
+export function waitForUnderwaterTerrainMap(map: UnderwaterTerrainMap, signal?: AbortSignal): Promise<UnderwaterTerrainMap> {
 
     if (signal?.aborted) return Promise.reject(signal.reason)
     if (map.loaded()) return Promise.resolve(map)
-    return new Promise<DemMap>((resolve, reject) => {
+    return new Promise<UnderwaterTerrainMap>((resolve, reject) => {
         const onLoad = () => {
             signal?.removeEventListener('abort', onAbort)
             resolve(map)
@@ -168,6 +168,6 @@ export function waitForDemMap(map: DemMap, signal?: AbortSignal): Promise<DemMap
 function requireMapApi(): MapApi {
 
     const mapApi = globalThis.maplibregl ?? globalThis.mapboxgl
-    if (mapApi === undefined) throw new Error('Map runtime failed to load for DEM Layer')
+    if (mapApi === undefined) throw new Error('Map runtime failed to load for Underwater Terrain')
     return mapApi
 }

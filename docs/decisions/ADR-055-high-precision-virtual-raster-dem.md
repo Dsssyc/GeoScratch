@@ -10,7 +10,7 @@ Accepted
 
 ## Context
 
-The current DEM example uploads one complete 1024 by 558 grayscale image and samples
+The current Underwater Terrain example uploads one complete 1024 by 558 grayscale image and samples
 it as one physical texture. The terrain selector and mesh already use geographic LoD,
 but raster identity, physical storage, and filtering are still conflated. The current
 Flow example similarly keeps 262,144 positions as global longitude and latitude f32
@@ -71,7 +71,7 @@ raster address spaces, sampling profiles, page identity, residency, immutable
 snapshots, fallback, bounded explain facts, and Geo diagnostics. Geo lowers physical
 buffers, textures, uploads, bindings, and commands through public Scratch contracts.
 
-The DEM example and its temporary backend own source bounds, elevation scale and
+The Underwater Terrain example and its temporary backend own source bounds, elevation scale and
 offset, deterministic PNG-to-COG construction, HTTP service startup, camera policy,
 terrain selection, and presentation.
 
@@ -152,7 +152,7 @@ resolver. No vertex-stage atomic feedback is required.
 
 ### DEM Clean Cut
 
-The existing complete PNG browser upload is removed. The normal DEM page requests
+The existing complete PNG browser upload is removed. The normal Underwater Terrain page requests
 real HTTP tiles produced from the deterministic COG and uploads them into a bounded
 atlas. CPU terrain selection also produces page demand; missing fine pages resolve to
 resident parents rather than a hidden full-image fallback.
@@ -251,7 +251,7 @@ Flow compute-readiness proof and migration matrix.
 - Physical page movement and camera movement no longer redefine position.
 - Cross-page filtering costs multiple page-table lookups and texture loads; this is
   explicit correctness cost and can be optimized only with measured evidence.
-- The temporary Python environment is required for the DEM example and browser gate,
+- The temporary Python environment is required for the Underwater Terrain example and browser gate,
   but it is isolated from the publishable package.
 - The next Flow goal has a concrete compute-proven foundation and a bounded migration
   matrix rather than an untested architectural promise.

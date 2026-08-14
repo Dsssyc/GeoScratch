@@ -9,7 +9,7 @@ import { chromium } from 'playwright'
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const examplesRoot = resolve(repositoryRoot, 'examples')
-const tileServerRoot = resolve(examplesRoot, 'demLayer/tile-server')
+const tileServerRoot = resolve(examplesRoot, 'underwaterTerrain/tile-server')
 const viteEntry = resolve(repositoryRoot, 'node_modules/vite/bin/vite.js')
 const workerBuildEntry = resolve(
     repositoryRoot,
@@ -76,7 +76,7 @@ try {
         String(vitePort),
         '--strictPort',
     ], examplesRoot)
-    await waitForHttpProcess(vite, `${baseUrl}/demLayer/index.html`, 'Vite')
+    await waitForHttpProcess(vite, `${baseUrl}/underwaterTerrain/index.html`, 'Vite')
     browser = await chromium.launch({
         channel: 'chrome',
         headless,
@@ -156,7 +156,7 @@ async function runStaticWorkerDeploymentSmoke(activeBrowser) {
     const page = await context.newPage()
     const events = observePage(page)
     try {
-        const url = `${baseUrl}/demLayer/index.html?cache=none` +
+        const url = `${baseUrl}/underwaterTerrain/index.html?cache=none` +
             `&tileServer=${encodeURIComponent(tileBaseUrl)}`
         await page.goto(url, { waitUntil: 'domcontentloaded', timeout })
         const facts = await waitForStaticWorkerDeployment(page, events)
@@ -185,7 +185,9 @@ async function waitForStaticWorkerDeployment(page, events) {
     while (Date.now() < deadline) {
         const facts = await readFacts(page)
         lastFacts = facts
-        if (facts.status === 'error') throw new Error(facts.error ?? 'DEM page failed')
+        if (facts.status === 'error') {
+            throw new Error(facts.error ?? 'Underwater Terrain page failed')
+        }
         if (facts.status === 'ready' && events.workerManifestResponses.length > 0 &&
             events.workerArtifactResponses.length > 0 &&
             events.workerBootstrapResponses.length > 0 && events.tileRequests.length > 0) {
@@ -212,7 +214,7 @@ async function runBudgetLimitedProof(activeBrowser) {
     const page = await context.newPage()
     const events = observePage(page)
     try {
-        const url = `${baseUrl}/demLayer/index.html?proof=1&atlasPages=${tightAtlasPages}` +
+        const url = `${baseUrl}/underwaterTerrain/index.html?proof=1&atlasPages=${tightAtlasPages}` +
             `&cache=none&tileServer=${encodeURIComponent(tileBaseUrl)}`
         await page.goto(url, { waitUntil: 'domcontentloaded', timeout })
         const first = await waitForStableFacts(page, facts => cameraMatches(facts, zoomedOutCamera))
@@ -257,7 +259,7 @@ async function runTerminalFailureProof(activeBrowser) {
     const page = await context.newPage()
     const events = observePage(page)
     try {
-        const url = `${baseUrl}/demLayer/index.html?proof=1&atlasPages=${operationalAtlasPages}` +
+        const url = `${baseUrl}/underwaterTerrain/index.html?proof=1&atlasPages=${operationalAtlasPages}` +
             `&cache=none&tileServer=${encodeURIComponent(tileBaseUrl)}`
         await page.goto(url, { waitUntil: 'domcontentloaded', timeout })
         const facts = await waitForStableFacts(page, current => {
@@ -284,8 +286,8 @@ async function runTerminalFailureProof(activeBrowser) {
 async function disposeTwice(page) {
 
     return await page.evaluate(async() => {
-        const first = window.__DEM_LAYER_PROOF__.dispose()
-        const second = window.__DEM_LAYER_PROOF__.dispose()
+        const first = window.__UNDERWATER_TERRAIN_PROOF__.dispose()
+        const second = window.__UNDERWATER_TERRAIN_PROOF__.dispose()
         const reports = await Promise.all([ first, second ])
         return {
             reports,
@@ -322,7 +324,7 @@ async function runCancellationProof(activeBrowser) {
     const page = await context.newPage()
     const events = observePage(page)
     try {
-        const url = `${baseUrl}/demLayer/index.html?proof=1&atlasPages=${operationalAtlasPages}` +
+        const url = `${baseUrl}/underwaterTerrain/index.html?proof=1&atlasPages=${operationalAtlasPages}` +
             `&cache=none&tileServer=${encodeURIComponent(tileBaseUrl)}`
         await page.goto(url, { waitUntil: 'domcontentloaded', timeout })
         const before = await waitForDemandActivity(
@@ -331,7 +333,7 @@ async function runCancellationProof(activeBrowser) {
         )
         await page.evaluate(async(cameras) => {
             for (const camera of cameras) {
-                window.__DEM_LAYER_PROOF__.moveCamera(camera)
+                window.__UNDERWATER_TERRAIN_PROOF__.moveCamera(camera)
                 await new Promise(resolvePromise => setTimeout(resolvePromise, 80))
             }
         }, [ westCamera, northCamera, southCamera, eastCamera ])
@@ -370,7 +372,7 @@ async function runStreamingProof(activeBrowser) {
     const page = await context.newPage()
     const events = observePage(page)
     try {
-        const url = `${baseUrl}/demLayer/index.html?proof=1&atlasPages=${operationalAtlasPages}` +
+        const url = `${baseUrl}/underwaterTerrain/index.html?proof=1&atlasPages=${operationalAtlasPages}` +
             `&cache=persistent&cacheNamespace=${encodeURIComponent(cacheNamespace)}` +
             '&cacheLifecycle=durable-reuse&cacheMaxMiB=128&cacheMaxEntries=2048' +
             '&cachePersistence=request' +
@@ -388,7 +390,7 @@ async function runStreamingProof(activeBrowser) {
         tileDelayMs = 150
         await page.evaluate(async(cameras) => {
             for (const camera of cameras) {
-                window.__DEM_LAYER_PROOF__.moveCamera(camera)
+                window.__UNDERWATER_TERRAIN_PROOF__.moveCamera(camera)
                 await new Promise(resolvePromise => setTimeout(resolvePromise, 25))
             }
         }, [ eastCamera, churnWestCamera, northCamera, churnSouthCamera, eastCamera ])
@@ -426,11 +428,11 @@ async function runStreamingProof(activeBrowser) {
         const statsResponse = await fetch(`${tileBaseUrl}/stats`)
         const tileStatsBeforeReload = await statsResponse.json()
         const drained = await page.evaluate(async() => (
-            await window.__DEM_LAYER_PROOF__.pauseAndDrain()
+            await window.__UNDERWATER_TERRAIN_PROOF__.pauseAndDrain()
         ))
         const cleanupPair = await page.evaluate(async() => {
-            const first = window.__DEM_LAYER_PROOF__.dispose()
-            const second = window.__DEM_LAYER_PROOF__.dispose()
+            const first = window.__UNDERWATER_TERRAIN_PROOF__.dispose()
+            const second = window.__UNDERWATER_TERRAIN_PROOF__.dispose()
             const reports = await Promise.all([ first, second ])
             return {
                 reports,
@@ -441,8 +443,8 @@ async function runStreamingProof(activeBrowser) {
         const reload = await waitForStableFacts(page)
         const tileStatsAfterReload = await (await fetch(`${tileBaseUrl}/stats`)).json()
         const reloadCleanupPair = await page.evaluate(async() => {
-            const first = window.__DEM_LAYER_PROOF__.dispose()
-            const second = window.__DEM_LAYER_PROOF__.dispose()
+            const first = window.__UNDERWATER_TERRAIN_PROOF__.dispose()
+            const second = window.__UNDERWATER_TERRAIN_PROOF__.dispose()
             const reports = await Promise.all([ first, second ])
             return {
                 reports,
@@ -493,7 +495,7 @@ async function runStreamingProof(activeBrowser) {
 async function moveAndWait(page, before, camera) {
 
     const previousFrames = Number(before.observedFrames)
-    await page.evaluate(value => window.__DEM_LAYER_PROOF__.moveCamera(value), camera)
+    await page.evaluate(value => window.__UNDERWATER_TERRAIN_PROOF__.moveCamera(value), camera)
     return await waitForStableFacts(page, facts => (
         Number(facts.observedFrames) > previousFrames && cameraMatches(facts, camera)
     ))
@@ -533,7 +535,9 @@ async function waitForStableFacts(page, additional = () => true) {
     while (Date.now() < deadline) {
         const facts = await readFacts(page)
         lastFacts = facts
-        if (facts.status === 'error') throw new Error(facts.error ?? 'DEM page failed')
+        if (facts.status === 'error') {
+            throw new Error(facts.error ?? 'Underwater Terrain page failed')
+        }
         const virtualRaster = parseJson(facts.virtualRaster)
         const frontier = parseJson(facts.frontier)
         const terminalFrontier = frontier?.convergenceState === 'converged' ||
@@ -577,7 +581,9 @@ async function waitForDemandActivity(page, additional = () => true) {
     while (Date.now() < deadline) {
         const facts = await readFacts(page)
         lastFacts = facts
-        if (facts.status === 'error') throw new Error(facts.error ?? 'DEM page failed')
+        if (facts.status === 'error') {
+            throw new Error(facts.error ?? 'Underwater Terrain page failed')
+        }
         const virtualRaster = parseJson(facts.virtualRaster)
         if (facts.status === 'ready' &&
             virtualRaster?.scheduler?.activeRequestCount > 0 &&
@@ -604,7 +610,7 @@ async function capture(page, name) {
     const path = resolve(outputDirectory, `${name}.png`)
     const png = await page.locator('#GPUFrame').screenshot({
         path,
-        style: '#DemControlPanel { visibility: hidden !important; }',
+        style: '#UnderwaterTerrainControlPanel { visibility: hidden !important; }',
     })
     return {
         path,
@@ -770,7 +776,9 @@ function validateProof(value, processState) {
             failures.push(`${name} frame violated bounded Worker/cache/GPU state`)
         }
     }
-    if (identityHashes.size !== 1) failures.push('persistent DEM graph identity changed')
+    if (identityHashes.size !== 1) {
+        failures.push('persistent Underwater Terrain graph identity changed')
+    }
 
     const budgetFirst = value.budget?.first
     const budgetRepeated = value.budget?.repeated
@@ -942,23 +950,25 @@ function validateProof(value, processState) {
     if (value.events.consoleFailures.length !== 0 || value.events.consoleWarnings.length !== 0 ||
         value.events.pageErrors.length !== 0 || value.events.requestFailures.length !== 0 ||
         value.events.httpFailures.length !== 0) {
-        failures.push('DEM browser page emitted an unexpected console, page, or network failure')
+        failures.push(
+            'Underwater Terrain page emitted an unexpected console, page, or network failure'
+        )
     }
     if (value.facts.drained.pendingObservationCount !== '0' ||
         value.facts.drained.currentPendingNativeObservations !== '0' ||
         value.facts.drained.currentEffectfulSubmittedWork !== '0') {
-        failures.push('DEM page did not drain all tracked and native work')
+        failures.push('Underwater Terrain page did not drain all tracked and native work')
     }
     if (!value.cleanupPair.equivalent || !value.reloadCleanupPair?.equivalent ||
         value.terminalStatus !== 'disposed') {
-        failures.push('DEM lifecycle disposal was not idempotent and terminal')
+        failures.push('Underwater Terrain lifecycle disposal was not idempotent and terminal')
     }
     const cleanup = value.cleanupPair.reports?.[0]
     if (cleanup?.report?.cleanupInvocationCount !== 1 ||
         cleanup?.report?.pendingObservationsAfter !== 0 ||
         cleanup?.report?.cleanupFailures?.length !== 0 ||
         cleanup?.lifecycle?.state !== 'disposed') {
-        failures.push('DEM lifecycle retained work or cleanup failures')
+        failures.push('Underwater Terrain lifecycle retained work or cleanup failures')
     }
     const terminalVirtual = cleanup?.virtualRaster
     if (terminalVirtual?.demandStopped !== true || terminalVirtual?.stopped !== true ||
@@ -995,14 +1005,16 @@ function validateProof(value, processState) {
         terminalVirtual?.worker?.group?.queuedTaskCount !== 0 ||
         terminalVirtual?.worker?.group?.activeTaskCount !== 0 ||
         terminalVirtual?.worker?.group?.contextCount !== 0) {
-        failures.push('DEM cleanup retained Worker, request, staging, or residency ownership')
+        failures.push(
+            'Underwater Terrain cleanup retained Worker, request, staging, or residency ownership'
+        )
     }
     const reloadCleanup = value.reloadCleanupPair?.reports?.[0]
     if (reloadCleanup?.report?.cleanupInvocationCount !== 1 ||
         reloadCleanup?.report?.cleanupFailures?.length !== 0 ||
         reloadCleanup?.lifecycle?.state !== 'disposed' ||
         reloadCleanup?.virtualRaster?.worker?.disposed !== true) {
-        failures.push('reloaded DEM lifecycle did not dispose cleanly')
+        failures.push('reloaded Underwater Terrain lifecycle did not dispose cleanly')
     }
     const cleanupActions = cleanup?.report?.cleanupActions ?? []
     const demandStop = cleanupActions.findIndex(action => (
@@ -1015,7 +1027,9 @@ function validateProof(value, processState) {
         action.phase === 'release' && action.label === 'scratch-runtime'
     ))
     if (demandStop < 0 || streamingRelease <= demandStop || runtimeRelease <= streamingRelease) {
-        failures.push('DEM cleanup did not stop demand before releasing Workers and Scratch')
+        failures.push(
+            'Underwater Terrain cleanup did not stop demand before releasing Workers and Scratch'
+        )
     }
     if (!processState.browserClosed || !processState.viteClosed || !processState.tileServerClosed) {
         failures.push('managed browser or service process remained reachable')
@@ -1033,7 +1047,9 @@ function validateStaticWorkerDeployment(value, processState) {
         : undefined
     const successfulJavaScript = response => response.status === 200 &&
         /(?:java|ecma)script/i.test(response.contentType)
-    if (value.facts?.status !== 'ready') failures.push('production DEM page was not ready')
+    if (value.facts?.status !== 'ready') {
+        failures.push('production Underwater Terrain page was not ready')
+    }
     if (value.manifest?.status !== 200 ||
         !/application\/json/i.test(value.manifest?.contentType ?? '') ||
         manifest?.kind !== 'geoscratch-worker-module-manifest' ||
@@ -1064,7 +1080,7 @@ function validateStaticWorkerDeployment(value, processState) {
     if (value.capture?.pixels?.nonBackground < 5_000 ||
         value.capture?.pixels?.channelRange < 8 ||
         value.capture?.pixels?.transparentPixels !== 0) {
-        failures.push('production DEM canvas was blank, uniform, or transparent')
+        failures.push('production Underwater Terrain canvas was blank, uniform, or transparent')
     }
     if (unexpectedEvents(value.events).length !== 0) {
         failures.push('production Worker deployment emitted browser or network failures')

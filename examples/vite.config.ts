@@ -59,7 +59,7 @@ const examplePages = {
   immediateData: path.resolve(examplesRoot, 'immediateData/index.html'),
   indirectExecution: path.resolve(examplesRoot, 'indirectExecution/index.html'),
   readinessPolicies: path.resolve(examplesRoot, 'readinessPolicies/index.html'),
-  demLayer: path.resolve(examplesRoot, 'demLayer/index.html'),
+  underwaterTerrain: path.resolve(examplesRoot, 'underwaterTerrain/index.html'),
   flowLayer: path.resolve(examplesRoot, 'flowLayer/index.html'),
   helloGAW: path.resolve(examplesRoot, 'helloGAW/index.html'),
 }

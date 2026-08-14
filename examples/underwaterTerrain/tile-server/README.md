@@ -16,19 +16,19 @@ it is never exposed as a browser fallback.
 From the repository root:
 
 ```bash
-python3 -m venv examples/demLayer/tile-server/.venv
-examples/demLayer/tile-server/.venv/bin/python -m pip install -e 'examples/demLayer/tile-server[test]'
-examples/demLayer/tile-server/.venv/bin/dem-tile-build
+python3 -m venv examples/underwaterTerrain/tile-server/.venv
+examples/underwaterTerrain/tile-server/.venv/bin/python -m pip install -e 'examples/underwaterTerrain/tile-server[test]'
+examples/underwaterTerrain/tile-server/.venv/bin/dem-tile-build
 ```
 
-Generated files are written to `examples/demLayer/tile-server/cache/` and are
+Generated files are written to `examples/underwaterTerrain/tile-server/cache/` and are
 ignored by Git. Rebuilding from the unchanged source produces the same pixel and
 metadata semantics.
 
 ## Serve
 
 ```bash
-examples/demLayer/tile-server/.venv/bin/dem-tile-serve --port 8787
+examples/underwaterTerrain/tile-server/.venv/bin/dem-tile-serve --port 8787
 ```
 
 Endpoints are `/health`, `/manifest.json`,
@@ -40,8 +40,8 @@ the server reads only the requested COG window and does not pre-slice the world.
 ## Verify
 
 ```bash
-examples/demLayer/tile-server/.venv/bin/python -m pytest examples/demLayer/tile-server/tests
-examples/demLayer/tile-server/.venv/bin/rio cogeo validate examples/demLayer/tile-server/cache/dem.cog.tif
+examples/underwaterTerrain/tile-server/.venv/bin/python -m pytest examples/underwaterTerrain/tile-server/tests
+examples/underwaterTerrain/tile-server/.venv/bin/rio cogeo validate examples/underwaterTerrain/tile-server/cache/dem.cog.tif
 ```
 
 The second command is the installed rio-cogeo 7.0.2 CLI equivalent of the goal's

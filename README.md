@@ -91,14 +91,15 @@ stateful contexts, Transferable ownership, and structured remote diagnostics. It
 shares no mutable state or lifecycle authority with `GPURuntime` and has no Geo,
 tile, DEM, or GPU dependency.
 
-The DEM Layer is the executable reference path: terrain demand resolves standard
-WebMercatorQuad tiles in Workers, can persist decode-ready raw height pages through
-Scratch Cache, transfers pages into a finite atlas, and samples them logically in
-the vertex shader with cross-page filtering and parent fallback. The source PNG is
-only an offline COG build input; the browser has no full-image or legacy-tile
-fallback. Raster residency remains capped by source detail while a separate GPU
-projected-grid frontier selects perspective-aware terrain patches and resolves
-mesh-stitching neighbors through global logical tile identity.
+Underwater Terrain is the executable Surface Reveal reference: a semi-transparent
+WebGPU terrain canvas preserves the MapLibre basemap as geographic context while exposing
+the underwater terrain. Terrain demand resolves standard WebMercatorQuad DEM tiles in
+Workers, can persist decode-ready raw height pages through Scratch Cache, transfers pages
+into a finite atlas, and samples them logically in the vertex shader with cross-page
+filtering and parent fallback. The source PNG is only an offline COG build input; the
+browser has no full-image or legacy-tile fallback. Raster residency remains capped by
+source detail while a separate GPU projected-grid frontier selects perspective-aware
+terrain patches and resolves mesh-stitching neighbors through global logical tile identity.
 
 ## Scratch Worker Modules
 
@@ -464,7 +465,7 @@ Run `npm run dev` and open the examples browser. Each demo also has a standalone
 | Render To Texture | `examples/renderToTexture/` |
 | Indirect Execution | `examples/indirectExecution/` |
 | Readiness Policies | `examples/readinessPolicies/` |
-| DEM Layer | `examples/demLayer/` |
+| Underwater Terrain | `examples/underwaterTerrain/` |
 | Flow Layer | `examples/flowLayer/` |
 | Hello GAW | `examples/helloGAW/` |
 

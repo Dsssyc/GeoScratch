@@ -2,7 +2,7 @@
 docId: geo.terrain-rendering.zh
 canonical: false
 translationOf: ./terrain-rendering.md
-canonicalDigest: ba65d3f9cd4b0ce685f705d0cde9671de1e1c8a7e66ad287c9b8f9579d50be6d
+canonicalDigest: cfa41d7272d9593e9b0f7ae44fdae1191b153d7ec8bcdbafe3acf3b9d738f450
 ---
 # 地形渲染
 
@@ -36,6 +36,6 @@ neighbor resolution 和 edge-coordinate snapping。生成模块不会读取 CPU 
 列表，也不会让 draw count 往返 CPU。
 
 Renderer 不拥有 map host、camera controller、source manifest、network transport、
-decoder、Worker system 或应用 cache policy；这些都是显式组合输入。因此 DEM example
-只拥有 source-specific loading/decoding、map/UI 装配、cache 总预算选择和自己的 fragment
-presentation。
+decoder、Worker system 或应用 cache policy；这些都是显式组合输入。因此 Underwater
+Terrain example 只拥有 source-specific loading/decoding、map/UI 装配、cache 总预算选择
+和自己的 fragment presentation。

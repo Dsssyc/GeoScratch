@@ -9,7 +9,7 @@ import { chromium } from 'playwright'
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const examplesRoot = resolve(repositoryRoot, 'examples')
-const tileServerRoot = resolve(examplesRoot, 'demLayer/tile-server')
+const tileServerRoot = resolve(examplesRoot, 'underwaterTerrain/tile-server')
 const viteEntry = resolve(repositoryRoot, 'node_modules/vite/bin/vite.js')
 const workerBuildEntry = resolve(
     repositoryRoot,
@@ -17,12 +17,16 @@ const workerBuildEntry = resolve(
 )
 const tileBuildEntry = resolve(tileServerRoot, '.venv/bin/dem-tile-build')
 const tileServeEntry = resolve(tileServerRoot, '.venv/bin/dem-tile-serve')
-const timeout = positiveInteger(process.env.DEM_TILE_WIREFRAME_TIMEOUT_MS, 120_000)
+const timeout = positiveInteger(
+    process.env.UNDERWATER_TERRAIN_TILE_WIREFRAME_TIMEOUT_MS,
+    120_000
+)
 const headless = process.env.GEO_VIRTUAL_RASTER_DEM_HEADLESS === '1'
 const outputDirectory = resolve(
-    process.env.DEM_TILE_WIREFRAME_OUTPUT ?? '/tmp/geoscratch-dem-tile-wireframe'
+    process.env.UNDERWATER_TERRAIN_TILE_WIREFRAME_OUTPUT ??
+        '/tmp/geoscratch-underwater-terrain-tile-wireframe'
 )
-const renderingStorageKey = 'geoscratch.examples.demLayer.rendering.v1'
+const renderingStorageKey = 'geoscratch.examples.underwaterTerrain.rendering.v1'
 const camera = Object.freeze({
     center: Object.freeze([ 120.980697, 31.684162 ]),
     zoom: 10,
@@ -63,7 +67,7 @@ try {
         String(vitePort),
         '--strictPort',
     ], examplesRoot)
-    await waitForHttpProcess(vite, `${baseUrl}/demLayer/`, 'Vite')
+    await waitForHttpProcess(vite, `${baseUrl}/underwaterTerrain/`, 'Vite')
     browser = await chromium.launch({
         channel: 'chrome',
         headless,
@@ -130,17 +134,17 @@ async function runWireframeProof(activeBrowser) {
             cache: 'none',
             tileServer: tileBaseUrl,
         })
-        await page.goto(`${baseUrl}/demLayer/?${parameters}`, {
+        await page.goto(`${baseUrl}/underwaterTerrain/?${parameters}`, {
             waitUntil: 'domcontentloaded',
             timeout,
         })
         await page.locator('#GPUFrame[data-status="ready"]').waitFor({ timeout })
         const loaded = await readFacts(page)
-        await page.evaluate(value => window.__DEM_LAYER_PROOF__.moveCamera(value), camera)
+        await page.evaluate(value => window.__UNDERWATER_TERRAIN_PROOF__.moveCamera(value), camera)
         const baseline = await waitForStableMode(page, 'shaded', loaded.observedFrames)
         const shadedCapture = await captureState(page, 'shaded')
 
-        await page.locator('[data-dem-control="tile-wireframe"] .tp-ckbv_w').click()
+        await page.locator('[data-underwater-terrain-control="tile-wireframe"] .tp-ckbv_w').click()
         const wireframe = await waitForStableMode(
             page,
             'tile-wireframe',
@@ -155,7 +159,7 @@ async function runWireframeProof(activeBrowser) {
         for (const zoom of [ 10.02, 10.04, 10.06, 13.66, 13.70, 13.84 ]) {
             const motionCamera = Object.freeze({ ...pitchedCamera, zoom })
             await page.evaluate(
-                value => window.__DEM_LAYER_PROOF__.moveCamera(value),
+                value => window.__UNDERWATER_TERRAIN_PROOF__.moveCamera(value),
                 motionCamera
             )
             const facts = await waitForStableMode(
@@ -172,7 +176,7 @@ async function runWireframeProof(activeBrowser) {
         for (const zoom of [ 11, 12, 14 ]) {
             const refinementCamera = Object.freeze({ ...camera, zoom })
             await page.evaluate(
-                value => window.__DEM_LAYER_PROOF__.moveCamera(value),
+                value => window.__UNDERWATER_TERRAIN_PROOF__.moveCamera(value),
                 refinementCamera
             )
             const facts = await waitForStableMode(
@@ -186,7 +190,7 @@ async function runWireframeProof(activeBrowser) {
             previous = facts
         }
 
-        await page.locator('[data-dem-control="tile-wireframe"] .tp-ckbv_w').click()
+        await page.locator('[data-underwater-terrain-control="tile-wireframe"] .tp-ckbv_w').click()
         const restored = await waitForStableMode(
             page,
             'shaded',
@@ -269,7 +273,7 @@ async function readFacts(page) {
         const parse = value => {
             try { return JSON.parse(value ?? 'null') } catch { return null }
         }
-        const checkbox = document.querySelector('[data-dem-control="tile-wireframe"] input')
+        const checkbox = document.querySelector('[data-underwater-terrain-control="tile-wireframe"] input')
         const graphContract = parse(canvas.dataset.graphContract)
         const frontier = parse(canvas.dataset.frontier)
         const renderPatchFeedback = parse(canvas.dataset.renderPatchFeedback)
@@ -331,7 +335,7 @@ async function captureState(page, name) {
     const pagePng = await page.screenshot({ path: pagePath })
     const canvasPng = await page.locator('#GPUFrame').screenshot({
         path: canvasPath,
-        style: '#DemControlPanel { visibility: hidden !important; }',
+        style: '#UnderwaterTerrainControlPanel { visibility: hidden !important; }',
     })
     return Object.freeze({
         page: Object.freeze({
@@ -444,7 +448,7 @@ function validateProof(value, processState) {
         baseline.identityFacts?.programs === 10 &&
         baseline.identityFacts?.pipelines === 10 &&
         baseline.identityFacts?.commands === 34,
-    'live presentation switching rebuilt or replaced the persistent DEM graph')
+    'live presentation switching rebuilt or replaced the persistent Underwater Terrain graph')
 
     expect(failures,
         baseline?.persistentFacts?.pipelines === wireframe?.persistentFacts?.pipelines &&

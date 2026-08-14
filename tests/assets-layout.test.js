@@ -21,10 +21,10 @@ describe('asset layout', () => {
         expect(exists('examples', 'helloGAW', 'assets', 'images', 'earth.jpg')).to.equal(true)
         expect(exists('examples', 'helloGAW', 'shaders', 'land.wgsl')).to.equal(true)
         expect(exists('examples', 'flowLayer', 'shaders', 'flow', 'particles.wgsl')).to.equal(true)
-        expect(exists('examples', 'demLayer', 'assets', 'dem.png')).to.equal(true)
-        expect(exists('examples', 'demLayer', 'shaders', 'lod-map.wgsl')).to.equal(false)
+        expect(exists('examples', 'underwaterTerrain', 'assets', 'dem.png')).to.equal(true)
+        expect(exists('examples', 'underwaterTerrain', 'shaders', 'lod-map.wgsl')).to.equal(false)
         expect(exists(
-            'examples', 'demLayer', 'shaders', 'terrain-presentation.wgsl'
+            'examples', 'underwaterTerrain', 'shaders', 'terrain-presentation.wgsl'
         )).to.equal(true)
 
         const helloGAW = read('examples', 'helloGAW', 'main.ts')
@@ -58,10 +58,10 @@ describe('asset layout', () => {
     it('keeps DEM Worker deployment independent from Vite-specific URL modules', () => {
 
         const config = read('examples', 'vite.config.ts')
-        const workerExecutor = read('examples', 'demLayer', 'dem-tile-executor.ts')
+        const workerExecutor = read('examples', 'underwaterTerrain', 'dem-tile-executor.ts')
 
-        expect(exists('examples', 'demLayer', 'dem-tile-worker-url.ts')).to.equal(false)
-        expect(exists('examples', 'demLayer', 'dem-worker-source.ts')).to.equal(false)
+        expect(exists('examples', 'underwaterTerrain', 'dem-tile-worker-url.ts')).to.equal(false)
+        expect(exists('examples', 'underwaterTerrain', 'dem-worker-source.ts')).to.equal(false)
         expect(config).to.not.include('workerModuleUrlPlugin')
         expect(config).to.not.include('demWorkerUrlModule')
         expect(config).to.not.include('demWorkerModule')
@@ -100,12 +100,12 @@ describe('asset layout', () => {
 
     it('keeps the DEM source beside its backend without exposing a full-image browser path', () => {
 
-        expect(exists('examples', 'demLayer', 'assets', 'dem.png')).to.equal(true)
+        expect(exists('examples', 'underwaterTerrain', 'assets', 'dem.png')).to.equal(true)
         expect(exists('packages', 'geoscratch', 'src', 'applications', 'terrain')).to.equal(false)
 
-        const main = read('examples', 'demLayer', 'main.ts')
+        const main = read('examples', 'underwaterTerrain', 'main.ts')
         const backend = read(
-            'examples', 'demLayer', 'tile-server', 'src', 'geoscratch_dem_tiles', 'build.py'
+            'examples', 'underwaterTerrain', 'tile-server', 'src', 'geoscratch_dem_tiles', 'build.py'
         )
         expect(backend).to.include('"assets" / "dem.png"')
         expect(main).not.to.include('./assets/dem.png')
@@ -121,16 +121,16 @@ describe('asset layout', () => {
         expect(read('examples', 'helloGAW', 'shaders', 'fxaa.wgsl')).to.include('@compute')
     })
 
-    it('keeps only reachable terrain shaders beside the DEM example', () => {
+    it('keeps only reachable terrain shaders beside Underwater Terrain', () => {
 
-        expect(exists('examples', 'demLayer', 'shaders', 'lod-map.wgsl')).to.equal(false)
+        expect(exists('examples', 'underwaterTerrain', 'shaders', 'lod-map.wgsl')).to.equal(false)
         expect(exists(
-            'examples', 'demLayer', 'shaders', 'terrain-presentation.wgsl'
+            'examples', 'underwaterTerrain', 'shaders', 'terrain-presentation.wgsl'
         )).to.equal(true)
         expect(exists('examples', 'public', 'shaders', 'examples', 'terrain')).to.equal(false)
 
         const terrain = read(
-            'examples', 'demLayer', 'shaders', 'terrain-presentation.wgsl'
+            'examples', 'underwaterTerrain', 'shaders', 'terrain-presentation.wgsl'
         )
         expect(terrain).to.include('@fragment')
         expect(terrain).to.not.include('@vertex')

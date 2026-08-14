@@ -4,7 +4,7 @@
 
 `confirmed-clean` on 2026-08-06 at implementation commit `d2787d9`.
 
-The DEM example now derives its active terrain frontier, visible instances, virtual
+The Underwater Terrain example now derives its active terrain frontier, visible instances, virtual
 raster demands, and indirect draw arguments from the persistent GPU tile frontier.
 All specified static, native-browser, visual, lifecycle, ownership, and clean-cut
 gates passed. No in-scope product defect remains open.
@@ -48,7 +48,7 @@ All required scripts emitted `status: "passed"` on headed Chrome
 `150.0.7871.188` using the Apple `metal-3` WebGPU adapter:
 
 - `node tests/browser/geo-gpu-tile-frontier-core.mjs`;
-- `node tests/browser/scratch-dem-layer.mjs`;
+- `node tests/browser/scratch-underwater-terrain.mjs`;
 - `node tests/browser/geo-virtual-raster-dem.mjs`;
 - `node tests/browser/scratch-hello-gaw.mjs`;
 - `node tests/browser/scratch-flow-layer.mjs`;
@@ -89,7 +89,7 @@ frames with one frontier signature and identical first/final pixel hashes.
 | Desktop high pitch | 1024x768 | zoom 10, pitch 85, bearing 225 | 23 / 17 | 9..10 | `1e416ed73db629e1a67f3066d62a7c254cda1ff07c095007e5dc82d40351881b` |
 | Mobile pitched | 390x844 | zoom 10, pitch 70, bearing 90 | 19 / 10 | 9..10 | `a3643571ca3ff534895f07cd4376a78315c2d8b6376afbb0faf3c885482c7ef4` |
 
-The corresponding files are under `/tmp/geoscratch-dem-layer-browser/` as
+The corresponding files are under `/tmp/geoscratch-underwater-terrain-browser/` as
 `pitch85-bearing90-z9-stable-final.png`,
 `pitch85-bearing225-z10-stable-final.png`, and
 `mobile-pitch70-bearing90-z10-stable-final.png`.
@@ -118,17 +118,17 @@ does not acquire network, cache, or Worker ownership.
 ## Ownership And Clean-Cut Audit
 
 `git diff --name-status 399a416..d2787d9` keeps implementation changes inside the
-approved Scratch prerequisite, Geo, DEM example, tests, ADR/vision, plan, and review
+approved Scratch prerequisite, Geo, Underwater Terrain example, tests, ADR/vision, plan, and review
 boundaries. Scratch changes are exactly six files implementing the generic ordered
 readback/submission-authority prerequisite (942 insertions and 38 deletions). A scan of
 added Scratch lines finds no Geo, DEM, `VirtualRaster`, or tile-frontier policy or
 import.
 
-`examples/demLayer/terrain-selection.ts` is deleted. The following production-symbol
+`examples/underwaterTerrain/terrain-selection.ts` is deleted. The following production-symbol
 scan returns no match:
 
 ```bash
-rg -n "selectTerrainNodes|nodeLevels|nodeBoxes|canonicalNodes|lodArguments\.upload|terrainArguments\.upload" examples/demLayer
+rg -n "selectTerrainNodes|nodeLevels|nodeBoxes|canonicalNodes|lodArguments\.upload|terrainArguments\.upload" examples/underwaterTerrain
 ```
 
 The example contains no parallel CPU selector, CPU-visible-instance upload, CPU draw-

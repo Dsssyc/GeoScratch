@@ -18,52 +18,52 @@ import {
     DEM_WEB_MERCATOR_COORDINATE_BITS,
     createDemTileSource,
     fetchDemTileSource,
-} from '../examples/demLayer/dem-source.ts'
+} from '../examples/underwaterTerrain/dem-source.ts'
 import {
     readDemCachePolicy,
-} from '../examples/demLayer/dem-cache-policy.ts'
+} from '../examples/underwaterTerrain/dem-cache-policy.ts'
 import {
-    DEM_CACHE_PANEL_DEFAULT_CONFIG,
-    DEM_CACHE_PANEL_STORAGE_KEY,
-    DEM_RENDERING_PREFERENCE_STORAGE_KEY,
-    removeDemCacheParameters,
-    replaceDemCacheParameters,
-    resolveDemRenderingPreference,
-    resolveDemCachePanelConfig,
-    serializeDemCachePanelConfig,
-    serializeDemRenderingPreference,
-} from '../examples/demLayer/dem-control-state.ts'
-import { prepareDemControlPanel } from '../examples/demLayer/dem-control-panel.ts'
+    UNDERWATER_TERRAIN_CACHE_PANEL_DEFAULT_CONFIG,
+    UNDERWATER_TERRAIN_CACHE_PANEL_STORAGE_KEY,
+    UNDERWATER_TERRAIN_RENDERING_PREFERENCE_STORAGE_KEY,
+    removeUnderwaterTerrainCacheParameters,
+    replaceUnderwaterTerrainCacheParameters,
+    resolveUnderwaterTerrainRenderingPreference,
+    resolveUnderwaterTerrainCachePanelConfig,
+    serializeUnderwaterTerrainCachePanelConfig,
+    serializeUnderwaterTerrainRenderingPreference,
+} from '../examples/underwaterTerrain/control-state.ts'
+import { prepareUnderwaterTerrainControlPanel } from '../examples/underwaterTerrain/control-panel.ts'
 import { demWebMercatorManifest as manifest } from './fixtures/dem-webmercator-manifest.js'
 
 describe('DEM WebMercator virtual raster', () => {
 
-    describe('DEM cache panel configuration', () => {
+    describe('Underwater Terrain cache panel configuration', () => {
 
         it('uses the existing no-cache defaults without URL or stored state', () => {
 
-            const resolved = resolveDemCachePanelConfig(new URLSearchParams(), null)
+            const resolved = resolveUnderwaterTerrainCachePanelConfig(new URLSearchParams(), null)
 
-            expect(DEM_CACHE_PANEL_STORAGE_KEY).to.equal(
-                'geoscratch.examples.dem.cache-panel.v1'
+            expect(UNDERWATER_TERRAIN_CACHE_PANEL_STORAGE_KEY).to.equal(
+                'geoscratch.examples.underwaterTerrain.cache-panel.v1'
             )
             expect(resolved.source).to.equal('default')
             expect(resolved.storageStatus).to.equal('missing')
-            expect(resolved.config).to.deep.equal(DEM_CACHE_PANEL_DEFAULT_CONFIG)
+            expect(resolved.config).to.deep.equal(UNDERWATER_TERRAIN_CACHE_PANEL_DEFAULT_CONFIG)
             expect(resolved.parameters.toString()).to.equal('')
             expect(readDemCachePolicy(resolved.parameters)).to.deep.equal({ mode: 'none' })
         })
 
         it('restores a complete versioned preference for a bare URL', () => {
 
-            const stored = serializeDemCachePanelConfig({
+            const stored = serializeUnderwaterTerrainCachePanelConfig({
                 policy: 'durable',
                 namespace: 'editable-dem',
                 maxMiB: 512,
                 maxEntries: 8192,
                 persistence: 'request',
             })
-            const resolved = resolveDemCachePanelConfig(
+            const resolved = resolveUnderwaterTerrainCachePanelConfig(
                 new URLSearchParams('tileServer=http%3A%2F%2Flocalhost%3A8787&atlasPages=32'),
                 stored
             )
@@ -95,11 +95,11 @@ describe('DEM WebMercator virtual raster', () => {
 
         it('treats any explicit cache URL state as authoritative', () => {
 
-            const stored = serializeDemCachePanelConfig({
-                ...DEM_CACHE_PANEL_DEFAULT_CONFIG,
+            const stored = serializeUnderwaterTerrainCachePanelConfig({
+                ...UNDERWATER_TERRAIN_CACHE_PANEL_DEFAULT_CONFIG,
                 policy: 'durable',
             })
-            const explicit = resolveDemCachePanelConfig(
+            const explicit = resolveUnderwaterTerrainCachePanelConfig(
                 new URLSearchParams('cache=none&atlasPages=16'),
                 stored
             )
@@ -108,11 +108,11 @@ describe('DEM WebMercator virtual raster', () => {
             expect(explicit.storageStatus).to.equal('valid')
             expect(explicit.config.policy).to.equal('disabled')
             expect(explicit.parameters.toString()).to.equal('cache=none&atlasPages=16')
-            expect(() => resolveDemCachePanelConfig(
+            expect(() => resolveUnderwaterTerrainCachePanelConfig(
                 new URLSearchParams('cacheLifecycle=session'),
                 stored
             )).to.throw('cache=none cannot accept cacheLifecycle')
-            expect(() => resolveDemCachePanelConfig(
+            expect(() => resolveUnderwaterTerrainCachePanelConfig(
                 new URLSearchParams('cache=none&cache=none'),
                 stored
             )).to.throw('Duplicate DEM cache option: cache')
@@ -136,9 +136,9 @@ describe('DEM WebMercator virtual raster', () => {
                 } ],
             ]
             for (const [ policy, facts ] of expected) {
-                const parameters = replaceDemCacheParameters(
+                const parameters = replaceUnderwaterTerrainCacheParameters(
                     new URLSearchParams('proof=1'),
-                    { ...DEM_CACHE_PANEL_DEFAULT_CONFIG, policy }
+                    { ...UNDERWATER_TERRAIN_CACHE_PANEL_DEFAULT_CONFIG, policy }
                 )
                 expect(parameters.get('proof')).to.equal('1')
                 expect(readDemCachePolicy(parameters)).to.deep.include(facts)
@@ -162,27 +162,27 @@ describe('DEM WebMercator virtual raster', () => {
 
             for (const invalid of [
                 '{',
-                JSON.stringify({ schemaVersion: 2, config: DEM_CACHE_PANEL_DEFAULT_CONFIG }),
+                JSON.stringify({ schemaVersion: 2, config: UNDERWATER_TERRAIN_CACHE_PANEL_DEFAULT_CONFIG }),
                 JSON.stringify({ schemaVersion: 1, config: {
-                    ...DEM_CACHE_PANEL_DEFAULT_CONFIG,
+                    ...UNDERWATER_TERRAIN_CACHE_PANEL_DEFAULT_CONFIG,
                     maxMiB: 0,
                 } }),
                 JSON.stringify({ schemaVersion: 1, config: {
-                    ...DEM_CACHE_PANEL_DEFAULT_CONFIG,
+                    ...UNDERWATER_TERRAIN_CACHE_PANEL_DEFAULT_CONFIG,
                     policy: 'forever',
                 } }),
             ]) {
-                const resolved = resolveDemCachePanelConfig(new URLSearchParams(), invalid)
+                const resolved = resolveUnderwaterTerrainCachePanelConfig(new URLSearchParams(), invalid)
                 expect(resolved.source).to.equal('default')
                 expect(resolved.storageStatus).to.equal('invalid')
-                expect(resolved.config).to.deep.equal(DEM_CACHE_PANEL_DEFAULT_CONFIG)
+                expect(resolved.config).to.deep.equal(UNDERWATER_TERRAIN_CACHE_PANEL_DEFAULT_CONFIG)
             }
-            expect(() => serializeDemCachePanelConfig({
-                ...DEM_CACHE_PANEL_DEFAULT_CONFIG,
+            expect(() => serializeUnderwaterTerrainCachePanelConfig({
+                ...UNDERWATER_TERRAIN_CACHE_PANEL_DEFAULT_CONFIG,
                 namespace: '',
             })).to.throw('namespace')
-            expect(() => replaceDemCacheParameters(new URLSearchParams(), {
-                ...DEM_CACHE_PANEL_DEFAULT_CONFIG,
+            expect(() => replaceUnderwaterTerrainCacheParameters(new URLSearchParams(), {
+                ...UNDERWATER_TERRAIN_CACHE_PANEL_DEFAULT_CONFIG,
                 maxEntries: 65_537,
             })).to.throw('cacheMaxEntries')
         })
@@ -196,7 +196,7 @@ describe('DEM WebMercator virtual raster', () => {
                 [ 'proof', '1' ],
                 [ 'cacheNamespace', 'old' ],
             ])
-            const next = replaceDemCacheParameters(current, {
+            const next = replaceUnderwaterTerrainCacheParameters(current, {
                 policy: 'clear-on-open',
                 namespace: 'new-dem',
                 maxMiB: 256,
@@ -212,21 +212,21 @@ describe('DEM WebMercator virtual raster', () => {
             expect(next.get('cacheMaxMiB')).to.equal('256')
             expect(next.get('cacheMaxEntries')).to.equal('4096')
             expect(next.get('cachePersistence')).to.equal('best-effort')
-            expect(removeDemCacheParameters(next).toString()).to.equal(
+            expect(removeUnderwaterTerrainCacheParameters(next).toString()).to.equal(
                 'tileServer=http%3A%2F%2Flocalhost%3A8787&proof=1'
             )
         })
 
         it('prepares browser preferences and degrades unavailable local storage', () => {
 
-            const stored = serializeDemCachePanelConfig({
-                ...DEM_CACHE_PANEL_DEFAULT_CONFIG,
+            const stored = serializeUnderwaterTerrainCachePanelConfig({
+                ...UNDERWATER_TERRAIN_CACHE_PANEL_DEFAULT_CONFIG,
                 policy: 'session',
             })
             const available = fakeStorage({
-                [DEM_CACHE_PANEL_STORAGE_KEY]: stored,
+                [UNDERWATER_TERRAIN_CACHE_PANEL_STORAGE_KEY]: stored,
             })
-            const restored = prepareDemControlPanel({
+            const restored = prepareUnderwaterTerrainControlPanel({
                 parameters: new URLSearchParams('proof=1'),
                 storage: available.storage,
             })
@@ -236,16 +236,16 @@ describe('DEM WebMercator virtual raster', () => {
             expect(restored.parameters.get('proof')).to.equal('1')
             expect(restored.parameters.get('cacheLifecycle')).to.equal('session')
 
-            available.storage.setItem(DEM_CACHE_PANEL_STORAGE_KEY, '{')
-            const damaged = prepareDemControlPanel({
+            available.storage.setItem(UNDERWATER_TERRAIN_CACHE_PANEL_STORAGE_KEY, '{')
+            const damaged = prepareUnderwaterTerrainControlPanel({
                 parameters: new URLSearchParams(),
                 storage: available.storage,
             })
             expect(damaged.source).to.equal('default')
             expect(damaged.storageStatus).to.equal('invalid')
-            expect(available.storage.getItem(DEM_CACHE_PANEL_STORAGE_KEY)).to.equal(null)
+            expect(available.storage.getItem(UNDERWATER_TERRAIN_CACHE_PANEL_STORAGE_KEY)).to.equal(null)
 
-            const unavailable = prepareDemControlPanel({
+            const unavailable = prepareUnderwaterTerrainControlPanel({
                 parameters: new URLSearchParams('cache=none'),
                 storage: {
                     getItem: () => null,
@@ -259,14 +259,14 @@ describe('DEM WebMercator virtual raster', () => {
         })
     })
 
-    describe('DEM rendering preference', () => {
+    describe('Underwater Terrain rendering preference', () => {
 
         it('defaults to shaded terrain without stored state', () => {
 
-            expect(DEM_RENDERING_PREFERENCE_STORAGE_KEY).to.equal(
-                'geoscratch.examples.demLayer.rendering.v1'
+            expect(UNDERWATER_TERRAIN_RENDERING_PREFERENCE_STORAGE_KEY).to.equal(
+                'geoscratch.examples.underwaterTerrain.rendering.v1'
             )
-            expect(resolveDemRenderingPreference(null)).to.deep.equal({
+            expect(resolveUnderwaterTerrainRenderingPreference(null)).to.deep.equal({
                 preference: { tileWireframe: false },
                 storageStatus: 'missing',
             })
@@ -274,10 +274,10 @@ describe('DEM WebMercator virtual raster', () => {
 
         it('round trips a strict versioned tile-wireframe preference', () => {
 
-            const stored = serializeDemRenderingPreference({ tileWireframe: true })
+            const stored = serializeUnderwaterTerrainRenderingPreference({ tileWireframe: true })
 
             expect(stored).to.equal('{"version":1,"tileWireframe":true}')
-            expect(resolveDemRenderingPreference(stored)).to.deep.equal({
+            expect(resolveUnderwaterTerrainRenderingPreference(stored)).to.deep.equal({
                 preference: { tileWireframe: true },
                 storageStatus: 'valid',
             })
@@ -292,12 +292,12 @@ describe('DEM WebMercator virtual raster', () => {
                 '{"version":1,"tileWireframe":true,"extra":1}',
                 'null',
             ]) {
-                expect(resolveDemRenderingPreference(stored)).to.deep.equal({
+                expect(resolveUnderwaterTerrainRenderingPreference(stored)).to.deep.equal({
                     preference: { tileWireframe: false },
                     storageStatus: 'invalid',
                 })
             }
-            expect(() => serializeDemRenderingPreference({ tileWireframe: 'yes' }))
+            expect(() => serializeUnderwaterTerrainRenderingPreference({ tileWireframe: 'yes' }))
                 .to.throw('tileWireframe')
         })
     })

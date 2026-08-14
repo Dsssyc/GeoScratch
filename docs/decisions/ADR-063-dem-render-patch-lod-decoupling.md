@@ -10,7 +10,7 @@ Superseded by [ADR-064](ADR-064-dem-screen-space-render-patch-lod.md)
 
 ## Context
 
-ADR-061 moved DEM page selection, residency demand, visibility, and indirect counts to
+ADR-061 moved DEM data-page selection, residency demand, visibility, and indirect counts to
 `GpuTileFrontier`. The initial integration also used that page frontier directly as the
 terrain draw-instance frontier. This accidentally coupled two independent ceilings:
 
@@ -32,7 +32,7 @@ preserving tile-relative mesh-stitching behavior.
 demand, retirement, and fallback. Its maximum matrix level remains the manifest's
 `z10`.
 
-The DEM example owns a second persistent GPU stage, `DemRenderPatchFrontier`, because
+The Underwater Terrain example owns a second persistent GPU stage, `DemRenderPatchFrontier`, because
 page-to-patch interpretation and terrain mesh density are DEM rendering policy. It:
 
 1. reads the current data frontier's map metadata, visible page descriptors, and

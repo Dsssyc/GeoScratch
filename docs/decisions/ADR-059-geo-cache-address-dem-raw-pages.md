@@ -14,7 +14,7 @@ DEM cache policy amended by ADR-062.
 
 ADR-058 owns persistent storage without raster semantics. Geo still needs a stable
 way to map source, tile, representation, decoder, and coherence facts into that
-domain-neutral cache. The DEM example must also prove that the split removes repeat
+domain-neutral cache. The Underwater Terrain example must also prove that the split removes repeat
 image decode rather than merely moving the previous encoded-PNG store.
 
 The old Geo cache runtime owned storage, LRU policy, memory tiers, and lifecycle.
@@ -49,7 +49,7 @@ record contracts are deleted without aliases.
 
 ### DEM is the first raw consumer
 
-The DEM example owns the application decision between no cache and a configured
+The Underwater Terrain example owns the application decision between no cache and a configured
 persistent cache. Default execution uses `none`; configured storage explicitly
 supplies namespace, finite byte and entry budgets, persistence request, and the
 ADR-062 lifecycle. Each stable page key is assigned to one Worker context shard, and

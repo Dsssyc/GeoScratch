@@ -19,8 +19,8 @@ const ordinaryExamples = [
     'readinessPolicies',
 ]
 const additionalOrdinaryFiles = [
-    'examples/demLayer/main.ts',
-    'examples/demLayer/dem-map.ts',
+    'examples/underwaterTerrain/main.ts',
+    'examples/underwaterTerrain/map.ts',
     'examples/flowLayer/main.ts',
     'examples/flowLayer/flow-layer.ts',
     'examples/flowLayer/flow-map.ts',

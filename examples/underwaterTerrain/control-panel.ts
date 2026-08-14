@@ -1,55 +1,55 @@
 import { Pane } from 'tweakpane'
 import { DEM_CACHE_POLICY_LIMITS } from './dem-cache-policy.ts'
 import {
-    DEM_CACHE_PANEL_STORAGE_KEY,
-    DEM_RENDERING_PREFERENCE_STORAGE_KEY,
-    removeDemCacheParameters,
-    replaceDemCacheParameters,
-    resolveDemCachePanelConfig,
-    resolveDemRenderingPreference,
-    serializeDemCachePanelConfig,
-    serializeDemRenderingPreference,
-} from './dem-control-state.ts'
+    UNDERWATER_TERRAIN_CACHE_PANEL_STORAGE_KEY,
+    UNDERWATER_TERRAIN_RENDERING_PREFERENCE_STORAGE_KEY,
+    removeUnderwaterTerrainCacheParameters,
+    replaceUnderwaterTerrainCacheParameters,
+    resolveUnderwaterTerrainCachePanelConfig,
+    resolveUnderwaterTerrainRenderingPreference,
+    serializeUnderwaterTerrainCachePanelConfig,
+    serializeUnderwaterTerrainRenderingPreference,
+} from './control-state.ts'
 import type {
-    DemCachePanelConfig,
-    DemCachePanelPolicy,
-    DemRenderingPreference,
-} from './dem-control-state.ts'
+    UnderwaterTerrainCachePanelConfig,
+    UnderwaterTerrainCachePanelPolicy,
+    UnderwaterTerrainRenderingPreference,
+} from './control-state.ts'
 
-type DemControlPanelStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
+type UnderwaterTerrainControlPanelStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
 
-type PreparedDemControlPanel = Readonly<{
+type PreparedUnderwaterTerrainControlPanel = Readonly<{
     parameters: URLSearchParams
-    config: DemCachePanelConfig
+    config: UnderwaterTerrainCachePanelConfig
     source: 'url' | 'storage' | 'default'
     storageStatus: 'missing' | 'valid' | 'invalid' | 'unavailable'
-    renderingPreference: DemRenderingPreference
+    renderingPreference: UnderwaterTerrainRenderingPreference
     renderingStorageStatus: 'missing' | 'valid' | 'invalid' | 'unavailable'
-    mount(options: DemControlPanelMountOptions): MountedDemControlPanel
+    mount(options: UnderwaterTerrainControlPanelMountOptions): MountedUnderwaterTerrainControlPanel
 }>
 
-type DemControlPanelMountOptions = Readonly<{
+type UnderwaterTerrainControlPanelMountOptions = Readonly<{
     container: HTMLElement
     location: Pick<Location, 'href' | 'replace'>
     onTileWireframeChange(enabled: boolean): void
     compact?: boolean
 }>
 
-type MountedDemControlPanel = Readonly<{
+type MountedUnderwaterTerrainControlPanel = Readonly<{
     dispose(): void
 }>
 
 type PrepareOptions = Readonly<{
     parameters: URLSearchParams
-    storage?: DemControlPanelStorage | null
+    storage?: UnderwaterTerrainControlPanelStorage | null
 }>
 
 type MutablePanelConfig = {
-    policy: DemCachePanelPolicy
+    policy: UnderwaterTerrainCachePanelPolicy
     namespace: string
     maxMiB: number
     maxEntries: number
-    persistence: DemCachePanelConfig['persistence']
+    persistence: UnderwaterTerrainCachePanelConfig['persistence']
 }
 
 type StoredValues = Readonly<{
@@ -58,7 +58,7 @@ type StoredValues = Readonly<{
     rendering: string | null
 }>
 
-const STORAGE_PROBE_KEY = `${DEM_CACHE_PANEL_STORAGE_KEY}.probe`
+const STORAGE_PROBE_KEY = `${UNDERWATER_TERRAIN_CACHE_PANEL_STORAGE_KEY}.probe`
 const POLICY_OPTIONS = Object.freeze({
     Disabled: 'disabled',
     Session: 'session',
@@ -70,26 +70,26 @@ const PERSISTENCE_OPTIONS = Object.freeze({
     Request: 'request',
 })
 
-export function prepareDemControlPanel(options: PrepareOptions): PreparedDemControlPanel {
+export function prepareUnderwaterTerrainControlPanel(options: PrepareOptions): PreparedUnderwaterTerrainControlPanel {
 
     const storage = options.storage === undefined ? browserStorage() : options.storage
     const stored = readStoredValues(storage)
-    const cache = resolveDemCachePanelConfig(options.parameters, stored.cache)
-    const rendering = resolveDemRenderingPreference(stored.rendering)
+    const cache = resolveUnderwaterTerrainCachePanelConfig(options.parameters, stored.cache)
+    const rendering = resolveUnderwaterTerrainRenderingPreference(stored.rendering)
     removeInvalidPreference(
         storage,
         cache.storageStatus,
-        DEM_CACHE_PANEL_STORAGE_KEY
+        UNDERWATER_TERRAIN_CACHE_PANEL_STORAGE_KEY
     )
     removeInvalidPreference(
         storage,
         rendering.storageStatus,
-        DEM_RENDERING_PREFERENCE_STORAGE_KEY
+        UNDERWATER_TERRAIN_RENDERING_PREFERENCE_STORAGE_KEY
     )
-    const storageStatus: PreparedDemControlPanel['storageStatus'] = stored.available
+    const storageStatus: PreparedUnderwaterTerrainControlPanel['storageStatus'] = stored.available
         ? cache.storageStatus
         : 'unavailable'
-    const renderingStorageStatus: PreparedDemControlPanel['renderingStorageStatus'] =
+    const renderingStorageStatus: PreparedUnderwaterTerrainControlPanel['renderingStorageStatus'] =
         stored.available ? rendering.storageStatus : 'unavailable'
     return Object.freeze({
         parameters: cache.parameters,
@@ -98,7 +98,7 @@ export function prepareDemControlPanel(options: PrepareOptions): PreparedDemCont
         storageStatus,
         renderingPreference: rendering.preference,
         renderingStorageStatus,
-        mount: (mountOptions: DemControlPanelMountOptions) => mountDemControlPanel({
+        mount: (mountOptions: UnderwaterTerrainControlPanelMountOptions) => mountUnderwaterTerrainControlPanel({
             ...mountOptions,
             config: cache.config,
             source: cache.source,
@@ -110,14 +110,14 @@ export function prepareDemControlPanel(options: PrepareOptions): PreparedDemCont
     })
 }
 
-function mountDemControlPanel(options: DemControlPanelMountOptions & Readonly<{
-    config: DemCachePanelConfig
-    source: PreparedDemControlPanel['source']
-    storage: DemControlPanelStorage | null
-    storageStatus: PreparedDemControlPanel['storageStatus']
-    renderingPreference: DemRenderingPreference
-    renderingStorageStatus: PreparedDemControlPanel['renderingStorageStatus']
-}>): MountedDemControlPanel {
+function mountUnderwaterTerrainControlPanel(options: UnderwaterTerrainControlPanelMountOptions & Readonly<{
+    config: UnderwaterTerrainCachePanelConfig
+    source: PreparedUnderwaterTerrainControlPanel['source']
+    storage: UnderwaterTerrainControlPanelStorage | null
+    storageStatus: PreparedUnderwaterTerrainControlPanel['storageStatus']
+    renderingPreference: UnderwaterTerrainRenderingPreference
+    renderingStorageStatus: PreparedUnderwaterTerrainControlPanel['renderingStorageStatus']
+}>): MountedUnderwaterTerrainControlPanel {
 
     const cacheDraft: MutablePanelConfig = { ...options.config }
     const renderingDraft = { ...options.renderingPreference }
@@ -129,12 +129,12 @@ function mountDemControlPanel(options: DemControlPanelMountOptions & Readonly<{
     let renderingStorageStatus = options.renderingStorageStatus
     let disposed = false
     const pane = new Pane({
-        title: 'DEM Layer',
+        title: 'Underwater Terrain',
         container: options.container,
         expanded: !(options.compact ?? false),
     })
     pane.element.style.width = '100%'
-    pane.element.dataset.demControlPane = 'ready'
+    pane.element.dataset.underwaterTerrainControlPane = 'ready'
 
     const rendering = pane.addFolder({ title: 'Rendering', expanded: true })
     const tileWireframe = rendering.addBinding(renderingDraft, 'tileWireframe', {
@@ -205,8 +205,8 @@ function mountDemControlPanel(options: DemControlPanelMountOptions & Readonly<{
         try {
             if (options.storage === null) throw new Error('localStorage unavailable')
             options.storage.setItem(
-                DEM_RENDERING_PREFERENCE_STORAGE_KEY,
-                serializeDemRenderingPreference({ tileWireframe: enabled })
+                UNDERWATER_TERRAIN_RENDERING_PREFERENCE_STORAGE_KEY,
+                serializeUnderwaterTerrainRenderingPreference({ tileWireframe: enabled })
             )
             renderingStorageStatus = 'valid'
         } catch {
@@ -224,7 +224,7 @@ function mountDemControlPanel(options: DemControlPanelMountOptions & Readonly<{
         for (const binding of advancedBindings) binding.disabled = disabled
         let valid = true
         try {
-            serializeDemCachePanelConfig(cacheDraft)
+            serializeUnderwaterTerrainCachePanelConfig(cacheDraft)
         } catch {
             valid = false
         }
@@ -253,11 +253,11 @@ function mountDemControlPanel(options: DemControlPanelMountOptions & Readonly<{
 
         if (disposed) return
         try {
-            const serialized = serializeDemCachePanelConfig(cacheDraft)
+            const serialized = serializeUnderwaterTerrainCachePanelConfig(cacheDraft)
             const url = new URL(options.location.href)
-            url.search = replaceDemCacheParameters(url.searchParams, cacheDraft).toString()
+            url.search = replaceUnderwaterTerrainCacheParameters(url.searchParams, cacheDraft).toString()
             try {
-                options.storage?.setItem(DEM_CACHE_PANEL_STORAGE_KEY, serialized)
+                options.storage?.setItem(UNDERWATER_TERRAIN_CACHE_PANEL_STORAGE_KEY, serialized)
             } catch {
                 storageAvailable = false
                 renderingStorageStatus = 'unavailable'
@@ -273,13 +273,13 @@ function mountDemControlPanel(options: DemControlPanelMountOptions & Readonly<{
 
         if (disposed) return
         try {
-            options.storage?.removeItem(DEM_CACHE_PANEL_STORAGE_KEY)
+            options.storage?.removeItem(UNDERWATER_TERRAIN_CACHE_PANEL_STORAGE_KEY)
         } catch {
             storageAvailable = false
             renderingStorageStatus = 'unavailable'
         }
         const url = new URL(options.location.href)
-        url.search = removeDemCacheParameters(url.searchParams).toString()
+        url.search = removeUnderwaterTerrainCacheParameters(url.searchParams).toString()
         options.location.replace(url.href)
     }
 
@@ -300,7 +300,7 @@ function mountDemControlPanel(options: DemControlPanelMountOptions & Readonly<{
     })
 }
 
-function browserStorage(): DemControlPanelStorage | null {
+function browserStorage(): UnderwaterTerrainControlPanelStorage | null {
 
     if (typeof window === 'undefined') return null
     try {
@@ -310,7 +310,7 @@ function browserStorage(): DemControlPanelStorage | null {
     }
 }
 
-function readStoredValues(storage: DemControlPanelStorage | null): StoredValues {
+function readStoredValues(storage: UnderwaterTerrainControlPanelStorage | null): StoredValues {
 
     if (storage === null) {
         return Object.freeze({ available: false, cache: null, rendering: null })
@@ -320,8 +320,8 @@ function readStoredValues(storage: DemControlPanelStorage | null): StoredValues 
         storage.removeItem(STORAGE_PROBE_KEY)
         return Object.freeze({
             available: true,
-            cache: storage.getItem(DEM_CACHE_PANEL_STORAGE_KEY),
-            rendering: storage.getItem(DEM_RENDERING_PREFERENCE_STORAGE_KEY),
+            cache: storage.getItem(UNDERWATER_TERRAIN_CACHE_PANEL_STORAGE_KEY),
+            rendering: storage.getItem(UNDERWATER_TERRAIN_RENDERING_PREFERENCE_STORAGE_KEY),
         })
     } catch {
         return Object.freeze({ available: false, cache: null, rendering: null })
@@ -329,7 +329,7 @@ function readStoredValues(storage: DemControlPanelStorage | null): StoredValues 
 }
 
 function removeInvalidPreference(
-    storage: DemControlPanelStorage | null,
+    storage: UnderwaterTerrainControlPanelStorage | null,
     status: 'missing' | 'valid' | 'invalid',
     key: string
 ) {
@@ -342,7 +342,7 @@ function removeInvalidPreference(
     }
 }
 
-function preferenceLabel(status: PreparedDemControlPanel['storageStatus']): string {
+function preferenceLabel(status: PreparedUnderwaterTerrainControlPanel['storageStatus']): string {
 
     switch (status) {
         case 'missing': return 'Local preference ready'
@@ -352,7 +352,7 @@ function preferenceLabel(status: PreparedDemControlPanel['storageStatus']): stri
     }
 }
 
-function sameConfig(left: MutablePanelConfig, right: DemCachePanelConfig): boolean {
+function sameConfig(left: MutablePanelConfig, right: UnderwaterTerrainCachePanelConfig): boolean {
 
     return left.policy === right.policy &&
         left.namespace === right.namespace &&
@@ -363,5 +363,5 @@ function sameConfig(left: MutablePanelConfig, right: DemCachePanelConfig): boole
 
 function tag(api: { element: HTMLElement }, name: string): void {
 
-    api.element.dataset.demControl = name
+    api.element.dataset.underwaterTerrainControl = name
 }

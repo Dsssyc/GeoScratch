@@ -5,38 +5,38 @@ import {
 } from './dem-cache-policy.ts'
 import type { DemCachePolicy } from './dem-tile-protocol.ts'
 
-export type DemCachePanelPolicy =
+export type UnderwaterTerrainCachePanelPolicy =
     | 'disabled'
     | 'session'
     | 'durable'
     | 'clear-on-open'
 
-export type DemCachePanelConfig = Readonly<{
-    policy: DemCachePanelPolicy
+export type UnderwaterTerrainCachePanelConfig = Readonly<{
+    policy: UnderwaterTerrainCachePanelPolicy
     namespace: string
     maxMiB: number
     maxEntries: number
     persistence: 'best-effort' | 'request'
 }>
 
-export type DemRenderingPreference = Readonly<{
+export type UnderwaterTerrainRenderingPreference = Readonly<{
     tileWireframe: boolean
 }>
 
-type DemCachePanelResolution = Readonly<{
+type UnderwaterTerrainCachePanelResolution = Readonly<{
     source: 'url' | 'storage' | 'default'
     storageStatus: 'missing' | 'valid' | 'invalid'
-    config: DemCachePanelConfig
+    config: UnderwaterTerrainCachePanelConfig
     parameters: URLSearchParams
 }>
 
-type DemRenderingPreferenceResolution = Readonly<{
-    preference: DemRenderingPreference
+type UnderwaterTerrainRenderingPreferenceResolution = Readonly<{
+    preference: UnderwaterTerrainRenderingPreference
     storageStatus: 'missing' | 'valid' | 'invalid'
 }>
 
 type StoredCacheConfigRead =
-    | Readonly<{ status: 'valid'; config: DemCachePanelConfig }>
+    | Readonly<{ status: 'valid'; config: UnderwaterTerrainCachePanelConfig }>
     | Readonly<{ status: 'missing' | 'invalid' }>
 
 const MEBIBYTE = 1024 * 1024
@@ -54,25 +54,27 @@ const POLICIES = Object.freeze(new Set<unknown>([
     'clear-on-open',
 ]))
 const PERSISTENCE_VALUES = Object.freeze(new Set<unknown>([ 'best-effort', 'request' ]))
-const DEFAULT_RENDERING_PREFERENCE: DemRenderingPreference = Object.freeze({
+const DEFAULT_RENDERING_PREFERENCE: UnderwaterTerrainRenderingPreference = Object.freeze({
     tileWireframe: false,
 })
 
-export const DEM_CACHE_PANEL_STORAGE_KEY = 'geoscratch.examples.dem.cache-panel.v1'
-export const DEM_RENDERING_PREFERENCE_STORAGE_KEY =
-    'geoscratch.examples.demLayer.rendering.v1'
-export const DEM_CACHE_PANEL_DEFAULT_CONFIG: DemCachePanelConfig = Object.freeze({
-    policy: 'disabled',
-    namespace: DEM_CACHE_POLICY_DEFAULTS.namespace,
-    maxMiB: DEM_CACHE_POLICY_DEFAULTS.maxMiB,
-    maxEntries: DEM_CACHE_POLICY_DEFAULTS.maxEntries,
-    persistence: DEM_CACHE_POLICY_DEFAULTS.persistence,
-})
+export const UNDERWATER_TERRAIN_CACHE_PANEL_STORAGE_KEY =
+    'geoscratch.examples.underwaterTerrain.cache-panel.v1'
+export const UNDERWATER_TERRAIN_RENDERING_PREFERENCE_STORAGE_KEY =
+    'geoscratch.examples.underwaterTerrain.rendering.v1'
+export const UNDERWATER_TERRAIN_CACHE_PANEL_DEFAULT_CONFIG:
+    UnderwaterTerrainCachePanelConfig = Object.freeze({
+        policy: 'disabled',
+        namespace: DEM_CACHE_POLICY_DEFAULTS.namespace,
+        maxMiB: DEM_CACHE_POLICY_DEFAULTS.maxMiB,
+        maxEntries: DEM_CACHE_POLICY_DEFAULTS.maxEntries,
+        persistence: DEM_CACHE_POLICY_DEFAULTS.persistence,
+    })
 
-export function resolveDemCachePanelConfig(
+export function resolveUnderwaterTerrainCachePanelConfig(
     current: URLSearchParams,
     stored: string | null
-): DemCachePanelResolution {
+): UnderwaterTerrainCachePanelResolution {
 
     const storedRead = readStoredCacheConfig(stored)
     if (hasExplicitCacheParameters(current)) {
@@ -88,29 +90,29 @@ export function resolveDemCachePanelConfig(
             source: 'storage',
             storageStatus: storedRead.status,
             config: storedRead.config,
-            parameters: replaceDemCacheParameters(current, storedRead.config),
+            parameters: replaceUnderwaterTerrainCacheParameters(current, storedRead.config),
         })
     }
     return Object.freeze({
         source: 'default',
         storageStatus: storedRead.status,
-        config: DEM_CACHE_PANEL_DEFAULT_CONFIG,
+        config: UNDERWATER_TERRAIN_CACHE_PANEL_DEFAULT_CONFIG,
         parameters: new URLSearchParams(current),
     })
 }
 
-export function serializeDemCachePanelConfig(config: DemCachePanelConfig): string {
+export function serializeUnderwaterTerrainCachePanelConfig(config: UnderwaterTerrainCachePanelConfig): string {
 
     return JSON.stringify({ schemaVersion: 1, config: normalizeCacheConfig(config) })
 }
 
-export function replaceDemCacheParameters(
+export function replaceUnderwaterTerrainCacheParameters(
     current: URLSearchParams,
-    config: DemCachePanelConfig
+    config: UnderwaterTerrainCachePanelConfig
 ): URLSearchParams {
 
     const normalized = normalizeCacheConfig(config)
-    const result = removeDemCacheParameters(current)
+    const result = removeUnderwaterTerrainCacheParameters(current)
     if (normalized.policy === 'disabled') {
         result.append('cache', 'none')
         return result
@@ -125,16 +127,16 @@ export function replaceDemCacheParameters(
     return result
 }
 
-export function removeDemCacheParameters(current: URLSearchParams): URLSearchParams {
+export function removeUnderwaterTerrainCacheParameters(current: URLSearchParams): URLSearchParams {
 
     const result = new URLSearchParams(current)
     for (const name of DEM_CACHE_PARAMETER_NAMES) result.delete(name)
     return result
 }
 
-export function resolveDemRenderingPreference(
+export function resolveUnderwaterTerrainRenderingPreference(
     serialized: string | null
-): DemRenderingPreferenceResolution {
+): UnderwaterTerrainRenderingPreferenceResolution {
 
     if (serialized === null) {
         return Object.freeze({
@@ -147,7 +149,7 @@ export function resolveDemRenderingPreference(
         if (!plainObject(value) || value.version !== 1 ||
             typeof value.tileWireframe !== 'boolean' ||
             !exactKeys(value, [ 'version', 'tileWireframe' ])) {
-            throw new TypeError('DEM rendering preference version is invalid')
+            throw new TypeError('Underwater Terrain rendering preference version is invalid')
         }
         return Object.freeze({
             preference: Object.freeze({ tileWireframe: value.tileWireframe }),
@@ -161,13 +163,15 @@ export function resolveDemRenderingPreference(
     }
 }
 
-export function serializeDemRenderingPreference(
-    preference: DemRenderingPreference
+export function serializeUnderwaterTerrainRenderingPreference(
+    preference: UnderwaterTerrainRenderingPreference
 ): string {
 
     if (!plainObject(preference) || typeof preference.tileWireframe !== 'boolean' ||
         !exactKeys(preference, [ 'tileWireframe' ])) {
-        throw new TypeError('DEM rendering preference tileWireframe must be boolean')
+        throw new TypeError(
+            'Underwater Terrain rendering preference tileWireframe must be boolean'
+        )
     }
     return JSON.stringify({ version: 1, tileWireframe: preference.tileWireframe })
 }
@@ -190,20 +194,20 @@ function readStoredCacheConfig(stored: string | null): StoredCacheConfigRead {
     }
 }
 
-function normalizeCacheConfig(value: unknown): DemCachePanelConfig {
+function normalizeCacheConfig(value: unknown): UnderwaterTerrainCachePanelConfig {
 
     if (!plainObject(value) || !exactKeys(value, CONFIG_KEYS) ||
         !POLICIES.has(value.policy) || typeof value.namespace !== 'string' ||
         !Number.isSafeInteger(value.maxMiB) || !Number.isSafeInteger(value.maxEntries) ||
         !PERSISTENCE_VALUES.has(value.persistence)) {
-        throw new TypeError('DEM cache panel configuration is invalid')
+        throw new TypeError('Underwater Terrain cache panel configuration is invalid')
     }
-    const normalized: DemCachePanelConfig = Object.freeze({
-        policy: value.policy as DemCachePanelPolicy,
+    const normalized: UnderwaterTerrainCachePanelConfig = Object.freeze({
+        policy: value.policy as UnderwaterTerrainCachePanelPolicy,
         namespace: value.namespace,
         maxMiB: value.maxMiB as number,
         maxEntries: value.maxEntries as number,
-        persistence: value.persistence as DemCachePanelConfig['persistence'],
+        persistence: value.persistence as UnderwaterTerrainCachePanelConfig['persistence'],
     })
     const parameters = new URLSearchParams([
         [ 'cache', 'persistent' ],
@@ -217,9 +221,9 @@ function normalizeCacheConfig(value: unknown): DemCachePanelConfig {
     return normalized
 }
 
-function panelConfigFromPolicy(policy: DemCachePolicy): DemCachePanelConfig {
+function panelConfigFromPolicy(policy: DemCachePolicy): UnderwaterTerrainCachePanelConfig {
 
-    if (policy.mode === 'none') return DEM_CACHE_PANEL_DEFAULT_CONFIG
+    if (policy.mode === 'none') return UNDERWATER_TERRAIN_CACHE_PANEL_DEFAULT_CONFIG
     return Object.freeze({
         policy: policy.lifecycle.kind === 'session'
             ? 'session'
@@ -233,7 +237,7 @@ function panelConfigFromPolicy(policy: DemCachePolicy): DemCachePanelConfig {
     })
 }
 
-function lifecycleValue(policy: Exclude<DemCachePanelPolicy, 'disabled'>): string {
+function lifecycleValue(policy: Exclude<UnderwaterTerrainCachePanelPolicy, 'disabled'>): string {
 
     switch (policy) {
         case 'session': return 'session'

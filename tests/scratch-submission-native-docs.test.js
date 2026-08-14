@@ -299,9 +299,9 @@ describe('scratch submission native outcome documentation', () => {
         }
     })
 
-    it('moves the final DEM example onto observed current submissions', () => {
+    it('moves Underwater Terrain onto observed current submissions', () => {
 
-        const main = read('examples', 'demLayer', 'main.ts')
+        const main = read('examples', 'underwaterTerrain', 'main.ts')
         const renderer = read(
             'packages', 'geoscratch', 'src', 'geo', 'web-mercator-terrain-renderer.ts'
         )

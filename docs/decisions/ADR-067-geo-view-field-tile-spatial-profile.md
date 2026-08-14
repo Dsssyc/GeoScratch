@@ -117,7 +117,7 @@ GeoField
 ```
 
 It intentionally has no lifecycle methods and owns no runtime, cache, Worker,
-scheduler, atlas, pipeline, or submission. The DEM example remains the owner of those
+scheduler, atlas, pipeline, or submission. The Underwater Terrain example remains the owner of those
 objects and uses the layer only as an explicit composition boundary.
 
 ## Consequences

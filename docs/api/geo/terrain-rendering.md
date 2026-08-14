@@ -42,5 +42,6 @@ modules never read a CPU-selected tile list or round-trip draw counts through th
 
 The renderer does not own a map host, camera controller, source manifest, network
 transport, decoder, Worker system, or application cache policy. Those remain explicit
-composition inputs. The DEM example therefore owns source-specific loading and
-decoding, map/UI assembly, cache-budget choice, and its fragment presentation only.
+composition inputs. The Underwater Terrain example therefore owns source-specific
+loading and decoding, map/UI assembly, cache-budget choice, and its fragment
+presentation only.

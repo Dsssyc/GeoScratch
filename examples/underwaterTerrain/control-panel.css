@@ -1,4 +1,4 @@
-#DemControlPanel {
+#UnderwaterTerrainControlPanel {
     --tp-base-background-color: hsla(216, 18%, 12%, 0.96);
     --tp-base-shadow-color: hsla(220, 30%, 2%, 0.42);
     --tp-button-background-color: hsl(180, 32%, 29%);
@@ -28,26 +28,26 @@
     pointer-events: auto;
 }
 
-#DemControlPanel:empty {
+#UnderwaterTerrainControlPanel:empty {
     display: none;
 }
 
-#DemControlPanel [data-dem-control="status"] input,
-#DemControlPanel [data-dem-control="preference"] input {
+#UnderwaterTerrainControlPanel [data-underwater-terrain-control="status"] input,
+#UnderwaterTerrainControlPanel [data-underwater-terrain-control="preference"] input {
     font-size: 10px;
 }
 
-#DemControlPanel [data-dem-control="apply"] button {
+#UnderwaterTerrainControlPanel [data-underwater-terrain-control="apply"] button {
     font-weight: 650;
 }
 
-#DemControlPanel [data-dem-control="reset"] button {
+#UnderwaterTerrainControlPanel [data-underwater-terrain-control="reset"] button {
     border: 1px solid hsla(210, 12%, 68%, 0.22);
     background: transparent;
 }
 
 @media (max-width: 640px) {
-    #DemControlPanel {
+    #UnderwaterTerrainControlPanel {
         top: 8px;
         right: 8px;
         width: min(304px, calc(100vw - 16px));

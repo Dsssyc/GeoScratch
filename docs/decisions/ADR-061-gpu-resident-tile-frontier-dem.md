@@ -10,7 +10,7 @@ Accepted
 
 ## Context
 
-The DEM example previously traversed an application-owned quadtree on the CPU,
+The Underwater Terrain example previously traversed an application-owned quadtree on the CPU,
 materialized visible node arrays and indirect counts, then uploaded those facts every
 frame. That path could render the original finite dataset, but it made camera movement,
 LoD budgeting, residency handoff, and draw count authority CPU responsibilities. It
@@ -43,7 +43,7 @@ and
   screen-space-error evaluation, hysteresis, level-difference-one balance, bounded
   transition arbitration, canonical compaction, visible instances, page demands,
   retirements, diagnostics, and indirect dispatch/draw arguments.
-- The DEM example owns its WebMercator camera adapter, per-level geometric error and
+- The Underwater Terrain example owns its WebMercator camera adapter, per-level geometric error and
   elevation range, page-to-patch interpretation, terrain shaders, and mesh-stitching.
 - The CPU event path continues to own network fetch, Worker execution, optional cache,
   decoded-payload transfer, residency publication, and `SubmittedWork`
@@ -91,7 +91,7 @@ facts count only demands admitted to the bounded scheduler set.
 
 ### Clean cut
 
-`examples/demLayer/terrain-selection.ts` and the CPU node/box/count upload path are
+`examples/underwaterTerrain/terrain-selection.ts` and the CPU node/box/count upload path are
 deleted. During `0.x.x` there is no compatibility flag, alternate route, or hidden CPU
 selector. `gpu-tile-frontier-reference.ts` remains a test-only deterministic oracle;
 it is not a production fallback.

@@ -14,11 +14,11 @@ import {
 } from 'geoscratch/geo'
 import {
     createDemTileSource,
-} from '../examples/demLayer/dem-source.ts'
+} from '../examples/underwaterTerrain/dem-source.ts'
 import {
     demCacheConfigurationForShard,
-} from '../examples/demLayer/dem-tile-executor.ts'
-import { demMapViewAdapter } from '../examples/demLayer/dem-map.ts'
+} from '../examples/underwaterTerrain/dem-tile-executor.ts'
+import { underwaterTerrainViewAdapter } from '../examples/underwaterTerrain/map.ts'
 import {
     createFakeCanvas,
     createFakeGpu,
@@ -155,7 +155,7 @@ function createTestFieldLayer(virtualRaster) {
         field: virtualRaster.field,
         representation: virtualRaster.representation,
         spatialProfile: virtualRaster.spatialProfile,
-        viewAdapter: demMapViewAdapter,
+        viewAdapter: underwaterTerrainViewAdapter,
         demandProducer: virtualRaster.viewDemandProducer,
     })
 }
@@ -175,7 +175,7 @@ function createTestTerrainRenderer({
         virtualRaster,
         size,
         presentationShader: read(
-            'examples', 'demLayer', 'shaders', 'terrain-presentation.wgsl'
+            'examples', 'underwaterTerrain', 'shaders', 'terrain-presentation.wgsl'
         ),
         fieldSampling: {
             namespace: 'DemHeight',
@@ -188,12 +188,16 @@ function createTestTerrainRenderer({
         ].sort((left, right) => left - right),
         exaggeration: 50,
         presentations: [
-            { id: 'shaded', fragmentEntryPoint: 'fMain', label: 'DEM terrain pipeline' },
+            {
+                id: 'shaded',
+                fragmentEntryPoint: 'fMain',
+                label: 'Underwater Terrain pipeline',
+            },
             {
                 id: 'tile-wireframe',
                 fragmentEntryPoint:
                     WEB_MERCATOR_TERRAIN_TILE_WIREFRAME_FRAGMENT_ENTRY_POINT,
-                label: 'DEM tile wireframe pipeline',
+                label: 'Underwater Terrain tile wireframe pipeline',
             },
         ],
         initialPresentation: 'shaded',
@@ -201,7 +205,7 @@ function createTestTerrainRenderer({
     })
 }
 
-describe('DEM Layer clean cut', () => {
+describe('Underwater Terrain clean cut', () => {
 
     it('consumes Geo-owned projected-grid render patches after the data frontier', () => {
 
@@ -218,7 +222,7 @@ describe('DEM Layer clean cut', () => {
             'packages', 'geoscratch', 'src', 'geo', 'web-mercator-terrain-wgsl.ts'
         )
         const terrainShader = read(
-            'examples', 'demLayer', 'shaders', 'terrain-presentation.wgsl'
+            'examples', 'underwaterTerrain', 'shaders', 'terrain-presentation.wgsl'
         )
 
         expect(layerSource).to.include('createGpuRenderPatchFrontier(')
@@ -278,20 +282,20 @@ describe('DEM Layer clean cut', () => {
         expect(fs.existsSync(path.join(
             root,
             'examples',
-            'demLayer',
+            'underwaterTerrain',
             'dem-render-patch-frontier.ts'
         ))).to.equal(false)
         expect(fs.existsSync(path.join(
             root,
             'examples',
-            'demLayer',
+            'underwaterTerrain',
             'shaders',
             'render-patch-frontier.wgsl'
         ))).to.equal(false)
         expect(fs.existsSync(path.join(
             root,
             'examples',
-            'demLayer',
+            'underwaterTerrain',
             'shaders',
             'lod-map.wgsl'
         ))).to.equal(false)
@@ -302,8 +306,8 @@ describe('DEM Layer clean cut', () => {
         const layerSource = read(
             'packages', 'geoscratch', 'src', 'geo', 'web-mercator-terrain-renderer.ts'
         )
-        const virtualRasterSource = read('examples', 'demLayer', 'dem-source.ts')
-        const mapSource = read('examples', 'demLayer', 'dem-map.ts')
+        const virtualRasterSource = read('examples', 'underwaterTerrain', 'dem-source.ts')
+        const mapSource = read('examples', 'underwaterTerrain', 'map.ts')
         const mapAdapterSource = read(
             'packages', 'geoscratch', 'src', 'geo', 'maplibre-planar-view.ts'
         )
@@ -326,7 +330,7 @@ describe('DEM Layer clean cut', () => {
         expect(mapAdapterSource).to.include('zoomHint')
         expect(mapAdapterSource).to.include('minimumElevationMeters')
         const browserProofAdapter = read(
-            'tests', 'browser', 'support', 'dem-layer-proof.ts'
+            'tests', 'browser', 'support', 'underwater-terrain-proof.ts'
         )
         expect(browserProofAdapter).to.include(
             'canvas.dataset.cpuSelectionUploadCount = \'0\''
@@ -338,24 +342,24 @@ describe('DEM Layer clean cut', () => {
 
     it('separates DEM cache policy, pure control state, and browser panel ownership', () => {
 
-        const policy = read('examples', 'demLayer', 'dem-cache-policy.ts')
-        const state = read('examples', 'demLayer', 'dem-control-state.ts')
-        const panel = read('examples', 'demLayer', 'dem-control-panel.ts')
-        const main = read('examples', 'demLayer', 'main.ts')
+        const policy = read('examples', 'underwaterTerrain', 'dem-cache-policy.ts')
+        const state = read('examples', 'underwaterTerrain', 'control-state.ts')
+        const panel = read('examples', 'underwaterTerrain', 'control-panel.ts')
+        const main = read('examples', 'underwaterTerrain', 'main.ts')
 
         expect(fs.existsSync(path.join(
             root,
             'examples',
-            'demLayer',
+            'underwaterTerrain',
             'dem-controls.ts'
         ))).to.equal(false)
         expect(policy).not.to.match(/tweakpane|\b(?:window|document|Storage|HTMLElement|Location)\b/)
         expect(state).not.to.match(/tweakpane|\b(?:window|document|Storage|HTMLElement|Location)\b/)
         expect(panel).to.include("from 'tweakpane'")
         expect(panel).to.include("from './dem-cache-policy.ts'")
-        expect(panel).to.include("from './dem-control-state.ts'")
+        expect(panel).to.include("from './control-state.ts'")
         expect(main).to.include("from './dem-cache-policy.ts'")
-        expect(main).to.include("from './dem-control-panel.ts'")
+        expect(main).to.include("from './control-panel.ts'")
         expect(main).not.to.include("from './dem-controls.ts'")
     })
 
@@ -390,7 +394,7 @@ describe('DEM Layer clean cut', () => {
 
     it('keeps one DEM source authority and delegates executor disposal to Geo', () => {
 
-        const source = read('examples', 'demLayer', 'dem-source.ts')
+        const source = read('examples', 'underwaterTerrain', 'dem-source.ts')
         const tileUrlBody = source.slice(
             source.lastIndexOf('tileUrl(page: VirtualRasterPageIdentity)'),
             source.indexOf('/** Fetches the mutable manifest endpoint')
@@ -399,7 +403,7 @@ describe('DEM Layer clean cut', () => {
         expect(fs.existsSync(path.join(
             root,
             'examples',
-            'demLayer',
+            'underwaterTerrain',
             'dem-virtual-raster.ts'
         ))).to.equal(false)
         expect((source.match(/parseDemVirtualRasterManifest\(/g) ?? [])).to.have.length(2)
@@ -413,8 +417,8 @@ describe('DEM Layer clean cut', () => {
 
     it('uses the neutral route and removes every legacy DEM owner', () => {
 
-        expect(fs.existsSync(path.join(root, 'examples', 'demLayer', 'index.html'))).to.equal(true)
-        expect(fs.existsSync(path.join(root, 'examples', 'demLayer', 'terrain-selection.ts')))
+        expect(fs.existsSync(path.join(root, 'examples', 'underwaterTerrain', 'index.html'))).to.equal(true)
+        expect(fs.existsSync(path.join(root, 'examples', 'underwaterTerrain', 'terrain-selection.ts')))
             .to.equal(false)
         expect(fs.existsSync(path.join(root, 'examples', 'm_demLayer'))).to.equal(false)
         expect(fs.existsSync(path.join(root, 'examples', 'shared', 'scratchMap.js'))).to.equal(false)
@@ -426,7 +430,7 @@ describe('DEM Layer clean cut', () => {
         const layerSource = read(
             'packages', 'geoscratch', 'src', 'geo', 'web-mercator-terrain-renderer.ts'
         )
-        const mainSource = read('examples', 'demLayer', 'main.ts')
+        const mainSource = read('examples', 'underwaterTerrain', 'main.ts')
         const frameSource = layerSource.slice(
             layerSource.indexOf('async function renderFrame(input: ViewInput)'),
             layerSource.indexOf('async function resize(nextSize: SurfaceSize)')
@@ -434,7 +438,7 @@ describe('DEM Layer clean cut', () => {
         const allSources = [
             layerSource,
             mainSource,
-            read('examples', 'demLayer', 'dem-map.ts'),
+            read('examples', 'underwaterTerrain', 'map.ts'),
         ].join('\n')
 
         for (const call of [
@@ -469,15 +473,15 @@ describe('DEM Layer clean cut', () => {
 
     it('locks the finite initialization faults and required migration documentation', () => {
 
-        const mainSource = read('examples', 'demLayer', 'main.ts')
+        const mainSource = read('examples', 'underwaterTerrain', 'main.ts')
         const lifecycleCreation = mainSource.indexOf(
-            "const pageLifetime = new LifetimeScope({ label: 'dem-page' })"
+            "const pageLifetime = new LifetimeScope({ label: 'underwater-terrain-page' })"
         )
         const pageHideRegistration = mainSource.indexOf("window.addEventListener('pagehide'")
         const initializationStart = mainSource.indexOf(
             'loadProof().then(loadedProof => {'
         )
-        const proofAdapter = read('tests', 'browser', 'support', 'dem-layer-proof.ts')
+        const proofAdapter = read('tests', 'browser', 'support', 'underwater-terrain-proof.ts')
         const frameController = read(
             'packages', 'geoscratch', 'src', 'geo', 'frame-controller.ts'
         )
@@ -495,7 +499,7 @@ describe('DEM Layer clean cut', () => {
         expect(proofAdapter).to.include('retainsWgslSource')
         expect(mainSource).to.include("activeProof?.reach('after-map-acquisition')")
         expect(mainSource).to.include('activeProof?.beforeTerrainShaderModule(runtime)')
-        expect(mainSource).to.include("'dem-page-initialization'")
+        expect(mainSource).to.include("'underwater-terrain-page-initialization'")
         expect(mainSource).to.include('const frameController = createGeoFrameController({')
         expect(mainSource).to.include('track: (work, label) => lifetime.track(work, label)')
         expect(mainSource).not.to.include('requestAnimationFrame(')
@@ -503,14 +507,14 @@ describe('DEM Layer clean cut', () => {
 
         for (const documentation of [
             'docs/decisions/ADR-045-dem-layer-scratch-api-clean-cut.md',
-            'docs/review/scratch-dem-layer-migration-audit.md',
-            'tests/browser/scratch-dem-layer.mjs',
+            'docs/review/scratch-underwater-terrain-migration-audit.md',
+            'tests/browser/scratch-underwater-terrain.mjs',
         ]) {
             expect(fs.existsSync(path.join(root, documentation)), documentation).to.equal(true)
         }
         const review = read('docs', 'review', 'scratch-api-intelligent-friendly-review.md')
-        const audit = read('docs', 'review', 'scratch-dem-layer-migration-audit.md')
-        expect(review).to.include('DEM Layer Persistent Graph And Application-Owned LoD')
+        const audit = read('docs', 'review', 'scratch-underwater-terrain-migration-audit.md')
+        expect(review).to.include('Underwater Terrain Persistent Graph And Application-Owned LoD')
         expect(audit).to.include('## One-To-One Source Matrix')
         expect(audit).to.include('## Managed Browser Evidence')
 
@@ -521,22 +525,22 @@ describe('DEM Layer clean cut', () => {
             'packages/geoscratch/README_zh.md',
         ]) {
             const source = read(...documentation.split('/'))
-            expect(source).to.include('| DEM Layer | `examples/demLayer/` |')
-            expect(source).not.to.include('DEM Layer (legacy)')
+            expect(source).to.include('| Underwater Terrain | `examples/underwaterTerrain/` |')
+            expect(source).not.to.include('Underwater Terrain (legacy)')
             expect(source).not.to.include('m_demLayer')
         }
     })
 
     it('preserves the DEM payload and enumerates every reachable WGSL correction', () => {
 
-        const demBytes = fs.readFileSync(path.join(root, 'examples', 'demLayer', 'assets', 'dem.png'))
+        const demBytes = fs.readFileSync(path.join(root, 'examples', 'underwaterTerrain', 'assets', 'dem.png'))
         const terrainShader = read(
-            'examples', 'demLayer', 'shaders', 'terrain-presentation.wgsl'
+            'examples', 'underwaterTerrain', 'shaders', 'terrain-presentation.wgsl'
         )
         const terrainModule = read(
             'packages', 'geoscratch', 'src', 'geo', 'web-mercator-terrain-wgsl.ts'
         )
-        const browserProof = read('tests', 'browser', 'scratch-dem-layer.mjs')
+        const browserProof = read('tests', 'browser', 'scratch-underwater-terrain.mjs')
 
         expect(sha256(demBytes)).to.equal('aa7a584830f198772d242df1ce1ae47e21b2bdc85bfc1f97101af8be986c57e1')
         expect(terrainShader).not.to.include('var<storage')
@@ -554,7 +558,7 @@ describe('DEM Layer clean cut', () => {
         const layer = read(
             'packages', 'geoscratch', 'src', 'geo', 'web-mercator-terrain-renderer.ts'
         )
-        const main = read('examples', 'demLayer', 'main.ts')
+        const main = read('examples', 'underwaterTerrain', 'main.ts')
         expect(layer).not.to.include('createExternalImageUploadCommand')
         expect(layer).not.to.include('DEM elevation texture')
         expect(main).not.to.include("./assets/dem.png")
@@ -569,12 +573,12 @@ describe('DEM Layer clean cut', () => {
         const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const fakeCanvas = createFakeCanvas()
         const surface = runtime.createSurface(fakeCanvas.canvas, {
-            label: 'DEM provenance-failure surface',
+            label: 'Underwater Terrain provenance-failure surface',
             format: 'rgba8unorm',
             alphaMode: 'premultiplied',
             size: { width: 320, height: 180 },
         })
-        const provenanceFailure = new Error('injected DEM provenance mismatch')
+        const provenanceFailure = new Error('injected Underwater Terrain provenance mismatch')
         const virtualRaster = await createTestVirtualRaster(runtime)
         const graph = await createTestTerrainRenderer({
             runtime,
@@ -604,13 +608,13 @@ describe('DEM Layer clean cut', () => {
         await runtime.dispose()
     })
 
-    it('keeps one persistent DEM graph across camera changes and resize', async() => {
+    it('keeps one persistent Underwater Terrain graph across camera changes and resize', async() => {
 
         const fake = createFakeGpu()
         const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const fakeCanvas = createFakeCanvas()
         const surface = runtime.createSurface(fakeCanvas.canvas, {
-            label: 'DEM test surface',
+            label: 'Underwater Terrain test surface',
             format: 'rgba8unorm',
             alphaMode: 'premultiplied',
             size: { width: 320, height: 180 },
@@ -644,16 +648,16 @@ describe('DEM Layer clean cut', () => {
 
         expect(second.needsFollowUp).to.equal(true)
         expect(second.feedback).to.equal(undefined)
-        expect(shadedPipelineLabel).to.equal('DEM terrain pipeline')
-        expect(wireframePipelineLabel).to.equal('DEM tile wireframe pipeline')
-        expect(restoredPipelineLabel).to.equal('DEM terrain pipeline')
+        expect(shadedPipelineLabel).to.equal('Underwater Terrain pipeline')
+        expect(wireframePipelineLabel).to.equal('Underwater Terrain tile wireframe pipeline')
+        expect(restoredPipelineLabel).to.equal('Underwater Terrain pipeline')
         expect(graph.state().terrainPresentation).to.equal('shaded')
         expect(fake.calls.renderPipelines.map(pipeline => (
             logicalPipelineLabel(pipeline.descriptor.label)
         )))
             .to.deep.equal([
-                'DEM terrain pipeline',
-                'DEM tile wireframe pipeline',
+                'Underwater Terrain pipeline',
+                'Underwater Terrain tile wireframe pipeline',
             ])
 
         expect(first.provenance.map(fact => fact.name)).to.deep.equal([

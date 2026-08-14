@@ -286,9 +286,9 @@ The bounded five-scenario proof closes the specific Hello GAW initialization lea
 does not justify a generic disposable stack in Scratch core, automatic lifecycle
 repair, OOM attribution, device-loss recovery, or an unbounded always-on trace.
 
-### DEM Layer Persistent Graph And Application-Owned LoD
+### Underwater Terrain Persistent Graph And Application-Owned LoD
 
-The DEM Layer clean cut is a closer rendering-business test than a synthetic API
+The Underwater Terrain clean cut is a closer rendering-business test than a synthetic API
 probe: MapLibre camera state drives a persistent GPU data frontier, a second bounded
 GPU projected-grid render frontier, virtual-raster sampling, and a native indirect
 terrain draw. The implementation keeps 71 Scratch identities stable across camera
@@ -320,7 +320,7 @@ and for an Agent reviewing it:
   MapLibre, ImageBitmap, listeners, or frame scheduling.
 
 The exercise also identifies responsibilities that correctly remain above Scratch.
-Geo owns the data-page frontier and virtual-raster contracts; the DEM example owns its
+Geo owns the data-page frontier and virtual-raster contracts; the Underwater Terrain example owns its
 eight-pixel projected cell-span policy, `z14` ceiling, 64-sector mesh, patch hashing,
 and stitching.
 The map host owns camera interpretation and the normal basemap. The page lifecycle owns

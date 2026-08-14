@@ -12,7 +12,7 @@ Accepted
 
 The first reusable terrain extraction moved scheduling, GPU frontiers, indirect draw,
 feedback, resize, and lifecycle into Geo, but left the complete terrain vertex shader
-in the DEM example. That shader still owned logical render-patch lookup, mixed-LoD
+in the Underwater Terrain example. That shader still owned logical render-patch lookup, mixed-LoD
 neighbor resolution, mesh stitching, wide-fixed camera-relative positioning, and
 Virtual Raster height sampling. The example therefore remained a second implementation
 authority for mechanisms that every Web Mercator terrain consumer requires.
@@ -39,7 +39,7 @@ renderer.
 
 Applications may append presentation WGSL containing fragment entry points and helper
 functions. They do not reimplement vertex generation, patch lookup, stitching, or
-height sampling. The DEM presentation shader is consequently fragment-only.
+height sampling. The Underwater Terrain presentation shader is consequently fragment-only.
 
 The old `TerrainFieldRenderer` names and `shader` descriptor property are removed.
 There is no compatibility alias. The Web Mercator API uses
@@ -48,7 +48,7 @@ There is no compatibility alias. The Web Mercator API uses
 
 ## Consequences
 
-- The DEM example becomes a thin source, map, controls, policy, and presentation
+- The Underwater Terrain example becomes a thin source, map, controls, policy, and presentation
   composition rather than a hidden terrain engine.
 - Web Mercator terrain consumers share one precision, stitching, and Virtual Raster
   sampling implementation.

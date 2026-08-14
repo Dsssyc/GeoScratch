@@ -17,7 +17,7 @@ TypeScript module cannot cross the structured-clone boundary, and serializing a
 function with `toString()` loses imports, lexical dependencies, module semantics,
 source maps, Content Security Policy compatibility, and reliable static analysis.
 
-The DEM example previously bridged this requirement with
+The Underwater Terrain example previously bridged this requirement with
 `dem-tile-worker-url.ts` plus a Vite/Rollup plugin that emitted the real Worker entry.
 That made application source depend on one bundler's chunk-emission lifecycle. Every
 new Worker module would need another URL glue file or equivalent bundler convention,

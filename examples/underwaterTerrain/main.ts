@@ -7,32 +7,32 @@ import {
     mapFieldLayer,
 } from 'geoscratch/geo'
 import {
-    createDemMap,
-    demMapViewAdapter,
-    waitForDemMap,
-} from './dem-map.ts'
-import type { DemMap } from './dem-map.ts'
+    createUnderwaterTerrainMap,
+    underwaterTerrainViewAdapter,
+    waitForUnderwaterTerrainMap,
+} from './map.ts'
+import type { UnderwaterTerrainMap } from './map.ts'
 import {
     createDemVirtualRaster,
     fetchDemTileSource,
 } from './dem-source.ts'
 import { readDemCachePolicy } from './dem-cache-policy.ts'
-import { prepareDemControlPanel } from './dem-control-panel.ts'
+import { prepareUnderwaterTerrainControlPanel } from './control-panel.ts'
 import terrainPresentationShader from './shaders/terrain-presentation.wgsl?raw'
 
-type DemLayerProofModule = typeof import(
-    '../../tests/browser/support/dem-layer-proof.ts'
+type UnderwaterTerrainProofModule = typeof import(
+    '../../tests/browser/support/underwater-terrain-proof.ts'
 )
-type DemLayerProof = ReturnType<DemLayerProofModule['createDemLayerProof']>
+type UnderwaterTerrainProof = ReturnType<UnderwaterTerrainProofModule['createUnderwaterTerrainProof']>
 type PageSettlement = Promise<unknown>
-type CameraMoveOptions = Parameters<DemMap['jumpTo']>[0]
+type CameraMoveOptions = Parameters<UnderwaterTerrainMap['jumpTo']>[0]
 type FailureDetails = Error & { diagnostic?: unknown }
 
 const TERRAIN_EXAGGERATION = 50
 const canvas = document.getElementById('GPUFrame') as HTMLCanvasElement
-const controlPanelContainer = document.getElementById('DemControlPanel') as HTMLElement
-const pageLifetime = new LifetimeScope({ label: 'dem-page' })
-const preparedControlPanel = prepareDemControlPanel({
+const controlPanelContainer = document.getElementById('UnderwaterTerrainControlPanel') as HTMLElement
+const pageLifetime = new LifetimeScope({ label: 'underwater-terrain-page' })
+const preparedControlPanel = prepareUnderwaterTerrainControlPanel({
     parameters: new URLSearchParams(window.location.search),
 })
 const parameters = preparedControlPanel.parameters
@@ -46,7 +46,7 @@ const cachePolicy = readDemCachePolicy(parameters)
 const maxPhysicalPages = boundedIntegerParameter(parameters.get('atlasPages'), 64, 2, 64)
 let tileWireframeEnabled = preparedControlPanel.renderingPreference.tileWireframe
 let applyTerrainPresentation: ((enabled: boolean) => void) | undefined
-let proof: DemLayerProof | undefined
+let proof: UnderwaterTerrainProof | undefined
 let pageSettlement: PageSettlement | undefined
 
 const controlPanel = preparedControlPanel.mount({
@@ -60,7 +60,7 @@ const controlPanel = preparedControlPanel.mount({
 })
 const handlePageHide = () => { void disposePage() }
 window.addEventListener('pagehide', handlePageHide, { once: true })
-pageLifetime.deferStop({ label: 'dem-control-panel', run: controlPanel.dispose })
+pageLifetime.deferStop({ label: 'underwater-terrain-control-panel', run: controlPanel.dispose })
 pageLifetime.deferStop({
     label: 'pagehide-listener',
     run: () => window.removeEventListener('pagehide', handlePageHide),
@@ -72,19 +72,19 @@ const pageInitialization = pageLifetime.track(
         proof = loadedProof
         return main(pageLifetime, loadedProof)
     }),
-    'dem-page-initialization'
+    'underwater-terrain-page-initialization'
 )
 void pageInitialization.catch(error => {
     if (pageLifetime.isStopError(error)) return
     void failPage(error)
 })
 
-async function loadProof(): Promise<DemLayerProof | undefined> {
+async function loadProof(): Promise<UnderwaterTerrainProof | undefined> {
     if (!import.meta.env.DEV || !proofMode) return undefined
-    const { createDemLayerProof } = await import(
-        '../../tests/browser/support/dem-layer-proof.ts'
+    const { createUnderwaterTerrainProof } = await import(
+        '../../tests/browser/support/underwater-terrain-proof.ts'
     )
-    return createDemLayerProof({
+    return createUnderwaterTerrainProof({
         canvas,
         lifetime: pageLifetime,
         scenario: parameters.get('fault') ?? undefined,
@@ -95,10 +95,10 @@ async function loadProof(): Promise<DemLayerProof | undefined> {
     })
 }
 
-async function main(lifetime: LifetimeScope, activeProof?: DemLayerProof) {
+async function main(lifetime: LifetimeScope, activeProof?: UnderwaterTerrainProof) {
 
     activeProof?.assertConfiguration()
-    const map = lifetime.own(createDemMap(canvas, { proof: proofMode }), {
+    const map = lifetime.own(createUnderwaterTerrainMap(canvas, { proof: proofMode }), {
         label: 'maplibre-map',
         release: value => value.remove(),
     })
@@ -107,7 +107,7 @@ async function main(lifetime: LifetimeScope, activeProof?: DemLayerProof) {
 
     const [ runtime, , source, workerModules ] = await Promise.all([
         lifetime.acquire(GPURuntime.create({
-            label: 'DEM Layer runtime',
+            label: 'Underwater Terrain runtime',
             powerPreference: 'high-performance',
             diagnostics: {
                 operationCapacity: 192,
@@ -120,7 +120,7 @@ async function main(lifetime: LifetimeScope, activeProof?: DemLayerProof) {
             label: 'scratch-runtime',
             release: value => value.dispose(),
         }),
-        waitForDemMap(map, lifetime.signal),
+        waitForUnderwaterTerrainMap(map, lifetime.signal),
         lifetime.track(
             fetchDemTileSource(tileServerUrl, lifetime.signal),
             'dem-tile-source'
@@ -135,7 +135,7 @@ async function main(lifetime: LifetimeScope, activeProof?: DemLayerProof) {
 
     const initialSize = canvasPixelSize(canvas)
     const surface = runtime.createSurface(canvas, {
-        label: 'DEM Layer surface',
+        label: 'Underwater Terrain surface',
         format: 'preferred',
         alphaMode: 'premultiplied',
         size: initialSize,
@@ -171,11 +171,11 @@ async function main(lifetime: LifetimeScope, activeProof?: DemLayerProof) {
             runtime,
             surface,
             fieldLayer: mapFieldLayer({
-                id: 'dem-height-layer',
+                id: 'underwater-terrain-height-field',
                 field: virtualRaster.field,
                 representation: virtualRaster.representation,
                 spatialProfile: virtualRaster.spatialProfile,
-                viewAdapter: demMapViewAdapter,
+                viewAdapter: underwaterTerrainViewAdapter,
                 demandProducer: virtualRaster.viewDemandProducer,
             }),
             virtualRaster,
@@ -190,22 +190,26 @@ async function main(lifetime: LifetimeScope, activeProof?: DemLayerProof) {
             elevationRangeMeters,
             exaggeration: TERRAIN_EXAGGERATION,
             presentations: [
-                { id: 'shaded', fragmentEntryPoint: 'fMain', label: 'DEM terrain pipeline' },
+                {
+                    id: 'shaded',
+                    fragmentEntryPoint: 'fMain',
+                    label: 'Underwater Terrain pipeline',
+                },
                 {
                     id: 'tile-wireframe',
                     fragmentEntryPoint:
                         WEB_MERCATOR_TERRAIN_TILE_WIREFRAME_FRAGMENT_ENTRY_POINT,
-                    label: 'DEM tile wireframe pipeline',
+                    label: 'Underwater Terrain tile wireframe pipeline',
                 },
             ],
             initialPresentation: tileWireframeEnabled ? 'tile-wireframe' : 'shaded',
         }), {
-            label: 'dem-gpu-frontier',
+            label: 'underwater-terrain-gpu-frontier',
             release: value => value.dispose(),
         }
     )
     const initialized = await graph.initialize()
-    await lifetime.track(initialized.observation, 'dem-initial-submission')
+    await lifetime.track(initialized.observation, 'underwater-terrain-initial-submission')
     lifetime.assertActive()
 
     const minimumTerrainElevationMeters = elevationRangeMeters[0] * TERRAIN_EXAGGERATION
@@ -215,7 +219,7 @@ async function main(lifetime: LifetimeScope, activeProof?: DemLayerProof) {
             const nextSize = canvasPixelSize(canvas)
             if (!sameSize(graph.state().size, nextSize)) await graph.resize(nextSize)
             lifetime.assertActive()
-            const camera = demMapViewAdapter.camera({
+            const camera = underwaterTerrainViewAdapter.camera({
                 map,
                 viewport: nextSize,
                 minimumElevationMeters: minimumTerrainElevationMeters,
@@ -245,7 +249,7 @@ async function main(lifetime: LifetimeScope, activeProof?: DemLayerProof) {
     function moveCamera(options: CameraMoveOptions) {
 
         if (frameController.snapshot().state === 'stopped') {
-            throw new Error('DEM frame controller is stopped')
+            throw new Error('Underwater Terrain frame controller is stopped')
         }
         map.jumpTo(options)
         frameController.invalidate()
@@ -256,7 +260,7 @@ async function main(lifetime: LifetimeScope, activeProof?: DemLayerProof) {
         frameController.invalidate()
     }
     lifetime.deferStop({
-        label: 'dem-terrain-presentation-control',
+        label: 'underwater-terrain-presentation-control',
         run: () => { applyTerrainPresentation = undefined },
     })
 
@@ -275,7 +279,10 @@ async function main(lifetime: LifetimeScope, activeProof?: DemLayerProof) {
         label: 'window-resize-listener',
         run: () => window.removeEventListener('resize', handleResize),
     })
-    lifetime.deferStop({ label: 'dem-frame-scheduler', run: frameController.stop })
+    lifetime.deferStop({
+        label: 'underwater-terrain-frame-scheduler',
+        run: frameController.stop,
+    })
     activeProof?.bindGraph({
         runtime,
         graph,
@@ -342,7 +349,7 @@ function boundedIntegerParameter(
     const parsed = Number(value)
     if (!Number.isSafeInteger(parsed) || parsed < minimum || parsed > maximum) {
         throw new RangeError(
-            `DEM integer parameter must be between ${minimum} and ${maximum}`
+            `Underwater Terrain integer parameter must be between ${minimum} and ${maximum}`
         )
     }
     return parsed

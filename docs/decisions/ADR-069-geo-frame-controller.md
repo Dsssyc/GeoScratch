@@ -10,7 +10,7 @@ Accepted
 
 ## Context
 
-The DEM example previously owned a second rendering subsystem around the public Geo
+The Underwater Terrain example previously owned a second rendering subsystem around the public Geo
 terrain renderer: animation-frame coalescing, in-flight render exclusion, native-work
 observation, residency settlement, bounded convergence follow-ups, cancellation, and
 failure routing. Those rules are not DEM source semantics. Every camera-driven Geo

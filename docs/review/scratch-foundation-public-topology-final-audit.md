@@ -43,7 +43,7 @@ npm run build
 node tests/audits/scratch-webgpu-wgsl-current-coverage.mjs
 node tests/browser/worker-system.mjs
 node tests/browser/scratch-hello-gaw.mjs
-node tests/browser/scratch-dem-layer.mjs
+node tests/browser/scratch-underwater-terrain.mjs
 node tests/browser/scratch-flow-layer.mjs
 ```
 
@@ -55,14 +55,16 @@ node tests/browser/scratch-flow-layer.mjs
 | WebGPU/WGSL current coverage | PASS | 1,244 entries: 1,242 managed and two not applicable; zero unresolved. |
 | Worker browser | PASS | Priority/reprioritization, cooperative cancellation, transferable detachment, context affinity, crash recovery, and terminal zero task/group/context/worker ownership all passed. |
 | Hello GAW browser | PASS | 240 proof frames, stable identity across resize, zero uncaptured errors, zero device loss, zero incidents, and no console/page/request/HTTP failure. |
-| DEM browser | PASS | Process exited successfully and produced nonempty initial, moved, and resized screenshots. The runner emitted no stdout, so this audit retains exit status and artifacts rather than inventing console facts. |
+| Underwater Terrain browser | PASS | Process exited successfully and produced nonempty initial, moved, and resized screenshots. The runner emitted no stdout, so this audit retains exit status and artifacts rather than inventing console facts. |
 | Flow browser | PASS | 660 proof frames, 262,144 particles, camera reprojection and history clear, estuary boundary proof, expected structured failures, terminal zero pending work, zero uncaptured errors/device loss, and no console/page/request/HTTP failure. |
 
-DEM evidence retained at the gate:
+Underwater Terrain evidence retained at the gate follows. The `dem-*` artifact
+filenames below are exact historical outputs from the 2026-08-05 gate, before
+the example identity was renamed by ADR-075:
 
-- `/tmp/geoscratch-dem-layer-browser/dem-initial.png`: 69,144 bytes
-- `/tmp/geoscratch-dem-layer-browser/dem-moved.png`: 65,300 bytes
-- `/tmp/geoscratch-dem-layer-browser/dem-resized.png`: 50,550 bytes
+- `/tmp/geoscratch-underwater-terrain-browser/dem-initial.png`: 69,144 bytes
+- `/tmp/geoscratch-underwater-terrain-browser/dem-moved.png`: 65,300 bytes
+- `/tmp/geoscratch-underwater-terrain-browser/dem-resized.png`: 50,550 bytes
 - Artifact timestamp: `2026-08-05T14:28:14+0800`
 
 The Flow boundary proof used display extent
@@ -153,7 +155,7 @@ TypeScript-only source: pass
 WebGPU/WGSL audit: pass
 Worker browser: pass
 Hello GAW browser: pass
-DEM browser: pass
+Underwater Terrain browser: pass
 Flow browser: pass
 Findings: none
 ```

@@ -9,7 +9,7 @@ import { chromium } from 'playwright'
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const examplesRoot = resolve(repositoryRoot, 'examples')
-const tileServerRoot = resolve(examplesRoot, 'demLayer/tile-server')
+const tileServerRoot = resolve(examplesRoot, 'underwaterTerrain/tile-server')
 const viteEntry = resolve(repositoryRoot, 'node_modules/vite/bin/vite.js')
 const workerBuildEntry = resolve(
     repositoryRoot,
@@ -17,14 +17,18 @@ const workerBuildEntry = resolve(
 )
 const tileBuildEntry = resolve(tileServerRoot, '.venv/bin/dem-tile-build')
 const tileServeEntry = resolve(tileServerRoot, '.venv/bin/dem-tile-serve')
-const timeout = positiveInteger(process.env.DEM_CACHE_PANEL_TIMEOUT_MS, 90_000)
+const timeout = positiveInteger(
+    process.env.UNDERWATER_TERRAIN_CACHE_PANEL_TIMEOUT_MS,
+    90_000
+)
 const headless = process.env.GEO_VIRTUAL_RASTER_DEM_HEADLESS === '1'
 const outputDirectory = resolve(
-    process.env.DEM_CACHE_PANEL_OUTPUT ?? '/tmp/geoscratch-dem-cache-panel'
+    process.env.UNDERWATER_TERRAIN_CACHE_PANEL_OUTPUT ??
+        '/tmp/geoscratch-underwater-terrain-cache-panel'
 )
-const storageKey = 'geoscratch.examples.dem.cache-panel.v1'
-const renderingStorageKey = 'geoscratch.examples.demLayer.rendering.v1'
-const namespace = `geoscratch-dem-panel-proof-${Date.now()}`
+const storageKey = 'geoscratch.examples.underwaterTerrain.cache-panel.v1'
+const renderingStorageKey = 'geoscratch.examples.underwaterTerrain.rendering.v1'
+const namespace = `geoscratch-underwater-terrain-panel-proof-${Date.now()}`
 const vitePort = await findAvailablePort()
 let tilePort = await findAvailablePort()
 while (tilePort === vitePort) tilePort = await findAvailablePort()
@@ -59,7 +63,7 @@ try {
         String(vitePort),
         '--strictPort',
     ], examplesRoot)
-    await waitForHttpProcess(vite, `${baseUrl}/demLayer/`, 'Vite')
+    await waitForHttpProcess(vite, `${baseUrl}/underwaterTerrain/`, 'Vite')
     browser = await chromium.launch({
         channel: 'chrome',
         headless,
@@ -124,13 +128,13 @@ async function runDesktopProof(activeBrowser) {
     const page = await context.newPage()
     const events = observePage(page)
     try {
-        await page.goto(demUrl(), { waitUntil: 'domcontentloaded', timeout })
+        await page.goto(underwaterTerrainUrl(), { waitUntil: 'domcontentloaded', timeout })
         await waitForReady(page)
         const initial = await readState(page)
         const initialLayout = await inspectLayout(page)
         const initialCapture = await capture(page, 'desktop-default')
 
-        await page.locator('[data-dem-control="tile-wireframe"] .tp-ckbv_w').click()
+        await page.locator('[data-underwater-terrain-control="tile-wireframe"] .tp-ckbv_w').click()
         await page.locator('#GPUFrame[data-terrain-presentation="tile-wireframe"]')
             .waitFor({ timeout })
         const wireframe = await readState(page)
@@ -138,45 +142,48 @@ async function runDesktopProof(activeBrowser) {
         await page.reload({ waitUntil: 'domcontentloaded', timeout })
         await waitForReady(page)
         const wireframeRestored = await readState(page)
-        await page.locator('[data-dem-control="tile-wireframe"] .tp-ckbv_w').click()
+        await page.locator('[data-underwater-terrain-control="tile-wireframe"] .tp-ckbv_w').click()
         await page.locator('#GPUFrame[data-terrain-presentation="shaded"]')
             .waitFor({ timeout })
         const shadedRestored = await readState(page)
 
-        await page.locator('[data-dem-control="policy"] select')
+        await page.locator('[data-underwater-terrain-control="policy"] select')
             .selectOption({ label: 'Durable' })
-        await page.locator('#DemControlPanel[data-cache-dirty="true"]').waitFor({ timeout })
-        await page.locator('[data-dem-control="advanced"] > button').click()
+        await page.locator('#UnderwaterTerrainControlPanel[data-cache-dirty="true"]').waitFor({ timeout })
+        await page.locator('[data-underwater-terrain-control="advanced"] > button').click()
         await replaceInput(page, 'namespace', namespace)
         await replaceInput(page, 'max-mib', '256')
         await replaceInput(page, 'max-entries', '4096')
-        await page.locator('[data-dem-control="persistence"] select')
+        await page.locator('[data-underwater-terrain-control="persistence"] select')
             .selectOption({ label: 'Request' })
-        await page.locator('#DemControlPanel[data-cache-valid="true"][data-cache-dirty="true"]')
+        await page.locator('#UnderwaterTerrainControlPanel[data-cache-valid="true"][data-cache-dirty="true"]')
             .waitFor({ timeout })
         const draft = await readState(page)
         const expandedLayout = await inspectLayout(page)
 
         await Promise.all([
             page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout }),
-            page.locator('[data-dem-control="apply"] button').click(),
+            page.locator('[data-underwater-terrain-control="apply"] button').click(),
         ])
         await waitForReady(page)
         const applied = await readState(page)
-        await page.locator('[data-dem-control="advanced"] > button').click()
+        await page.locator('[data-underwater-terrain-control="advanced"] > button').click()
         const appliedCapture = await capture(page, 'desktop-applied')
 
-        await page.goto(demUrl(), { waitUntil: 'domcontentloaded', timeout })
+        await page.goto(underwaterTerrainUrl(), { waitUntil: 'domcontentloaded', timeout })
         await waitForReady(page)
         const restored = await readState(page)
 
-        await page.goto(demUrl('cache=none'), { waitUntil: 'domcontentloaded', timeout })
+        await page.goto(underwaterTerrainUrl('cache=none'), {
+            waitUntil: 'domcontentloaded',
+            timeout,
+        })
         await waitForReady(page)
         const overridden = await readState(page)
 
         await Promise.all([
             page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout }),
-            page.locator('[data-dem-control="reset"] button').click(),
+            page.locator('[data-underwater-terrain-control="reset"] button').click(),
         ])
         await waitForReady(page)
         const reset = await readState(page)
@@ -208,7 +215,10 @@ async function runMobileProof(activeBrowser) {
     const page = await context.newPage()
     const events = observePage(page)
     try {
-        await page.goto(demUrl('cache=none'), { waitUntil: 'domcontentloaded', timeout })
+        await page.goto(underwaterTerrainUrl('cache=none'), {
+            waitUntil: 'domcontentloaded',
+            timeout,
+        })
         await waitForReady(page)
         return {
             state: await readState(page),
@@ -246,7 +256,10 @@ async function runUnavailableStorageProof(activeBrowser) {
             cacheMaxEntries: '512',
             cachePersistence: 'best-effort',
         }).toString()
-        await page.goto(demUrl(cacheQuery), { waitUntil: 'domcontentloaded', timeout })
+        await page.goto(underwaterTerrainUrl(cacheQuery), {
+            waitUntil: 'domcontentloaded',
+            timeout,
+        })
         await waitForReady(page)
         return {
             state: await readState(page, { includeStorage: false }),
@@ -257,17 +270,17 @@ async function runUnavailableStorageProof(activeBrowser) {
     }
 }
 
-function demUrl(cacheQuery = '') {
+function underwaterTerrainUrl(cacheQuery = '') {
 
     const parameters = new URLSearchParams(cacheQuery)
     parameters.set('proof', '1')
     parameters.set('tileServer', tileBaseUrl)
-    return `${baseUrl}/demLayer/?${parameters.toString()}`
+    return `${baseUrl}/underwaterTerrain/?${parameters.toString()}`
 }
 
 async function waitForReady(page) {
 
-    await page.locator('#DemControlPanel[data-cache-valid="true"]').waitFor({ timeout })
+    await page.locator('#UnderwaterTerrainControlPanel[data-cache-valid="true"]').waitFor({ timeout })
     await page.locator('#GPUFrame[data-status="ready"]').waitFor({ timeout })
     await page.waitForFunction(() => {
         const canvas = document.querySelector('#GPUFrame')
@@ -277,7 +290,7 @@ async function waitForReady(page) {
 
 async function replaceInput(page, control, value) {
 
-    const input = page.locator(`[data-dem-control="${control}"] input`)
+    const input = page.locator(`[data-underwater-terrain-control="${control}"] input`)
     await input.fill(value)
     await input.blur()
 }
@@ -285,7 +298,7 @@ async function replaceInput(page, control, value) {
 async function readState(page, options = {}) {
 
     return await page.evaluate(({ cacheKey, renderingKey, includeStorage }) => {
-        const panel = document.querySelector('#DemControlPanel')
+        const panel = document.querySelector('#UnderwaterTerrainControlPanel')
         const canvas = document.querySelector('#GPUFrame')
         const value = selector => document.querySelector(selector)?.value
         const disabled = selector => document.querySelector(selector)?.disabled
@@ -299,27 +312,27 @@ async function readState(page, options = {}) {
             panelText: panel?.textContent,
             controls: {
                 tileWireframe: document.querySelector(
-                    '[data-dem-control="tile-wireframe"] input'
+                    '[data-underwater-terrain-control="tile-wireframe"] input'
                 )?.checked,
-                policy: value('[data-dem-control="policy"] select'),
-                state: value('[data-dem-control="status"] input'),
-                preference: value('[data-dem-control="preference"] input'),
-                namespace: value('[data-dem-control="namespace"] input'),
-                maxMiB: value('[data-dem-control="max-mib"] input'),
-                maxEntries: value('[data-dem-control="max-entries"] input'),
-                persistence: value('[data-dem-control="persistence"] select'),
+                policy: value('[data-underwater-terrain-control="policy"] select'),
+                state: value('[data-underwater-terrain-control="status"] input'),
+                preference: value('[data-underwater-terrain-control="preference"] input'),
+                namespace: value('[data-underwater-terrain-control="namespace"] input'),
+                maxMiB: value('[data-underwater-terrain-control="max-mib"] input'),
+                maxEntries: value('[data-underwater-terrain-control="max-entries"] input'),
+                persistence: value('[data-underwater-terrain-control="persistence"] select'),
                 advancedDisabled: [
-                    disabled('[data-dem-control="namespace"] input'),
-                    disabled('[data-dem-control="max-mib"] input'),
-                    disabled('[data-dem-control="max-entries"] input'),
-                    disabled('[data-dem-control="persistence"] select'),
+                    disabled('[data-underwater-terrain-control="namespace"] input'),
+                    disabled('[data-underwater-terrain-control="max-mib"] input'),
+                    disabled('[data-underwater-terrain-control="max-entries"] input'),
+                    disabled('[data-underwater-terrain-control="persistence"] select'),
                 ],
-                applyDisabled: disabled('[data-dem-control="apply"] button'),
+                applyDisabled: disabled('[data-underwater-terrain-control="apply"] button'),
                 applyTabIndex: document.querySelector(
-                    '[data-dem-control="apply"] button'
+                    '[data-underwater-terrain-control="apply"] button'
                 )?.tabIndex,
                 resetTabIndex: document.querySelector(
-                    '[data-dem-control="reset"] button'
+                    '[data-underwater-terrain-control="reset"] button'
                 )?.tabIndex,
             },
             runtime: canvas === null ? undefined : {
@@ -350,7 +363,7 @@ async function readState(page, options = {}) {
 async function inspectLayout(page) {
 
     return await page.evaluate(() => {
-        const panel = document.querySelector('#DemControlPanel')
+        const panel = document.querySelector('#UnderwaterTerrainControlPanel')
         if (panel === null) return undefined
         const bounds = panel.getBoundingClientRect()
         const visibleControls = [ ...panel.querySelectorAll('button, input, select') ]
@@ -369,7 +382,7 @@ async function inspectLayout(page) {
                     rect.left < -1 || rect.right > window.innerWidth + 1 ||
                     rect.top < -1 || rect.bottom > window.innerHeight + 1
             })
-            .map(element => element.closest('[data-dem-control]')?.dataset.demControl ??
+            .map(element => element.closest('[data-underwater-terrain-control]')?.dataset.underwaterTerrainControl ??
                 element.tagName.toLowerCase())
         return {
             viewport: { width: window.innerWidth, height: window.innerHeight },
@@ -404,7 +417,7 @@ async function capture(page, name) {
 function validateProof(value, processState) {
 
     const failures = []
-    if (value === undefined) return [ 'DEM cache panel proof was not produced' ]
+    if (value === undefined) return [ 'Underwater Terrain cache panel proof was not produced' ]
     const { desktop, mobile, unavailableStorage } = value
 
     expect(failures, desktop?.initial?.panel?.cachePolicy === 'disabled' &&
@@ -413,7 +426,7 @@ function validateProof(value, processState) {
         desktop.initial.panel.renderingStorageStatus === 'missing' &&
         desktop.initial.panel.wireframeEnabled === 'false' &&
         desktop.initial.panel.cacheDirty === 'false' &&
-        desktop.initial.panelText?.includes('DEM Layer') &&
+        desktop.initial.panelText?.includes('Underwater Terrain') &&
         desktop.initial.panelText?.includes('Rendering') &&
         desktop.initial.panelText?.includes('Cache') &&
         desktop.initial.controls.tileWireframe === false &&

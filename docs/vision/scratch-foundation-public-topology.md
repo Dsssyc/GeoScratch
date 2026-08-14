@@ -44,10 +44,10 @@ Geo 可以依赖 Scratch 的公开契约，Scratch 不得依赖 Geo。
 
 1. Scratch/Geo 公共拓扑重构；
 2. Scratch Persistent Cache；
-3. Geo Virtual Raster 与 DEM example 验证。
+3. Geo Virtual Raster 与 Underwater Terrain example 验证。
 
 三个 goal 均已完成。Goal 2 没有引入第三个公共入口；Goal 3 只把通用 cache
-address/coherence 留在 Geo，并以 DEM example 验证 raw page persistence。Flow Layer
+address/coherence 留在 Geo，并以 Underwater Terrain example 验证 raw page persistence。Flow Layer
 虚拟栅格化仍不属于这三个 goal。
 
 这种拆分只限制交付范围，不引入临时兼容 API、重复实现或替代性的目标架构。
@@ -306,7 +306,7 @@ npm run build
 Scratch/WebGPU current-spec coverage audit
 Worker real-browser test
 Hello GAW browser test
-DEM Layer browser test
+Underwater Terrain browser test
 Flow Layer browser test
 ```
 
@@ -315,7 +315,7 @@ Flow Layer browser test
 - 无 uncaptured WebGPU error；
 - 无 device loss；
 - 无 Worker 泄漏；
-- Hello GAW、DEM Layer 与 Flow Layer 保持当前已接受的可见结果。
+- Hello GAW、Underwater Terrain 与 Flow Layer 保持当前已接受的可见结果。
 
 ## 收敛与终止
 

@@ -50,15 +50,15 @@ describe('Flow Layer Scratch clean cut', () => {
         }
     })
 
-    it('coexists with the neutral DEM replacement and no legacy catalog entry', () => {
+    it('coexists with Underwater Terrain and no legacy catalog entry', () => {
 
         const catalog = read('examples', 'index.html')
-        const demStart = catalog.indexOf('data-id="demLayer"')
-        const demLink = catalog.slice(demStart, demStart + 420)
+        const terrainStart = catalog.indexOf('data-id="underwaterTerrain"')
+        const terrainLink = catalog.slice(terrainStart, terrainStart + 420)
 
-        expect(demStart).to.be.greaterThan(-1)
-        expect(demLink).to.include('data-path="./demLayer/"')
-        expect(demLink).to.not.match(/legacy|scratch/i)
+        expect(terrainStart).to.be.greaterThan(-1)
+        expect(terrainLink).to.include('data-path="./underwaterTerrain/"')
+        expect(terrainLink).to.not.match(/legacy|scratch/i)
         expect(catalog).to.not.include('(legacy)')
     })
 

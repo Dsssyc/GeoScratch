@@ -1,4 +1,4 @@
-"""Local COG source adapter for the GeoScratch DEM example."""
+"""Local COG source adapter for the GeoScratch Underwater Terrain example."""
 
 from .build import BuildResult, build_dem_cog
 from .service import create_app

@@ -13,7 +13,7 @@ Accepted
 ADR-058 defined `PersistentCache.dispose()` as connection disposal without data
 deletion. That is correct for durable editing and recovery data, but the public
 descriptor did not require an application to state whether a namespace should be
-reused, reset on startup, or scoped to one application session. The DEM example
+reused, reset on startup, or scoped to one application session. The Underwater Terrain example
 also reduced the choice to `none | persistent` while hard-coding persistence and
 budget details.
 
@@ -74,7 +74,7 @@ GPU residency, in-flight request coalescing, and application memory remain separ
 policies.
 
 Applications own namespace, budgets, persistence request, and lifecycle selection.
-The DEM example must expose those choices instead of embedding one persistent
+The Underwater Terrain example must expose those choices instead of embedding one persistent
 policy.
 
 ## Alternatives Rejected

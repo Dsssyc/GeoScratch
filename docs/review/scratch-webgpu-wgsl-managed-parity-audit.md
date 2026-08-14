@@ -414,7 +414,7 @@ inventory contains zero legacy examples. The headed Chrome regressions pass:
 | Regression | Result |
 | --- | --- |
 | Flow Layer | passed, including estuary display boundary and terminal disposal |
-| DEM Layer | passed |
+| Underwater Terrain | passed |
 | Hello GAW | passed, including rendered output and provenance |
 | Hello GAW initialization failures | passed, including attributed injected/native failures and cleanup |
 
@@ -480,7 +480,7 @@ authorize a gate rerun.
 | `node tests/stress/scratch-submission-native-provenance.mjs` | passed |
 | `node tests/browser/scratch-wgsl-capability-matrix.mjs` | failed: 14 pass, 3 capability skips, 2 invalid shader proofs |
 | `node tests/browser/scratch-flow-layer.mjs` | passed |
-| `node tests/browser/scratch-dem-layer.mjs` | passed |
+| `node tests/browser/scratch-underwater-terrain.mjs` | passed |
 | `node tests/browser/scratch-hello-gaw.mjs` | passed |
 | `node tests/browser/scratch-hello-gaw-init-failures.mjs` | passed |
 
@@ -611,7 +611,7 @@ in the required order. No environment retry was used.
 | `node tests/audits/scratch-webgpu-wgsl-current-coverage.mjs` | passed: 662 entries, 608 managed, 54 not applicable, 0 unresolved |
 | `node tests/browser/scratch-wgsl-capability-matrix.mjs` | passed: 16 pass, 3 capability skips, 0 failures |
 | `node tests/browser/scratch-flow-layer.mjs` | passed: interaction, resize, estuary boundary, failure attribution, and terminal disposal |
-| `node tests/browser/scratch-dem-layer.mjs` | passed: LOD/terrain execution, resize, failure attribution, and terminal disposal |
+| `node tests/browser/scratch-underwater-terrain.mjs` | passed: LOD/terrain execution, resize, failure attribution, and terminal disposal |
 | `node tests/browser/scratch-hello-gaw.mjs` | passed: 240 frames, GPU-only indirect execution, provenance, resize, and bounded diagnostics |
 | `node tests/browser/scratch-hello-gaw-init-failures.mjs` | passed: five attributed failure points and complete cleanup |
 

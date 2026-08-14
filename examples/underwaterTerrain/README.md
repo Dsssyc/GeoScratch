@@ -1,7 +1,12 @@
-# DEM Layer
+# Underwater Terrain
 
-The DEM Layer streams standard `WebMercatorQuad` height tiles through Workers into
-a bounded GPU virtual-raster atlas. Start the local tile service as documented in
+The Underwater Terrain example reveals terrain below an existing MapLibre basemap while
+preserving the map as geographic context. Its current Surface Reveal strategy composites a
+semi-transparent WebGPU terrain canvas over the basemap; it does not claim depth-correct
+ground translucency or reduce the example to bathymetry data alone.
+
+Standard `WebMercatorQuad` DEM tiles stream through Workers into a bounded GPU
+virtual-raster atlas. Start the local tile service as documented in
 [`tile-server/README.md`](./tile-server/README.md), then run `npm run dev` from the
 repository root.
 
@@ -13,19 +18,19 @@ the DEM source does not depend on a Vite Worker URL plugin or a generated URL mo
 Disk caching is disabled by default:
 
 ```text
-http://localhost:5173/demLayer/?cache=none
+http://localhost:5173/underwaterTerrain/?cache=none
 ```
 
-## DEM controls
+## Underwater Terrain controls
 
-The `DEM Layer` panel in the upper-right corner contains live rendering controls
+The `Underwater Terrain` panel in the upper-right corner contains live rendering controls
 and cache configuration.
 
 The `Rendering` folder exposes `Tile wireframe`. It switches immediately to the
 already-created diagnostic pipeline: each logical render patch
 `(matrixLevel, row, column)` receives a stable pseudo-random color and only the
 post-stitch triangle edges are drawn. The setting is stored independently at
-`geoscratch.examples.demLayer.rendering.v1` in `localStorage`; it does not reload
+`geoscratch.examples.underwaterTerrain.rendering.v1` in `localStorage`; it does not reload
 the page, alter cache query parameters, or rebuild the virtual raster.
 
 ## Data and geometry LoD
@@ -72,14 +77,14 @@ The `Cache` folder exposes all supported application cache settings:
 - `Namespace`, `Maximum MiB`, `Maximum entries`, and `Persistence` under
   `Advanced`;
 - `Apply & Reload` to validate the complete draft, save the preference, and
-  rebuild the DEM runtime from the resulting URL;
+  rebuild the terrain runtime from the resulting URL;
 - `Restore defaults` to remove the saved preference and cache query parameters.
 
 Edits remain a panel-only draft until `Apply & Reload` is selected. The running
 Worker, persistent cache, and GPU virtual raster are never hot-switched.
 
 The panel stores only its versioned configuration at
-`geoscratch.examples.dem.cache-panel.v1` in `localStorage`. It does not store
+`geoscratch.examples.underwaterTerrain.cache-panel.v1` in `localStorage`. It does not store
 tile bytes, cache metadata, entry keys, or diagnostics there. A URL containing
 any cache parameter is authoritative for that load; a saved preference is used
 only when the URL contains no cache parameters. If `localStorage` is unavailable,
@@ -93,9 +98,9 @@ application intends to remove stored data.
 Persistent storage is application-configurable:
 
 ```text
-http://localhost:5173/demLayer/?cache=persistent&cacheLifecycle=session
-http://localhost:5173/demLayer/?cache=persistent&cacheLifecycle=durable-reuse
-http://localhost:5173/demLayer/?cache=persistent&cacheLifecycle=durable-clear-before-open
+http://localhost:5173/underwaterTerrain/?cache=persistent&cacheLifecycle=session
+http://localhost:5173/underwaterTerrain/?cache=persistent&cacheLifecycle=durable-reuse
+http://localhost:5173/underwaterTerrain/?cache=persistent&cacheLifecycle=durable-clear-before-open
 ```
 
 Supported cache parameters are:
@@ -113,7 +118,7 @@ when the visualization must not write disk-backed cache data. `request` asks the
 browser storage manager to protect origin data from automatic eviction; it does not
 change the selected cache lifecycle.
 
-`cacheMaxMiB` and `cacheMaxEntries` are totals for the whole DEM application, not
+`cacheMaxMiB` and `cacheMaxEntries` are totals for the whole example, not
 per-Worker multipliers. The executor partitions both totals exactly over the active
 cache shards. If the entry total is smaller than the Worker count, remaining Workers
 run without a cache shard.

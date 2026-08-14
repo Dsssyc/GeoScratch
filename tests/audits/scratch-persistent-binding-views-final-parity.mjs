@@ -133,7 +133,7 @@ const historicalPaths = Object.freeze({
 const ordinaryExamples = Object.freeze([
     'bufferMapping',
     'computeReadback',
-    'demLayer',
+    'underwaterTerrain',
     'externalImageUpload',
     'flowLayer',
     'helloGAW',
@@ -3102,7 +3102,7 @@ function auditExamples() {
     }
     if (directories.some(name => name.startsWith('scratch_'))) failures.push('scratch-prefixed example remains')
     if (directories.some(name => /hello.?map/i.test(name))) failures.push('Hello Map was restored')
-    if (!directories.includes('demLayer') || !directories.includes('flowLayer')) {
+    if (!directories.includes('underwaterTerrain') || !directories.includes('flowLayer')) {
         failures.push('DEM and Flow are not separate examples')
     }
     const targetAudit = fs.readFileSync('tests/scratch-examples-target-api.test.js', 'utf8')

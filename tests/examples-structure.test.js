@@ -21,7 +21,7 @@ describe('examples structure', () => {
         'immediateData',
         'indirectExecution',
         'readinessPolicies',
-        'demLayer',
+        'underwaterTerrain',
         'flowLayer',
         'helloGAW',
     ]
@@ -39,7 +39,7 @@ describe('examples structure', () => {
         'immediateData',
         'indirectExecution',
         'readinessPolicies',
-        'demLayer',
+        'underwaterTerrain',
         'flowLayer',
         'helloGAW',
     ]
@@ -118,7 +118,7 @@ describe('examples structure', () => {
             [ 'immediateData', 'Immediate Data' ],
             [ 'indirectExecution', 'Indirect Execution' ],
             [ 'readinessPolicies', 'Readiness Policies' ],
-            [ 'demLayer', 'DEM Layer' ],
+            [ 'underwaterTerrain', 'Underwater Terrain' ],
             [ 'helloGAW', 'Hello GAW' ],
             [ 'flowLayer', 'Flow Layer' ],
         ]
@@ -143,6 +143,20 @@ describe('examples structure', () => {
         expect(html).to.not.include('m_demLayer')
     })
 
+    it('uses Underwater Terrain as the only active name for the former DEM example', () => {
+        const html = read('examples', 'index.html')
+        const standalone = read('examples', 'underwaterTerrain', 'index.html')
+
+        expect(html).to.include('data-id="underwaterTerrain"')
+        expect(html).to.include('data-path="./underwaterTerrain/"')
+        expect(html).to.include('data-title="Underwater Terrain"')
+        expect(html).to.not.include('data-id="demLayer"')
+        expect(html).to.not.include('data-path="./demLayer/"')
+        expect(html).to.not.include('data-title="DEM Layer"')
+        expect(standalone).to.include('<title>Underwater Terrain | GeoScratch Examples</title>')
+        expect(exists('examples', 'demLayer')).to.equal(false)
+    })
+
     it('gives each runnable example its own standalone html shell', () => {
         for (const name of standaloneExamples) {
             const html = read('examples', name, 'index.html')
@@ -164,11 +178,11 @@ describe('examples structure', () => {
     })
 
     it('loads MapLibre only for the map-backed terrain examples', () => {
-        const demHtml = read('examples', 'demLayer', 'index.html')
+        const terrainHtml = read('examples', 'underwaterTerrain', 'index.html')
         const flowHtml = read('examples', 'flowLayer', 'index.html')
 
-        expect(demHtml).to.include('maplibre-gl@4.7.1/dist/maplibre-gl.js')
-        expect(demHtml).to.include('maplibre-gl@4.7.1/dist/maplibre-gl.css')
+        expect(terrainHtml).to.include('maplibre-gl@4.7.1/dist/maplibre-gl.js')
+        expect(terrainHtml).to.include('maplibre-gl@4.7.1/dist/maplibre-gl.css')
         expect(flowHtml).to.include('maplibre-gl@4.7.1/dist/maplibre-gl.js')
         expect(flowHtml).to.include('maplibre-gl@4.7.1/dist/maplibre-gl.css')
     })
@@ -259,12 +273,12 @@ describe('examples structure', () => {
         expect(continued).to.equal(true)
     })
 
-    it('keeps the DEM layer example focused on terrain only', () => {
-        const source = read('examples', 'demLayer', 'main.ts')
+    it('keeps the Underwater Terrain example focused on terrain only', () => {
+        const source = read('examples', 'underwaterTerrain', 'main.ts')
         const renderer = read(
             'packages', 'geoscratch', 'src', 'geo', 'web-mercator-terrain-renderer.ts'
         )
-        const mapRuntime = read('examples', 'demLayer', 'dem-map.ts')
+        const mapRuntime = read('examples', 'underwaterTerrain', 'map.ts')
         const mapAdapter = read(
             'packages', 'geoscratch', 'src', 'geo', 'maplibre-planar-view.ts'
         )
@@ -272,7 +286,7 @@ describe('examples structure', () => {
         expect(source).to.include('GPURuntime')
         expect(source).to.include('createWebMercatorTerrainRenderer')
         expect(source).to.include('mapFieldLayer')
-        expect(source).to.include('createDemMap')
+        expect(source).to.include('createUnderwaterTerrainMap')
         expect(renderer).to.include('runtime.createSubmission(')
         expect(renderer).to.include("contentEpoch: 'current-at-step'")
         expect(renderer).to.include('GpuTileFrontier.create(')
@@ -285,7 +299,7 @@ describe('examples structure', () => {
         expect(mapRuntime).to.include('globalThis.maplibregl')
         expect(mapRuntime).to.include('darkMatterStyle')
         expect(mapRuntime).to.include('mapLibrePlanarViewAdapter')
-        expect(mapRuntime).to.include('maxPitch: DEM_MAP_DEFAULTS.maxPitch')
+        expect(mapRuntime).to.include('maxPitch: UNDERWATER_TERRAIN_MAP_DEFAULTS.maxPitch')
         expect(mapAdapter).to.include('getCameraPosition()')
         expect(mapAdapter).to.include('minimumElevationMeters')
         expect(mapAdapter).to.include('new Float64Array(16)')
