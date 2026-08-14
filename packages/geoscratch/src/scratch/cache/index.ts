@@ -1,5 +1,6 @@
 export {
     PersistentCache,
+    persistentCacheDescriptor,
     persistentCacheKey,
 } from './persistent-cache.js'
 export {

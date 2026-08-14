@@ -6,7 +6,8 @@ import { GPURuntime } from 'geoscratch/scratch'
 import {
     ViewDemandProducer,
     VirtualRasterResidency,
-    createTerrainFieldRenderer,
+    WEB_MERCATOR_TERRAIN_TILE_WIREFRAME_FRAGMENT_ENTRY_POINT,
+    createWebMercatorTerrainRenderer,
     createVirtualRasterGpuState,
     mapFieldLayer,
     ownedVirtualRasterPagePayload,
@@ -14,6 +15,9 @@ import {
 import {
     createDemTileSource,
 } from '../examples/demLayer/dem-source.ts'
+import {
+    demCacheConfigurationForShard,
+} from '../examples/demLayer/dem-tile-executor.ts'
 import { demMapViewAdapter } from '../examples/demLayer/dem-map.ts'
 import {
     createFakeCanvas,
@@ -164,13 +168,15 @@ function createTestTerrainRenderer({
     observeProvenance,
 }) {
 
-    return createTerrainFieldRenderer({
+    return createWebMercatorTerrainRenderer({
         runtime,
         surface,
         fieldLayer: createTestFieldLayer(virtualRaster),
         virtualRaster,
         size,
-        shader: read('examples', 'demLayer', 'shaders', 'terrain-mesh.wgsl'),
+        presentationShader: read(
+            'examples', 'demLayer', 'shaders', 'terrain-presentation.wgsl'
+        ),
         fieldSampling: {
             namespace: 'DemHeight',
             addressNamespace: 'DemAddress',
@@ -185,7 +191,8 @@ function createTestTerrainRenderer({
             { id: 'shaded', fragmentEntryPoint: 'fMain', label: 'DEM terrain pipeline' },
             {
                 id: 'tile-wireframe',
-                fragmentEntryPoint: 'fTileWireframe',
+                fragmentEntryPoint:
+                    WEB_MERCATOR_TERRAIN_TILE_WIREFRAME_FRAGMENT_ENTRY_POINT,
                 label: 'DEM tile wireframe pipeline',
             },
         ],
@@ -199,7 +206,7 @@ describe('DEM Layer clean cut', () => {
     it('consumes Geo-owned projected-grid render patches after the data frontier', () => {
 
         const layerSource = read(
-            'packages', 'geoscratch', 'src', 'geo', 'terrain-field-renderer.ts'
+            'packages', 'geoscratch', 'src', 'geo', 'web-mercator-terrain-renderer.ts'
         )
         const renderPatchSource = read(
             'packages', 'geoscratch', 'src', 'geo', 'gpu-render-patch-frontier.ts'
@@ -207,7 +214,12 @@ describe('DEM Layer clean cut', () => {
         const renderPatchShader = read(
             'packages', 'geoscratch', 'src', 'geo', 'gpu-render-patch-frontier-wgsl.ts'
         )
-        const terrainShader = read('examples', 'demLayer', 'shaders', 'terrain-mesh.wgsl')
+        const terrainModule = read(
+            'packages', 'geoscratch', 'src', 'geo', 'web-mercator-terrain-wgsl.ts'
+        )
+        const terrainShader = read(
+            'examples', 'demLayer', 'shaders', 'terrain-presentation.wgsl'
+        )
 
         expect(layerSource).to.include('createGpuRenderPatchFrontier(')
         expect(layerSource).to.include('renderPatchFrontier.encode(builder, frame)')
@@ -258,10 +270,11 @@ describe('DEM Layer clean cut', () => {
         )
         expect(layerSource).to.include('latestRenderPatchFeedback')
         expect(layerSource).to.include('renderPatchCellSpanRange')
-        expect(terrainShader).to.include('fn renderPatchLookup(')
-        expect(terrainShader).to.include('fn neighboringPatch(')
-        expect(terrainShader).to.include('fn snapEdgeCoordinate(')
-        expect(terrainShader).not.to.include('fn coarserSamplingLevel(')
+        expect(terrainModule).to.include('gpuRenderPatchReadWgslModule(')
+        expect(terrainModule).to.include('_sample_vertex')
+        expect(terrainModule).to.include('_signed_difference_f32')
+        expect(terrainModule).to.include('_snap_edge_coordinate')
+        expect(terrainShader).not.to.match(/renderPatchLookup|neighboringPatch|snapEdgeCoordinate/)
         expect(fs.existsSync(path.join(
             root,
             'examples',
@@ -287,7 +300,7 @@ describe('DEM Layer clean cut', () => {
     it('uses a GPU-resident frontier without a CPU selection compatibility path', () => {
 
         const layerSource = read(
-            'packages', 'geoscratch', 'src', 'geo', 'terrain-field-renderer.ts'
+            'packages', 'geoscratch', 'src', 'geo', 'web-mercator-terrain-renderer.ts'
         )
         const virtualRasterSource = read('examples', 'demLayer', 'dem-source.ts')
         const mapSource = read('examples', 'demLayer', 'dem-map.ts')
@@ -346,6 +359,35 @@ describe('DEM Layer clean cut', () => {
         expect(main).not.to.include("from './dem-controls.ts'")
     })
 
+    it('partitions the application cache budget exactly across Worker shards', () => {
+
+        const policy = Object.freeze({
+            mode: 'persistent',
+            namespace: 'dem-test',
+            maxPayloadBytes: 10_000,
+            maxEntries: 2,
+            requestPersistence: true,
+            lifecycle: Object.freeze({ kind: 'session' }),
+        })
+        const configurations = Array.from({ length: 4 }, (_, shard) =>
+            demCacheConfigurationForShard(policy, shard, 4)
+        )
+
+        expect(configurations.map(value => value.mode)).to.deep.equal([
+            'persistent', 'persistent', 'none', 'none',
+        ])
+        expect(configurations
+            .filter(value => value.mode === 'persistent')
+            .reduce((sum, value) => sum + value.descriptor.maxEntries, 0)
+        ).to.equal(2)
+        expect(configurations
+            .filter(value => value.mode === 'persistent')
+            .reduce((sum, value) => sum + value.descriptor.maxPayloadBytes, 0)
+        ).to.equal(10_000)
+        expect(configurations[0].descriptor.requestPersistence).to.equal(true)
+        expect(configurations[1].descriptor.requestPersistence).to.equal(false)
+    })
+
     it('keeps one DEM source authority and delegates executor disposal to Geo', () => {
 
         const source = read('examples', 'demLayer', 'dem-source.ts')
@@ -382,7 +424,7 @@ describe('DEM Layer clean cut', () => {
     it('uses only the current public Scratch graph and keeps persistent construction out of frames', () => {
 
         const layerSource = read(
-            'packages', 'geoscratch', 'src', 'geo', 'terrain-field-renderer.ts'
+            'packages', 'geoscratch', 'src', 'geo', 'web-mercator-terrain-renderer.ts'
         )
         const mainSource = read('examples', 'demLayer', 'main.ts')
         const frameSource = layerSource.slice(
@@ -488,38 +530,29 @@ describe('DEM Layer clean cut', () => {
     it('preserves the DEM payload and enumerates every reachable WGSL correction', () => {
 
         const demBytes = fs.readFileSync(path.join(root, 'examples', 'demLayer', 'assets', 'dem.png'))
-        const terrainShader = read('examples', 'demLayer', 'shaders', 'terrain-mesh.wgsl')
+        const terrainShader = read(
+            'examples', 'demLayer', 'shaders', 'terrain-presentation.wgsl'
+        )
+        const terrainModule = read(
+            'packages', 'geoscratch', 'src', 'geo', 'web-mercator-terrain-wgsl.ts'
+        )
         const browserProof = read('tests', 'browser', 'scratch-dem-layer.mjs')
 
         expect(sha256(demBytes)).to.equal('aa7a584830f198772d242df1ce1ae47e21b2bdc85bfc1f97101af8be986c57e1')
-        expect(terrainShader.match(/var<storage, read>/g)).to.have.length(4)
+        expect(terrainShader).not.to.include('var<storage')
         expect(terrainShader).not.to.match(/\b(lSampler|palette|colorMap)\b/)
         expect(terrainShader).not.to.include('demTexture')
         expect(terrainShader).not.to.match(/nodeBox|canonicalNodes|cameraCoordinate/)
-        expect(terrainShader).to.include('DemHeight_sample_vertex')
-        expect(terrainShader).not.to.include('DemHeight_sample_vertex_mercator')
-        expect(terrainShader).to.include('fixedAxisFromShiftedNumerator')
-        expect(terrainShader).to.include('relativeFixedMeters')
-        expect(terrainShader).to.include('grid.x == 0u')
-        expect(terrainShader).to.include('@location(5) barycentric: vec3f')
-        expect(terrainShader).to.include(
-            '@location(6) @interpolate(flat) tileColor: vec3f'
-        )
-        expect(terrainShader).to.include('fn logicalTileColor(')
-        expect(terrainShader).to.include('fn barycentricForVertex(')
-        expect(terrainShader).to.include('@fragment\nfn fTileWireframe(')
-        expect(terrainShader).to.include('fwidth(input.barycentric)')
-        expect(terrainShader).to.include('discard;')
-        const tileColorFunction = terrainShader.slice(
-            terrainShader.indexOf('fn logicalTileColor('),
-            terrainShader.indexOf('fn barycentricForVertex(')
-        )
-        expect(tileColorFunction).to.include('instance.matrixLevel')
-        expect(tileColorFunction).to.include('instance.tileRow')
-        expect(tileColorFunction).to.include('instance.tileCol')
-        expect(tileColorFunction).not.to.include('physicalSlot')
+        expect(terrainShader).to.include('WebMercatorTerrainVertexOutput')
+        expect(terrainShader).to.include('@fragment\nfn fMain(')
+        expect(terrainShader).not.to.match(/DemHeight|DemAddress|fixedAxis|relativeFixed/)
+        expect(terrainShader).not.to.match(/grid\.x|barycentric|tileColor|fTileWireframe/)
+        expect(terrainModule).to.include('_sample_vertex')
+        expect(terrainModule).to.include('_tile_wireframe')
+        expect(terrainModule).to.include('_logical_tile_color')
+        expect(terrainModule).to.include('_barycentric_for_vertex')
         const layer = read(
-            'packages', 'geoscratch', 'src', 'geo', 'terrain-field-renderer.ts'
+            'packages', 'geoscratch', 'src', 'geo', 'web-mercator-terrain-renderer.ts'
         )
         const main = read('examples', 'demLayer', 'main.ts')
         expect(layer).not.to.include('createExternalImageUploadCommand')

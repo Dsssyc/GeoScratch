@@ -2,9 +2,74 @@ import { expect } from 'chai'
 import {
     GeoDiagnosticError,
     decodeGpuRenderPatchState,
+    gpuRenderPatchReadWgslModule,
+    webMercatorTerrainWgslModule,
 } from 'geoscratch/geo'
 
 describe('Geo GPU render-patch frontier', () => {
+
+    it('publishes a complete bounded read-side lookup and stitching module', () => {
+
+        const module = gpuRenderPatchReadWgslModule({
+            namespace: 'TerrainPatch',
+            group: 1,
+            visibleInstancesBinding: 2,
+            lookupEntriesBinding: 3,
+        })
+
+        expect(module).to.deep.include({
+            kind: 'gpu-render-patch-read-wgsl-module',
+            namespace: 'TerrainPatch',
+        })
+        expect(module.bindings).to.deep.equal({
+            group: 1,
+            visibleInstances: 2,
+            lookupEntries: 3,
+        })
+        expect(module.code).to.include('@group(1) @binding(2)')
+        expect(module.code).to.include('@group(1) @binding(3)')
+        expect(module.code).to.include('fn TerrainPatch_lookup(')
+        expect(module.code).to.include('fn TerrainPatch_covering(')
+        expect(module.code).to.include('fn TerrainPatch_neighbor(')
+        expect(module.code).to.include('fn TerrainPatch_snap_edge_coordinate(')
+        expect(module.code).not.to.match(/\blet patch\b/)
+        expect(module.layoutDependencies).to.have.length.greaterThan(1)
+        expect(Object.isFrozen(module)).to.equal(true)
+    })
+
+    it('generates the complete Web Mercator terrain vertex and diagnostic presentation', () => {
+
+        const module = webMercatorTerrainWgslModule({
+            fieldNamespace: 'HeightField',
+            addressNamespace: 'HeightAddress',
+            cellsPerPatchEdge: 64,
+            sceneGroup: 0,
+            mapMetaBinding: 0,
+            configBinding: 1,
+            dataGroup: 1,
+            indicesBinding: 0,
+            gridPositionsBinding: 1,
+            visibleInstancesBinding: 2,
+            lookupEntriesBinding: 3,
+        })
+
+        expect(module).to.deep.include({
+            kind: 'web-mercator-terrain-wgsl-module',
+            namespace: 'WebMercatorTerrain',
+            vertexEntryPoint: 'WebMercatorTerrain_vertex',
+            tileWireframeFragmentEntryPoint: 'WebMercatorTerrain_tile_wireframe',
+        })
+        expect(module.code).to.include('struct WebMercatorTerrainVertexOutput')
+        expect(module.code).to.include('fn WebMercatorTerrain_fixed_position(')
+        expect(module.code).to.include('HeightAddressFixedPosition')
+        expect(module.code).to.include('HeightAddressFixed_signed_difference_f32')
+        expect(module.code).to.include('WebMercatorTerrainPatch_neighbor')
+        expect(module.code).to.include('HeightField_sample_vertex')
+        expect(module.code).not.to.match(/\blet sample\b/)
+        expect(module.code).to.include('@vertex\nfn WebMercatorTerrain_vertex(')
+        expect(module.code).to.include('@fragment\nfn WebMercatorTerrain_tile_wireframe(')
+        expect(module.layoutDependencies).to.have.length.greaterThan(2)
+    })
 
     it('decodes bounded delayed GPU selection facts', () => {
 

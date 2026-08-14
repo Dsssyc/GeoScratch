@@ -8,8 +8,8 @@ import type {
 import type {
     GeoFrameController,
     MapLibrePlanarCameraState,
-    TerrainFieldProvenanceFact,
-    TerrainFieldRenderer,
+    WebMercatorTerrainProvenanceFact,
+    WebMercatorTerrainRenderer,
     VirtualRasterRuntimeFacts,
     VirtualRasterWorkerExecutorFacts,
 } from 'geoscratch/geo'
@@ -22,7 +22,10 @@ import type {
 } from '../../../examples/demLayer/dem-tile-protocol.ts'
 
 type DemTerrainPresentation = 'shaded' | 'tile-wireframe'
-type DemLayer = TerrainFieldRenderer<MapLibrePlanarCameraState, DemTerrainPresentation>
+type DemLayer = WebMercatorTerrainRenderer<
+    MapLibrePlanarCameraState,
+    DemTerrainPresentation
+>
 type DemVirtualRasterFacts = Readonly<{
     runtime: VirtualRasterRuntimeFacts
     source: DemTileSourceFacts
@@ -110,7 +113,7 @@ export function createDemLayerProof(configuration: ProofConfiguration) {
     let rasterAcquiredCount = 0
     let submittedFrames = 0
     let observedFrames = 0
-    let latestProvenance: readonly TerrainFieldProvenanceFact[] = []
+    let latestProvenance: readonly WebMercatorTerrainProvenanceFact[] = []
     let latestCamera: MapLibrePlanarCameraState | undefined
 
     function assertConfiguration() {
@@ -263,7 +266,7 @@ export function createDemLayerProof(configuration: ProofConfiguration) {
         mapAcquired: () => { mapAcquiredCount++ },
         rasterAcquired: () => { rasterAcquiredCount++ },
         frameSubmitted(
-            provenance: readonly TerrainFieldProvenanceFact[],
+            provenance: readonly WebMercatorTerrainProvenanceFact[],
             camera: MapLibrePlanarCameraState
         ) {
             submittedFrames++
@@ -337,7 +340,7 @@ function publishFrameFacts({
     lifetime: LifetimeScope
     submittedFrames: number
     observedFrames: number
-    latestProvenance: readonly TerrainFieldProvenanceFact[]
+    latestProvenance: readonly WebMercatorTerrainProvenanceFact[]
     latestCamera?: MapLibrePlanarCameraState
     frameController: GeoFrameController
     virtualRasterFacts(): DemVirtualRasterFacts

@@ -434,14 +434,14 @@ type RemovedVirtualRasterSourceLoadContext = geoApi.VirtualRasterSourceLoadConte
 // @ts-expect-error OwnedVirtualRasterPagePayload is the sole payload ownership identity
 type RemovedVirtualRasterPagePayload = geoApi.VirtualRasterPagePayload
 const typedTerrainRendererCreation: Promise<
-    geoApi.TerrainFieldRenderer<{ frameEpoch: number }, 'shaded' | 'wireframe'>
-> = geoApi.createTerrainFieldRenderer({
+    geoApi.WebMercatorTerrainRenderer<{ frameEpoch: number }, 'shaded' | 'wireframe'>
+> = geoApi.createWebMercatorTerrainRenderer({
     runtime: typedTerrainRuntime,
     surface: typedTerrainSurface,
     fieldLayer: typedMapField,
     virtualRaster: typedTerrainVirtualRaster,
     size: { width: 1920, height: 1080 },
-    shader: '',
+    presentationShader: '',
     fieldSampling: {
         namespace: 'TypedHeight',
         addressNamespace: 'TypedAddress',
@@ -449,7 +449,11 @@ const typedTerrainRendererCreation: Promise<
     elevationRangeMeters: [ -100, 8_000 ],
     presentations: [
         { id: 'shaded', fragmentEntryPoint: 'fMain' },
-        { id: 'wireframe', fragmentEntryPoint: 'fWireframe' },
+        {
+            id: 'wireframe',
+            fragmentEntryPoint:
+                geoApi.WEB_MERCATOR_TERRAIN_TILE_WIREFRAME_FRAGMENT_ENTRY_POINT,
+        },
     ],
     initialPresentation: 'shaded',
 })

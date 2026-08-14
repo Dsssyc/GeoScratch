@@ -23,7 +23,9 @@ describe('asset layout', () => {
         expect(exists('examples', 'flowLayer', 'shaders', 'flow', 'particles.wgsl')).to.equal(true)
         expect(exists('examples', 'demLayer', 'assets', 'dem.png')).to.equal(true)
         expect(exists('examples', 'demLayer', 'shaders', 'lod-map.wgsl')).to.equal(false)
-        expect(exists('examples', 'demLayer', 'shaders', 'terrain-mesh.wgsl')).to.equal(true)
+        expect(exists(
+            'examples', 'demLayer', 'shaders', 'terrain-presentation.wgsl'
+        )).to.equal(true)
 
         const helloGAW = read('examples', 'helloGAW', 'main.ts')
         const flowLayer = read('examples', 'flowLayer', 'flow-layer.ts')
@@ -122,11 +124,17 @@ describe('asset layout', () => {
     it('keeps only reachable terrain shaders beside the DEM example', () => {
 
         expect(exists('examples', 'demLayer', 'shaders', 'lod-map.wgsl')).to.equal(false)
-        expect(exists('examples', 'demLayer', 'shaders', 'terrain-mesh.wgsl')).to.equal(true)
+        expect(exists(
+            'examples', 'demLayer', 'shaders', 'terrain-presentation.wgsl'
+        )).to.equal(true)
         expect(exists('examples', 'public', 'shaders', 'examples', 'terrain')).to.equal(false)
 
-        const terrain = read('examples', 'demLayer', 'shaders', 'terrain-mesh.wgsl')
-        expect(terrain).to.include('@vertex')
+        const terrain = read(
+            'examples', 'demLayer', 'shaders', 'terrain-presentation.wgsl'
+        )
+        expect(terrain).to.include('@fragment')
+        expect(terrain).to.not.include('@vertex')
+        expect(terrain).to.not.match(/renderPatch|stitch|sample_vertex|cameraFixed/)
         expect(terrain).to.not.include('terrainMeshLineShader')
     })
 })

@@ -10,6 +10,7 @@ import {
     type ComputePipeline,
     type DispatchCommand,
     type GPURuntime,
+    type LayoutArtifact,
     type Program,
     type ReadbackCommand,
     type ShaderModule,
@@ -63,7 +64,6 @@ const STATE_BALANCE_SCRATCH_COUNT_OFFSET_WORDS =
     STATE_BALANCE_PASS_COUNT_OFFSET_WORDS + 1
 const STATE_WORDS = STATE_BALANCE_SCRATCH_COUNT_OFFSET_WORDS + 1
 const STATE_BYTES = STATE_WORDS * Uint32Array.BYTES_PER_ELEMENT
-const LOOKUP_ENTRY_BYTES = 8
 const BUFFER_COPY_DST = 0x08
 const BUFFER_COPY_SRC = 0x04
 const BUFFER_UNIFORM = 0x40
@@ -83,6 +83,16 @@ const renderPatchCodec = layoutCodec({
         { name: 'sourceCompactIndex', type: 'u32' },
     ],
 }, { usage: [ 'storage', 'readback' ] })
+
+const renderPatchLookupEntryCodec = layoutCodec({
+    name: 'GpuRenderPatchLookupEntry',
+    fields: [
+        { name: 'key', type: 'u32' },
+        { name: 'patchIndex', type: 'u32' },
+    ],
+}, { usage: [ 'storage', 'readback' ] })
+
+const LOOKUP_ENTRY_BYTES = renderPatchLookupEntryCodec.byteLength()
 
 const renderPatchPolicyCodec = layoutCodec({
     name: 'GpuRenderPatchPolicy',
@@ -218,6 +228,25 @@ export type GpuRenderPatchSelectionFacts = Readonly<{
     balanceOverheadPatchCount: number
     maximumAdjacentLevelDelta: number
     balancePassCount: number
+}>
+
+export type GpuRenderPatchReadWgslOptions = Readonly<{
+    namespace?: string
+    group: number
+    visibleInstancesBinding: number
+    lookupEntriesBinding: number
+}>
+
+export type GpuRenderPatchReadWgslModule = Readonly<{
+    kind: 'gpu-render-patch-read-wgsl-module'
+    namespace: string
+    code: string
+    layoutDependencies: readonly LayoutArtifact[]
+    bindings: Readonly<{
+        group: number
+        visibleInstances: number
+        lookupEntries: number
+    }>
 }>
 
 export type GpuRenderPatchFeedback = Readonly<GpuRenderPatchSelectionFacts & {
@@ -464,6 +493,120 @@ fn GpuRenderPatch_lookupSlot(key: u32, probe: u32, capacity: u32) -> u32 {
             ...frontier.layoutDependencies,
             renderPatchCodec.artifact,
         ]),
+    })
+}
+
+/** Generates bounded read-side lookup, neighbor, and edge-stitching WGSL for render patches. */
+export function gpuRenderPatchReadWgslModule(
+    options: GpuRenderPatchReadWgslOptions
+): GpuRenderPatchReadWgslModule {
+
+    const namespace = normalizeWgslNamespace(options?.namespace, 'GpuRenderPatchRead')
+    const bindings = Object.freeze({
+        group: nonNegativeBinding(options?.group, 'group'),
+        visibleInstances: nonNegativeBinding(
+            options?.visibleInstancesBinding,
+            'visibleInstancesBinding'
+        ),
+        lookupEntries: nonNegativeBinding(
+            options?.lookupEntriesBinding,
+            'lookupEntriesBinding'
+        ),
+    })
+    if (bindings.visibleInstances === bindings.lookupEntries) {
+        throw new TypeError('GPU render-patch read WGSL bindings must be distinct')
+    }
+    const shared = gpuRenderPatchWgslModule()
+    const code = `${shared.code}\n` +
+        `${renderPatchLookupEntryCodec.wgslAccessors({
+            namespace: `${namespace}LookupEntryLayout`,
+        })}\n\n` +
+        `struct ${namespace}Neighbor {\n` +
+        `    found: u32,\n` +
+        `    matrixLevel: u32,\n` +
+        `    samplingLevel: u32,\n` +
+        `    patchIndex: u32,\n` +
+        `}\n\n` +
+        `@group(${bindings.group}) @binding(${bindings.visibleInstances}) ` +
+        `var<storage, read> ${namespace}_visible_instances: array<GpuRenderPatch>;\n` +
+        `@group(${bindings.group}) @binding(${bindings.lookupEntries}) ` +
+        `var<storage, read> ${namespace}_lookup_entries: array<GpuRenderPatchLookupEntry>;\n\n` +
+        `fn ${namespace}_missing() -> ${namespace}Neighbor {\n` +
+        `    return ${namespace}Neighbor(0u, 0u, 0u, 0xffffffffu);\n` +
+        `}\n\n` +
+        `fn ${namespace}_lookup(matrix_level: u32, tile_row: u32, tile_col: u32, ` +
+        `lookup_capacity: u32) -> ${namespace}Neighbor {\n` +
+        `    let key = GpuRenderPatch_lookupKey(matrix_level, tile_row, tile_col);\n` +
+        `    for (var probe = 0u; probe < lookup_capacity; probe += 1u) {\n` +
+        `        let slot = GpuRenderPatch_lookupSlot(key, probe, lookup_capacity);\n` +
+        `        let entry = ${namespace}_lookup_entries[slot];\n` +
+        `        if (entry.key == 0u) { return ${namespace}_missing(); }\n` +
+        `        if (entry.key == key) {\n` +
+        `            let selected_patch = ` +
+        `${namespace}_visible_instances[entry.patchIndex];\n` +
+        `            return ${namespace}Neighbor(1u, selected_patch.matrixLevel, ` +
+        `selected_patch.samplingLevel, entry.patchIndex);\n` +
+        `        }\n` +
+        `    }\n` +
+        `    return ${namespace}_missing();\n` +
+        `}\n\n` +
+        `fn ${namespace}_covering(render_row: u32, render_col: u32, ` +
+        `maximum_matrix_level: u32, lookup_capacity: u32) -> ${namespace}Neighbor {\n` +
+        `    var matrix_level = maximum_matrix_level;\n` +
+        `    loop {\n` +
+        `        let shift = maximum_matrix_level - matrix_level;\n` +
+        `        let result = ${namespace}_lookup(matrix_level, render_row >> shift, ` +
+        `render_col >> shift, lookup_capacity);\n` +
+        `        if (result.found != 0u) { return result; }\n` +
+        `        if (matrix_level == 0u) { break; }\n` +
+        `        matrix_level -= 1u;\n` +
+        `    }\n` +
+        `    return ${namespace}_missing();\n` +
+        `}\n\n` +
+        `fn ${namespace}_neighbor(instance: GpuRenderPatch, edge: u32, local: vec2f, ` +
+        `maximum_matrix_level: u32, lookup_capacity: u32) -> ${namespace}Neighbor {\n` +
+        `    let level_delta = maximum_matrix_level - instance.matrixLevel;\n` +
+        `    let scale = 1u << level_delta;\n` +
+        `    let matrix_width = 1u << maximum_matrix_level;\n` +
+        `    let west = instance.tileCol * scale;\n` +
+        `    let north = instance.tileRow * scale;\n` +
+        `    let along_x = min(scale - 1u, u32(floor(clamp(local.x, 0.0f, ` +
+        `0.99999994f) * f32(scale))));\n` +
+        `    let along_south = min(scale - 1u, u32(floor(clamp(1.0f - local.y, ` +
+        `0.0f, 0.99999994f) * f32(scale))));\n` +
+        `    var row = north + along_south;\n` +
+        `    var column = west + along_x;\n` +
+        `    switch edge {\n` +
+        `        case 0u: { column = (west + matrix_width - 1u) % matrix_width; }\n` +
+        `        case 1u: { column = (west + scale) % matrix_width; }\n` +
+        `        case 2u: {\n` +
+        `            if (north == 0u) { return ${namespace}_missing(); }\n` +
+        `            row = north - 1u;\n` +
+        `        }\n` +
+        `        default: {\n` +
+        `            row = north + scale;\n` +
+        `            if (row >= matrix_width) { return ${namespace}_missing(); }\n` +
+        `        }\n` +
+        `    }\n` +
+        `    return ${namespace}_covering(row, column, maximum_matrix_level, ` +
+        `lookup_capacity);\n` +
+        `}\n\n` +
+        `fn ${namespace}_snap_edge_coordinate(coordinate: u32, matrix_level: u32, ` +
+        `neighbor_matrix_level: u32, cells_per_edge: u32) -> u32 {\n` +
+        `    if (neighbor_matrix_level >= matrix_level) { return coordinate; }\n` +
+        `    let level_delta = min(matrix_level - neighbor_matrix_level, 31u);\n` +
+        `    let step = 1u << level_delta;\n` +
+        `    return min(cells_per_edge, ((coordinate + step - 1u) / step) * step);\n` +
+        `}\n`
+    return Object.freeze({
+        kind: 'gpu-render-patch-read-wgsl-module' as const,
+        namespace,
+        code,
+        layoutDependencies: Object.freeze([
+            ...shared.layoutDependencies,
+            renderPatchLookupEntryCodec.artifact,
+        ]),
+        bindings,
     })
 }
 
@@ -1404,4 +1547,21 @@ function validateOptions(
 function assertActive(disposed: boolean) {
 
     if (disposed) throw new Error('GPU render-patch frontier is disposed')
+}
+
+function normalizeWgslNamespace(value: string | undefined, fallback: string): string {
+
+    const namespace = value ?? fallback
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(namespace)) {
+        throw new TypeError('GPU render-patch WGSL namespace must be an identifier')
+    }
+    return namespace
+}
+
+function nonNegativeBinding(value: number | undefined, name: string): number {
+
+    if (!Number.isSafeInteger(value) || Number(value) < 0) {
+        throw new TypeError(`GPU render-patch ${name} must be a non-negative integer`)
+    }
+    return Number(value)
 }

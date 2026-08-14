@@ -449,8 +449,10 @@ export class WideFixedCodec {
 
         const namespace = normalizeNamespace(options.namespace, 'GeoWideFixed')
         const dimensions = this.domain.intrinsicDimensions
+        const quantum = `${Math.fround(this.facts.fixedQuantum!)}f`
         return `struct ${namespace}Axis {\n    low: u32,\n    high: u32,\n}\n\n` +
             `struct ${namespace}Position {\n    axes: array<${namespace}Axis, ${dimensions}>,\n}\n\n` +
+            `const ${namespace}_quantum = ${quantum};\n\n` +
             `fn ${namespace}_add_axis(a: ${namespace}Axis, b: ${namespace}Axis) -> ${namespace}Axis {\n` +
             `    let low = a.low + b.low;\n` +
             `    let carry = select(0u, 1u, low < a.low);\n` +
@@ -465,7 +467,32 @@ export class WideFixedCodec {
             `fn ${namespace}_subtract(value: ${namespace}Position, delta: ${namespace}Position) -> ${namespace}Position {\n` +
             `    var result = value;\n` +
             `    for (var axis = 0u; axis < ${dimensions}u; axis++) { result.axes[axis] = ${namespace}_subtract_axis(value.axes[axis], delta.axes[axis]); }\n` +
-            `    return result;\n}\n`
+            `    return result;\n}\n\n` +
+            `fn ${namespace}_from_shifted_u32(value: u32, shift: u32) -> ${namespace}Axis {\n` +
+            `    if (shift == 0u) { return ${namespace}Axis(value, 0u); }\n` +
+            `    if (shift < 32u) { return ${namespace}Axis(value << shift, value >> (32u - shift)); }\n` +
+            `    return ${namespace}Axis(0u, value << (shift - 32u));\n}\n\n` +
+            `fn ${namespace}_axis_magnitude(value: ${namespace}Axis) -> ${namespace}Axis {\n` +
+            `    if ((value.high & 0x80000000u) == 0u) { return value; }\n` +
+            `    let low = ~value.low + 1u;\n` +
+            `    let carry = select(0u, 1u, low == 0u);\n` +
+            `    return ${namespace}Axis(low, ~value.high + carry);\n}\n\n` +
+            `fn ${namespace}_signed_axis_f32(value: ${namespace}Axis, scale: f32) -> f32 {\n` +
+            `    let negative = (value.high & 0x80000000u) != 0u;\n` +
+            `    let magnitude = ${namespace}_axis_magnitude(value);\n` +
+            `    let result = f32(magnitude.high) * ldexp(scale, 32) + f32(magnitude.low) * scale;\n` +
+            `    return select(result, -result, negative);\n}\n\n` +
+            `fn ${namespace}_signed_difference_f32(value: ${namespace}Axis, origin: ${namespace}Axis) -> f32 {\n` +
+            `    return ${namespace}_signed_axis_f32(${namespace}_subtract_axis(value, origin), ${namespace}_quantum);\n}\n\n` +
+            `fn ${namespace}_fraction_f32(value: ${namespace}Axis, fractional_bits: u32) -> f32 {\n` +
+            `    return ${namespace}_signed_axis_f32(value, ldexp(1.0f, -i32(fractional_bits)));\n}\n\n` +
+            `fn ${namespace}_subtract_expansions_f32(left: vec2f, right: vec2f) -> f32 {\n` +
+            `    let low_difference = left.y - right.y;\n` +
+            `    if (left.x == right.x) { return low_difference; }\n` +
+            `    let difference = left.x - right.x;\n` +
+            `    let bridge = difference - left.x;\n` +
+            `    let roundoff = (left.x - (difference - bridge)) - (right.x + bridge);\n` +
+            `    return difference + (roundoff + low_difference);\n}\n`
     }
 
     #assertPosition(position: WideFixedPosition): void {

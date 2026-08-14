@@ -2,7 +2,7 @@
 
 # geoscratch/geo API Reference
 
-Public symbols: 292.
+Public symbols: 299.
 
 ## `packages/geoscratch/src/geo/coordinate-domain.ts`
 
@@ -560,6 +560,36 @@ Kind: `Type Alias`.
 
 ```ts
 type GpuRenderPatchIdentityObjects = Readonly<{ bindLayouts: readonly BindLayout[]; bindSets: readonly BindSet[]; commands: readonly (ClearBufferCommand | DispatchCommand | ReadbackCommand)[]; passes: readonly ComputePassSpec[]; pipelines: readonly ComputePipeline[]; programs: readonly Program[]; resources: readonly BufferResource[]; uploads: readonly UploadCommand[] }>
+```
+
+### `gpuRenderPatchReadWgslModule`
+
+Kind: `Function`.
+
+Generates bounded read-side lookup, neighbor, and edge-stitching WGSL for render patches.
+
+```ts
+Function gpuRenderPatchReadWgslModule
+```
+
+```ts
+gpuRenderPatchReadWgslModule(options: GpuRenderPatchReadWgslOptions): GpuRenderPatchReadWgslModule
+```
+
+### `GpuRenderPatchReadWgslModule`
+
+Kind: `Type Alias`.
+
+```ts
+type GpuRenderPatchReadWgslModule = Readonly<{ bindings: Readonly<{ group: number; lookupEntries: number; visibleInstances: number }>; code: string; kind: "gpu-render-patch-read-wgsl-module"; layoutDependencies: readonly LayoutArtifact[]; namespace: string }>
+```
+
+### `GpuRenderPatchReadWgslOptions`
+
+Kind: `Type Alias`.
+
+```ts
+type GpuRenderPatchReadWgslOptions = Readonly<{ group: number; lookupEntriesBinding: number; namespace?: string; visibleInstancesBinding: number }>
 ```
 
 ### `GpuRenderPatchRenderTemplate`
@@ -1158,126 +1188,6 @@ Kind: `Type Alias`.
 
 ```ts
 type WideFixedPosition = Readonly<{ dimensions: CoordinateDimension; encoding: "wide-fixed"; limbs: readonly WideFixedAxis[] }>
-```
-
-## `packages/geoscratch/src/geo/terrain-field-renderer.ts`
-
-### `createTerrainFieldRenderer`
-
-Kind: `Function`.
-
-Assembles a view-driven Virtual Raster terrain renderer with GPU frontiers and explicit lifetime.
-
-```ts
-Function createTerrainFieldRenderer
-```
-
-```ts
-createTerrainFieldRenderer<ViewInput, Presentation extends string>(__namedParameters: TerrainFieldRendererDescriptor<ViewInput, Presentation>): Promise<Readonly<{ stableIdentities: readonly string[]; stableIdentityFacts: TerrainFieldIdentityFacts; stableIdentityHash: string; contractFacts: any; currentIdentityFacts: any; dispose: any; initialize: any; persistentFacts: any; renderFrame: any; resize: any; setPresentation: any; state: any; virtualRasterFacts: any }>>
-```
-
-### `TerrainFieldContractFacts`
-
-Kind: `Type Alias`.
-
-```ts
-type TerrainFieldContractFacts = Readonly<{ commandIds: Readonly<{ drawTerrain: Readonly<Record<string, readonly string[]>>; renderPatches: readonly (readonly string[])[] }>; countPath: "gpu-produced-indirect-arguments"; dataMaximumMatrixLevel: number; feedback: VirtualRasterGpuFeedbackRingFacts; fieldLayer: Readonly<{ demandProducerId: string; fieldId: string; id: string; representationId: string; spatialProfileId: string; viewAdapterId: string }>; frontier: ReturnType<GpuTileFrontier["facts"]>; passIds: Readonly<{ renderPatches: string; terrain: string }>; persistentIdentityCount: number; renderMaximumMatrixLevel: number; renderPatches: GpuRenderPatchFrontierFacts; selectionPath: "gpu-resident-active-frontier"; stageOrder: readonly string[]; terrainVertexCount: number; virtualRaster: Readonly<{ completeImageUpload: false; coordinateEncoding: WebMercatorVirtualRasterField["addressCodec"]["positionCodec"]["facts"]["encoding"]; crossPageFiltering: "logical-bilinear"; levelCount: number; maxPhysicalPages: number; pageSize: readonly number[]; sourceRevision: string }> }>
-```
-
-### `TerrainFieldFrame`
-
-Kind: `Type Alias`.
-
-```ts
-type TerrainFieldFrame<Presentation extends string = string> = Readonly<{ feedback?: VirtualRasterGpuFeedbackBatch; needsFollowUp: boolean; observation: Promise<TerrainFieldSubmissionObservation>; provenance: readonly TerrainFieldProvenanceFact[]; reconciliation?: VirtualRasterFeedbackReconciliation; renderPatchFeedback?: GpuRenderPatchFeedback; requestedPageCount: number; residencySettlement: Promise<unknown>; submitted: SubmittedWork; terrainPresentation: Presentation }>
-```
-
-### `TerrainFieldIdentityFacts`
-
-Kind: `Type Alias`.
-
-```ts
-type TerrainFieldIdentityFacts = Readonly<{ bindLayouts: number; bindSets: number; commands: number; count: number; hash: string; passes: number; pipelines: number; programs: number; resources: number; uploads: number }>
-```
-
-### `TerrainFieldInitialization`
-
-Kind: `Type Alias`.
-
-```ts
-type TerrainFieldInitialization = Readonly<{ observation: Promise<TerrainFieldSubmissionObservation>; submitted: SubmittedWork }>
-```
-
-### `TerrainFieldPersistentFacts`
-
-Kind: `Type Alias`.
-
-```ts
-type TerrainFieldPersistentFacts = Readonly<{ bindLayouts: number; bindSets: number; logicalFootprintBytes: number; pipelines: number; resources: number }>
-```
-
-### `TerrainFieldPresentationDescriptor`
-
-Kind: `Type Alias`.
-
-```ts
-type TerrainFieldPresentationDescriptor<Presentation extends string = string> = Readonly<{ fragmentEntryPoint: string; id: Presentation; label?: string }>
-```
-
-### `TerrainFieldProvenanceFact`
-
-Kind: `Type Alias`.
-
-```ts
-type TerrainFieldProvenanceFact = Readonly<{ consumerStepIndex: number; declaredContentEpoch: "current-at-step"; name: string; producerContentEpoch: number; producerStepIndex: number; readContentEpoch: number; resourceId: string }>
-```
-
-### `TerrainFieldRenderer`
-
-Kind: `Type Alias`.
-
-```ts
-type TerrainFieldRenderer<ViewInput, Presentation extends string = string> = Readonly<{ stableIdentities: readonly string[]; stableIdentityFacts: TerrainFieldIdentityFacts; stableIdentityHash: string; contractFacts: any; currentIdentityFacts: any; dispose: any; initialize: any; persistentFacts: any; renderFrame: any; resize: any; setPresentation: any; state: any; virtualRasterFacts: any }>
-```
-
-### `TerrainFieldRendererDescriptor`
-
-Kind: `Type Alias`.
-
-```ts
-type TerrainFieldRendererDescriptor<ViewInput, Presentation extends string = string> = Readonly<{ elevationRangeMeters: readonly [number, number]; exaggeration?: number; fieldLayer: MapFieldLayer<ViewInput>; fieldSampling: TerrainFieldSamplingWgslOptions; initialPresentation: Presentation; observeProvenance?: (facts: readonly TerrainFieldProvenanceFact[]) => void; presentations: readonly TerrainFieldPresentationDescriptor<Presentation>[]; runtime: GPURuntime; shader: string; size: SurfaceSize; surface: Surface; virtualRaster: VirtualRasterRuntime<WebMercatorVirtualRasterField> }>
-```
-
-### `TerrainFieldRendererState`
-
-Kind: `Type Alias`.
-
-```ts
-type TerrainFieldRendererState<Presentation extends string = string> = Readonly<{ budgetLimitedCount: number; convergenceState: GpuTileFrontierFacts["convergenceState"]; demandCount: number; disposed: boolean; fallbackCount: number; feedback: VirtualRasterGpuFeedbackRingFacts; frame: number; frontierCount: number; frontierFacts?: GpuTileFrontierFacts; initialized: boolean; lastResizeFacts?: TerrainFieldResizeFacts; latestFeedbackDiagnostics: readonly unknown[]; levelRange: readonly [number | undefined, number | undefined]; maximumObservedSse: number; readbackInFlightCount: number; renderPatchBaselineBudget: number; renderPatchBudgetLimitedByMinimumTrial: boolean; renderPatchCellSpanRange: readonly [number | undefined, number | undefined]; renderPatchCount: number; renderPatchDescriptorOverflowCount: number; renderPatchFeedback?: GpuRenderPatchFeedback; renderPatchFrameBudget: number; renderPatchFrameEpoch?: number; renderPatchLevelRange: readonly [number | undefined, number | undefined]; renderPatchLookupOverflowCount: number; renderPatchMinimumTrialCount: number; renderPatchRequestedCount: number; renderPatchSelectedBiasLevels: number; renderPatchSourceRootCount: number; resizeGeneration: number; size: SurfaceSize; staleBindSetPreparationCount: number; staleFeedbackCount: number; staleGenerationCount: number; supersededFeedbackCount: number; terrainPresentation: Presentation; virtualRequestedPageCount: number; virtualSnapshotEpoch: number; visibleNodeCount: number }>
-```
-
-### `TerrainFieldResizeFacts`
-
-Kind: `Type Alias`.
-
-```ts
-type TerrainFieldResizeFacts = Readonly<{ depthAllocationVersion: number; preparedBindSetCount: number; resizeGeneration: number; staleBindSetCount: number }>
-```
-
-### `TerrainFieldSamplingWgslOptions`
-
-Kind: `Type Alias`.
-
-```ts
-type TerrainFieldSamplingWgslOptions = Readonly<{ addressNamespace: string; namespace: string; transitionTexels?: number }>
-```
-
-### `TerrainFieldSubmissionObservation`
-
-Kind: `Type Alias`.
-
-```ts
-type TerrainFieldSubmissionObservation = Readonly<{ nativeStatus: "observed-succeeded"; submissionId: string }>
 ```
 
 ## `packages/geoscratch/src/geo/tile-matrix.ts`
@@ -3017,6 +2927,168 @@ Kind: `Type Alias`.
 
 ```ts
 type WebMercatorTileSampleAddress = Readonly<{ compactIndex?: number; covered: boolean; kind: "web-mercator-tile-sample-address"; subTexel: readonly [number, number]; texel: readonly [number, number]; tile: TileCoordinate }>
+```
+
+## `packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts`
+
+### `createWebMercatorTerrainRenderer`
+
+Kind: `Function`.
+
+Assembles a WebMercatorQuad Virtual Raster terrain renderer with GPU-driven selection, precision-aware vertex generation, mesh stitching, and explicit lifetime.
+
+```ts
+Function createWebMercatorTerrainRenderer
+```
+
+```ts
+createWebMercatorTerrainRenderer<ViewInput, Presentation extends string>(__namedParameters: WebMercatorTerrainRendererDescriptor<ViewInput, Presentation>): Promise<Readonly<{ stableIdentities: readonly string[]; stableIdentityFacts: WebMercatorTerrainIdentityFacts; stableIdentityHash: string; contractFacts: any; currentIdentityFacts: any; dispose: any; initialize: any; persistentFacts: any; renderFrame: any; resize: any; setPresentation: any; state: any; virtualRasterFacts: any }>>
+```
+
+### `WebMercatorTerrainContractFacts`
+
+Kind: `Type Alias`.
+
+```ts
+type WebMercatorTerrainContractFacts = Readonly<{ commandIds: Readonly<{ drawTerrain: Readonly<Record<string, readonly string[]>>; renderPatches: readonly (readonly string[])[] }>; countPath: "gpu-produced-indirect-arguments"; dataMaximumMatrixLevel: number; feedback: VirtualRasterGpuFeedbackRingFacts; fieldLayer: Readonly<{ demandProducerId: string; fieldId: string; id: string; representationId: string; spatialProfileId: string; viewAdapterId: string }>; frontier: ReturnType<GpuTileFrontier["facts"]>; passIds: Readonly<{ renderPatches: string; terrain: string }>; persistentIdentityCount: number; renderMaximumMatrixLevel: number; renderPatches: GpuRenderPatchFrontierFacts; selectionPath: "gpu-resident-active-frontier"; stageOrder: readonly string[]; terrainVertexCount: number; virtualRaster: Readonly<{ completeImageUpload: false; coordinateEncoding: WebMercatorVirtualRasterField["addressCodec"]["positionCodec"]["facts"]["encoding"]; crossPageFiltering: "logical-bilinear"; levelCount: number; maxPhysicalPages: number; pageSize: readonly number[]; sourceRevision: string }> }>
+```
+
+### `WebMercatorTerrainFrame`
+
+Kind: `Type Alias`.
+
+```ts
+type WebMercatorTerrainFrame<Presentation extends string = string> = Readonly<{ feedback?: VirtualRasterGpuFeedbackBatch; needsFollowUp: boolean; observation: Promise<WebMercatorTerrainSubmissionObservation>; provenance: readonly WebMercatorTerrainProvenanceFact[]; reconciliation?: VirtualRasterFeedbackReconciliation; renderPatchFeedback?: GpuRenderPatchFeedback; requestedPageCount: number; residencySettlement: Promise<unknown>; submitted: SubmittedWork; terrainPresentation: Presentation }>
+```
+
+### `WebMercatorTerrainIdentityFacts`
+
+Kind: `Type Alias`.
+
+```ts
+type WebMercatorTerrainIdentityFacts = Readonly<{ bindLayouts: number; bindSets: number; commands: number; count: number; hash: string; passes: number; pipelines: number; programs: number; resources: number; uploads: number }>
+```
+
+### `WebMercatorTerrainInitialization`
+
+Kind: `Type Alias`.
+
+```ts
+type WebMercatorTerrainInitialization = Readonly<{ observation: Promise<WebMercatorTerrainSubmissionObservation>; submitted: SubmittedWork }>
+```
+
+### `WebMercatorTerrainPersistentFacts`
+
+Kind: `Type Alias`.
+
+```ts
+type WebMercatorTerrainPersistentFacts = Readonly<{ bindLayouts: number; bindSets: number; logicalFootprintBytes: number; pipelines: number; resources: number }>
+```
+
+### `WebMercatorTerrainPresentationDescriptor`
+
+Kind: `Type Alias`.
+
+```ts
+type WebMercatorTerrainPresentationDescriptor<Presentation extends string = string> = Readonly<{ fragmentEntryPoint: string; id: Presentation; label?: string }>
+```
+
+### `WebMercatorTerrainProvenanceFact`
+
+Kind: `Type Alias`.
+
+```ts
+type WebMercatorTerrainProvenanceFact = Readonly<{ consumerStepIndex: number; declaredContentEpoch: "current-at-step"; name: string; producerContentEpoch: number; producerStepIndex: number; readContentEpoch: number; resourceId: string }>
+```
+
+### `WebMercatorTerrainRenderer`
+
+Kind: `Type Alias`.
+
+```ts
+type WebMercatorTerrainRenderer<ViewInput, Presentation extends string = string> = Readonly<{ stableIdentities: readonly string[]; stableIdentityFacts: WebMercatorTerrainIdentityFacts; stableIdentityHash: string; contractFacts: any; currentIdentityFacts: any; dispose: any; initialize: any; persistentFacts: any; renderFrame: any; resize: any; setPresentation: any; state: any; virtualRasterFacts: any }>
+```
+
+### `WebMercatorTerrainRendererDescriptor`
+
+Kind: `Type Alias`.
+
+```ts
+type WebMercatorTerrainRendererDescriptor<ViewInput, Presentation extends string = string> = Readonly<{ elevationRangeMeters: readonly [number, number]; exaggeration?: number; fieldLayer: MapFieldLayer<ViewInput>; fieldSampling: WebMercatorTerrainSamplingWgslOptions; initialPresentation: Presentation; observeProvenance?: (facts: readonly WebMercatorTerrainProvenanceFact[]) => void; presentations: readonly WebMercatorTerrainPresentationDescriptor<Presentation>[]; presentationShader: string; runtime: GPURuntime; size: SurfaceSize; surface: Surface; virtualRaster: VirtualRasterRuntime<WebMercatorVirtualRasterField> }>
+```
+
+### `WebMercatorTerrainRendererState`
+
+Kind: `Type Alias`.
+
+```ts
+type WebMercatorTerrainRendererState<Presentation extends string = string> = Readonly<{ budgetLimitedCount: number; convergenceState: GpuTileFrontierFacts["convergenceState"]; demandCount: number; disposed: boolean; fallbackCount: number; feedback: VirtualRasterGpuFeedbackRingFacts; frame: number; frontierCount: number; frontierFacts?: GpuTileFrontierFacts; initialized: boolean; lastResizeFacts?: WebMercatorTerrainResizeFacts; latestFeedbackDiagnostics: readonly unknown[]; levelRange: readonly [number | undefined, number | undefined]; maximumObservedSse: number; readbackInFlightCount: number; renderPatchBaselineBudget: number; renderPatchBudgetLimitedByMinimumTrial: boolean; renderPatchCellSpanRange: readonly [number | undefined, number | undefined]; renderPatchCount: number; renderPatchDescriptorOverflowCount: number; renderPatchFeedback?: GpuRenderPatchFeedback; renderPatchFrameBudget: number; renderPatchFrameEpoch?: number; renderPatchLevelRange: readonly [number | undefined, number | undefined]; renderPatchLookupOverflowCount: number; renderPatchMinimumTrialCount: number; renderPatchRequestedCount: number; renderPatchSelectedBiasLevels: number; renderPatchSourceRootCount: number; resizeGeneration: number; size: SurfaceSize; staleBindSetPreparationCount: number; staleFeedbackCount: number; staleGenerationCount: number; supersededFeedbackCount: number; terrainPresentation: Presentation; virtualRequestedPageCount: number; virtualSnapshotEpoch: number; visibleNodeCount: number }>
+```
+
+### `WebMercatorTerrainResizeFacts`
+
+Kind: `Type Alias`.
+
+```ts
+type WebMercatorTerrainResizeFacts = Readonly<{ depthAllocationVersion: number; preparedBindSetCount: number; resizeGeneration: number; staleBindSetCount: number }>
+```
+
+### `WebMercatorTerrainSamplingWgslOptions`
+
+Kind: `Type Alias`.
+
+```ts
+type WebMercatorTerrainSamplingWgslOptions = Readonly<{ addressNamespace: string; namespace: string; transitionTexels?: number }>
+```
+
+### `WebMercatorTerrainSubmissionObservation`
+
+Kind: `Type Alias`.
+
+```ts
+type WebMercatorTerrainSubmissionObservation = Readonly<{ nativeStatus: "observed-succeeded"; submissionId: string }>
+```
+
+## `packages/geoscratch/src/geo/web-mercator-terrain-wgsl.ts`
+
+### `WEB_MERCATOR_TERRAIN_TILE_WIREFRAME_FRAGMENT_ENTRY_POINT`
+
+Kind: `Variable`.
+
+Built-in fragment entry point for post-stitch logical-tile wireframe diagnostics.
+
+```ts
+const WEB_MERCATOR_TERRAIN_TILE_WIREFRAME_FRAGMENT_ENTRY_POINT: "WebMercatorTerrain_tile_wireframe"
+```
+
+### `webMercatorTerrainWgslModule`
+
+Kind: `Function`.
+
+Generates the complete precision-aware Web Mercator terrain vertex and wireframe WGSL.
+
+```ts
+Function webMercatorTerrainWgslModule
+```
+
+```ts
+webMercatorTerrainWgslModule(options: WebMercatorTerrainWgslOptions): WebMercatorTerrainWgslModule
+```
+
+### `WebMercatorTerrainWgslModule`
+
+Kind: `Type Alias`.
+
+```ts
+type WebMercatorTerrainWgslModule = Readonly<{ bindings: Readonly<{ config: number; dataGroup: number; gridPositions: number; indices: number; lookupEntries: number; mapMeta: number; sceneGroup: number; visibleInstances: number }>; code: string; kind: "web-mercator-terrain-wgsl-module"; layoutDependencies: readonly LayoutArtifact[]; namespace: string; tileWireframeFragmentEntryPoint: string; vertexEntryPoint: string }>
+```
+
+### `WebMercatorTerrainWgslOptions`
+
+Kind: `Type Alias`.
+
+```ts
+type WebMercatorTerrainWgslOptions = Readonly<{ addressNamespace: string; cellsPerPatchEdge: number; configBinding: number; dataGroup: number; fieldNamespace: string; gridPositionsBinding: number; indicesBinding: number; lookupEntriesBinding: number; mapMetaBinding: number; namespace?: string; sceneGroup: number; visibleInstancesBinding: number }>
 ```
 
 ## `packages/geoscratch/src/geo/web-mercator-virtual-raster-field.ts`

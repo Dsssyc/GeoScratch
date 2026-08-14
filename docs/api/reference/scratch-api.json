@@ -1466,7 +1466,7 @@
           "packages/geoscratch/src/scratch/cache/diagnostics.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/cache/diagnostics.ts:56"
+          "packages/geoscratch/src/scratch/cache/diagnostics.ts:57"
         ],
         "summary": "",
         "declaration": "type CacheDiagnostic = ScratchDiagnosticBase<\"cache\", CacheDiagnosticCode, CacheDiagnosticPhase, CacheDiagnosticSubject> & CacheDiagnosticFacts"
@@ -1480,7 +1480,7 @@
           "packages/geoscratch/src/scratch/cache/diagnostics.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/cache/diagnostics.ts:22"
+          "packages/geoscratch/src/scratch/cache/diagnostics.ts:23"
         ],
         "summary": "",
         "declaration": "type CacheDiagnosticCode = \"CACHE_KEY_INVALID\" | \"CACHE_DESCRIPTOR_INVALID\" | \"CACHE_ENTRY_INVALID\" | \"CACHE_STORAGE_UNAVAILABLE\" | \"CACHE_STORAGE_FAILED\" | \"CACHE_QUOTA_EXCEEDED\" | \"CACHE_PAYLOAD_MISSING\" | \"CACHE_PAYLOAD_SIZE_MISMATCH\" | \"CACHE_DISPOSED\""
@@ -1494,7 +1494,7 @@
           "packages/geoscratch/src/scratch/cache/diagnostics.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/cache/diagnostics.ts:63"
+          "packages/geoscratch/src/scratch/cache/diagnostics.ts:64"
         ],
         "summary": "",
         "declaration": "type CacheDiagnosticInput = Readonly<{ actual?: unknown; code: CacheDiagnosticCode; expected?: unknown; hints?: readonly string[]; keyId?: string; message: string; operation?: string; phase: CacheDiagnosticPhase; retriable?: boolean; revision?: string; severity: ScratchDiagnosticSeverity; storage?: CacheStorageErrorFacts[\"storage\"]; storageErrorName?: string; subject: CacheDiagnosticSubject }>"
@@ -1511,7 +1511,7 @@
           "packages/geoscratch/src/scratch/cache/diagnostics.ts:11"
         ],
         "summary": "",
-        "declaration": "type CacheDiagnosticPhase = \"cache-key\" | \"cache-open\" | \"cache-read\" | \"cache-write\" | \"cache-delete\" | \"cache-invalidate\" | \"cache-clear\" | \"cache-recovery\" | \"cache-lifecycle\""
+        "declaration": "type CacheDiagnosticPhase = \"cache-key\" | \"cache-descriptor\" | \"cache-open\" | \"cache-read\" | \"cache-write\" | \"cache-delete\" | \"cache-invalidate\" | \"cache-clear\" | \"cache-recovery\" | \"cache-lifecycle\""
       },
       {
         "id": "geoscratch/scratch#CacheDiagnosticSubject",
@@ -1522,7 +1522,7 @@
           "packages/geoscratch/src/scratch/cache/diagnostics.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/cache/diagnostics.ts:33"
+          "packages/geoscratch/src/scratch/cache/diagnostics.ts:34"
         ],
         "summary": "",
         "declaration": "type CacheDiagnosticSubject = Readonly<{ id?: string; kind: \"PersistentCache\" | \"PersistentCacheKey\" | \"CacheEntry\" | \"CachePayload\"; label?: string }>"
@@ -1690,7 +1690,7 @@
           "packages/geoscratch/src/scratch/cache/diagnostics.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/cache/diagnostics.ts:39"
+          "packages/geoscratch/src/scratch/cache/diagnostics.ts:40"
         ],
         "summary": "",
         "declaration": "type CacheStorageErrorFacts = Readonly<{ errorMessage?: string; errorName?: string; operation: string; retriable: boolean; storage: \"indexeddb\" | \"opfs\" | \"storage-manager\" | \"coordination\" }>"
@@ -2763,7 +2763,7 @@
           "packages/geoscratch/src/scratch/cache/diagnostics.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/cache/diagnostics.ts:81"
+          "packages/geoscratch/src/scratch/cache/diagnostics.ts:82"
         ],
         "summary": "Creates an immutable cache diagnostic while preserving storage-stage evidence.",
         "declaration": "Function createCacheDiagnostic",
@@ -9240,6 +9240,23 @@
         ]
       },
       {
+        "id": "geoscratch/scratch#persistentCacheDescriptor",
+        "name": "persistentCacheDescriptor",
+        "kind": "Function",
+        "source": "packages/geoscratch/src/scratch/cache/persistent-cache.ts",
+        "sources": [
+          "packages/geoscratch/src/scratch/cache/persistent-cache.ts"
+        ],
+        "locations": [
+          "packages/geoscratch/src/scratch/cache/persistent-cache.ts:1039"
+        ],
+        "summary": "Validates and freezes a persistent-cache configuration without opening storage.",
+        "declaration": "Function persistentCacheDescriptor",
+        "signatures": [
+          "persistentCacheDescriptor(descriptor: PersistentCacheDescriptor): PersistentCacheDescriptor"
+        ]
+      },
+      {
         "id": "geoscratch/scratch#PersistentCacheDescriptor",
         "name": "PersistentCacheDescriptor",
         "kind": "Type Alias",
@@ -9276,7 +9293,7 @@
           "packages/geoscratch/src/scratch/cache/persistent-cache.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/cache/persistent-cache.ts:1010"
+          "packages/geoscratch/src/scratch/cache/persistent-cache.ts:1014"
         ],
         "summary": "Validates and freezes the logical id and revision that identify one cache record.",
         "declaration": "Function persistentCacheKey",

@@ -89,7 +89,7 @@ describe('Geo virtual-raster Flow readiness contract', () => {
             'Status',
             'Remaining limitation',
             'Terrain selection',
-            'terrain-mesh.wgsl',
+            'terrain-presentation.wgsl',
             'stitch',
             'Elevation',
             'Projection',

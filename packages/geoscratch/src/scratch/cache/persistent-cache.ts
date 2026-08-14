@@ -128,7 +128,7 @@ export class PersistentCache<Metadata extends object = Readonly<Record<string, u
         descriptor: PersistentCacheDescriptor
     ): Promise<PersistentCache<Metadata>> {
 
-        validateDescriptor(descriptor)
+        const cacheDescriptor = persistentCacheDescriptor(descriptor)
         const indexedDb = globalThis.indexedDB
         const storage = globalThis.navigator?.storage
         if (indexedDb === undefined || storage === undefined ||
@@ -137,7 +137,7 @@ export class PersistentCache<Metadata extends object = Readonly<Record<string, u
                 code: 'CACHE_STORAGE_UNAVAILABLE',
                 severity: 'error',
                 phase: 'cache-open',
-                subject: { kind: 'PersistentCache', id: descriptor.namespace },
+                subject: { kind: 'PersistentCache', id: cacheDescriptor.namespace },
                 message: 'PersistentCache requires IndexedDB and the origin-private file system.',
                 expected: { indexedDB: true, opfs: true },
                 actual: {
@@ -156,21 +156,25 @@ export class PersistentCache<Metadata extends object = Readonly<Record<string, u
             const root = await storage.getDirectory()
             const cacheRoot = await root.getDirectoryHandle(ROOT_DIRECTORY, { create: true })
             const namespaceDirectory = await cacheRoot.getDirectoryHandle(
-                namespaceDirectoryName(descriptor.namespace),
+                namespaceDirectoryName(cacheDescriptor.namespace),
                 { create: true }
             )
             const payloadDirectory = await namespaceDirectory.getDirectoryHandle(
                 PAYLOAD_DIRECTORY,
                 { create: true }
             )
-            const cache = new PersistentCache<Metadata>(descriptor, database, payloadDirectory)
+            const cache = new PersistentCache<Metadata>(
+                cacheDescriptor,
+                database,
+                payloadDirectory
+            )
             await cache.#initialize()
             return cache
         } catch (error) {
             database?.close()
             if (isScratchDiagnosticError(error)) throw error
             return storageFailure(
-                descriptor.namespace,
+                cacheDescriptor.namespace,
                 'cache-open',
                 'open',
                 storageKind(error, 'indexeddb'),
@@ -1031,7 +1035,10 @@ export function persistentCacheKey(
     })
 }
 
-function validateDescriptor(descriptor: PersistentCacheDescriptor): void {
+/** Validates and freezes a persistent-cache configuration without opening storage. */
+export function persistentCacheDescriptor(
+    descriptor: PersistentCacheDescriptor
+): PersistentCacheDescriptor {
 
     if (!nonEmptyText(descriptor.namespace) || descriptor.namespace.length > MAX_NAMESPACE_LENGTH ||
         !wellFormedText(descriptor.namespace) ||
@@ -1045,13 +1052,25 @@ function validateDescriptor(descriptor: PersistentCacheDescriptor): void {
         throw cacheDiagnosticError({
             code: 'CACHE_DESCRIPTOR_INVALID',
             severity: 'error',
-            phase: 'cache-open',
+            phase: 'cache-descriptor',
             subject: cacheSubject(descriptor.namespace),
             message: 'PersistentCache requires a bounded namespace, finite budgets, and an explicit lifecycle.',
             actual: descriptor,
             operation: 'validate-descriptor',
         })
     }
+    return Object.freeze({
+        namespace: descriptor.namespace,
+        maxPayloadBytes: descriptor.maxPayloadBytes,
+        maxEntries: descriptor.maxEntries,
+        lifecycle: snapshotLifecycle(descriptor.lifecycle),
+        ...(descriptor.maxHistory === undefined ? {} : {
+            maxHistory: descriptor.maxHistory,
+        }),
+        ...(descriptor.requestPersistence === undefined ? {} : {
+            requestPersistence: descriptor.requestPersistence,
+        }),
+    })
 }
 
 function validLifecycle(value: unknown): value is PersistentCacheLifecycle {

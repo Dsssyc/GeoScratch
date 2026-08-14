@@ -262,7 +262,7 @@ describe('examples structure', () => {
     it('keeps the DEM layer example focused on terrain only', () => {
         const source = read('examples', 'demLayer', 'main.ts')
         const renderer = read(
-            'packages', 'geoscratch', 'src', 'geo', 'terrain-field-renderer.ts'
+            'packages', 'geoscratch', 'src', 'geo', 'web-mercator-terrain-renderer.ts'
         )
         const mapRuntime = read('examples', 'demLayer', 'dem-map.ts')
         const mapAdapter = read(
@@ -270,7 +270,7 @@ describe('examples structure', () => {
         )
 
         expect(source).to.include('GPURuntime')
-        expect(source).to.include('createTerrainFieldRenderer')
+        expect(source).to.include('createWebMercatorTerrainRenderer')
         expect(source).to.include('mapFieldLayer')
         expect(source).to.include('createDemMap')
         expect(renderer).to.include('runtime.createSubmission(')

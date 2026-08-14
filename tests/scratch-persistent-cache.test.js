@@ -3,6 +3,7 @@ import {
     PersistentCache,
     createScratchDiagnostic,
     isScratchDiagnosticError,
+    persistentCacheDescriptor,
     persistentCacheKey,
 } from 'geoscratch/scratch'
 import {
@@ -10,6 +11,34 @@ import {
 } from 'geoscratch/geo'
 
 describe('Scratch persistent cache contract', () => {
+
+    it('normalizes cache descriptors without opening browser storage', () => {
+
+        const descriptor = persistentCacheDescriptor({
+            namespace: 'pure-descriptor',
+            maxPayloadBytes: 1024,
+            maxEntries: 4,
+            lifecycle: { kind: 'session' },
+        })
+
+        expect(descriptor).to.deep.equal({
+            namespace: 'pure-descriptor',
+            maxPayloadBytes: 1024,
+            maxEntries: 4,
+            lifecycle: { kind: 'session' },
+        })
+        expect(Object.isFrozen(descriptor)).to.equal(true)
+        expect(Object.isFrozen(descriptor.lifecycle)).to.equal(true)
+        expect(() => persistentCacheDescriptor({
+            namespace: '\ud800',
+            maxPayloadBytes: 1024,
+            maxEntries: 4,
+            lifecycle: { kind: 'session' },
+        })).to.throw().with.property('diagnostic').that.deep.includes({
+            code: 'CACHE_DESCRIPTOR_INVALID',
+            phase: 'cache-descriptor',
+        })
+    })
 
     it('creates immutable domain-neutral cache identities', () => {
 
@@ -84,7 +113,7 @@ describe('Scratch persistent cache contract', () => {
             expect(failure.diagnostic).to.deep.include({
                 domain: 'cache',
                 code: 'CACHE_DESCRIPTOR_INVALID',
-                phase: 'cache-open',
+                phase: 'cache-descriptor',
             })
         }
     })
@@ -112,7 +141,7 @@ describe('Scratch persistent cache contract', () => {
             expect(failure.diagnostic).to.deep.include({
                 domain: 'cache',
                 code: 'CACHE_DESCRIPTOR_INVALID',
-                phase: 'cache-open',
+                phase: 'cache-descriptor',
             })
         }
     })

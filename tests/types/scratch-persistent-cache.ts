@@ -1,5 +1,6 @@
 import {
     PersistentCache,
+    persistentCacheDescriptor,
     persistentCacheKey,
 } from 'geoscratch/scratch'
 import type {
@@ -23,13 +24,14 @@ const key = persistentCacheKey({
     id: 'typed-cache/resource-a',
     revision: 'revision-1',
 })
-const cache = await PersistentCache.open<RasterMetadata>({
+const descriptor = persistentCacheDescriptor({
     namespace: 'typed-cache',
     maxPayloadBytes: 1024,
     maxEntries: 4,
     maxHistory: 8,
     lifecycle: { kind: 'durable', open: 'reuse' },
 })
+const cache = await PersistentCache.open<RasterMetadata>(descriptor)
 const write = await cache.put(key, {
     metadata: { format: 'r8uint', width: 16, height: 16 },
     payload: new Uint8Array(256).buffer,

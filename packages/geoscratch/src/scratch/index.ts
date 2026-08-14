@@ -35,6 +35,7 @@ export type { GPUDiagnostic, GPUDiagnosticPhase } from './gpu/diagnostics.js'
 export {
     PersistentCache,
     createCacheDiagnostic,
+    persistentCacheDescriptor,
     persistentCacheKey,
 } from './cache/index.js'
 export type {

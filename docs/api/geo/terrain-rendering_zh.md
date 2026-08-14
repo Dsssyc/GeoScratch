@@ -2,24 +2,40 @@
 docId: geo.terrain-rendering.zh
 canonical: false
 translationOf: ./terrain-rendering.md
-canonicalDigest: bc43cf8caefee70b574083c1b978374e1014369d1ec60435b42408201721ea9a
+canonicalDigest: ba65d3f9cd4b0ce685f705d0cde9671de1e1c8a7e66ad287c9b8f9579d50be6d
 ---
 # 地形渲染
 
 [English](./terrain-rendering.md) | [Geo 概览](./README_zh.md)
 
-`createTerrainFieldRenderer` 是从 DEM example 提取出的可复用 Geo 编排。它把 Geo view、
-field/runtime、GPU render-patch frontier、atlas sampling module、mesh-stitching topology、
-pipeline、indirect draw、resize、feedback 与 lifecycle 组合为一个显式 renderer contract。
-应用提供 source、presentation、shader/color policy 与 ownership choice。
+`createWebMercatorTerrainRenderer` 是 Geo 完整的 OGC `WebMercatorQuad` 地形编排器。
+它把 `MapFieldLayer`、Web Mercator Virtual Raster runtime、GPU data frontier、GPU
+render-patch frontier、生成式 terrain WGSL、indirect draw、feedback、resize 与 dispose
+组合为一个显式 renderer。这个名称有意限定投影。不存在通用
+`TerrainFieldRenderer` 别名：globe 或其他 tiling topology 需要具备不同空间与选择语义
+的 renderer。
 
-Web Mercator Virtual Raster WGSL 根据 logical world position 采样高程，包括 parent
-fallback 与跨 tile filtering。Terrain vertex generation 保持 camera-relative，并能独立于
-raster z 细化 mesh density。消除 T-junction crack 的是 mesh stitching，不是 Virtual
-Raster；Virtual Raster 消除的是 tile boundary 处 CPU padding 与 neighbor-aware shader
-plumbing。
+`webMercatorTerrainWgslModule` 拥有完整 terrain vertex 路径。它从 render patch
+重建 wide-fixed logical position，在转成 f32 前计算 camera-relative difference，解析
+相邻 render patch，对混合 LoD 的共享边做 snapping，通过 logical Virtual Raster
+accessor 采样高程，并投影最终结果。它也提供由
+`WEB_MERCATOR_TERRAIN_TILE_WIREFRAME_FRAGMENT_ENTRY_POINT` 命名的内置 fragment
+entry point。Renderer 的 `presentationShader` 是应用 fragment entry point 的扩展源码；
+它消费 `WebMercatorTerrainVertexOutput`，不得重复 position、stitching、tile lookup 或
+height sampling 逻辑。
 
-Renderer 不是通用 scene、map 或 DEM loader。它不拥有外部 map，也不暗中启动无关
-Worker。其他 renderer 可以复用相同 field 与 frontier primitive 来实现 imagery、flow、
-compute 或 editing。DEM example 最终应只保留 source-specific loading/decoding、
-presentation shader、control 和无法由这些公开 contract 表达的装配。
+Raster LoD 与 geometry LoD 保持为不同权威。Data frontier 在数据源 matrix 上限内选择
+resident source page；render-patch frontier 可以继续细化地形网格，并保留显式
+`samplingLevel`。Neighbor stitching 使用 geometry level，共享边高程查询则协调实际可用
+的 sampling level。Virtual Raster 消除 CPU padding 与 physical atlas 耦合；mesh
+stitching 消除 T-junction crack。
+
+更底层的消费者可以直接组合 `gpuRenderPatchReadWgslModule`。它通过显式 storage
+binding 与 layout dependency 提供有界 visible-instance lookup、covering-patch lookup、
+neighbor resolution 和 edge-coordinate snapping。生成模块不会读取 CPU 选择的 tile
+列表，也不会让 draw count 往返 CPU。
+
+Renderer 不拥有 map host、camera controller、source manifest、network transport、
+decoder、Worker system 或应用 cache policy；这些都是显式组合输入。因此 DEM example
+只拥有 source-specific loading/decoding、map/UI 装配、cache 总预算选择和自己的 fragment
+presentation。

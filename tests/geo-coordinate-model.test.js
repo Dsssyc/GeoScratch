@@ -221,6 +221,10 @@ describe('Geo high-precision coordinate model', () => {
             expect(wgsl).to.include('select(0u, 1u')
             expect(wgsl).to.include(`fn Fixed${domain.intrinsicDimensions}D_add`)
             expect(wgsl).to.include(`fn Fixed${domain.intrinsicDimensions}D_subtract`)
+            expect(wgsl).to.include(
+                `fn Fixed${domain.intrinsicDimensions}D_signed_difference_f32`
+            )
+            expect(wgsl).to.include(`fn Fixed${domain.intrinsicDimensions}D_fraction_f32`)
             expect(wgsl).to.not.include('f64')
             expect(wgsl).to.not.include('i64')
         }

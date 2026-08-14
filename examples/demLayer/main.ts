@@ -1,8 +1,9 @@
 import { GPURuntime, LifetimeScope, WorkerModuleCatalog } from 'geoscratch/scratch'
 import type { SurfaceSize } from 'geoscratch/scratch'
 import {
+    WEB_MERCATOR_TERRAIN_TILE_WIREFRAME_FRAGMENT_ENTRY_POINT,
     createGeoFrameController,
-    createTerrainFieldRenderer,
+    createWebMercatorTerrainRenderer,
     mapFieldLayer,
 } from 'geoscratch/geo'
 import {
@@ -17,7 +18,7 @@ import {
 } from './dem-source.ts'
 import { readDemCachePolicy } from './dem-cache-policy.ts'
 import { prepareDemControlPanel } from './dem-control-panel.ts'
-import terrainShader from './shaders/terrain-mesh.wgsl?raw'
+import terrainPresentationShader from './shaders/terrain-presentation.wgsl?raw'
 
 type DemLayerProofModule = typeof import(
     '../../tests/browser/support/dem-layer-proof.ts'
@@ -166,7 +167,7 @@ async function main(lifetime: LifetimeScope, activeProof?: DemLayerProof) {
     ].sort((left, right) => left - right) as [number, number]
     activeProof?.beforeTerrainShaderModule(runtime)
     const graph = await lifetime.acquire(
-        createTerrainFieldRenderer({
+        createWebMercatorTerrainRenderer({
             runtime,
             surface,
             fieldLayer: mapFieldLayer({
@@ -179,7 +180,8 @@ async function main(lifetime: LifetimeScope, activeProof?: DemLayerProof) {
             }),
             virtualRaster,
             size: initialSize,
-            shader: activeProof?.terrainShader(terrainShader) ?? terrainShader,
+            presentationShader: activeProof?.terrainShader(terrainPresentationShader) ??
+                terrainPresentationShader,
             fieldSampling: {
                 namespace: 'DemHeight',
                 addressNamespace: 'DemAddress',
@@ -191,7 +193,8 @@ async function main(lifetime: LifetimeScope, activeProof?: DemLayerProof) {
                 { id: 'shaded', fragmentEntryPoint: 'fMain', label: 'DEM terrain pipeline' },
                 {
                     id: 'tile-wireframe',
-                    fragmentEntryPoint: 'fTileWireframe',
+                    fragmentEntryPoint:
+                        WEB_MERCATOR_TERRAIN_TILE_WIREFRAME_FRAGMENT_ENTRY_POINT,
                     label: 'DEM tile wireframe pipeline',
                 },
             ],

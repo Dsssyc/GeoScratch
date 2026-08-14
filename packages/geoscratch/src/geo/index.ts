@@ -127,6 +127,7 @@ export {
     GpuRenderPatchFeedbackStaleError,
     createGpuRenderPatchFrontier,
     decodeGpuRenderPatchState,
+    gpuRenderPatchReadWgslModule,
     gpuRenderPatchWgslModule,
 } from './gpu-render-patch-frontier.js'
 export type {
@@ -136,25 +137,35 @@ export type {
     GpuRenderPatchFrontierDescriptor,
     GpuRenderPatchFrontierFacts,
     GpuRenderPatchIdentityObjects,
+    GpuRenderPatchReadWgslModule,
+    GpuRenderPatchReadWgslOptions,
     GpuRenderPatchRenderTemplate,
     GpuRenderPatchSelectionFacts,
 } from './gpu-render-patch-frontier.js'
-export { createTerrainFieldRenderer } from './terrain-field-renderer.js'
+export {
+    WEB_MERCATOR_TERRAIN_TILE_WIREFRAME_FRAGMENT_ENTRY_POINT,
+    webMercatorTerrainWgslModule,
+} from './web-mercator-terrain-wgsl.js'
 export type {
-    TerrainFieldContractFacts,
-    TerrainFieldFrame,
-    TerrainFieldIdentityFacts,
-    TerrainFieldInitialization,
-    TerrainFieldPersistentFacts,
-    TerrainFieldPresentationDescriptor,
-    TerrainFieldProvenanceFact,
-    TerrainFieldRenderer,
-    TerrainFieldRendererDescriptor,
-    TerrainFieldRendererState,
-    TerrainFieldResizeFacts,
-    TerrainFieldSamplingWgslOptions,
-    TerrainFieldSubmissionObservation,
-} from './terrain-field-renderer.js'
+    WebMercatorTerrainWgslModule,
+    WebMercatorTerrainWgslOptions,
+} from './web-mercator-terrain-wgsl.js'
+export { createWebMercatorTerrainRenderer } from './web-mercator-terrain-renderer.js'
+export type {
+    WebMercatorTerrainContractFacts,
+    WebMercatorTerrainFrame,
+    WebMercatorTerrainIdentityFacts,
+    WebMercatorTerrainInitialization,
+    WebMercatorTerrainPersistentFacts,
+    WebMercatorTerrainPresentationDescriptor,
+    WebMercatorTerrainProvenanceFact,
+    WebMercatorTerrainRenderer,
+    WebMercatorTerrainRendererDescriptor,
+    WebMercatorTerrainRendererState,
+    WebMercatorTerrainResizeFacts,
+    WebMercatorTerrainSamplingWgslOptions,
+    WebMercatorTerrainSubmissionObservation,
+} from './web-mercator-terrain-renderer.js'
 export {
     coordinateDomain,
     localVector,

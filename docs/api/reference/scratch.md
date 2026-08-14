@@ -2,7 +2,7 @@
 
 # geoscratch/scratch API Reference
 
-Public symbols: 525.
+Public symbols: 526.
 
 ## `packages/geoscratch/src/scratch/cache/diagnostics.ts`
 
@@ -35,7 +35,7 @@ type CacheDiagnosticInput = Readonly<{ actual?: unknown; code: CacheDiagnosticCo
 Kind: `Type Alias`.
 
 ```ts
-type CacheDiagnosticPhase = "cache-key" | "cache-open" | "cache-read" | "cache-write" | "cache-delete" | "cache-invalidate" | "cache-clear" | "cache-recovery" | "cache-lifecycle"
+type CacheDiagnosticPhase = "cache-key" | "cache-descriptor" | "cache-open" | "cache-read" | "cache-write" | "cache-delete" | "cache-invalidate" | "cache-clear" | "cache-recovery" | "cache-lifecycle"
 ```
 
 ### `CacheDiagnosticSubject`
@@ -105,6 +105,20 @@ Members:
   - `open<Metadata extends object = Readonly<Record<string, unknown>>>(descriptor: PersistentCacheDescriptor): Promise<PersistentCache<Metadata>>`
 - `put`: `Method put`
   - `put(key: PersistentCacheKey, descriptor: CacheEntryDescriptor<Metadata>): Promise<Readonly<{ byteLength: number; diagnostic?: CacheDiagnostic; evictedCount: number; status: CachePutStatus }>>`
+
+### `persistentCacheDescriptor`
+
+Kind: `Function`.
+
+Validates and freezes a persistent-cache configuration without opening storage.
+
+```ts
+Function persistentCacheDescriptor
+```
+
+```ts
+persistentCacheDescriptor(descriptor: PersistentCacheDescriptor): PersistentCacheDescriptor
+```
 
 ### `persistentCacheKey`
 

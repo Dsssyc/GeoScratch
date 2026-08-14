@@ -303,7 +303,7 @@ describe('scratch submission native outcome documentation', () => {
 
         const main = read('examples', 'demLayer', 'main.ts')
         const renderer = read(
-            'packages', 'geoscratch', 'src', 'geo', 'terrain-field-renderer.ts'
+            'packages', 'geoscratch', 'src', 'geo', 'web-mercator-terrain-renderer.ts'
         )
 
         expect(renderer).to.include('submitted.nativeOutcome')

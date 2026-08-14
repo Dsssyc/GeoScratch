@@ -10,6 +10,7 @@ import type {
 
 export type CacheDiagnosticPhase =
     | 'cache-key'
+    | 'cache-descriptor'
     | 'cache-open'
     | 'cache-read'
     | 'cache-write'

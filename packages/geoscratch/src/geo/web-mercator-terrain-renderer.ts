@@ -1,12 +1,10 @@
 import {
     GPURuntime,
-    layoutCodec,
     plane,
     type BindLayoutEntry,
     type BindVisibility,
     type BufferResource,
     type LayoutCodec,
-    type LayoutFixedFieldDescriptor,
     type Program,
     type ProgramBufferLayoutRequirement,
     type RenderPipeline,
@@ -22,7 +20,6 @@ import {
     GPU_RENDER_PATCH_MAXIMUM_MATRIX_LEVEL,
     GpuRenderPatchFeedbackStaleError,
     createGpuRenderPatchFrontier,
-    gpuRenderPatchWgslModule,
     type GpuRenderPatchFeedback,
     type GpuRenderPatchFrontier,
     type GpuRenderPatchFrontierFacts,
@@ -41,6 +38,10 @@ import {
 } from './web-mercator-quad.js'
 import type { WebMercatorVirtualRasterField } from './web-mercator-virtual-raster-field.js'
 import { webMercatorVirtualRasterWgslModule } from './web-mercator-virtual-raster-wgsl.js'
+import {
+    webMercatorTerrainConfigCodec,
+    webMercatorTerrainWgslModule,
+} from './web-mercator-terrain-wgsl.js'
 import { VirtualRasterGpuFeedbackRing } from './virtual-raster-gpu-feedback.js'
 import type {
     VirtualRasterGpuFeedbackBatch,
@@ -52,20 +53,20 @@ import type {
     VirtualRasterRuntimeFacts,
 } from './virtual-raster-runtime.js'
 
-export type TerrainFieldPresentationDescriptor<Presentation extends string = string> =
+export type WebMercatorTerrainPresentationDescriptor<Presentation extends string = string> =
     Readonly<{
         id: Presentation
         fragmentEntryPoint: string
         label?: string
     }>
 
-export type TerrainFieldSamplingWgslOptions = Readonly<{
+export type WebMercatorTerrainSamplingWgslOptions = Readonly<{
     namespace: string
     addressNamespace: string
     transitionTexels?: number
 }>
 
-export type TerrainFieldProvenanceFact = Readonly<{
+export type WebMercatorTerrainProvenanceFact = Readonly<{
     name: string
     resourceId: string
     declaredContentEpoch: 'current-at-step'
@@ -75,27 +76,27 @@ export type TerrainFieldProvenanceFact = Readonly<{
     consumerStepIndex: number
 }>
 
-export type TerrainFieldResizeFacts = Readonly<{
+export type WebMercatorTerrainResizeFacts = Readonly<{
     resizeGeneration: number
     staleBindSetCount: number
     preparedBindSetCount: number
     depthAllocationVersion: number
 }>
 
-export type TerrainFieldSubmissionObservation = Readonly<{
+export type WebMercatorTerrainSubmissionObservation = Readonly<{
     submissionId: string
     nativeStatus: 'observed-succeeded'
 }>
 
-export type TerrainFieldInitialization = Readonly<{
+export type WebMercatorTerrainInitialization = Readonly<{
     submitted: SubmittedWork
-    observation: Promise<TerrainFieldSubmissionObservation>
+    observation: Promise<WebMercatorTerrainSubmissionObservation>
 }>
 
-export type TerrainFieldFrame<Presentation extends string = string> = Readonly<{
+export type WebMercatorTerrainFrame<Presentation extends string = string> = Readonly<{
     submitted: SubmittedWork
-    observation: Promise<TerrainFieldSubmissionObservation>
-    provenance: readonly TerrainFieldProvenanceFact[]
+    observation: Promise<WebMercatorTerrainSubmissionObservation>
+    provenance: readonly WebMercatorTerrainProvenanceFact[]
     feedback?: VirtualRasterGpuFeedbackBatch
     renderPatchFeedback?: GpuRenderPatchFeedback
     reconciliation?: VirtualRasterFeedbackReconciliation
@@ -105,7 +106,7 @@ export type TerrainFieldFrame<Presentation extends string = string> = Readonly<{
     terrainPresentation: Presentation
 }>
 
-export type TerrainFieldIdentityFacts = Readonly<{
+export type WebMercatorTerrainIdentityFacts = Readonly<{
     hash: string
     count: number
     resources: number
@@ -118,7 +119,7 @@ export type TerrainFieldIdentityFacts = Readonly<{
     commands: number
 }>
 
-export type TerrainFieldPersistentFacts = Readonly<{
+export type WebMercatorTerrainPersistentFacts = Readonly<{
     resources: number
     bindLayouts: number
     bindSets: number
@@ -126,7 +127,7 @@ export type TerrainFieldPersistentFacts = Readonly<{
     logicalFootprintBytes: number
 }>
 
-export type TerrainFieldContractFacts = Readonly<{
+export type WebMercatorTerrainContractFacts = Readonly<{
     stageOrder: readonly string[]
     countPath: 'gpu-produced-indirect-arguments'
     selectionPath: 'gpu-resident-active-frontier'
@@ -161,14 +162,14 @@ export type TerrainFieldContractFacts = Readonly<{
     }>
 }>
 
-export type TerrainFieldRendererState<Presentation extends string = string> = Readonly<{
+export type WebMercatorTerrainRendererState<Presentation extends string = string> = Readonly<{
     initialized: boolean
     disposed: boolean
     frame: number
     size: SurfaceSize
     resizeGeneration: number
     staleBindSetPreparationCount: number
-    lastResizeFacts?: TerrainFieldResizeFacts
+    lastResizeFacts?: WebMercatorTerrainResizeFacts
     virtualSnapshotEpoch: number
     virtualRequestedPageCount: number
     readbackInFlightCount: number
@@ -203,26 +204,26 @@ export type TerrainFieldRendererState<Presentation extends string = string> = Re
     feedback: VirtualRasterGpuFeedbackRingFacts
 }>
 
-export type TerrainFieldRenderer<
+export type WebMercatorTerrainRenderer<
     ViewInput,
     Presentation extends string = string,
 > = Readonly<{
-    initialize(): Promise<TerrainFieldInitialization>
-    renderFrame(input: ViewInput): Promise<TerrainFieldFrame<Presentation>>
+    initialize(): Promise<WebMercatorTerrainInitialization>
+    renderFrame(input: ViewInput): Promise<WebMercatorTerrainFrame<Presentation>>
     setPresentation(presentation: Presentation): Presentation
-    resize(size: SurfaceSize): Promise<TerrainFieldResizeFacts>
+    resize(size: SurfaceSize): Promise<WebMercatorTerrainResizeFacts>
     dispose(): void
     stableIdentities: readonly string[]
     stableIdentityHash: string
-    stableIdentityFacts: TerrainFieldIdentityFacts
-    currentIdentityFacts(): TerrainFieldIdentityFacts
-    persistentFacts(): TerrainFieldPersistentFacts
-    contractFacts(): TerrainFieldContractFacts
+    stableIdentityFacts: WebMercatorTerrainIdentityFacts
+    currentIdentityFacts(): WebMercatorTerrainIdentityFacts
+    persistentFacts(): WebMercatorTerrainPersistentFacts
+    contractFacts(): WebMercatorTerrainContractFacts
     virtualRasterFacts(): VirtualRasterRuntimeFacts
-    state(): TerrainFieldRendererState<Presentation>
+    state(): WebMercatorTerrainRendererState<Presentation>
 }>
 
-export type TerrainFieldRendererDescriptor<
+export type WebMercatorTerrainRendererDescriptor<
     ViewInput,
     Presentation extends string = string,
 > = Readonly<{
@@ -231,25 +232,24 @@ export type TerrainFieldRendererDescriptor<
     fieldLayer: MapFieldLayer<ViewInput>
     virtualRaster: VirtualRasterRuntime<WebMercatorVirtualRasterField>
     size: SurfaceSize
-    shader: string
-    fieldSampling: TerrainFieldSamplingWgslOptions
+    presentationShader: string
+    fieldSampling: WebMercatorTerrainSamplingWgslOptions
     elevationRangeMeters: readonly [number, number]
     exaggeration?: number
-    presentations: readonly TerrainFieldPresentationDescriptor<Presentation>[]
+    presentations: readonly WebMercatorTerrainPresentationDescriptor<Presentation>[]
     initialPresentation: Presentation
-    observeProvenance?: (facts: readonly TerrainFieldProvenanceFact[]) => void
+    observeProvenance?: (facts: readonly WebMercatorTerrainProvenanceFact[]) => void
 }>
 
-type TerrainVirtualRaster = VirtualRasterRuntime<WebMercatorVirtualRasterField>
-type TerrainMapField = Readonly<{
+type WebMercatorTerrainVirtualRaster = VirtualRasterRuntime<WebMercatorVirtualRasterField>
+type WebMercatorTerrainMapField = Readonly<{
     id: string
-    field: TerrainVirtualRaster['field']
-    representation: TerrainVirtualRaster['representation']
-    spatialProfile: TerrainVirtualRaster['spatialProfile']
+    field: WebMercatorTerrainVirtualRaster['field']
+    representation: WebMercatorTerrainVirtualRaster['representation']
+    spatialProfile: WebMercatorTerrainVirtualRaster['spatialProfile']
     viewAdapter: Readonly<{ id: string }>
-    demandProducer: TerrainVirtualRaster['viewDemandProducer']
+    demandProducer: WebMercatorTerrainVirtualRaster['viewDemandProducer']
 }>
-type Codecs = ReturnType<typeof createCodecs>
 type TerrainGeometry = ReturnType<typeof createTerrainGeometry>
 type Uniforms = Awaited<ReturnType<typeof createUniformResources>>
 type Buffers = Awaited<ReturnType<typeof createBufferResources>>
@@ -268,12 +268,11 @@ type LayoutValues = Parameters<LayoutCodec['pack']>[0]
 type BufferData = Uint32Array<ArrayBuffer>
 type ContentResource = BufferResource | TextureResource
 
-type TerrainFieldGraph = {
+type WebMercatorTerrainGraph = {
     runtime: GPURuntime
     surface: Surface
-    virtualRaster: TerrainVirtualRaster
-    fieldLayer: TerrainMapField
-    codecs: Codecs
+    virtualRaster: WebMercatorTerrainVirtualRaster
+    fieldLayer: WebMercatorTerrainMapField
     geometry: TerrainGeometry
     uniforms: Uniforms
     buffers: Buffers
@@ -293,19 +292,19 @@ type TerrainFieldGraph = {
 
 type ProvenanceVerifier = (
     submitted: SubmittedWork,
-    graph: TerrainFieldGraph,
+    graph: WebMercatorTerrainGraph,
     frame: GpuTileFrontierFrame,
     terrainPresentation: string
-) => readonly TerrainFieldProvenanceFact[]
+) => readonly WebMercatorTerrainProvenanceFact[]
 
-type TerrainFieldState<Presentation extends string = string> = {
+type WebMercatorTerrainState<Presentation extends string = string> = {
     initialized: boolean
     disposed: boolean
     frame: number
     size: SurfaceSize
     resizeGeneration: number
     staleBindSetPreparationCount: number
-    lastResizeFacts?: TerrainFieldResizeFacts
+    lastResizeFacts?: WebMercatorTerrainResizeFacts
     virtualSnapshotEpoch: number
     virtualRequestedPageCount: number
     staleFeedbackCount: number
@@ -316,7 +315,7 @@ type TerrainFieldState<Presentation extends string = string> = {
     terrainPresentation: Presentation
 }
 
-type PersistentFacts = TerrainFieldPersistentFacts
+type PersistentFacts = WebMercatorTerrainPersistentFacts
 
 type PendingFeedback = Readonly<{
     frame: GpuTileFrontierFrame
@@ -332,7 +331,7 @@ type ConsumedFeedback = Readonly<{
     renderPatchFeedback?: GpuRenderPatchFeedback
 }>
 
-export const TERRAIN_FIELD_STAGE_ORDER = Object.freeze([
+const WEB_MERCATOR_TERRAIN_STAGE_ORDER = Object.freeze([
     'frontier-compute',
     'render-patch-compute',
     'terrain',
@@ -343,8 +342,11 @@ const BUFFER_UNIFORM = 0x40
 const BUFFER_STORAGE = 0x80
 const TEXTURE_RENDER_ATTACHMENT = 0x10
 
-/** Assembles a view-driven Virtual Raster terrain renderer with GPU frontiers and explicit lifetime. */
-export async function createTerrainFieldRenderer<
+/**
+ * Assembles a WebMercatorQuad Virtual Raster terrain renderer with GPU-driven
+ * selection, precision-aware vertex generation, mesh stitching, and explicit lifetime.
+ */
+export async function createWebMercatorTerrainRenderer<
     ViewInput,
     Presentation extends string,
 >({
@@ -353,33 +355,32 @@ export async function createTerrainFieldRenderer<
     fieldLayer,
     virtualRaster,
     size,
-    shader,
+    presentationShader,
     fieldSampling,
     elevationRangeMeters,
     exaggeration = 1,
     presentations,
     initialPresentation,
     observeProvenance,
-}: TerrainFieldRendererDescriptor<ViewInput, Presentation>): Promise<
-    TerrainFieldRenderer<ViewInput, Presentation>
+}: WebMercatorTerrainRendererDescriptor<ViewInput, Presentation>): Promise<
+    WebMercatorTerrainRenderer<ViewInput, Presentation>
 > {
 
     if (!(runtime instanceof GPURuntime)) {
-        throw new TypeError('Terrain field renderer requires GPURuntime')
+        throw new TypeError('Web Mercator terrain renderer requires GPURuntime')
     }
     assertSize(size)
     assertVirtualRaster(virtualRaster)
     assertFieldLayer(fieldLayer, virtualRaster)
-    assertShader(shader)
+    assertPresentationShader(presentationShader)
     assertFieldSampling(fieldSampling)
     assertElevation(elevationRangeMeters, exaggeration)
     const presentationTable = normalizePresentations(presentations, initialPresentation)
-    const terrainFieldLayer = fieldLayer as unknown as TerrainMapField
+    const terrainFieldLayer = fieldLayer as unknown as WebMercatorTerrainMapField
     if (observeProvenance !== undefined && typeof observeProvenance !== 'function') {
-        throw new TypeError('Terrain field provenance observer must be a function')
+        throw new TypeError('Web Mercator terrain provenance observer must be a function')
     }
 
-    const codecs = createCodecs()
     const geometry = createTerrainGeometry()
     const buffers = await createBufferResources(runtime, geometry)
     const textures = await createTextures(runtime, size)
@@ -410,7 +411,6 @@ export async function createTerrainFieldRenderer<
     const renderTemplates = createRenderTemplates(renderPatchFrontier)
     const uniforms = await createUniformResources(
         runtime,
-        codecs,
         virtualRaster,
         renderPatchFrontier.facts().renderPatchLookupCapacity,
         elevationRangeMeters,
@@ -418,7 +418,6 @@ export async function createTerrainFieldRenderer<
     )
     const layouts = await createBindLayouts(
         runtime,
-        codecs,
         renderTemplates.terrain[0].mapMeta.size
     )
     const bindSets = await createBindSets(
@@ -431,8 +430,7 @@ export async function createTerrainFieldRenderer<
     )
     const programs = await createPrograms({
         runtime,
-        codecs,
-        shader,
+        presentationShader,
         fieldSampling,
         virtualRaster,
         presentations: presentationTable,
@@ -455,12 +453,11 @@ export async function createTerrainFieldRenderer<
         bindSets,
         pipelines
     )
-    const graph: TerrainFieldGraph = {
+    const graph: WebMercatorTerrainGraph = {
         runtime,
         surface,
         virtualRaster,
         fieldLayer: terrainFieldLayer,
-        codecs,
         geometry,
         uniforms,
         buffers,
@@ -527,8 +524,8 @@ export async function createTerrainFieldRenderer<
 
     async function renderFrame(input: ViewInput) {
 
-        if (!state.initialized) throw new Error('Terrain field graph must be initialized before rendering')
-        if (state.disposed) throw new Error('Terrain field graph is disposed')
+        if (!state.initialized) throw new Error('Web Mercator terrain graph must be initialized before rendering')
+        if (state.disposed) throw new Error('Web Mercator terrain graph is disposed')
         assertSameIdentities(stableIdentities, stableIdentitySnapshot(graph), 'frame')
         assertPersistentCounts(persistentBaseline, persistentFactSnapshot(runtime), 'frame')
         const frameTerrainPresentation = state.terrainPresentation
@@ -561,7 +558,7 @@ export async function createTerrainFieldRenderer<
             await virtualRaster.acknowledge(noOpPublication, submitted!)
         }
 
-        let provenance: readonly TerrainFieldProvenanceFact[] = Object.freeze([])
+        let provenance: readonly WebMercatorTerrainProvenanceFact[] = Object.freeze([])
         let provenanceFailure: unknown
         try {
             provenance = verifyFrameProvenance(
@@ -628,7 +625,7 @@ export async function createTerrainFieldRenderer<
             requestedPageCount: reconciliation?.requestedCount ?? 0,
             needsFollowUp,
             terrainPresentation: frameTerrainPresentation,
-        }) satisfies TerrainFieldFrame<Presentation>
+        }) satisfies WebMercatorTerrainFrame<Presentation>
     }
 
     function setPresentation(nextPresentation: Presentation) {
@@ -636,7 +633,7 @@ export async function createTerrainFieldRenderer<
         if (!presentationTable.has(nextPresentation)) {
             throw new TypeError(`Unknown terrain presentation ${nextPresentation}`)
         }
-        if (state.disposed) throw new Error('Terrain field graph is disposed')
+        if (state.disposed) throw new Error('Web Mercator terrain graph is disposed')
         state.terrainPresentation = nextPresentation
         return state.terrainPresentation
     }
@@ -698,26 +695,9 @@ export async function createTerrainFieldRenderer<
     })
 }
 
-function createCodecs() {
-
-    const uniform = (name: string, fields: LayoutFixedFieldDescriptor[]) =>
-        layoutCodec({ name, fields }, { usage: [ 'uniform' ] })
-    return Object.freeze({
-        config: uniform('TerrainFieldConfig', [
-            { name: 'sourceMercatorBox', type: 'vec4f' },
-            { name: 'elevationRange', type: 'vec2f' },
-            { name: 'coordinateBits', type: 'u32' },
-            { name: 'exaggeration', type: 'f32' },
-            { name: 'renderMaximumMatrixLevel', type: 'u32' },
-            { name: 'renderPatchLookupCapacity', type: 'u32' },
-        ]),
-    })
-}
-
 async function createUniformResources(
     runtime: GPURuntime,
-    codecs: Codecs,
-    virtualRaster: TerrainVirtualRaster,
+    virtualRaster: WebMercatorTerrainVirtualRaster,
     renderPatchLookupCapacity: number,
     elevationRangeMeters: readonly [number, number],
     exaggeration: number
@@ -734,14 +714,19 @@ async function createUniformResources(
         (WEB_MERCATOR_QUAD_HALF_WORLD - south) / WEB_MERCATOR_QUAD_WORLD_WIDTH,
     ]
     return {
-        config: await createUniform(runtime, 'Terrain field terrain configuration', codecs.config, {
-            sourceMercatorBox,
-            elevationRange: elevationRangeMeters,
-            coordinateBits: virtualRaster.addressCodec.coordinateBits,
-            exaggeration,
-            renderMaximumMatrixLevel: GPU_RENDER_PATCH_MAXIMUM_MATRIX_LEVEL,
-            renderPatchLookupCapacity,
-        }),
+        config: await createUniform(
+            runtime,
+            'Web Mercator terrain configuration',
+            webMercatorTerrainConfigCodec,
+            {
+                sourceMercatorBox,
+                elevationRange: elevationRangeMeters,
+                coordinateBits: virtualRaster.addressCodec.coordinateBits,
+                exaggeration,
+                renderMaximumMatrixLevel: GPU_RENDER_PATCH_MAXIMUM_MATRIX_LEVEL,
+                renderPatchLookupCapacity,
+            }
+        ),
     }
 }
 
@@ -785,13 +770,13 @@ async function createBufferResources(runtime: GPURuntime, geometry: TerrainGeome
     return {
         positions: await createBufferWithUpload(
             runtime,
-            'Terrain field terrain positions',
+            'Web Mercator terrain grid positions',
             geometry.positions,
             BUFFER_COPY_DST | BUFFER_STORAGE
         ),
         indices: await createBufferWithUpload(
             runtime,
-            'Terrain field terrain indices',
+            'Web Mercator terrain grid indices',
             geometry.indices,
             BUFFER_COPY_DST | BUFFER_STORAGE
         ),
@@ -818,7 +803,7 @@ async function createBufferWithUpload<T extends BufferData>(
 async function createTextures(runtime: GPURuntime, size: SurfaceSize) {
 
     const depth = await runtime.createTexture({
-        label: 'Terrain field presentation depth',
+        label: 'Web Mercator terrain presentation depth',
         size,
         format: 'depth32float',
         usage: TEXTURE_RENDER_ATTACHMENT,
@@ -833,8 +818,8 @@ async function createTextures(runtime: GPURuntime, size: SurfaceSize) {
 
 async function createFrontier(
     runtime: GPURuntime,
-    virtualRaster: TerrainVirtualRaster,
-    fieldLayer: TerrainMapField,
+    virtualRaster: WebMercatorTerrainVirtualRaster,
+    fieldLayer: WebMercatorTerrainMapField,
     elevationRangeMeters: readonly [number, number]
 ) {
 
@@ -844,7 +829,7 @@ async function createFrontier(
     const rootCount = virtualRaster.safetyCoverPages.length
     const maxPhysicalPages = virtualRaster.gpu.maxPhysicalPages
     if (maxPhysicalPages <= rootCount) {
-        throw new Error('Terrain field GPU frontier requires transition capacity beyond its safety cover')
+        throw new Error('Web Mercator terrain GPU frontier requires transition capacity beyond its safety cover')
     }
     const transitionReservePages = Math.min(5, maxPhysicalPages - rootCount)
     const maximumActiveTiles = Math.max(rootCount, Math.min(
@@ -908,7 +893,7 @@ function createRenderTemplates(frontier: GpuRenderPatchFrontier) {
     })
 }
 
-async function createBindLayouts(runtime: GPURuntime, codecs: Codecs, mapMetaBytes: number) {
+async function createBindLayouts(runtime: GPURuntime, mapMetaBytes: number) {
 
     const uniform = (
         binding: number,
@@ -931,15 +916,20 @@ async function createBindLayouts(runtime: GPURuntime, codecs: Codecs, mapMetaByt
 
     return {
         scene: await runtime.createBindLayout({
-            label: 'Terrain field frontier scene layout',
+            label: 'Web Mercator terrain frontier scene layout',
             group: 0,
             entries: [
                 uniform(0, 'mapMeta', mapMetaBytes, [ 'vertex' ]),
-                uniform(1, 'terrainConfig', codecs.config.byteLength(), [ 'vertex' ]),
+                uniform(
+                    1,
+                    'terrainConfig',
+                    webMercatorTerrainConfigCodec.byteLength(),
+                    [ 'vertex' ]
+                ),
             ],
         }),
         terrainData: await runtime.createBindLayout({
-            label: 'Terrain field terrain frontier data layout',
+            label: 'Web Mercator terrain frontier data layout',
             group: 1,
             entries: [
                 readStorage(0, 'indices'),
@@ -949,7 +939,7 @@ async function createBindLayouts(runtime: GPURuntime, codecs: Codecs, mapMetaByt
             ],
         }),
         terrainTextures: await runtime.createBindLayout({
-            label: 'Terrain field terrain texture layout',
+            label: 'Web Mercator terrain texture layout',
             group: 2,
             entries: [
                 readStorage(0, 'fieldPageTable'),
@@ -971,7 +961,7 @@ async function createBindSets(
     layouts: Layouts,
     uniforms: Uniforms,
     buffers: Buffers,
-    virtualRaster: TerrainVirtualRaster,
+    virtualRaster: WebMercatorTerrainVirtualRaster,
     templates: RenderTemplates
 ) {
 
@@ -982,49 +972,42 @@ async function createBindSets(
             gridPositions: buffers.positions.region,
             visibleInstances: template.visibleInstances.region(),
             renderPatchLookupEntries: template.renderPatchLookup.region(),
-        }, { label: `Terrain field terrain frontier data ${parity}` }))
+        }, { label: `Web Mercator terrain frontier data ${parity}` }))
     }
 
     return {
         scene: await runtime.createBindSet(layouts.scene, {
             mapMeta: templates.terrain[0].mapMeta.region(),
             terrainConfig: uniforms.config.region,
-        }, { label: 'Terrain field frontier scene' }),
+        }, { label: 'Web Mercator terrain frontier scene' }),
         terrainData,
         terrainTextures: await runtime.createBindSet(layouts.terrainTextures, {
             fieldPageTable: virtualRaster.gpu.pageTable.region(),
             fieldAtlas: virtualRaster.gpu.atlasView,
-        }, { label: 'Terrain field terrain textures' }),
+        }, { label: 'Web Mercator terrain textures' }),
     }
 }
 
 async function createPrograms({
     runtime,
-    codecs,
-    shader,
+    presentationShader,
     fieldSampling,
     virtualRaster,
     presentations,
 }: Readonly<{
     runtime: GPURuntime
-    codecs: Codecs
-    shader: string
-    fieldSampling: TerrainFieldSamplingWgslOptions
-    virtualRaster: TerrainVirtualRaster
-    presentations: ReadonlyMap<string, TerrainFieldPresentationDescriptor>
+    presentationShader: string
+    fieldSampling: WebMercatorTerrainSamplingWgslOptions
+    virtualRaster: WebMercatorTerrainVirtualRaster
+    presentations: ReadonlyMap<string, WebMercatorTerrainPresentationDescriptor>
 }>): Promise<Readonly<Record<string, Program>>> {
 
-    const renderWgsl = gpuRenderPatchWgslModule()
     const configRequirement: ProgramBufferLayoutRequirement = {
         group: 0,
         binding: 1,
         type: 'uniform',
         hasDynamicOffset: false,
-        layout: codecs.config.artifact,
-    }
-    const frontierSource = {
-        code: renderWgsl.code,
-        layoutDependencies: renderWgsl.layoutDependencies,
+        layout: webMercatorTerrainConfigCodec.artifact,
     }
     const fieldWgsl = webMercatorVirtualRasterWgslModule(virtualRaster.model, {
         namespace: fieldSampling.namespace,
@@ -1036,19 +1019,35 @@ async function createPrograms({
             ? {}
             : { transitionTexels: fieldSampling.transitionTexels }),
     })
+    const terrainWgsl = webMercatorTerrainWgslModule({
+        fieldNamespace: fieldSampling.namespace,
+        addressNamespace: fieldSampling.addressNamespace,
+        cellsPerPatchEdge: TERRAIN_SECTOR_SIZE,
+        sceneGroup: 0,
+        mapMetaBinding: 0,
+        configBinding: 1,
+        dataGroup: 1,
+        indicesBinding: 0,
+        gridPositionsBinding: 1,
+        visibleInstancesBinding: 2,
+        lookupEntriesBinding: 3,
+    })
     const terrainShader = await runtime.createShaderModule({
-        label: 'Terrain field terrain shader',
+        label: 'Web Mercator terrain shader',
         sourceParts: [
-            frontierSource,
             { code: fieldWgsl.code },
-            { code: shader },
+            {
+                code: terrainWgsl.code,
+                layoutDependencies: terrainWgsl.layoutDependencies,
+            },
+            { code: presentationShader },
         ],
     })
     const programs: Record<string, Program> = {}
     for (const presentation of presentations.values()) {
         programs[presentation.id] = runtime.createProgram({
-            label: presentation.label ?? `Terrain field ${presentation.id} program`,
-            vertex: { module: terrainShader, entryPoint: 'vMain' },
+            label: presentation.label ?? `Web Mercator terrain ${presentation.id} program`,
+            vertex: { module: terrainShader, entryPoint: terrainWgsl.vertexEntryPoint },
             fragment: {
                 module: terrainShader,
                 entryPoint: presentation.fragmentEntryPoint,
@@ -1065,13 +1064,13 @@ async function createPipelines(
     textures: Textures,
     layouts: Layouts,
     programs: Programs,
-    presentations: ReadonlyMap<string, TerrainFieldPresentationDescriptor>
+    presentations: ReadonlyMap<string, WebMercatorTerrainPresentationDescriptor>
 ): Promise<Readonly<Record<string, RenderPipeline>>> {
 
     const pipelines: Record<string, RenderPipeline> = {}
     for (const presentation of presentations.values()) {
         pipelines[presentation.id] = await runtime.createRenderPipeline({
-            label: presentation.label ?? `Terrain field ${presentation.id} pipeline`,
+            label: presentation.label ?? `Web Mercator terrain ${presentation.id} pipeline`,
             program: programs[presentation.id]!,
             layout: {
                 mode: 'explicit',
@@ -1093,7 +1092,7 @@ function createPasses(runtime: GPURuntime, surface: Surface, textures: Textures)
 
     return {
         terrain: runtime.createRenderPass({
-            label: 'Terrain field terrain stage',
+            label: 'Web Mercator terrain stage',
             color: [ {
                 target: surface,
                 load: 'clear',
@@ -1114,7 +1113,7 @@ function createCommands(
     runtime: GPURuntime,
     uniforms: Uniforms,
     buffers: Buffers,
-    virtualRaster: TerrainVirtualRaster,
+    virtualRaster: WebMercatorTerrainVirtualRaster,
     templates: RenderTemplates,
     bindSets: BindSets,
     pipelines: Pipelines
@@ -1153,7 +1152,7 @@ function createCommands(
         terrain: Object.freeze(Object.fromEntries(
             Object.entries(pipelines).map(([ id, pipeline ]) => [
                 id,
-                Object.freeze(terrainCommands(`Draw terrain field ${id}`, pipeline)),
+                Object.freeze(terrainCommands(`Draw Web Mercator terrain ${id}`, pipeline)),
             ])
         )),
     })
@@ -1164,7 +1163,7 @@ function currentReads(resources: readonly ContentResource[]) {
     return resources.map(resource => ({ resource, contentEpoch: 'current-at-step' as const }))
 }
 
-async function publishChangedResidency(graph: TerrainFieldGraph, state: TerrainFieldState) {
+async function publishChangedResidency(graph: WebMercatorTerrainGraph, state: WebMercatorTerrainState) {
 
     const publication = graph.virtualRaster.publish()
     if (!publication.changed) return publication
@@ -1180,9 +1179,9 @@ async function publishChangedResidency(graph: TerrainFieldGraph, state: TerrainF
 }
 
 async function consumeReadyFeedback(
-    graph: TerrainFieldGraph,
+    graph: WebMercatorTerrainGraph,
     pending: PendingFeedback[],
-    state: TerrainFieldState
+    state: WebMercatorTerrainState
 ): Promise<ConsumedFeedback | undefined> {
 
     if (pending.length < 2) return undefined
@@ -1232,7 +1231,7 @@ function frontierDecisionKey(view: GeoViewSnapshot): string {
 
 function verifyFrameProvenance(
     submitted: SubmittedWork,
-    graph: TerrainFieldGraph,
+    graph: WebMercatorTerrainGraph,
     frame: GpuTileFrontierFrame,
     terrainPresentation: string
 ) {
@@ -1286,7 +1285,7 @@ function verifyFrameProvenance(
         ))
         if (producer === undefined || read === undefined ||
             read.declaredContentEpoch !== 'current-at-step') {
-            throw new Error(`Terrain field submission provenance mismatch for ${pair.name}`)
+            throw new Error(`Web Mercator terrain submission provenance mismatch for ${pair.name}`)
         }
         return Object.freeze({
             name: pair.name,
@@ -1300,13 +1299,13 @@ function verifyFrameProvenance(
     }))
 }
 
-function stableIdentitySnapshot(graph: TerrainFieldGraph) {
+function stableIdentitySnapshot(graph: WebMercatorTerrainGraph) {
 
     const objects = Object.values(identityObjectsByKind(graph)).flat()
     return [ ...new Set(objects.map(object => object.id)) ].sort()
 }
 
-function identityFactSnapshot(graph: TerrainFieldGraph) {
+function identityFactSnapshot(graph: WebMercatorTerrainGraph) {
 
     const objects = identityObjectsByKind(graph)
     const identities = stableIdentitySnapshot(graph)
@@ -1324,7 +1323,7 @@ function identityFactSnapshot(graph: TerrainFieldGraph) {
     })
 }
 
-function identityObjectsByKind(graph: TerrainFieldGraph) {
+function identityObjectsByKind(graph: WebMercatorTerrainGraph) {
 
     const renderPatchIdentity = graph.renderPatchFrontier.identityObjects()
     const templateResources = [
@@ -1392,11 +1391,11 @@ function persistentFactSnapshot(runtime: GPURuntime): PersistentFacts {
     })
 }
 
-function graphContractSnapshot(graph: TerrainFieldGraph): TerrainFieldContractFacts {
+function graphContractSnapshot(graph: WebMercatorTerrainGraph): WebMercatorTerrainContractFacts {
 
     const dataMaximumMatrixLevel = graph.frontier.descriptor.policy.maximumMatrixLevel
     return Object.freeze({
-        stageOrder: TERRAIN_FIELD_STAGE_ORDER,
+        stageOrder: WEB_MERCATOR_TERRAIN_STAGE_ORDER,
         countPath: 'gpu-produced-indirect-arguments',
         selectionPath: 'gpu-resident-active-frontier',
         dataMaximumMatrixLevel,
@@ -1444,7 +1443,7 @@ function graphContractSnapshot(graph: TerrainFieldGraph): TerrainFieldContractFa
 function createState<Presentation extends string>(
     size: SurfaceSize,
     terrainPresentation: Presentation
-): TerrainFieldState<Presentation> {
+): WebMercatorTerrainState<Presentation> {
 
     return {
         initialized: false,
@@ -1463,10 +1462,10 @@ function createState<Presentation extends string>(
 }
 
 function stateSnapshot<Presentation extends string>(
-    state: TerrainFieldState<Presentation>,
+    state: WebMercatorTerrainState<Presentation>,
     pendingFeedbackCount: number,
     feedbackRing: VirtualRasterGpuFeedbackRing
-): TerrainFieldRendererState<Presentation> {
+): WebMercatorTerrainRendererState<Presentation> {
 
     const latest = state.latestFrontierFacts
     const renderPatches = state.latestRenderPatchFeedback
@@ -1532,7 +1531,7 @@ async function observeSubmittedWork(submitted: SubmittedWork) {
 
     const [ nativeOutcome ] = await Promise.all([ submitted.nativeOutcome, submitted.done ])
     if (nativeOutcome.status !== 'observed-succeeded') {
-        throw new Error(`Terrain field submission native outcome was ${nativeOutcome.status}`)
+        throw new Error(`Web Mercator terrain submission native outcome was ${nativeOutcome.status}`)
     }
     return Object.freeze({ submissionId: submitted.id, nativeStatus: nativeOutcome.status })
 }
@@ -1544,7 +1543,7 @@ function assertSameIdentities(
 ) {
 
     if (before.length !== after.length || before.some((id, index) => id !== after[index])) {
-        throw new Error(`Persistent Terrain field graph identity changed during ${action}`)
+        throw new Error(`Persistent Web Mercator terrain graph identity changed during ${action}`)
     }
 }
 
@@ -1552,7 +1551,7 @@ function assertPersistentCounts(before: PersistentFacts, after: PersistentFacts,
 
     for (const name of [ 'resources', 'bindLayouts', 'bindSets', 'pipelines' ] as const) {
         if (before[name] !== after[name]) {
-            throw new Error(`Persistent Terrain field ${name} count changed during ${action}`)
+            throw new Error(`Persistent Web Mercator terrain ${name} count changed during ${action}`)
         }
     }
 }
@@ -1573,11 +1572,11 @@ function assertSize(value: SurfaceSize) {
 
     if (value === undefined || !Number.isInteger(value.width) ||
         !Number.isInteger(value.height) || value.width <= 0 || value.height <= 0) {
-        throw new TypeError('Terrain field size must contain positive integer width and height')
+        throw new TypeError('Web Mercator terrain size must contain positive integer width and height')
     }
 }
 
-function assertVirtualRaster(value: TerrainVirtualRaster) {
+function assertVirtualRaster(value: WebMercatorTerrainVirtualRaster) {
 
     if (value === undefined || value.kind !== 'virtual-raster-runtime' ||
         value.model?.kind !== 'web-mercator-virtual-raster-field' ||
@@ -1589,14 +1588,14 @@ function assertVirtualRaster(value: TerrainVirtualRaster) {
         value.viewDemandProducer?.kind !== 'view-demand-producer' ||
         typeof value.reconcileFeedback !== 'function') {
         throw new TypeError(
-            'Terrain field renderer requires a prepared WebMercator Virtual Raster runtime'
+            'Web Mercator terrain renderer requires a prepared WebMercator Virtual Raster runtime'
         )
     }
 }
 
 function assertFieldLayer<ViewInput>(
     value: MapFieldLayer<ViewInput>,
-    virtualRaster: TerrainVirtualRaster
+    virtualRaster: WebMercatorTerrainVirtualRaster
 ) {
 
     if (value?.field !== virtualRaster.field ||
@@ -1605,23 +1604,23 @@ function assertFieldLayer<ViewInput>(
         value.demandProducer !== virtualRaster.viewDemandProducer ||
         typeof value.viewAdapter?.read !== 'function') {
         throw new TypeError(
-            'Terrain field renderer requires one coherent MapFieldLayer and Virtual Raster runtime'
+            'Web Mercator terrain renderer requires one coherent MapFieldLayer and Virtual Raster runtime'
         )
     }
 }
 
-function assertShader(value: string) {
+function assertPresentationShader(value: string) {
 
     if (typeof value !== 'string' || value.trim() === '') {
-        throw new TypeError('Terrain field renderer requires application terrain WGSL')
+        throw new TypeError('Web Mercator terrain renderer requires presentation WGSL')
     }
 }
 
-function assertFieldSampling(value: TerrainFieldSamplingWgslOptions) {
+function assertFieldSampling(value: WebMercatorTerrainSamplingWgslOptions) {
 
     if (typeof value?.namespace !== 'string' || value.namespace.length === 0 ||
         typeof value.addressNamespace !== 'string' || value.addressNamespace.length === 0) {
-        throw new TypeError('Terrain field sampling requires WGSL namespaces')
+        throw new TypeError('Web Mercator terrain sampling requires WGSL namespaces')
     }
 }
 
@@ -1630,25 +1629,25 @@ function assertElevation(range: readonly [number, number], exaggeration: number)
     if (!Array.isArray(range) || range.length !== 2 ||
         range.some(value => !Number.isFinite(value)) || range[0] > range[1] ||
         !Number.isFinite(exaggeration) || exaggeration <= 0) {
-        throw new TypeError('Terrain field elevation range and exaggeration are invalid')
+        throw new TypeError('Web Mercator terrain elevation range and exaggeration are invalid')
     }
 }
 
 function normalizePresentations<Presentation extends string>(
-    values: readonly TerrainFieldPresentationDescriptor<Presentation>[],
+    values: readonly WebMercatorTerrainPresentationDescriptor<Presentation>[],
     initial: Presentation
-): ReadonlyMap<Presentation, TerrainFieldPresentationDescriptor<Presentation>> {
+): ReadonlyMap<Presentation, WebMercatorTerrainPresentationDescriptor<Presentation>> {
 
     if (!Array.isArray(values) || values.length === 0) {
-        throw new TypeError('Terrain field renderer requires at least one presentation')
+        throw new TypeError('Web Mercator terrain renderer requires at least one presentation')
     }
-    const normalized = new Map<Presentation, TerrainFieldPresentationDescriptor<Presentation>>()
+    const normalized = new Map<Presentation, WebMercatorTerrainPresentationDescriptor<Presentation>>()
     for (const value of values) {
         if (typeof value?.id !== 'string' || value.id.length === 0 ||
             typeof value.fragmentEntryPoint !== 'string' ||
             !/^[A-Za-z_][A-Za-z0-9_]*$/.test(value.fragmentEntryPoint) ||
             normalized.has(value.id)) {
-            throw new TypeError('Terrain field presentations require unique ids and WGSL entry points')
+            throw new TypeError('Web Mercator terrain presentations require unique ids and WGSL entry points')
         }
         normalized.set(value.id, Object.freeze({ ...value }))
     }

@@ -1,6 +1,6 @@
 # Geo Executable Field Runtime Clean Cut Design
 
-Status: Accepted
+Status: Accepted; amended by ADR-074
 Date: 2026-08-11
 
 ## Goal
@@ -9,8 +9,8 @@ Make `examples/demLayer` a thin consumer of public `geoscratch/scratch` and
 `geoscratch/geo` APIs. Scratch continues to own domain-independent GPU, Worker,
 cache, diagnostics, and scheduling primitives. Geo owns map-camera adaptation,
 tile-space demand, Virtual Raster execution, GPU render-patch selection, and
-terrain-field lowering. The example owns only DEM source interpretation, its
-Worker task implementation, presentation controls, and terrain WGSL.
+WebMercator terrain lowering. The example owns only DEM source interpretation, its
+Worker task implementation, presentation controls, and fragment presentation WGSL.
 
 ## Current Problem
 
@@ -40,8 +40,9 @@ and leaves the public API unable to reproduce the example without copying it.
   execution with residency, request scheduling, GPU atlas/page-table state,
   publication acknowledgement, transition leases, and bounded diagnostics.
 - A generic planar render-patch frontier with its own library-owned WGSL kernel.
-- A terrain-field renderer that lowers a scalar `MapFieldLayer` plus Virtual
-  Raster runtime into persistent Scratch resources and explicit submissions.
+- A WebMercator terrain renderer that lowers a scalar `MapFieldLayer` plus Virtual
+  Raster runtime into persistent Scratch resources, generated terrain WGSL, and
+  explicit submissions.
 
 ### DEM Example
 
@@ -98,16 +99,17 @@ balances the final cut to a maximum adjacent level delta of one, and publishes
 indirect draw arguments plus delayed structured feedback. Its compute WGSL is a
 library implementation detail.
 
-### `TerrainFieldRenderer`
+### `WebMercatorTerrainRenderer`
 
-An explicit Geo rendering product. It owns the terrain geometry, render-patch
-frontier, depth target, Scratch binding graph, render pipelines, commands, and
-feedback orchestration. It borrows a `VirtualRasterRuntime`, `MapFieldLayer`,
+An explicit OGC `WebMercatorQuad` Geo rendering product. It owns the terrain
+geometry, render-patch frontier, depth target, Scratch binding graph, render
+pipelines, commands, generated precision/patch/stitching/height-sampling WGSL,
+and feedback orchestration. It borrows a `VirtualRasterRuntime`, `MapFieldLayer`,
 `GPURuntime`, and `Surface`; it does not create or dispose those owners.
 
-The application supplies terrain WGSL and selects a named presentation. The
-renderer injects generated field sampling and render-patch ABI modules before
-compiling the shader.
+The application supplies fragment presentation WGSL and selects a named
+presentation. The renderer composes it after the generated field-sampling and
+complete WebMercator terrain modules. No projection-neutral alias is exposed.
 
 ## Data Flow
 
@@ -120,7 +122,7 @@ MapLibre map
   -> caller-owned Worker request executor
   -> VirtualRasterRuntime residency/publication
   -> GpuRenderPatchFrontier
-  -> TerrainFieldRenderer indirect draw
+  -> WebMercatorTerrainRenderer indirect draw
   -> Scratch submission
 ```
 

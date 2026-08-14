@@ -60,6 +60,12 @@ map stores geometry level and sampling level separately, so edge vertex snapping
 uses render LoD while shared-edge height sampling uses the coarser available data
 LoD. Wireframe mode makes this post-`z10` subdivision directly visible.
 
+The application does not own the terrain vertex shader. Geo's
+`webMercatorTerrainWgslModule` generates logical patch lookup, high-precision
+camera-relative positioning, cross-LoD mesh stitching, Virtual Raster height
+sampling, and the built-in wireframe fragment. This example's
+`terrain-presentation.wgsl` contains only the shaded fragment presentation.
+
 The `Cache` folder exposes all supported application cache settings:
 
 - `Cache policy`: `Disabled`, `Session`, `Durable`, or `Clear on open`;
@@ -106,3 +112,8 @@ Supported cache parameters are:
 when the visualization must not write disk-backed cache data. `request` asks the
 browser storage manager to protect origin data from automatic eviction; it does not
 change the selected cache lifecycle.
+
+`cacheMaxMiB` and `cacheMaxEntries` are totals for the whole DEM application, not
+per-Worker multipliers. The executor partitions both totals exactly over the active
+cache shards. If the entry total is smaller than the Worker count, remaining Workers
+run without a cache shard.

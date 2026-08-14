@@ -2,27 +2,45 @@
 docId: geo.terrain-rendering
 canonical: true
 apiSources:
-  - packages/geoscratch/src/geo/terrain-field-renderer.ts
+  - packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts
+  - packages/geoscratch/src/geo/web-mercator-terrain-wgsl.ts
   - packages/geoscratch/src/geo/web-mercator-virtual-raster-wgsl.ts
 ---
 # Terrain Rendering
 
 [简体中文](./terrain-rendering_zh.md) | [Geo overview](./README.md)
 
-`createTerrainFieldRenderer` is the reusable Geo orchestration extracted from the DEM
-example. It composes a Geo view, field/runtime, GPU render-patch frontier, atlas
-sampling module, mesh-stitching topology, pipelines, indirect draws, resize, feedback,
-and lifecycle into one explicit renderer contract. The application supplies source,
-presentation, shader/color policy, and ownership choices.
+`createWebMercatorTerrainRenderer` is Geo's complete OGC `WebMercatorQuad` terrain
+orchestrator. It composes a `MapFieldLayer`, Web Mercator Virtual Raster runtime, GPU
+data frontier, GPU render-patch frontier, generated terrain WGSL, indirect draw,
+feedback, resize, and disposal into one explicit renderer. The name is intentionally
+projection-specific. There is no generic `TerrainFieldRenderer` alias: a globe or
+another tiling topology requires a renderer with different spatial and selection
+semantics.
 
-Web Mercator Virtual Raster WGSL samples height by logical world position, including
-parent fallback and cross-tile filtering. Terrain vertex generation stays camera-
-relative and can refine mesh density independently of raster z. Mesh stitching, not
-Virtual Raster, removes T-junction cracks; Virtual Raster removes CPU padding and
-neighbor-aware shader plumbing at tile boundaries.
+`webMercatorTerrainWgslModule` owns the entire terrain vertex path. It reconstructs
+wide-fixed logical positions from render patches, takes camera-relative differences
+before f32 conversion, resolves neighboring render patches, snaps mixed-LoD shared
+edges, samples height through the logical Virtual Raster accessor, and projects the
+result. It also provides the built-in fragment entry point named by
+`WEB_MERCATOR_TERRAIN_TILE_WIREFRAME_FRAGMENT_ENTRY_POINT`. The renderer's
+`presentationShader` is an extension source for application fragment entry points; it
+consumes `WebMercatorTerrainVertexOutput` and must not duplicate position, stitching,
+tile lookup, or height-sampling logic.
 
-The renderer is not a universal scene, map, or DEM loader. It does not own an external
-map or silently start unrelated Workers. Other renderers may consume the same field and
-frontier primitives for imagery, flow, compute, or editing. The DEM example should
-contain only source-specific loading/decoding, presentation shaders, controls, and
-assembly that cannot be expressed by these public contracts.
+Raster LoD and geometry LoD remain separate authorities. The data frontier selects
+resident source pages up to the source matrix limit. The render-patch frontier may
+continue refining the terrain grid beyond that level while retaining an explicit
+`samplingLevel`. Neighbor stitching operates on geometry levels, while shared-edge
+height lookup reconciles the available sampling levels. Virtual Raster removes CPU
+padding and physical-atlas coupling; mesh stitching removes T-junction cracks.
+
+Lower-level consumers may compose `gpuRenderPatchReadWgslModule` directly. It exposes
+bounded visible-instance lookup, covering-patch lookup, neighbor resolution, and edge
+coordinate snapping with explicit storage bindings and layout dependencies. Generated
+modules never read a CPU-selected tile list or round-trip draw counts through the CPU.
+
+The renderer does not own a map host, camera controller, source manifest, network
+transport, decoder, Worker system, or application cache policy. Those remain explicit
+composition inputs. The DEM example therefore owns source-specific loading and
+decoding, map/UI assembly, cache-budget choice, and its fragment presentation only.

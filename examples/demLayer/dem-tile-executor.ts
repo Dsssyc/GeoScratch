@@ -7,6 +7,7 @@ import type {
     VirtualRasterWorkerExecutor,
 } from 'geoscratch/geo'
 import {
+    persistentCacheDescriptor,
     recommendedWorkerCount,
     workerRemoteErrorCode,
 } from 'geoscratch/scratch'
@@ -76,7 +77,7 @@ export async function createDemWorkerRequestExecutor(
         context: index => ({
             key: `dem-cache-shard-${index}`,
             init: {
-                cache: shardCacheConfiguration(
+                cache: demCacheConfigurationForShard(
                     descriptor.cachePolicy,
                     index,
                     workerCount
@@ -141,19 +142,29 @@ function createCandidate(
     })
 }
 
-function shardCacheConfiguration(
+export function demCacheConfigurationForShard(
     policy: DemCachePolicy,
     shard: number,
     count: number
 ): DemTileWorkerInit['cache'] {
 
+    if (!positiveInteger(count) || !Number.isSafeInteger(shard) ||
+        shard < 0 || shard >= count) {
+        throw new TypeError('DEM cache sharding requires a valid shard index and count')
+    }
     if (policy.mode === 'none') return Object.freeze({ mode: 'none' })
+    const activeShardCount = Math.min(count, policy.maxEntries)
+    if (shard >= activeShardCount) return Object.freeze({ mode: 'none' })
     return Object.freeze({
         mode: 'persistent',
-        descriptor: Object.freeze({
+        descriptor: persistentCacheDescriptor({
             namespace: `${policy.namespace}.shard-${shard}`,
-            maxPayloadBytes: dividedBudget(policy.maxPayloadBytes, count),
-            maxEntries: dividedBudget(policy.maxEntries, count),
+            maxPayloadBytes: partitionBudget(
+                policy.maxPayloadBytes,
+                activeShardCount,
+                shard
+            ),
+            maxEntries: partitionBudget(policy.maxEntries, activeShardCount, shard),
             maxHistory: 64,
             requestPersistence: policy.requestPersistence && shard === 0,
             lifecycle: policy.lifecycle,
@@ -161,9 +172,10 @@ function shardCacheConfiguration(
     })
 }
 
-function dividedBudget(value: number, count: number): number {
+function partitionBudget(value: number, count: number, index: number): number {
 
-    return Math.max(1, Math.floor(value / count))
+    const base = Math.floor(value / count)
+    return base + (index < value % count ? 1 : 0)
 }
 
 function positiveInteger(value: unknown): value is number {
