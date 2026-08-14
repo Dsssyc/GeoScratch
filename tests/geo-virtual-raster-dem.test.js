@@ -16,11 +16,9 @@ import {
 } from 'geoscratch/geo'
 import {
     DEM_WEB_MERCATOR_COORDINATE_BITS,
-    createDemVirtualRasterModel,
-    demTileUrl,
-    fetchDemVirtualRasterManifest,
-    parseDemVirtualRasterManifest,
-} from '../examples/demLayer/dem-virtual-raster.ts'
+    createDemTileSource,
+    fetchDemTileSource,
+} from '../examples/demLayer/dem-source.ts'
 import {
     DEM_CACHE_PANEL_DEFAULT_CONFIG,
     DEM_CACHE_PANEL_STORAGE_KEY,
@@ -442,10 +440,17 @@ describe('DEM WebMercator virtual raster', () => {
 
     it('validates standard manifest facts and builds a compact tile address space', () => {
 
-        const parsed = parseDemVirtualRasterManifest(manifest)
-        const model = createDemVirtualRasterModel(parsed)
+        const source = createDemTileSource({
+            manifest,
+            tileServerUrl: 'http://127.0.0.1:8787/',
+        })
+        const { model } = source
 
-        expect(parsed).to.deep.equal(manifest)
+        expect(source.manifest).to.deep.equal(manifest)
+        expect(source.facts.contentVersion).to.equal(source.manifest.contentVersion)
+        expect(Object.isFrozen(source)).to.equal(true)
+        expect(Object.isFrozen(source.manifest)).to.equal(true)
+        expect(Object.isFrozen(source.model)).to.equal(true)
         expect(model.coverage.entryCount).to.equal(49)
         expect(model.addressSpace.pageTableEntryCount).to.equal(49)
         expect(model.addressSpace.pageSize).to.deep.equal([ 256, 256 ])
@@ -805,15 +810,18 @@ describe('DEM WebMercator virtual raster', () => {
 
     it('constructs only the standard row/column endpoint with immutable content identity', () => {
 
-        const parsed = parseDemVirtualRasterManifest(manifest)
-        const model = createDemVirtualRasterModel(parsed)
+        const source = createDemTileSource({
+            manifest,
+            tileServerUrl: 'http://127.0.0.1:8787/',
+        })
+        const { model } = source
         const page = model.addressSpace.pageFromTile({
             matrixId: '10',
             tileRow: 418,
             tileCol: 858,
         })
 
-        expect(demTileUrl(parsed, 'http://127.0.0.1:8787/', page)).to.equal(
+        expect(source.tileUrl(page)).to.equal(
             'http://127.0.0.1:8787/tiles/WebMercatorQuad/10/418/858.png' +
             '?v=dem-aa7a584830f19877-cog-wmq-v3'
         )
@@ -829,7 +837,10 @@ describe('DEM WebMercator virtual raster', () => {
             minTileCol: 12,
             maxTileCol: 13,
         }
-        const model = createDemVirtualRasterModel(parseDemVirtualRasterManifest(expanded))
+        const { model } = createDemTileSource({
+            manifest: expanded,
+            tileServerUrl: 'http://127.0.0.1:8787',
+        })
 
         expect(model.safetyCoverPages.map(page => page.key)).to.deep.equal([
             '4/6/12',
@@ -851,7 +862,7 @@ describe('DEM WebMercator virtual raster', () => {
         }
         let result
         try {
-            result = await fetchDemVirtualRasterManifest(
+            result = await fetchDemTileSource(
                 'http://127.0.0.1:8787/',
                 new AbortController().signal
             )
@@ -861,13 +872,17 @@ describe('DEM WebMercator virtual raster', () => {
 
         expect(requestedUrl).to.equal('http://127.0.0.1:8787/manifest.json')
         expect(requestOptions.cache).to.equal('no-store')
-        expect(result.contentVersion).to.equal(manifest.contentVersion)
+        expect(result.manifest.contentVersion).to.equal(manifest.contentVersion)
+        expect(result.model.addressSpace.levelCount).to.equal(7)
     })
 
     it('emits direct fixed-Mercator sampling without persistent per-node addresses', () => {
 
-        const parsed = parseDemVirtualRasterManifest(manifest)
-        const model = createDemVirtualRasterModel(parsed)
+        const source = createDemTileSource({
+            manifest,
+            tileServerUrl: 'http://127.0.0.1:8787',
+        })
+        const { model } = source
         const wgsl = webMercatorVirtualRasterWgslModule(model, {
             namespace: 'DemHeight',
             addressNamespace: 'DemAddress',
@@ -879,9 +894,9 @@ describe('DEM WebMercator virtual raster', () => {
         const generic = webMercatorVirtualRasterField({
             id: 'test-height',
             addressSpaceId: 'test-height-address-space',
-            sourceRevision: parsed.contentVersion,
+            sourceRevision: source.manifest.contentVersion,
             coverage: model.coverage,
-            geographicBounds: parsed.source.geographicBounds,
+            geographicBounds: source.manifest.source.geographicBounds,
             coordinateBits: DEM_WEB_MERCATOR_COORDINATE_BITS,
             fieldKind: 'scalar',
             channels: 1,
@@ -889,8 +904,8 @@ describe('DEM WebMercator virtual raster', () => {
             gpuFormat: 'r8unorm',
             unit: 'm',
             interpolation: 'linear',
-            scale: parsed.scale,
-            offset: parsed.offset,
+            scale: source.manifest.scale,
+            offset: source.manifest.offset,
         })
         const genericWgsl = webMercatorVirtualRasterWgslModule(generic, {
             namespace: 'TestHeight',
@@ -955,7 +970,10 @@ async function expectRejectedName(promise, name) {
 
 async function createGpuDemandFixture({ maxPhysicalPages = 6, maxRequests = 24 } = {}) {
 
-    const model = createDemVirtualRasterModel(parseDemVirtualRasterManifest(manifest))
+    const { model } = createDemTileSource({
+        manifest,
+        tileServerUrl: 'http://127.0.0.1:8787',
+    })
     const residency = new VirtualRasterResidency({
         addressSpace: model.addressSpace,
         plane: model.plane,

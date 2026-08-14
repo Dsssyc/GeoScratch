@@ -14,6 +14,7 @@ import type {
     VirtualRasterWorkerExecutorFacts,
 } from 'geoscratch/geo'
 import type { DemMap } from '../../../examples/demLayer/dem-map.ts'
+import type { DemTileSourceFacts } from '../../../examples/demLayer/dem-source.ts'
 import type {
     DemCachePolicy,
     DemTileCacheFacts,
@@ -22,7 +23,9 @@ import type {
 
 type DemTerrainPresentation = 'shaded' | 'tile-wireframe'
 type DemLayer = TerrainFieldRenderer<MapLibrePlanarCameraState, DemTerrainPresentation>
-type DemVirtualRasterFacts = VirtualRasterRuntimeFacts & Readonly<{
+type DemVirtualRasterFacts = Readonly<{
+    runtime: VirtualRasterRuntimeFacts
+    source: DemTileSourceFacts
     worker: VirtualRasterWorkerExecutorFacts<DemTileWorkerFacts>
 }>
 type CleanupReport = Awaited<ReturnType<LifetimeScope['dispose']>>
@@ -60,6 +63,7 @@ type GraphBinding = Readonly<{
     graph: DemLayer
     lifetime: LifetimeScope
     frameController: GeoFrameController
+    virtualRasterFacts(): DemVirtualRasterFacts
     dispose(): Promise<unknown>
     moveCamera(options: CameraMoveOptions): void
     setStatus(status: string): void
@@ -179,6 +183,7 @@ export function createDemLayerProof(configuration: ProofConfiguration) {
             latestProvenance,
             latestCamera,
             frameController: graphBinding.frameController,
+            virtualRasterFacts: graphBinding.virtualRasterFacts,
             cachePolicy: configuration.cachePolicy,
         })
     }
@@ -235,7 +240,7 @@ export function createDemLayerProof(configuration: ProofConfiguration) {
             virtualRaster: graphBinding === undefined
                 ? undefined
                 : demVirtualRasterProofFacts(
-                    graphBinding.graph.virtualRasterFacts(),
+                    graphBinding.virtualRasterFacts(),
                     configuration.cachePolicy
                 ),
         }) as CleanupProof
@@ -323,6 +328,7 @@ function publishFrameFacts({
     latestProvenance,
     latestCamera,
     frameController,
+    virtualRasterFacts,
     cachePolicy,
 }: {
     canvas: HTMLCanvasElement
@@ -334,6 +340,7 @@ function publishFrameFacts({
     latestProvenance: readonly TerrainFieldProvenanceFact[]
     latestCamera?: MapLibrePlanarCameraState
     frameController: GeoFrameController
+    virtualRasterFacts(): DemVirtualRasterFacts
     cachePolicy: DemCachePolicy
 }) {
 
@@ -392,7 +399,7 @@ function publishFrameFacts({
     canvas.dataset.virtualSnapshotEpoch = String(state.virtualSnapshotEpoch)
     canvas.dataset.virtualRequestedPageCount = String(state.virtualRequestedPageCount)
     canvas.dataset.virtualRaster = JSON.stringify(demVirtualRasterProofFacts(
-        graph.virtualRasterFacts(),
+        virtualRasterFacts(),
         cachePolicy
     ))
     canvas.dataset.provenance = JSON.stringify(latestProvenance)
@@ -433,18 +440,21 @@ function publishFrameFacts({
 }
 
 function demVirtualRasterProofFacts(
-    value: VirtualRasterRuntimeFacts,
+    facts: DemVirtualRasterFacts,
     policy: DemCachePolicy
 ) {
 
-    const facts = value as DemVirtualRasterFacts
     const workers = facts.worker.workers
     const sum = (read: (worker: DemTileWorkerFacts) => number) =>
         workers.reduce((total, worker) => total + read(worker), 0)
     const sumCache = (read: (cache: DemTileCacheFacts) => number) =>
         workers.reduce((total, worker) => total + read(worker.cache), 0)
     return Object.freeze({
-        ...facts,
+        ...facts.source,
+        ...facts.runtime,
+        cachePolicy: policy.mode,
+        cacheConfiguration: policy,
+        stopped: facts.runtime.disposed || facts.worker.disposed,
         worker: Object.freeze({
             ...facts.worker,
             cache: Object.freeze({

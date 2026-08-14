@@ -12,9 +12,8 @@ import {
     ownedVirtualRasterPagePayload,
 } from 'geoscratch/geo'
 import {
-    createDemVirtualRasterModel,
-    parseDemVirtualRasterManifest,
-} from '../examples/demLayer/dem-virtual-raster.ts'
+    createDemTileSource,
+} from '../examples/demLayer/dem-source.ts'
 import { demMapViewAdapter } from '../examples/demLayer/dem-map.ts'
 import {
     createFakeCanvas,
@@ -24,7 +23,11 @@ import { demWebMercatorManifest } from './fixtures/dem-webmercator-manifest.js'
 
 const root = process.cwd()
 const read = (...parts) => fs.readFileSync(path.join(root, ...parts), 'utf8')
-const demManifest = parseDemVirtualRasterManifest(demWebMercatorManifest)
+const demSource = createDemTileSource({
+    manifest: demWebMercatorManifest,
+    tileServerUrl: 'http://127.0.0.1:8787',
+})
+const demManifest = demSource.manifest
 
 function sha256(value) {
 
@@ -33,7 +36,7 @@ function sha256(value) {
 
 async function createTestVirtualRaster(runtime) {
 
-    const model = createDemVirtualRasterModel(demManifest)
+    const model = demSource.model
     const residency = new VirtualRasterResidency({
         addressSpace: model.addressSpace,
         plane: model.plane,
@@ -286,7 +289,7 @@ describe('DEM Layer clean cut', () => {
         const layerSource = read(
             'packages', 'geoscratch', 'src', 'geo', 'terrain-field-renderer.ts'
         )
-        const virtualRasterSource = read('examples', 'demLayer', 'dem-virtual-raster.ts')
+        const virtualRasterSource = read('examples', 'demLayer', 'dem-source.ts')
         const mapSource = read('examples', 'demLayer', 'dem-map.ts')
         const mapAdapterSource = read(
             'packages', 'geoscratch', 'src', 'geo', 'maplibre-planar-view.ts'
@@ -318,6 +321,29 @@ describe('DEM Layer clean cut', () => {
         expect(browserProofAdapter).to.include('canvas.dataset.frontier = JSON.stringify(')
         expect(browserProofAdapter).to.include('canvas.dataset.cameraView = JSON.stringify(')
         expect(mapSource).not.to.match(/\bcenter(?:High|Low)\b|\bcameraPos\b/)
+    })
+
+    it('keeps one DEM source authority and delegates executor disposal to Geo', () => {
+
+        const source = read('examples', 'demLayer', 'dem-source.ts')
+        const tileUrlBody = source.slice(
+            source.lastIndexOf('tileUrl(page: VirtualRasterPageIdentity)'),
+            source.indexOf('/** Fetches the mutable manifest endpoint')
+        )
+
+        expect(fs.existsSync(path.join(
+            root,
+            'examples',
+            'demLayer',
+            'dem-virtual-raster.ts'
+        ))).to.equal(false)
+        expect((source.match(/parseDemVirtualRasterManifest\(/g) ?? [])).to.have.length(2)
+        expect(tileUrlBody).not.to.include('parseDemVirtualRasterManifest')
+        expect(tileUrlBody).not.to.include('structuredClone')
+        expect(source).to.include("ownership: 'owned'")
+        expect(source).not.to.include("ownership: 'borrowed'")
+        expect(source).not.to.include('inspect: () =>')
+        expect(source).not.to.include('let stopped')
     })
 
     it('uses the neutral route and removes every legacy DEM owner', () => {

@@ -107,7 +107,7 @@ describe('asset layout', () => {
         )
         expect(backend).to.include('"assets" / "dem.png"')
         expect(main).not.to.include('./assets/dem.png')
-        expect(main).to.include('fetchDemVirtualRasterManifest')
+        expect(main).to.include('fetchDemTileSource')
         expect(main).to.not.match(/border|palette/i)
     })
 

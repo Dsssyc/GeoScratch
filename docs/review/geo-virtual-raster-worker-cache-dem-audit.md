@@ -57,7 +57,7 @@ b5dc94b Define Scratch cache public contract tests
 | `/tiles/{z}/{x}/{y}.png` and full-image fallback left two data models. | Only `/tiles/WebMercatorQuad/{matrix}/{row}/{col}.png`; source PNG is offline COG input. | Python service, manifest, client URL builder, server README. | Old/full routes fail, network observer records only standard tiles, and source scan finds no browser PNG fallback. | Deleted |
 | Tile orientation depended on an implicit southwest flip. | Source, COG, standard tile, and shader are north-up; top-left rows are converted exactly once by standard addressing. | Build/service manifest facts and DEM validator. | Python corner/center/random equivalence, orientation test, and headed terrain capture. | Corrected |
 | Parent fallback produced nearest/blocky transitions at mixed residency LoDs. | Fallback converges to one common level, recomputes bilinear weights there, and blends only where a same-level neighbor resolves coarser. | Generated `DemHeight_sample_level` and residency-aware guard band. | Cross-page unit tests and page-boundary pixel contrast gate pass. | Corrected |
-| DEM teardown did not own request/cache/Worker lifetime. | One lifecycle authority stops demand, settles work, drains submitted GPU work, then releases Worker/cache/residency/GPU/runtime/map in order. | Scratch `WorkerContextPool`, Geo executor disposal, `LifetimeScope`, and `main.ts`. | Pause/drain, equivalent double dispose, all task/context/cache/staging/native counters zero, and all owned processes/ports closed. | Replaced |
+| DEM teardown did not own request/cache/Worker lifetime. | The DEM source transfers its executor through an explicit owned binding; Geo stops and settles scheduling before disposing that executor, while page `LifetimeScope` drains GPU work and releases the runtime/map authorities. | `dem-source.ts`, `VirtualRasterRuntime`, Scratch `WorkerContextPool`, and `main.ts`. | Runtime ownership tests plus pause/drain, equivalent double dispose, all task/context/cache/staging/native counters zero, and all owned processes/ports closed. | Replaced |
 | A DEM/WebMercator implementation could accidentally narrow the reusable virtual-raster contract. | Existing 1D/2D/3D address model and shader-stage accessor remain generic; visible Flow is unchanged. | Geo virtual-raster API and dynamic Flow fixture. | 262,144 particles run six compute steps over three LoDs with zero persistent address payload, one terminal readback, stable identities, and no errors. | Preserved |
 
 ## Observed Browser Facts
@@ -126,6 +126,11 @@ The production source scan confirms:
 - Geo cache adaptation has no storage, LRU, budget, database, filesystem, or lifecycle
   authority;
 - DEM imports library behavior only from public package entrypoints;
+- `dem-source.ts` validates and freezes one manifest, then derives one model and stable
+  tile-URL closure from that authority; model construction and per-page requests do not
+  reparse or clone the manifest;
+- generic `VirtualRasterRuntime.inspect()` remains limited to runtime authorities while
+  DEM source and Worker facts are read separately and combined only by browser proof code;
 - all added browser/library implementation source is TypeScript and generated `dist` is not
   tracked.
 

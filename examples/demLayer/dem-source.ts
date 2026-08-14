@@ -5,7 +5,10 @@ import {
     tileMatrixCoverage,
     webMercatorVirtualRasterField,
 } from 'geoscratch/geo'
-import type { VirtualRasterPageIdentity } from 'geoscratch/geo'
+import type {
+    VirtualRasterPageIdentity,
+    VirtualRasterRuntime,
+} from 'geoscratch/geo'
 import {
     createDemWorkerRequestExecutor,
 } from './dem-tile-executor.ts'
@@ -78,10 +81,35 @@ type DemVirtualRasterManifest = Readonly<{
 
 type DemVirtualRasterModel = ReturnType<typeof createDemVirtualRasterModel>
 
-type DemVirtualRasterRuntimeOptions = Readonly<{
-    runtime: GPURuntime
+export type DemTileSourceFacts = Readonly<{
+    kind: 'dem-tile-source-facts'
+    sourceId: string
+    contentVersion: string
+    coordinateEncoding: string
+    coordinateBits: number
+    coordinateQuantumMeters: number
+    tileMatrixSetId: 'WebMercatorQuad'
+    tileOrientation: 'north-up-row-major'
+    sourceOrientation: 'north-up-row-major'
+}>
+
+export type DemTileSource = Readonly<{
+    kind: 'dem-tile-source'
+    id: string
     manifest: DemVirtualRasterManifest
-    tileServerUrl: string
+    model: DemVirtualRasterModel
+    facts: DemTileSourceFacts
+    tileUrl(page: VirtualRasterPageIdentity): string
+}>
+
+export type DemVirtualRaster = VirtualRasterRuntime<DemVirtualRasterModel> & Readonly<{
+    source: DemTileSource
+    workerFacts(): ReturnType<DemWorkerRequestExecutor['inspect']>
+}>
+
+type DemVirtualRasterOptions = Readonly<{
+    runtime: GPURuntime
+    source: DemTileSource
     cachePolicy: DemCachePolicy
     workerModules: WorkerModuleResolver
     workerCount?: number
@@ -101,7 +129,7 @@ const DEM_DEFAULT_MAX_REQUESTS = 24
 const DEM_TILE_SIZE = 256
 const DEM_CACHE_SCHEMA_VERSION = 2
 
-export function parseDemVirtualRasterManifest(value: unknown): DemVirtualRasterManifest {
+function parseDemVirtualRasterManifest(value: unknown): DemVirtualRasterManifest {
 
     const manifest = value as Partial<DemVirtualRasterManifest> | null
     const source = manifest?.source
@@ -164,70 +192,99 @@ export function parseDemVirtualRasterManifest(value: unknown): DemVirtualRasterM
     return deepFreeze(structuredClone(manifest) as DemVirtualRasterManifest)
 }
 
-export function createDemVirtualRasterModel(manifest: DemVirtualRasterManifest) {
+function createDemVirtualRasterModel(manifest: DemVirtualRasterManifest) {
 
-    const parsed = parseDemVirtualRasterManifest(manifest)
     const coverage = tileMatrixCoverage({
         tileMatrixSet: WebMercatorQuad,
-        limits: parsed.tileMatrixSet.limits,
+        limits: manifest.tileMatrixSet.limits,
     })
-    const model = webMercatorVirtualRasterField({
+    return webMercatorVirtualRasterField({
         id: 'dem-height',
-        addressSpaceId: `dem.wmq.${parsed.sourceHash.slice(0, 16)}`,
-        sourceRevision: parsed.contentVersion,
+        addressSpaceId: `dem.wmq.${manifest.sourceHash.slice(0, 16)}`,
+        sourceRevision: manifest.contentVersion,
         coverage,
-        geographicBounds: parsed.source.geographicBounds,
+        geographicBounds: manifest.source.geographicBounds,
         coordinateBits: DEM_WEB_MERCATOR_COORDINATE_BITS,
         fieldKind: 'scalar',
         channels: 1,
         sampleType: 'unorm8',
         gpuFormat: 'r8unorm',
         unit: 'm',
-        ...(parsed.nodata === null ? {} : { noData: parsed.nodata }),
+        ...(manifest.nodata === null ? {} : { noData: manifest.nodata }),
         interpolation: 'linear',
-        scale: parsed.scale,
-        offset: parsed.offset,
+        scale: manifest.scale,
+        offset: manifest.offset,
         auxiliaryAxes: [ { name: 'tile-matrix', value: 'explicit-WebMercatorQuad' } ],
     })
+}
+
+/** Validates one manifest and captures the immutable model and tile URL authority. */
+export function createDemTileSource({
+    manifest: value,
+    tileServerUrl,
+}: Readonly<{
+    manifest: unknown
+    tileServerUrl: string
+}>): DemTileSource {
+
+    if (typeof tileServerUrl !== 'string' || tileServerUrl.length === 0) {
+        throw new TypeError('DEM tile source requires a non-empty tile server URL')
+    }
+    const manifest = parseDemVirtualRasterManifest(value)
+    const model = createDemVirtualRasterModel(manifest)
+    const baseUrl = tileServerUrl.replace(/\/$/, '')
+    const id = `dem.${manifest.sourceHash}`
+    const facts = Object.freeze({
+        kind: 'dem-tile-source-facts' as const,
+        sourceId: id,
+        contentVersion: manifest.contentVersion,
+        coordinateEncoding: model.addressCodec.positionCodec.facts.encoding,
+        coordinateBits: model.addressCodec.coordinateBits,
+        coordinateQuantumMeters: model.addressCodec.quantumMeters,
+        tileMatrixSetId: manifest.tileMatrixSet.id,
+        tileOrientation: manifest.pixelOrientation.tile,
+        sourceOrientation: manifest.pixelOrientation.source,
+    })
     return Object.freeze({
-        ...model,
-        manifest: parsed,
+        kind: 'dem-tile-source' as const,
+        id,
+        manifest,
+        model,
+        facts,
+        tileUrl(page: VirtualRasterPageIdentity) {
+
+            const tile = page.tile
+            if (tile === undefined || tile.tileMatrixSetId !== manifest.tileMatrixSet.id) {
+                throw new TypeError('DEM tile URL requires a standard WebMercatorQuad page')
+            }
+            return `${baseUrl}/tiles/WebMercatorQuad/` +
+                `${encodeURIComponent(tile.matrixId)}/${tile.tileRow}/${tile.tileCol}.png` +
+                `?v=${encodeURIComponent(manifest.contentVersion)}`
+        },
     })
 }
 
-export function demTileUrl(
-    manifest: DemVirtualRasterManifest,
-    baseUrl: string,
-    page: VirtualRasterPageIdentity
-): string {
-
-    const parsed = parseDemVirtualRasterManifest(manifest)
-    const tile = page.tile
-    if (tile === undefined || tile.tileMatrixSetId !== parsed.tileMatrixSet.id) {
-        throw new TypeError('DEM tile URL requires a standard WebMercatorQuad page')
-    }
-    return `${baseUrl.replace(/\/$/, '')}/tiles/WebMercatorQuad/` +
-        `${encodeURIComponent(tile.matrixId)}/${tile.tileRow}/${tile.tileCol}.png` +
-        `?v=${encodeURIComponent(parsed.contentVersion)}`
-}
-
-export async function fetchDemVirtualRasterManifest(
+/** Fetches the mutable manifest endpoint without browser caching, then creates one source. */
+export async function fetchDemTileSource(
     baseUrl: string,
     signal: AbortSignal
-): Promise<DemVirtualRasterManifest> {
+): Promise<DemTileSource> {
 
     const response = await fetch(`${baseUrl.replace(/\/$/, '')}/manifest.json`, {
         signal,
         cache: 'no-store',
     })
     if (!response.ok) throw new Error(`DEM manifest request failed with HTTP ${response.status}`)
-    return parseDemVirtualRasterManifest(await response.json())
+    return createDemTileSource({
+        manifest: await response.json(),
+        tileServerUrl: baseUrl,
+    })
 }
 
-export async function createDemVirtualRasterRuntime({
+/** Composes one DEM source with an owned Worker executor and generic Virtual Raster runtime. */
+export async function createDemVirtualRaster({
     runtime,
-    manifest,
-    tileServerUrl,
+    source,
     cachePolicy,
     workerModules,
     workerCount,
@@ -237,105 +294,45 @@ export async function createDemVirtualRasterRuntime({
     maxPhysicalPages = DEM_DEFAULT_PHYSICAL_PAGES,
     maxStagingBytes = maxPhysicalPages * DEM_TILE_SIZE * DEM_TILE_SIZE,
     maxHistory = DEM_DEFAULT_HISTORY,
-}: DemVirtualRasterRuntimeOptions) {
+}: DemVirtualRasterOptions): Promise<DemVirtualRaster> {
 
-    const model = createDemVirtualRasterModel(manifest)
-    let requestExecutor: DemWorkerRequestExecutor | undefined
-    try {
-        requestExecutor = await createDemWorkerRequestExecutor({
-            sourceId: `dem.${manifest.sourceHash}`,
-            tileMatrixSetId: 'WebMercatorQuad',
-            tileMatrixSetUri: manifest.tileMatrixSet.uri,
-            plane: 'height',
-            contentVersion: manifest.contentVersion,
-            encodedRepresentation: manifest.cacheValidators.encodedRepresentation,
-            decoderVersion: manifest.cacheValidators.decoderVersion,
-            sampleType: manifest.source.sampleType,
-            cacheSchemaVersion: DEM_CACHE_SCHEMA_VERSION,
-            cachePolicy,
-            workerModules,
-            ...(workerCount === undefined ? {} : { workerCount }),
-            ...(maxNetworkRequests === undefined ? {} : { maxNetworkRequests }),
-            ...(maxDecodeTasks === undefined ? {} : { maxDecodeTasks }),
-            maxRequests,
-            tileUrl: page => demTileUrl(manifest, tileServerUrl, page),
-        })
-        const virtualRaster = await createVirtualRasterRuntime({
-            runtime,
-            model,
-            executor: {
-                ownership: 'borrowed',
-                executor: requestExecutor,
-            },
-            maxRequests,
-            maxPhysicalPages,
-            maxStagingBytes,
-            maxHistory,
-            viewDemandProducerId: `dem-view-demand.${model.id}`,
-        })
-        let stopped = false
-        let stopPromise: Promise<void> | undefined
-
-        function dispose(): Promise<void> {
-
-            if (stopPromise !== undefined) return stopPromise
-            stopped = true
-            stopPromise = stop()
-            return stopPromise
-        }
-
-        async function stop(): Promise<void> {
-
-            const failures: unknown[] = []
-            try {
-                await virtualRaster.dispose()
-            } catch (error) {
-                failures.push(error)
-            }
-            try {
-                await requestExecutor!.dispose()
-            } catch (error) {
-                failures.push(error)
-            }
-            if (failures.length > 0) {
-                throw new AggregateError(failures, 'DEM Virtual Raster disposal failed')
-            }
-        }
-
-        return Object.freeze({
-            ...virtualRaster,
-            manifest: model.manifest,
-            dispose,
-            inspect: () => {
-                const facts = virtualRaster.inspect()
-                return Object.freeze({
-                    ...facts,
-                    contentVersion: model.manifest.contentVersion,
-                    coordinateEncoding: model.addressCodec.positionCodec.facts.encoding,
-                    coordinateBits: model.addressCodec.coordinateBits,
-                    coordinateQuantumMeters: model.addressCodec.quantumMeters,
-                    tileMatrixSetId: model.manifest.tileMatrixSet.id,
-                    tileOrientation: model.manifest.pixelOrientation.tile,
-                    sourceOrientation: model.manifest.pixelOrientation.source,
-                    cachePolicy: cachePolicy.mode,
-                    cacheConfiguration: cachePolicy,
-                    stopped,
-                    worker: requestExecutor!.inspect(),
-                })
-            },
-        })
-    } catch (error) {
-        if (requestExecutor === undefined) throw error
-        try {
-            await requestExecutor.dispose()
-        } catch (cleanupError) {
-            throw new AggregateError(
-                [ error, cleanupError ],
-                'DEM Virtual Raster initialization and cleanup failed'
-            )
-        }
-        throw error
-    }
+    const { manifest, model } = source
+    const requestExecutor = await createDemWorkerRequestExecutor({
+        sourceId: source.id,
+        tileMatrixSetId: 'WebMercatorQuad',
+        tileMatrixSetUri: manifest.tileMatrixSet.uri,
+        plane: 'height',
+        contentVersion: manifest.contentVersion,
+        encodedRepresentation: manifest.cacheValidators.encodedRepresentation,
+        decoderVersion: manifest.cacheValidators.decoderVersion,
+        sampleType: manifest.source.sampleType,
+        cacheSchemaVersion: DEM_CACHE_SCHEMA_VERSION,
+        cachePolicy,
+        workerModules,
+        ...(workerCount === undefined ? {} : { workerCount }),
+        ...(maxNetworkRequests === undefined ? {} : { maxNetworkRequests }),
+        ...(maxDecodeTasks === undefined ? {} : { maxDecodeTasks }),
+        maxRequests,
+        tileUrl: source.tileUrl,
+    })
+    const virtualRaster = await createVirtualRasterRuntime({
+        runtime,
+        model,
+        executor: {
+            ownership: 'owned',
+            executor: requestExecutor,
+        },
+        maxRequests,
+        maxPhysicalPages,
+        maxStagingBytes,
+        maxHistory,
+        viewDemandProducerId: `dem-view-demand.${model.id}`,
+    })
+    return Object.freeze({
+        ...virtualRaster,
+        source,
+        workerFacts: requestExecutor.inspect,
+    })
 }
 
 function assertOrderedBounds(value: NumberSequence, name: string): void {

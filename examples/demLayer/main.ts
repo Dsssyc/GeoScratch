@@ -12,9 +12,9 @@ import {
 } from './dem-map.ts'
 import type { DemMap } from './dem-map.ts'
 import {
-    createDemVirtualRasterRuntime,
-    fetchDemVirtualRasterManifest,
-} from './dem-virtual-raster.ts'
+    createDemVirtualRaster,
+    fetchDemTileSource,
+} from './dem-source.ts'
 import { prepareDemControlPanel, readDemCachePolicy } from './dem-controls.ts'
 import terrainShader from './shaders/terrain-mesh.wgsl?raw'
 
@@ -103,7 +103,7 @@ async function main(lifetime: LifetimeScope, activeProof?: DemLayerProof) {
     activeProof?.mapAcquired()
     activeProof?.reach('after-map-acquisition')
 
-    const [ runtime, , manifest, workerModules ] = await Promise.all([
+    const [ runtime, , source, workerModules ] = await Promise.all([
         lifetime.acquire(GPURuntime.create({
             label: 'DEM Layer runtime',
             powerPreference: 'high-performance',
@@ -120,8 +120,8 @@ async function main(lifetime: LifetimeScope, activeProof?: DemLayerProof) {
         }),
         waitForDemMap(map, lifetime.signal),
         lifetime.track(
-            fetchDemVirtualRasterManifest(tileServerUrl, lifetime.signal),
-            'dem-virtual-raster-manifest'
+            fetchDemTileSource(tileServerUrl, lifetime.signal),
+            'dem-tile-source'
         ),
         lifetime.track(
             WorkerModuleCatalog.load(workerModuleManifestUrl, { signal: lifetime.signal }),
@@ -139,10 +139,9 @@ async function main(lifetime: LifetimeScope, activeProof?: DemLayerProof) {
         size: initialSize,
     })
     const virtualRaster = await lifetime.acquire(
-        createDemVirtualRasterRuntime({
+        createDemVirtualRaster({
             runtime,
-            manifest,
-            tileServerUrl,
+            source,
             cachePolicy,
             workerModules,
             workerCount: 3,
@@ -161,8 +160,8 @@ async function main(lifetime: LifetimeScope, activeProof?: DemLayerProof) {
     })
 
     const elevationRangeMeters = [
-        virtualRaster.manifest.offset,
-        virtualRaster.manifest.offset + virtualRaster.manifest.scale * 255,
+        source.manifest.offset,
+        source.manifest.offset + source.manifest.scale * 255,
     ].sort((left, right) => left - right) as [number, number]
     activeProof?.beforeTerrainShaderModule(runtime)
     const graph = await lifetime.acquire(
@@ -278,6 +277,11 @@ async function main(lifetime: LifetimeScope, activeProof?: DemLayerProof) {
         graph,
         lifetime,
         frameController,
+        virtualRasterFacts: () => Object.freeze({
+            runtime: virtualRaster.inspect(),
+            source: source.facts,
+            worker: virtualRaster.workerFacts(),
+        }),
         dispose: disposePage,
         moveCamera,
         setStatus,
