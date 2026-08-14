@@ -8,7 +8,6 @@ import type {
     TileMatrixLimits,
 } from './tile-matrix.js'
 import type {
-    OwnedVirtualRasterPagePayload,
     VirtualRasterPageData,
 } from './virtual-raster-transfer.js'
 
@@ -94,8 +93,6 @@ export type VirtualRasterSamplingProfile = Readonly<{
     outerBoundary: VirtualRasterOuterBoundary
 }>
 
-export type VirtualRasterPagePayload = OwnedVirtualRasterPagePayload
-
 export type VirtualRasterCpuPage = Readonly<{
     page: VirtualRasterPageIdentity
     width: number
@@ -106,27 +103,6 @@ export type VirtualRasterCpuPage = Readonly<{
 
 export type VirtualRasterCpuPageProvider = Readonly<{
     get(page: VirtualRasterPageIdentity): VirtualRasterCpuPage | undefined
-}>
-
-export type VirtualRasterSourceLoadContext = Readonly<{
-    signal: AbortSignal
-}>
-
-export type VirtualRasterSourceDescriptor = Readonly<{
-    id: string
-    loadPage(
-        page: VirtualRasterPageIdentity,
-        context: VirtualRasterSourceLoadContext
-    ): Promise<VirtualRasterPagePayload>
-}>
-
-export type VirtualRasterSource = Readonly<{
-    kind: 'virtual-raster-source'
-    id: string
-    loadPage(
-        page: VirtualRasterPageIdentity,
-        context: VirtualRasterSourceLoadContext
-    ): Promise<VirtualRasterPagePayload>
 }>
 
 export type VirtualRasterSnapshotResolveStatus = 'resident' | 'fallback' | 'missing' | 'failed'
@@ -905,27 +881,6 @@ export function virtualRasterPlane(descriptor: VirtualRasterPlaneDescriptor): Vi
     }
     if (descriptor.noData !== undefined) plane.noData = descriptor.noData
     return Object.freeze(plane)
-}
-
-/** Defines a stable asynchronous logical page source without choosing scheduling or cache policy. */
-export function virtualRasterSource(descriptor: VirtualRasterSourceDescriptor): VirtualRasterSource {
-
-    if (typeof descriptor.id !== 'string' || descriptor.id.length === 0 ||
-        typeof descriptor.loadPage !== 'function') {
-        return throwGeoDiagnostic({
-            code: 'GEO_VIRTUAL_RASTER_SOURCE_INVALID',
-            phase: 'source',
-            subject: { kind: 'virtual-raster-source', id: descriptor.id },
-            message: 'A virtual-raster source requires a stable id and async page loader.',
-            expected: { id: 'non-empty string', loadPage: 'function' },
-            actual: descriptor,
-        })
-    }
-    return Object.freeze({
-        kind: 'virtual-raster-source',
-        id: descriptor.id,
-        loadPage: descriptor.loadPage,
-    })
 }
 
 /** Defines level, filtering, parent fallback, and outer-boundary behavior for sampling. */

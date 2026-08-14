@@ -79,12 +79,12 @@ Commit: `Make Virtual Raster executor authority explicit`
 - Modify: `docs/api/geo/virtual-raster_zh.md`
 
 **Interfaces:**
-- Removes: `VirtualRasterSource`, `VirtualRasterSourceDescriptor`, `VirtualRasterSourceLoadContext`, and `virtualRasterSource()`.
+- Removes: `VirtualRasterSource`, `VirtualRasterSourceDescriptor`, `VirtualRasterSourceLoadContext`, `VirtualRasterPagePayload`, and `virtualRasterSource()`.
 - Retains: `VirtualRasterRequestExecutor` as the sole executable asynchronous page-source boundary used by scheduling and runtime composition.
 
 - [ ] **Step 1: Change topology/type tests and verify RED**
 
-Require all four disconnected symbols to be absent from public Geo exports and generated facts.
+Require all five disconnected symbols to be absent from public Geo exports and generated facts.
 
 Run: `npm --workspace geoscratch run build && npx mocha tests/scratch-foundation-public-topology.test.js`
 

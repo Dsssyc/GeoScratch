@@ -20724,7 +20724,7 @@
             "packages/geoscratch/src/geo/virtual-raster.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/virtual-raster.ts:952"
+            "packages/geoscratch/src/geo/virtual-raster.ts:907"
           ],
           "summary": "Creates a logical CPU and WGSL accessor over one address space and plane.",
           "declaration": "Function virtualRasterAccessor",
@@ -20741,7 +20741,7 @@
             "packages/geoscratch/src/geo/virtual-raster.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/virtual-raster.ts:594"
+            "packages/geoscratch/src/geo/virtual-raster.ts:570"
           ],
           "summary": "Resolves CPU samples and generates shader accessors without exposing atlas placement to callers.",
           "declaration": "class VirtualRasterAccessor",
@@ -20805,7 +20805,7 @@
             "packages/geoscratch/src/geo/virtual-raster.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/virtual-raster.ts:155"
+            "packages/geoscratch/src/geo/virtual-raster.ts:131"
           ],
           "summary": "",
           "declaration": "type VirtualRasterAccessorDescriptor = Readonly<{ addressSpace: VirtualRasterAddressSpace; plane: VirtualRasterPlane }>"
@@ -20819,7 +20819,7 @@
             "packages/geoscratch/src/geo/virtual-raster.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/virtual-raster.ts:165"
+            "packages/geoscratch/src/geo/virtual-raster.ts:141"
           ],
           "summary": "",
           "declaration": "type VirtualRasterAccessorWgslOptions = Readonly<{ atlasBinding: number; group: number; namespace?: string; pageTableBinding: number }>"
@@ -20833,7 +20833,7 @@
             "packages/geoscratch/src/geo/virtual-raster.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/virtual-raster.ts:851"
+            "packages/geoscratch/src/geo/virtual-raster.ts:827"
           ],
           "summary": "Creates a regular finite-dimensional Virtual Raster address space.",
           "declaration": "Function virtualRasterAddressSpace",
@@ -20850,7 +20850,7 @@
             "packages/geoscratch/src/geo/virtual-raster.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/virtual-raster.ts:194"
+            "packages/geoscratch/src/geo/virtual-raster.ts:170"
           ],
           "summary": "Maps finite logical raster coordinates or tile coverage into compact page identities.",
           "declaration": "class VirtualRasterAddressSpace",
@@ -21069,7 +21069,7 @@
             "packages/geoscratch/src/geo/virtual-raster.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/virtual-raster.ts:27"
+            "packages/geoscratch/src/geo/virtual-raster.ts:26"
           ],
           "summary": "",
           "declaration": "type VirtualRasterAddressSpaceDescriptor = Readonly<{ dimensions: CoordinateDimension; extent: readonly number[]; id: string; levelCount: number; pageSize: readonly number[] }>"
@@ -21170,7 +21170,7 @@
             "packages/geoscratch/src/geo/virtual-raster.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/virtual-raster.ts:99"
+            "packages/geoscratch/src/geo/virtual-raster.ts:96"
           ],
           "summary": "",
           "declaration": "type VirtualRasterCpuPage = Readonly<{ channels: number; data: VirtualRasterPageData; height: number; page: VirtualRasterPageIdentity; width: number }>"
@@ -21184,7 +21184,7 @@
             "packages/geoscratch/src/geo/virtual-raster.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/virtual-raster.ts:107"
+            "packages/geoscratch/src/geo/virtual-raster.ts:104"
           ],
           "summary": "",
           "declaration": "type VirtualRasterCpuPageProvider = Readonly<{ get: any }>"
@@ -21400,7 +21400,7 @@
             "packages/geoscratch/src/geo/virtual-raster.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/virtual-raster.ts:15"
+            "packages/geoscratch/src/geo/virtual-raster.ts:14"
           ],
           "summary": "",
           "declaration": "type VirtualRasterFieldKind = \"scalar\" | \"color\" | \"categorical\" | \"mask\" | \"vector\" | \"multiband\""
@@ -21414,7 +21414,7 @@
             "packages/geoscratch/src/geo/virtual-raster.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/virtual-raster.ts:24"
+            "packages/geoscratch/src/geo/virtual-raster.ts:23"
           ],
           "summary": "",
           "declaration": "type VirtualRasterFilter = \"nearest\" | \"bilinear\""
@@ -21822,7 +21822,7 @@
             "packages/geoscratch/src/geo/virtual-raster.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/virtual-raster.ts:25"
+            "packages/geoscratch/src/geo/virtual-raster.ts:24"
           ],
           "summary": "",
           "declaration": "type VirtualRasterOuterBoundary = \"clamp\" | \"no-data\""
@@ -21878,7 +21878,7 @@
             "packages/geoscratch/src/geo/virtual-raster.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/virtual-raster.ts:40"
+            "packages/geoscratch/src/geo/virtual-raster.ts:39"
           ],
           "summary": "",
           "declaration": "type VirtualRasterPageDescriptor = Readonly<{ level: number; x: number; y?: number; z?: number }>"
@@ -21892,24 +21892,10 @@
             "packages/geoscratch/src/geo/virtual-raster.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/virtual-raster.ts:47"
+            "packages/geoscratch/src/geo/virtual-raster.ts:46"
           ],
           "summary": "",
           "declaration": "type VirtualRasterPageIdentity = Readonly<{ addressSpaceId: string; coordinates: readonly number[]; dimensions: CoordinateDimension; key: string; kind: \"virtual-raster-page\"; level: number; tile?: TileCoordinate }>"
-        },
-        {
-          "id": "geoscratch/geo#VirtualRasterPagePayload",
-          "name": "VirtualRasterPagePayload",
-          "kind": "Type Alias",
-          "source": "packages/geoscratch/src/geo/virtual-raster.ts",
-          "sources": [
-            "packages/geoscratch/src/geo/virtual-raster.ts"
-          ],
-          "locations": [
-            "packages/geoscratch/src/geo/virtual-raster.ts:97"
-          ],
-          "summary": "",
-          "declaration": "type VirtualRasterPagePayload = OwnedVirtualRasterPagePayload"
         },
         {
           "id": "geoscratch/geo#VirtualRasterPagePayloadDescriptor",
@@ -21934,7 +21920,7 @@
             "packages/geoscratch/src/geo/virtual-raster.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/virtual-raster.ts:134"
+            "packages/geoscratch/src/geo/virtual-raster.ts:110"
           ],
           "summary": "",
           "declaration": "type VirtualRasterPageTableEntry = Readonly<{ contentEpoch?: number; generation?: number; physicalSlot?: number; requestedLevel: number; requestedPage: VirtualRasterPageIdentity; resolvedLevel?: number; resolvedPage?: VirtualRasterPageIdentity; status: VirtualRasterSnapshotResolveStatus }>"
@@ -21962,7 +21948,7 @@
             "packages/geoscratch/src/geo/virtual-raster.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/virtual-raster.ts:181"
+            "packages/geoscratch/src/geo/virtual-raster.ts:157"
           ],
           "summary": "",
           "declaration": "type VirtualRasterPhysicalPage = Readonly<{ byteLength: number; channels: number; contentEpoch: number; contentVersion: string; generation: number; height: number; page: VirtualRasterPageIdentity; physicalSlot: number; width: number }>"
@@ -21976,7 +21962,7 @@
             "packages/geoscratch/src/geo/virtual-raster.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/virtual-raster.ts:867"
+            "packages/geoscratch/src/geo/virtual-raster.ts:843"
           ],
           "summary": "Defines physical channel, sample, format, and missing-data semantics for one raster plane.",
           "declaration": "Function virtualRasterPlane",
@@ -21993,7 +21979,7 @@
             "packages/geoscratch/src/geo/virtual-raster.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/virtual-raster.ts:70"
+            "packages/geoscratch/src/geo/virtual-raster.ts:69"
           ],
           "summary": "",
           "declaration": "type VirtualRasterPlane = Readonly<{ addressSpace: VirtualRasterAddressSpace; auxiliaryAxes: readonly Readonly<{ name: string; value: string | number }>[]; channels: 1 | 2 | 3 | 4; fieldKind: VirtualRasterFieldKind; gpuFormat: GPUTextureFormat; id: string; kind: \"virtual-raster-plane\"; noData?: number; offset: readonly number[]; sampleType: VirtualRasterSampleType; scale: readonly number[] }>"
@@ -22007,7 +21993,7 @@
             "packages/geoscratch/src/geo/virtual-raster.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/virtual-raster.ts:57"
+            "packages/geoscratch/src/geo/virtual-raster.ts:56"
           ],
           "summary": "",
           "declaration": "type VirtualRasterPlaneDescriptor = Readonly<{ addressSpace: VirtualRasterAddressSpace; auxiliaryAxes?: readonly Readonly<{ name: string; value: string | number }>[]; channels: 1 | 2 | 3 | 4; gpuFormat: GPUTextureFormat; id: string; kind: VirtualRasterFieldKind; noData?: number; offset?: number | readonly number[]; sampleType: VirtualRasterSampleType; scale?: number | readonly number[] }>"
@@ -22709,7 +22695,7 @@
             "packages/geoscratch/src/geo/virtual-raster.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/virtual-raster.ts:147"
+            "packages/geoscratch/src/geo/virtual-raster.ts:123"
           ],
           "summary": "",
           "declaration": "type VirtualRasterSample = Readonly<{ physicalSlots: readonly number[]; requestedLevel: number; resolvedLodRange: readonly [number, number]; status: VirtualRasterSampleStatus; value?: readonly number[] }>"
@@ -22723,7 +22709,7 @@
             "packages/geoscratch/src/geo/virtual-raster.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/virtual-raster.ts:160"
+            "packages/geoscratch/src/geo/virtual-raster.ts:136"
           ],
           "summary": "",
           "declaration": "type VirtualRasterSampleDescriptor = Readonly<{ profile: VirtualRasterSamplingProfile; texel: readonly [number, number] }>"
@@ -22737,7 +22723,7 @@
             "packages/geoscratch/src/geo/virtual-raster.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/virtual-raster.ts:145"
+            "packages/geoscratch/src/geo/virtual-raster.ts:121"
           ],
           "summary": "",
           "declaration": "type VirtualRasterSampleStatus = \"resident\" | \"fallback\" | \"missing\" | \"failed\" | \"no-data\""
@@ -22751,7 +22737,7 @@
             "packages/geoscratch/src/geo/virtual-raster.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/virtual-raster.ts:23"
+            "packages/geoscratch/src/geo/virtual-raster.ts:22"
           ],
           "summary": "",
           "declaration": "type VirtualRasterSampleType = \"unorm8\" | \"float32\""
@@ -22765,7 +22751,7 @@
             "packages/geoscratch/src/geo/virtual-raster.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/virtual-raster.ts:932"
+            "packages/geoscratch/src/geo/virtual-raster.ts:887"
           ],
           "summary": "Defines level, filtering, parent fallback, and outer-boundary behavior for sampling.",
           "declaration": "Function virtualRasterSamplingProfile",
@@ -22782,7 +22768,7 @@
             "packages/geoscratch/src/geo/virtual-raster.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/virtual-raster.ts:90"
+            "packages/geoscratch/src/geo/virtual-raster.ts:89"
           ],
           "summary": "",
           "declaration": "type VirtualRasterSamplingProfile = Readonly<{ filter: VirtualRasterFilter; kind: \"virtual-raster-sampling-profile\"; level: number; outerBoundary: VirtualRasterOuterBoundary }>"
@@ -22796,7 +22782,7 @@
             "packages/geoscratch/src/geo/virtual-raster.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/virtual-raster.ts:84"
+            "packages/geoscratch/src/geo/virtual-raster.ts:83"
           ],
           "summary": "",
           "declaration": "type VirtualRasterSamplingProfileDescriptor = Readonly<{ filter: VirtualRasterFilter; level: number; outerBoundary: VirtualRasterOuterBoundary }>"
@@ -22810,7 +22796,7 @@
             "packages/geoscratch/src/geo/virtual-raster.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/virtual-raster.ts:554"
+            "packages/geoscratch/src/geo/virtual-raster.ts:530"
           ],
           "summary": "Freezes one coherent logical-to-physical page-table epoch and its physical mappings.",
           "declaration": "class VirtualRasterSnapshot",
@@ -22900,69 +22886,10 @@
             "packages/geoscratch/src/geo/virtual-raster.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/virtual-raster.ts:132"
+            "packages/geoscratch/src/geo/virtual-raster.ts:108"
           ],
           "summary": "",
           "declaration": "type VirtualRasterSnapshotResolveStatus = \"resident\" | \"fallback\" | \"missing\" | \"failed\""
-        },
-        {
-          "id": "geoscratch/geo#virtualRasterSource",
-          "name": "virtualRasterSource",
-          "kind": "Function",
-          "source": "packages/geoscratch/src/geo/virtual-raster.ts",
-          "sources": [
-            "packages/geoscratch/src/geo/virtual-raster.ts"
-          ],
-          "locations": [
-            "packages/geoscratch/src/geo/virtual-raster.ts:911"
-          ],
-          "summary": "Defines a stable asynchronous logical page source without choosing scheduling or cache policy.",
-          "declaration": "Function virtualRasterSource",
-          "signatures": [
-            "virtualRasterSource(descriptor: VirtualRasterSourceDescriptor): VirtualRasterSource"
-          ]
-        },
-        {
-          "id": "geoscratch/geo#VirtualRasterSource",
-          "name": "VirtualRasterSource",
-          "kind": "Type Alias",
-          "source": "packages/geoscratch/src/geo/virtual-raster.ts",
-          "sources": [
-            "packages/geoscratch/src/geo/virtual-raster.ts"
-          ],
-          "locations": [
-            "packages/geoscratch/src/geo/virtual-raster.ts:123"
-          ],
-          "summary": "",
-          "declaration": "type VirtualRasterSource = Readonly<{ id: string; kind: \"virtual-raster-source\"; loadPage: any }>"
-        },
-        {
-          "id": "geoscratch/geo#VirtualRasterSourceDescriptor",
-          "name": "VirtualRasterSourceDescriptor",
-          "kind": "Type Alias",
-          "source": "packages/geoscratch/src/geo/virtual-raster.ts",
-          "sources": [
-            "packages/geoscratch/src/geo/virtual-raster.ts"
-          ],
-          "locations": [
-            "packages/geoscratch/src/geo/virtual-raster.ts:115"
-          ],
-          "summary": "",
-          "declaration": "type VirtualRasterSourceDescriptor = Readonly<{ id: string; loadPage: any }>"
-        },
-        {
-          "id": "geoscratch/geo#VirtualRasterSourceLoadContext",
-          "name": "VirtualRasterSourceLoadContext",
-          "kind": "Type Alias",
-          "source": "packages/geoscratch/src/geo/virtual-raster.ts",
-          "sources": [
-            "packages/geoscratch/src/geo/virtual-raster.ts"
-          ],
-          "locations": [
-            "packages/geoscratch/src/geo/virtual-raster.ts:111"
-          ],
-          "summary": "",
-          "declaration": "type VirtualRasterSourceLoadContext = Readonly<{ signal: AbortSignal }>"
         },
         {
           "id": "geoscratch/geo#VirtualRasterStageOptions",
@@ -23015,7 +22942,7 @@
             "packages/geoscratch/src/geo/virtual-raster.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/virtual-raster.ts:859"
+            "packages/geoscratch/src/geo/virtual-raster.ts:835"
           ],
           "summary": "Creates a compact Virtual Raster address space from finite tile-matrix coverage.",
           "declaration": "Function virtualRasterTileAddressSpace",
@@ -23032,7 +22959,7 @@
             "packages/geoscratch/src/geo/virtual-raster.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/virtual-raster.ts:35"
+            "packages/geoscratch/src/geo/virtual-raster.ts:34"
           ],
           "summary": "",
           "declaration": "type VirtualRasterTileAddressSpaceDescriptor = Readonly<{ coverage: TileMatrixCoverage; id: string }>"

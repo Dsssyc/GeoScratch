@@ -2,20 +2,24 @@
 docId: geo.virtual-raster.zh
 canonical: false
 translationOf: ./virtual-raster.md
-canonicalDigest: 24331795c0b13c33c905023454e594eef1f4635b013b4a5f672e1b6522bd238e
+canonicalDigest: d7b50de1cfeb12bc4248a68705571d75bd5ae2bc4c8c2f9e9bbf0698ad45c877
 ---
 # Virtual Raster
 
 [English](./virtual-raster.md) | [Geo 概览](./README_zh.md)
 
-Virtual Raster 提供大于有限 GPU storage 的逻辑 field。Address space、plane、source、
-sampling profile、accessor 与 snapshot 将 logical identity 和 physical atlas placement
+Virtual Raster 提供大于有限 GPU storage 的逻辑 field。Address space、plane、request
+executor、sampling profile、accessor 与 snapshot 将 logical identity 和 physical atlas placement
 分离。紧凑 source coverage 避免为整个世界创建 dense page table。库级 WGSL 根据
 vertex、fragment 或 compute stage 中的位置解析精确 page、parent fallback、跨页过滤与
 outer-boundary policy。
 
 Demand scheduling、CPU page transfer、residency、publication、GPU table 与 feedback 是
-不同权威。Request scheduler 协调带 generation 的 demand 与 cancellation。Worker
+不同权威。Request scheduler 协调带 generation 的 demand 与 cancellation。
+`VirtualRasterRequestExecutor` 是 scheduling 与 runtime composition 实际消费的唯一异步
+page-source 边界，不再并存一套失联的 `loadPage()` source object。Decoded ownership 只由
+`OwnedVirtualRasterPagePayload` 及其 transfer operation 表达，不再通过第二个 identity
+alias 表达。Worker
 `createVirtualRasterWorkerExecutor` 在 `WorkerContextPool` 之上适配固定的七步 context
 protocol（`lookup`、`fetch`、`decode`、`transfer`、`accept`、`discard` 与 `facts`），并独立
 限制 network/decode phase。`VirtualRasterWorkerModuleProtocol` 让源码 implementation

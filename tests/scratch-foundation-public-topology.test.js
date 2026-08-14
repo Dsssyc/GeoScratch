@@ -157,7 +157,6 @@ const geoValues = [
     'virtualRasterDemandSetFromViewDemands',
     'virtualRasterPlane',
     'virtualRasterSamplingProfile',
-    'virtualRasterSource',
     'virtualRasterTileAddressSpace',
     'webMercatorPlanarTileSpatialProfile',
     'webMercatorQuadAddressCodec',

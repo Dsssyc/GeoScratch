@@ -302,7 +302,6 @@ export {
     virtualRasterTileAddressSpace,
     virtualRasterPlane,
     virtualRasterSamplingProfile,
-    virtualRasterSource,
 } from './virtual-raster.js'
 export type {
     VirtualRasterAccessorDescriptor,
@@ -316,7 +315,6 @@ export type {
     VirtualRasterOuterBoundary,
     VirtualRasterPageDescriptor,
     VirtualRasterPageIdentity,
-    VirtualRasterPagePayload,
     VirtualRasterPageTableEntry,
     VirtualRasterPhysicalPage,
     VirtualRasterPlane,
@@ -328,9 +326,6 @@ export type {
     VirtualRasterSamplingProfile,
     VirtualRasterSamplingProfileDescriptor,
     VirtualRasterSnapshotResolveStatus,
-    VirtualRasterSource,
-    VirtualRasterSourceDescriptor,
-    VirtualRasterSourceLoadContext,
 } from './virtual-raster.js'
 export {
     VirtualRasterPublication,

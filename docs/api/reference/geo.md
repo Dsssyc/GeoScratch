@@ -2,7 +2,7 @@
 
 # geoscratch/geo API Reference
 
-Public symbols: 297.
+Public symbols: 292.
 
 ## `packages/geoscratch/src/geo/coordinate-domain.ts`
 
@@ -2689,14 +2689,6 @@ Kind: `Type Alias`.
 type VirtualRasterPageIdentity = Readonly<{ addressSpaceId: string; coordinates: readonly number[]; dimensions: CoordinateDimension; key: string; kind: "virtual-raster-page"; level: number; tile?: TileCoordinate }>
 ```
 
-### `VirtualRasterPagePayload`
-
-Kind: `Type Alias`.
-
-```ts
-type VirtualRasterPagePayload = OwnedVirtualRasterPagePayload
-```
-
 ### `VirtualRasterPageTableEntry`
 
 Kind: `Type Alias`.
@@ -2834,44 +2826,6 @@ Kind: `Type Alias`.
 
 ```ts
 type VirtualRasterSnapshotResolveStatus = "resident" | "fallback" | "missing" | "failed"
-```
-
-### `virtualRasterSource`
-
-Kind: `Function`.
-
-Defines a stable asynchronous logical page source without choosing scheduling or cache policy.
-
-```ts
-Function virtualRasterSource
-```
-
-```ts
-virtualRasterSource(descriptor: VirtualRasterSourceDescriptor): VirtualRasterSource
-```
-
-### `VirtualRasterSource`
-
-Kind: `Type Alias`.
-
-```ts
-type VirtualRasterSource = Readonly<{ id: string; kind: "virtual-raster-source"; loadPage: any }>
-```
-
-### `VirtualRasterSourceDescriptor`
-
-Kind: `Type Alias`.
-
-```ts
-type VirtualRasterSourceDescriptor = Readonly<{ id: string; loadPage: any }>
-```
-
-### `VirtualRasterSourceLoadContext`
-
-Kind: `Type Alias`.
-
-```ts
-type VirtualRasterSourceLoadContext = Readonly<{ signal: AbortSignal }>
 ```
 
 ### `virtualRasterTileAddressSpace`

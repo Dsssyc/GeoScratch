@@ -423,6 +423,16 @@ const typedOwnedVirtualRasterExecutorBinding: geoApi.VirtualRasterExecutorBindin
 }
 void typedBorrowedVirtualRasterExecutor
 void typedOwnedVirtualRasterExecutorBinding
+// @ts-expect-error Disconnected loadPage source contracts are not public runtime APIs
+geoApi.virtualRasterSource
+// @ts-expect-error Disconnected loadPage source contracts are not public runtime APIs
+type RemovedVirtualRasterSource = geoApi.VirtualRasterSource
+// @ts-expect-error Disconnected loadPage source contracts are not public runtime APIs
+type RemovedVirtualRasterSourceDescriptor = geoApi.VirtualRasterSourceDescriptor
+// @ts-expect-error Disconnected loadPage source contracts are not public runtime APIs
+type RemovedVirtualRasterSourceLoadContext = geoApi.VirtualRasterSourceLoadContext
+// @ts-expect-error OwnedVirtualRasterPagePayload is the sole payload ownership identity
+type RemovedVirtualRasterPagePayload = geoApi.VirtualRasterPagePayload
 const typedTerrainRendererCreation: Promise<
     geoApi.TerrainFieldRenderer<{ frameEpoch: number }, 'shaded' | 'wireframe'>
 > = geoApi.createTerrainFieldRenderer({

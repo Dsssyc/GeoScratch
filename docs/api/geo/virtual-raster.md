@@ -17,15 +17,19 @@ apiSources:
 [简体中文](./virtual-raster_zh.md) | [Geo overview](./README.md)
 
 Virtual Raster presents a logical field larger than finite GPU storage. Address spaces,
-planes, sources, sampling profiles, accessors, and snapshots separate logical identity
-from physical atlas placement. Compact source coverage avoids a dense page table for
+planes, request executors, sampling profiles, accessors, and snapshots separate logical
+identity from physical atlas placement. Compact source coverage avoids a dense page table for
 the whole world. Library WGSL resolves exact pages, parent fallback, cross-page
 filtering, and outer-boundary policy from shader positions in vertex, fragment, or
 compute stages.
 
 Demand scheduling, CPU page transfer, residency, publication, GPU tables, and feedback
 are distinct authorities. The request scheduler reconciles generation-tagged demand
-and cancellation. `createVirtualRasterWorkerExecutor` adapts one fixed seven-operation
+and cancellation. `VirtualRasterRequestExecutor` is the sole executable asynchronous
+page-source boundary consumed by scheduling and runtime composition; there is no
+disconnected `loadPage()` source object beside it. Decoded ownership is expressed only
+as `OwnedVirtualRasterPagePayload` and its transfer operations, not by an alias with a
+second identity. `createVirtualRasterWorkerExecutor` adapts one fixed seven-operation
 context protocol (`lookup`, `fetch`, `decode`, `transfer`, `accept`, `discard`, and
 `facts`) over `WorkerContextPool` and independently bounded network/decode phases.
 `VirtualRasterWorkerModuleProtocol` gives source implementations the same typed
