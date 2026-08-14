@@ -323,6 +323,29 @@ describe('DEM Layer clean cut', () => {
         expect(mapSource).not.to.match(/\bcenter(?:High|Low)\b|\bcameraPos\b/)
     })
 
+    it('separates DEM cache policy, pure control state, and browser panel ownership', () => {
+
+        const policy = read('examples', 'demLayer', 'dem-cache-policy.ts')
+        const state = read('examples', 'demLayer', 'dem-control-state.ts')
+        const panel = read('examples', 'demLayer', 'dem-control-panel.ts')
+        const main = read('examples', 'demLayer', 'main.ts')
+
+        expect(fs.existsSync(path.join(
+            root,
+            'examples',
+            'demLayer',
+            'dem-controls.ts'
+        ))).to.equal(false)
+        expect(policy).not.to.match(/tweakpane|\b(?:window|document|Storage|HTMLElement|Location)\b/)
+        expect(state).not.to.match(/tweakpane|\b(?:window|document|Storage|HTMLElement|Location)\b/)
+        expect(panel).to.include("from 'tweakpane'")
+        expect(panel).to.include("from './dem-cache-policy.ts'")
+        expect(panel).to.include("from './dem-control-state.ts'")
+        expect(main).to.include("from './dem-cache-policy.ts'")
+        expect(main).to.include("from './dem-control-panel.ts'")
+        expect(main).not.to.include("from './dem-controls.ts'")
+    })
+
     it('keeps one DEM source authority and delegates executor disposal to Geo', () => {
 
         const source = read('examples', 'demLayer', 'dem-source.ts')

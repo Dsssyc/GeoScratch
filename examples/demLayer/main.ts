@@ -15,7 +15,8 @@ import {
     createDemVirtualRaster,
     fetchDemTileSource,
 } from './dem-source.ts'
-import { prepareDemControlPanel, readDemCachePolicy } from './dem-controls.ts'
+import { readDemCachePolicy } from './dem-cache-policy.ts'
+import { prepareDemControlPanel } from './dem-control-panel.ts'
 import terrainShader from './shaders/terrain-mesh.wgsl?raw'
 
 type DemLayerProofModule = typeof import(

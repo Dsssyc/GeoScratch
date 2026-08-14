@@ -20,18 +20,20 @@ import {
     fetchDemTileSource,
 } from '../examples/demLayer/dem-source.ts'
 import {
+    readDemCachePolicy,
+} from '../examples/demLayer/dem-cache-policy.ts'
+import {
     DEM_CACHE_PANEL_DEFAULT_CONFIG,
     DEM_CACHE_PANEL_STORAGE_KEY,
     DEM_RENDERING_PREFERENCE_STORAGE_KEY,
-    prepareDemControlPanel,
-    readDemCachePolicy,
     removeDemCacheParameters,
     replaceDemCacheParameters,
     resolveDemRenderingPreference,
     resolveDemCachePanelConfig,
     serializeDemCachePanelConfig,
     serializeDemRenderingPreference,
-} from '../examples/demLayer/dem-controls.ts'
+} from '../examples/demLayer/dem-control-state.ts'
+import { prepareDemControlPanel } from '../examples/demLayer/dem-control-panel.ts'
 import { demWebMercatorManifest as manifest } from './fixtures/dem-webmercator-manifest.js'
 
 describe('DEM WebMercator virtual raster', () => {
