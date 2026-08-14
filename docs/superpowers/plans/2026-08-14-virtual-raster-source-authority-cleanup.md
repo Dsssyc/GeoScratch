@@ -33,17 +33,17 @@
 - Consumes: `VirtualRasterRequestExecutor` and its optional asynchronous `dispose()` capability.
 - Produces: `VirtualRasterExecutorBinding`, an explicit `owned` or `borrowed` descriptor consumed by `VirtualRasterRuntimeDescriptor.executor`.
 
-- [ ] **Step 1: Write failing ownership tests**
+- [x] **Step 1: Write failing ownership tests**
 
 Add tests proving that borrowed executors are never disposed, owned executors are disposed exactly once after active request settlement, owned executor disposal failures join runtime disposal failures, and initialization failure disposes only owned executors.
 
-- [ ] **Step 2: Run the focused test and verify RED**
+- [x] **Step 2: Run the focused test and verify RED**
 
 Run: `npm --workspace geoscratch run build && npx mocha tests/geo-virtual-raster-runtime.test.js`
 
 Expected: failures because the descriptor still accepts a bare executor and runtime does not own executor disposal.
 
-- [ ] **Step 3: Implement explicit authority**
+- [x] **Step 3: Implement explicit authority**
 
 Use the clean-cut descriptor shape:
 
@@ -57,12 +57,12 @@ export type VirtualRasterExecutorBinding =
 
 Normalize no implicit form. Stop the scheduler before disposing an owned executor, aggregate independent disposal failures, and preserve idempotence.
 
-- [ ] **Step 4: Verify GREEN and public types**
+- [x] **Step 4: Verify GREEN and public types**
 
 Run: `npm --workspace geoscratch run build && npx mocha tests/geo-virtual-raster-runtime.test.js`
 Run: `npm run typecheck`
 
-- [ ] **Step 5: Update bilingual semantics and ADR, then commit**
+- [x] **Step 5: Update bilingual semantics and ADR, then commit**
 
 Document exact borrowed/owned creation, failure rollback, shutdown order, and non-ownership of Cache or WorkerSystem outside the supplied executor.
 
@@ -82,17 +82,17 @@ Commit: `Make Virtual Raster executor authority explicit`
 - Removes: `VirtualRasterSource`, `VirtualRasterSourceDescriptor`, `VirtualRasterSourceLoadContext`, `VirtualRasterPagePayload`, and `virtualRasterSource()`.
 - Retains: `VirtualRasterRequestExecutor` as the sole executable asynchronous page-source boundary used by scheduling and runtime composition.
 
-- [ ] **Step 1: Change topology/type tests and verify RED**
+- [x] **Step 1: Change topology/type tests and verify RED**
 
 Require all five disconnected symbols to be absent from public Geo exports and generated facts.
 
 Run: `npm --workspace geoscratch run build && npx mocha tests/scratch-foundation-public-topology.test.js`
 
-- [ ] **Step 2: Remove the unused source declarations, factory, and exports**
+- [x] **Step 2: Remove the unused source declarations, factory, and exports**
 
 Do not add an alias or adapter. Update the canonical docs to call `VirtualRasterRequestExecutor` the executable source boundary.
 
-- [ ] **Step 3: Verify focused tests and commit**
+- [x] **Step 3: Verify focused tests and commit**
 
 Run: `npm --workspace geoscratch run build && npx mocha tests/scratch-foundation-public-topology.test.js tests/geo-virtual-raster.test.js`
 
@@ -112,23 +112,23 @@ Commit: `Remove disconnected Virtual Raster source API`
 - Produces: `DemTileSource`, created only by manifest validation, containing the immutable manifest, WebMercator model, stable tile URL mapping, and source facts.
 - Produces: a small `createDemVirtualRaster()` adapter returning generic `VirtualRasterRuntime` plus separately inspectable DEM worker/source facts.
 
-- [ ] **Step 1: Add failing source-authority tests**
+- [x] **Step 1: Add failing source-authority tests**
 
 Prove one parser invocation establishes the immutable source used by model construction, tile URL generation, cache coherence, and executor creation. Prove tile URL generation performs no validation or clone per page. Prove generic runtime facts remain generic.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `npm --workspace geoscratch run build && npx mocha tests/geo-virtual-raster-dem.test.js tests/scratch-dem-layer-clean-cut.test.js tests/assets-layout.test.js`
 
-- [ ] **Step 3: Implement the source adapter and update imports**
+- [x] **Step 3: Implement the source adapter and update imports**
 
 Keep exact DEM manifest/schema validation and URL semantics in the example. Remove raw/validated manifest dual use, the custom runtime `inspect()` override, duplicated stopped state, and manual executor cleanup now owned by Geo.
 
-- [ ] **Step 4: Keep proof facts separate**
+- [x] **Step 4: Keep proof facts separate**
 
 Pass a source/executor facts reader to the browser proof binding instead of casting `VirtualRasterRuntimeFacts` to a DEM-extended shape.
 
-- [ ] **Step 5: Verify focused behavior and commit**
+- [x] **Step 5: Verify focused behavior and commit**
 
 Run: `npm --workspace geoscratch run build && npx mocha tests/geo-virtual-raster-dem.test.js tests/scratch-dem-layer-clean-cut.test.js tests/assets-layout.test.js`
 
@@ -144,25 +144,32 @@ Commit: `Consolidate DEM Virtual Raster source authority`
 - Consumes: final public TypeScript entrypoints and DEM browser path.
 - Produces: current bilingual API facts and executable regression evidence.
 
-- [ ] **Step 1: Regenerate and validate API documentation**
+- [x] **Step 1: Regenerate and validate API documentation**
 
 Run: `npm run docs:generate`
 Run: `npm run docs:translations`
 Run: `npm run docs:check`
 
-- [ ] **Step 2: Run complete static and Node gates**
+- [x] **Step 2: Run complete static and Node gates**
 
 Run: `npm run typecheck`
 Run: `npm test`
 Run: `npm run build`
 Run: `git diff --check`
 
-- [ ] **Step 3: Run real browser DEM proof**
+- [x] **Step 3: Run real browser DEM proof**
 
 Start the documented Vite and tile-server commands, load `/demLayer/` in isolated Chrome with WebGPU, wait for `#GPUFrame[data-status="ready"]`, and require zero Vite overlays, console errors, page errors, pending native observations, and terminal ownership residue.
 
-- [ ] **Step 4: Review final diff and commit**
+- [x] **Step 4: Review final diff and commit**
 
 Confirm no DEM/COG/PNG/HTTP semantics entered Geo, no old source symbols remain, no compatibility path exists, and the worktree contains only intended changes.
 
 Commit: `Verify Virtual Raster source authority cleanup`
+
+## Verification Record
+
+- Documentation generation, translation parity, documentation checks, typecheck, package build, and repository build passed.
+- Full Node suite passed with 1,452 passing and 2 intentionally pending headed acceptance cases.
+- DEM tile wireframe browser proof passed in Chrome 151 with zero console, page, HTTP, or cleanup failures.
+- Full Virtual Raster DEM browser proof passed, including request cancellation, persistent-cache reopen, terminal failure cleanup, idempotent disposal, and zero browser/Vite/tile-server process residue.
