@@ -263,7 +263,10 @@ export async function createDemVirtualRasterRuntime({
         const virtualRaster = await createVirtualRasterRuntime({
             runtime,
             model,
-            executor: requestExecutor,
+            executor: {
+                ownership: 'borrowed',
+                executor: requestExecutor,
+            },
             maxRequests,
             maxPhysicalPages,
             maxStagingBytes,

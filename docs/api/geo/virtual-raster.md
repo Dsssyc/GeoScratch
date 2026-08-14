@@ -36,6 +36,14 @@ records whether remote Worker finalizers completed or lifecycle authority forced
 bounded termination. Executor facts label Worker business snapshots as `live` or
 `last-observed-before-disposal`; after disposal, context-pool facts rather than a
 fabricated business snapshot are the lifecycle authority.
+
+`createVirtualRasterRuntime` also requires an explicit `VirtualRasterExecutorBinding`.
+A `borrowed` executor remains entirely caller-owned. An `owned` executor must provide
+asynchronous `dispose()`; ownership transfers when runtime creation begins, creation
+failure releases it, and runtime disposal stops and settles scheduler work before
+releasing it exactly once. Independent shutdown failures are retained together rather
+than allowing one failure to skip another authority. Runtime facts report the declared
+executor ownership without fabricating executor business state.
 Transfer helpers make `ArrayBuffer` ownership explicit. Residency stages pages and
 publishes coherent snapshots; leases prevent physical slots from being recycled while
 a submission may still sample them. GPU feedback rings bound asynchronous readback and
@@ -60,3 +68,4 @@ their shaders to tile neighbors or atlas coordinates.
 - `docs/decisions/ADR-055-high-precision-virtual-raster-dem.md`
 - `docs/decisions/ADR-056-generic-worker-webmercator-virtual-raster-cache.md`
 - `docs/decisions/ADR-072-worker-context-pool-and-typed-protocols.md`
+- `docs/decisions/ADR-073-virtual-raster-executor-authority.md`

@@ -409,6 +409,20 @@ const typedMapField: MapFieldLayer<{ frameEpoch: number }> = mapFieldLayer({
 declare const typedTerrainSurface: scr.Surface
 declare const typedTerrainRuntime: scr.GPURuntime
 declare const typedTerrainVirtualRaster: geoApi.VirtualRasterRuntime<WebMercatorVirtualRasterField>
+declare const typedVirtualRasterExecutor: geoApi.VirtualRasterRequestExecutor
+declare const typedOwnedVirtualRasterExecutor: geoApi.VirtualRasterRequestExecutor & Readonly<{
+    dispose(): Promise<void>
+}>
+const typedBorrowedVirtualRasterExecutor: geoApi.VirtualRasterExecutorBinding = {
+    ownership: 'borrowed',
+    executor: typedVirtualRasterExecutor,
+}
+const typedOwnedVirtualRasterExecutorBinding: geoApi.VirtualRasterExecutorBinding = {
+    ownership: 'owned',
+    executor: typedOwnedVirtualRasterExecutor,
+}
+void typedBorrowedVirtualRasterExecutor
+void typedOwnedVirtualRasterExecutorBinding
 const typedTerrainRendererCreation: Promise<
     geoApi.TerrainFieldRenderer<{ frameEpoch: number }, 'shaded' | 'wireframe'>
 > = geoApi.createTerrainFieldRenderer({

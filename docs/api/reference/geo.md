@@ -2,7 +2,7 @@
 
 # geoscratch/geo API Reference
 
-Public symbols: 296.
+Public symbols: 297.
 
 ## `packages/geoscratch/src/geo/coordinate-domain.ts`
 
@@ -2219,7 +2219,7 @@ createVirtualRasterDemandController<Model extends Readonly<{ addressSpace: Virtu
 
 Kind: `Function`.
 
-Assembles request scheduling, CPU residency, GPU publication, and demand authority.
+Assembles request scheduling, CPU residency, GPU publication, demand, and explicit executor authority.
 
 ```ts
 Function createVirtualRasterRuntime
@@ -2253,6 +2253,16 @@ Kind: `Type Alias`.
 type VirtualRasterDemandControllerFacts = Readonly<{ acknowledgedSnapshotEpoch: number; activeDemandCount: number; deferredDemandCount: number; disposed: boolean; feedbackDemandGraceGenerations: number; generation: number; lastDecisionFrameEpoch: number; lease: ReturnType<VirtualRasterResidencyLease["facts"]>; transitionCount: number }>
 ```
 
+### `VirtualRasterExecutorBinding`
+
+Kind: `Type Alias`.
+
+Declares whether one Virtual Raster runtime borrows or owns its request executor.
+
+```ts
+type VirtualRasterExecutorBinding = Readonly<{ executor: VirtualRasterRequestExecutor; ownership: "borrowed" }> | Readonly<{ executor: VirtualRasterRequestExecutor & Readonly<{ dispose: any }>; ownership: "owned" }>
+```
+
 ### `VirtualRasterFeedbackReconciliation`
 
 Kind: `Type Alias`.
@@ -2274,7 +2284,7 @@ type VirtualRasterRuntime<Model extends VirtualRasterRuntimeModel = VirtualRaste
 Kind: `Type Alias`.
 
 ```ts
-type VirtualRasterRuntimeDescriptor<Model extends VirtualRasterRuntimeModel = VirtualRasterRuntimeModel> = Readonly<{ executor: VirtualRasterRequestExecutor; maxHistory: number; maxPhysicalPages: number; maxRequests: number; maxStagingBytes: number; model: Model; runtime: GPURuntime; viewDemandProducerId?: string }>
+type VirtualRasterRuntimeDescriptor<Model extends VirtualRasterRuntimeModel = VirtualRasterRuntimeModel> = Readonly<{ executor: VirtualRasterExecutorBinding; maxHistory: number; maxPhysicalPages: number; maxRequests: number; maxStagingBytes: number; model: Model; runtime: GPURuntime; viewDemandProducerId?: string }>
 ```
 
 ### `VirtualRasterRuntimeFacts`
@@ -2282,7 +2292,7 @@ type VirtualRasterRuntimeDescriptor<Model extends VirtualRasterRuntimeModel = Vi
 Kind: `Type Alias`.
 
 ```ts
-type VirtualRasterRuntimeFacts = Readonly<{ demand: VirtualRasterDemandControllerFacts; demandStopped: boolean; disposed: boolean; gpu: ReturnType<VirtualRasterGpuState["facts"]>; id: string; kind: "virtual-raster-runtime"; residency: ReturnType<VirtualRasterResidency["inspect"]>; scheduler: ReturnType<VirtualRasterRequestScheduler["inspect"]> }>
+type VirtualRasterRuntimeFacts = Readonly<{ demand: VirtualRasterDemandControllerFacts; demandStopped: boolean; disposed: boolean; executorOwnership: VirtualRasterExecutorBinding["ownership"]; gpu: ReturnType<VirtualRasterGpuState["facts"]>; id: string; kind: "virtual-raster-runtime"; residency: ReturnType<VirtualRasterResidency["inspect"]>; scheduler: ReturnType<VirtualRasterRequestScheduler["inspect"]> }>
 ```
 
 ### `VirtualRasterRuntimeModel`

@@ -107,12 +107,25 @@ export type VirtualRasterDemandController = Readonly<{
     dispose(): void
 }>
 
+/** Declares whether one Virtual Raster runtime borrows or owns its request executor. */
+export type VirtualRasterExecutorBinding =
+    | Readonly<{
+        ownership: 'borrowed'
+        executor: VirtualRasterRequestExecutor
+    }>
+    | Readonly<{
+        ownership: 'owned'
+        executor: VirtualRasterRequestExecutor & Readonly<{
+            dispose(): Promise<void>
+        }>
+    }>
+
 export type VirtualRasterRuntimeDescriptor<
     Model extends VirtualRasterRuntimeModel = VirtualRasterRuntimeModel,
 > = Readonly<{
     runtime: GPURuntime
     model: Model
-    executor: VirtualRasterRequestExecutor
+    executor: VirtualRasterExecutorBinding
     maxRequests: number
     maxPhysicalPages: number
     maxStagingBytes: number
@@ -130,6 +143,7 @@ export type VirtualRasterRuntimePublication = Readonly<{
 export type VirtualRasterRuntimeFacts = Readonly<{
     kind: 'virtual-raster-runtime'
     id: string
+    executorOwnership: VirtualRasterExecutorBinding['ownership']
     demandStopped: boolean
     disposed: boolean
     residency: ReturnType<VirtualRasterResidency['inspect']>
@@ -500,13 +514,13 @@ export function createVirtualRasterDemandController<
     })
 }
 
-/** Assembles request scheduling, CPU residency, GPU publication, and demand authority. */
+/** Assembles request scheduling, CPU residency, GPU publication, demand, and explicit executor authority. */
 export async function createVirtualRasterRuntime<
     Model extends VirtualRasterRuntimeModel,
 >({
     runtime,
     model,
-    executor,
+    executor: executorBinding,
     maxRequests,
     maxPhysicalPages,
     maxStagingBytes,
@@ -514,65 +528,82 @@ export async function createVirtualRasterRuntime<
     viewDemandProducerId = `virtual-raster-view-demand.${model?.id}`,
 }: VirtualRasterRuntimeDescriptor<Model>): Promise<VirtualRasterRuntime<Model>> {
 
-    assertRuntimeModel(model)
-    if (runtime === undefined || typeof runtime.createTexture !== 'function' ||
-        typeof executor?.request !== 'function' || !positiveInteger(maxRequests) ||
-        !positiveInteger(maxPhysicalPages) || !positiveInteger(maxStagingBytes) ||
-        !positiveInteger(maxHistory) || typeof viewDemandProducerId !== 'string' ||
-        viewDemandProducerId.length === 0 || model.safetyCoverPages.length > maxRequests ||
-        model.safetyCoverPages.length > maxPhysicalPages) {
-        return invalidRuntime(
-            model,
-            'A Virtual Raster runtime requires one GPU runtime, request executor, and explicit budgets containing its safety cover.',
-            {
-                runtime,
-                executor,
-                maxRequests,
-                maxPhysicalPages,
-                maxStagingBytes,
-                maxHistory,
-                viewDemandProducerId,
-                safetyCoverPageCount: model.safetyCoverPages.length,
-            }
-        )
-    }
-    const residency = new VirtualRasterResidency({
-        addressSpace: model.addressSpace,
-        plane: model.plane,
-        maxPhysicalPages,
-        maxStagingBytes,
-        maxHistory,
-    })
-    let gpu: VirtualRasterGpuState | undefined
+    const binding = assertExecutorBinding(model, executorBinding)
+    const executor = binding.executor
+    let residency: VirtualRasterResidency | undefined
+    let gpuState: VirtualRasterGpuState | undefined
+    let scheduler: VirtualRasterRequestScheduler | undefined
+    let demandController: VirtualRasterDemandController | undefined
+    let viewDemandProducer: ViewDemandProducer | undefined
     try {
-        gpu = await createVirtualRasterGpuState(runtime, {
+        assertRuntimeModel(model)
+        if (runtime === undefined || typeof runtime.createTexture !== 'function' ||
+            !positiveInteger(maxRequests) || !positiveInteger(maxPhysicalPages) ||
+            !positiveInteger(maxStagingBytes) || !positiveInteger(maxHistory) ||
+            typeof viewDemandProducerId !== 'string' || viewDemandProducerId.length === 0 ||
+            model.safetyCoverPages.length > maxRequests ||
+            model.safetyCoverPages.length > maxPhysicalPages) {
+            return invalidRuntime(
+                model,
+                'A Virtual Raster runtime requires one GPU runtime, explicit executor authority, and budgets containing its safety cover.',
+                {
+                    runtime,
+                    executorOwnership: binding.ownership,
+                    maxRequests,
+                    maxPhysicalPages,
+                    maxStagingBytes,
+                    maxHistory,
+                    viewDemandProducerId,
+                    safetyCoverPageCount: model.safetyCoverPages.length,
+                }
+            )
+        }
+        residency = new VirtualRasterResidency({
+            addressSpace: model.addressSpace,
+            plane: model.plane,
+            maxPhysicalPages,
+            maxStagingBytes,
+            maxHistory,
+        })
+        gpuState = await createVirtualRasterGpuState(runtime, {
             addressSpace: model.addressSpace,
             plane: model.plane,
             maxPhysicalPages,
         })
+        scheduler = new VirtualRasterRequestScheduler({
+            residency,
+            executor,
+            maxRequests,
+            maxHistory,
+        })
+        viewDemandProducer = new ViewDemandProducer({
+            id: viewDemandProducerId,
+            maxDemands: maxRequests,
+        })
+        demandController = createVirtualRasterDemandController({
+            model,
+            residency,
+            scheduler,
+            viewDemandProducer,
+            maxPhysicalPages,
+            maxHistory,
+        })
     } catch (error) {
-        residency.dispose()
-        throw error
+        return await failRuntimeCreation({
+            model,
+            binding,
+            residency,
+            gpu: gpuState,
+            scheduler,
+            demandController,
+            error,
+        })
     }
-    const gpuState = gpu
-    const scheduler = new VirtualRasterRequestScheduler({
-        residency,
-        executor,
-        maxRequests,
-        maxHistory,
-    })
-    const viewDemandProducer = new ViewDemandProducer({
-        id: viewDemandProducerId,
-        maxDemands: maxRequests,
-    })
-    const demandController = createVirtualRasterDemandController({
-        model,
-        residency,
-        scheduler,
-        viewDemandProducer,
-        maxPhysicalPages,
-        maxHistory,
-    })
+    const activeResidency = residency
+    const activeGpuState = gpuState
+    const activeScheduler = scheduler
+    const activeDemandController = demandController
+    const activeViewDemandProducer = viewDemandProducer
     let demandStopped = false
     let disposed = false
     let stopDemandPromise: Promise<void> | undefined
@@ -581,7 +612,7 @@ export async function createVirtualRasterRuntime<
 
     async function initialize() {
 
-        const reconciliation = demandController.initialize()
+        const reconciliation = activeDemandController.initialize()
         const settlement = await reconciliation.settled
         if (settlement.stagedCount + settlement.residentCount < model.safetyCoverPages.length) {
             return invalidRuntime(
@@ -603,14 +634,14 @@ export async function createVirtualRasterRuntime<
                 activePublication.publication.inspect()
             )
         }
-        const publication = scheduler.publish()
-        demandController.retainPublication(publication)
+        const publication = activeScheduler.publish()
+        activeDemandController.retainPublication(publication)
         let update: VirtualRasterGpuUpdate
         try {
-            update = gpuState.stage(publication)
+            update = activeGpuState.stage(publication)
         } catch (error) {
             void publication.abandon().then(() => {
-                demandController.abandonPublication(publication)
+                activeDemandController.abandonPublication(publication)
             })
             throw error
         }
@@ -637,8 +668,8 @@ export async function createVirtualRasterRuntime<
                 wrapped.publication.inspect()
             )
         }
-        await gpuState.acknowledge(wrapped.publication, submitted)
-        demandController.acknowledgePublication(wrapped.publication)
+        await activeGpuState.acknowledge(wrapped.publication, submitted)
+        activeDemandController.acknowledgePublication(wrapped.publication)
         activePublication = undefined
     }
 
@@ -646,7 +677,7 @@ export async function createVirtualRasterRuntime<
 
         if (stopDemandPromise !== undefined) return stopDemandPromise
         demandStopped = true
-        stopDemandPromise = scheduler.dispose()
+        stopDemandPromise = activeScheduler.dispose()
         return stopDemandPromise
     }
 
@@ -670,24 +701,31 @@ export async function createVirtualRasterRuntime<
         if (activePublication !== undefined) {
             const publication = activePublication.publication
             try {
-                await gpuState.abandon(publication)
+                await activeGpuState.abandon(publication)
             } catch (error) {
                 failures.push(error)
             }
             try {
-                demandController.abandonPublication(publication)
+                activeDemandController.abandonPublication(publication)
             } catch (error) {
                 failures.push(error)
             }
             activePublication = undefined
         }
         for (const dispose of [
-            () => demandController.dispose(),
-            () => residency.dispose(),
-            () => gpuState.dispose(),
+            () => activeDemandController.dispose(),
+            () => activeResidency.dispose(),
+            () => activeGpuState.dispose(),
         ]) {
             try {
                 dispose()
+            } catch (error) {
+                failures.push(error)
+            }
+        }
+        if (binding.ownership === 'owned') {
+            try {
+                await binding.executor.dispose()
             } catch (error) {
                 failures.push(error)
             }
@@ -702,12 +740,13 @@ export async function createVirtualRasterRuntime<
         return Object.freeze({
             kind: 'virtual-raster-runtime' as const,
             id: model.id,
+            executorOwnership: binding.ownership,
             demandStopped,
             disposed,
-            residency: residency.inspect(),
-            scheduler: scheduler.inspect(),
-            demand: demandController.facts(),
-            gpu: gpuState.facts(),
+            residency: activeResidency.inspect(),
+            scheduler: activeScheduler.inspect(),
+            demand: activeDemandController.facts(),
+            gpu: activeGpuState.facts(),
         })
     }
 
@@ -721,19 +760,90 @@ export async function createVirtualRasterRuntime<
         ...model,
         kind: 'virtual-raster-runtime' as const,
         model,
-        residency,
-        gpu: gpuState,
-        scheduler,
-        viewDemandProducer,
-        residencyLease: demandController.lease,
+        residency: activeResidency,
+        gpu: activeGpuState,
+        scheduler: activeScheduler,
+        viewDemandProducer: activeViewDemandProducer,
+        residencyLease: activeDemandController.lease,
         initialize,
-        reconcileFeedback: demandController.reconcileFeedback,
+        reconcileFeedback: activeDemandController.reconcileFeedback,
         publish,
         acknowledge,
         stopDemand,
         dispose,
         inspect,
     })
+}
+
+function assertExecutorBinding(
+    model: Partial<VirtualRasterRuntimeModel> | undefined,
+    binding: VirtualRasterExecutorBinding
+): VirtualRasterExecutorBinding {
+
+    const ownership = binding?.ownership
+    const executor = binding?.executor
+    if ((ownership !== 'borrowed' && ownership !== 'owned') ||
+        typeof executor?.request !== 'function' ||
+        (ownership === 'owned' &&
+            typeof (executor as { dispose?: unknown } | undefined)?.dispose !== 'function')) {
+        return invalidRuntime(
+            model,
+            'Virtual Raster executor authority must explicitly be borrowed or owned; owned executors require asynchronous disposal.',
+            binding
+        )
+    }
+    return binding
+}
+
+async function failRuntimeCreation({
+    model,
+    binding,
+    residency,
+    gpu,
+    scheduler,
+    demandController,
+    error,
+}: Readonly<{
+    model: Partial<VirtualRasterRuntimeModel> | undefined
+    binding: VirtualRasterExecutorBinding
+    residency: VirtualRasterResidency | undefined
+    gpu: VirtualRasterGpuState | undefined
+    scheduler: VirtualRasterRequestScheduler | undefined
+    demandController: VirtualRasterDemandController | undefined
+    error: unknown
+}>): Promise<never> {
+
+    const failures = [ error ]
+    if (scheduler !== undefined) {
+        try {
+            await scheduler.dispose()
+        } catch (cleanupError) {
+            failures.push(cleanupError)
+        }
+    }
+    for (const dispose of [
+        () => demandController?.dispose(),
+        () => residency?.dispose(),
+        () => gpu?.dispose(),
+    ]) {
+        try {
+            dispose()
+        } catch (cleanupError) {
+            failures.push(cleanupError)
+        }
+    }
+    if (binding.ownership === 'owned') {
+        try {
+            await binding.executor.dispose()
+        } catch (cleanupError) {
+            failures.push(cleanupError)
+        }
+    }
+    if (failures.length === 1) throw error
+    throw new AggregateError(
+        failures,
+        `Virtual Raster runtime ${model?.id ?? '<unknown>'} initialization and cleanup failed`
+    )
 }
 
 function canonicalGpuFeedback(

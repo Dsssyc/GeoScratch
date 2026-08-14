@@ -18129,7 +18129,7 @@
             "packages/geoscratch/src/geo/virtual-raster-runtime.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/virtual-raster-runtime.ts:186"
+            "packages/geoscratch/src/geo/virtual-raster-runtime.ts:200"
           ],
           "summary": "Coordinates safety cover, view demand, feedback acknowledgement, and publication retention.",
           "declaration": "Function createVirtualRasterDemandController",
@@ -18163,9 +18163,9 @@
             "packages/geoscratch/src/geo/virtual-raster-runtime.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/virtual-raster-runtime.ts:504"
+            "packages/geoscratch/src/geo/virtual-raster-runtime.ts:518"
           ],
-          "summary": "Assembles request scheduling, CPU residency, GPU publication, and demand authority.",
+          "summary": "Assembles request scheduling, CPU residency, GPU publication, demand, and explicit executor authority.",
           "declaration": "Function createVirtualRasterRuntime",
           "signatures": [
             "createVirtualRasterRuntime<Model extends Readonly<{ addressSpace: VirtualRasterAddressSpace; field: GeoField; id: string; plane: VirtualRasterPlane; representation: TiledFieldRepresentation; safetyCoverPages: readonly Readonly<{ addressSpaceId: string; coordinates: readonly number[]; dimensions: CoordinateDimension; key: string; kind: \"virtual-raster-page\"; level: number; tile?: Readonly<{ key: string; kind: \"tile-coordinate\"; matrixId: string; tileCol: number; tileMatrixSetId: string; tileRow: number }> }>[]; spatialProfile: TileSpatialProfile }>>(__namedParameters: VirtualRasterRuntimeDescriptor<Model>): Promise<VirtualRasterRuntime<Model>>"
@@ -21350,6 +21350,20 @@
           "declaration": "type VirtualRasterDemandUsage = \"required\" | \"prefetch\""
         },
         {
+          "id": "geoscratch/geo#VirtualRasterExecutorBinding",
+          "name": "VirtualRasterExecutorBinding",
+          "kind": "Type Alias",
+          "source": "packages/geoscratch/src/geo/virtual-raster-runtime.ts",
+          "sources": [
+            "packages/geoscratch/src/geo/virtual-raster-runtime.ts"
+          ],
+          "locations": [
+            "packages/geoscratch/src/geo/virtual-raster-runtime.ts:111"
+          ],
+          "summary": "Declares whether one Virtual Raster runtime borrows or owns its request executor.",
+          "declaration": "type VirtualRasterExecutorBinding = Readonly<{ executor: VirtualRasterRequestExecutor; ownership: \"borrowed\" }> | Readonly<{ executor: VirtualRasterRequestExecutor & Readonly<{ dispose: any }>; ownership: \"owned\" }>"
+        },
+        {
           "id": "geoscratch/geo#VirtualRasterFailureOptions",
           "name": "VirtualRasterFailureOptions",
           "kind": "Type Alias",
@@ -22625,7 +22639,7 @@
             "packages/geoscratch/src/geo/virtual-raster-runtime.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/virtual-raster-runtime.ts:141"
+            "packages/geoscratch/src/geo/virtual-raster-runtime.ts:155"
           ],
           "summary": "",
           "declaration": "type VirtualRasterRuntime<Model extends VirtualRasterRuntimeModel = VirtualRasterRuntimeModel> = Omit<Model, \"kind\"> & Readonly<{ gpu: VirtualRasterGpuState; kind: \"virtual-raster-runtime\"; model: Model; residency: VirtualRasterResidency; residencyLease: VirtualRasterResidencyLease; scheduler: VirtualRasterRequestScheduler; viewDemandProducer: ViewDemandProducer; acknowledge: any; dispose: any; initialize: any; inspect: any; publish: any; reconcileFeedback: any; stopDemand: any }>"
@@ -22639,10 +22653,10 @@
             "packages/geoscratch/src/geo/virtual-raster-runtime.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/virtual-raster-runtime.ts:110"
+            "packages/geoscratch/src/geo/virtual-raster-runtime.ts:123"
           ],
           "summary": "",
-          "declaration": "type VirtualRasterRuntimeDescriptor<Model extends VirtualRasterRuntimeModel = VirtualRasterRuntimeModel> = Readonly<{ executor: VirtualRasterRequestExecutor; maxHistory: number; maxPhysicalPages: number; maxRequests: number; maxStagingBytes: number; model: Model; runtime: GPURuntime; viewDemandProducerId?: string }>"
+          "declaration": "type VirtualRasterRuntimeDescriptor<Model extends VirtualRasterRuntimeModel = VirtualRasterRuntimeModel> = Readonly<{ executor: VirtualRasterExecutorBinding; maxHistory: number; maxPhysicalPages: number; maxRequests: number; maxStagingBytes: number; model: Model; runtime: GPURuntime; viewDemandProducerId?: string }>"
         },
         {
           "id": "geoscratch/geo#VirtualRasterRuntimeFacts",
@@ -22653,10 +22667,10 @@
             "packages/geoscratch/src/geo/virtual-raster-runtime.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/virtual-raster-runtime.ts:130"
+            "packages/geoscratch/src/geo/virtual-raster-runtime.ts:143"
           ],
           "summary": "",
-          "declaration": "type VirtualRasterRuntimeFacts = Readonly<{ demand: VirtualRasterDemandControllerFacts; demandStopped: boolean; disposed: boolean; gpu: ReturnType<VirtualRasterGpuState[\"facts\"]>; id: string; kind: \"virtual-raster-runtime\"; residency: ReturnType<VirtualRasterResidency[\"inspect\"]>; scheduler: ReturnType<VirtualRasterRequestScheduler[\"inspect\"]> }>"
+          "declaration": "type VirtualRasterRuntimeFacts = Readonly<{ demand: VirtualRasterDemandControllerFacts; demandStopped: boolean; disposed: boolean; executorOwnership: VirtualRasterExecutorBinding[\"ownership\"]; gpu: ReturnType<VirtualRasterGpuState[\"facts\"]>; id: string; kind: \"virtual-raster-runtime\"; residency: ReturnType<VirtualRasterResidency[\"inspect\"]>; scheduler: ReturnType<VirtualRasterRequestScheduler[\"inspect\"]> }>"
         },
         {
           "id": "geoscratch/geo#VirtualRasterRuntimeModel",
@@ -22681,7 +22695,7 @@
             "packages/geoscratch/src/geo/virtual-raster-runtime.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/virtual-raster-runtime.ts:123"
+            "packages/geoscratch/src/geo/virtual-raster-runtime.ts:136"
           ],
           "summary": "",
           "declaration": "type VirtualRasterRuntimePublication = Readonly<{ changed: boolean; publication: VirtualRasterPublication; snapshotEpoch: number; update: VirtualRasterGpuUpdate }>"

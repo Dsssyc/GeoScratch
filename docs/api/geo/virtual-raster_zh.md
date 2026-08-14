@@ -2,7 +2,7 @@
 docId: geo.virtual-raster.zh
 canonical: false
 translationOf: ./virtual-raster.md
-canonicalDigest: 2cdd3286c1446c50e4240c0834b6b538a12a87ab8b14a18db81c96226b8071cf
+canonicalDigest: 24331795c0b13c33c905023454e594eef1f4635b013b4a5f672e1b6522bd238e
 ---
 # Virtual Raster
 
@@ -24,7 +24,14 @@ protocol（`lookup`、`fetch`、`decode`、`transfer`、`accept`、`discard` 与
 Facts 来自 live context 查询，pool 的 terminal state 会记录远端 Worker finalizer 正常完成，
 还是 lifecycle authority 执行了有界强制终止。Executor facts 会把 Worker 业务快照标记为
 `live` 或 `last-observed-before-disposal`；dispose 后由 context-pool facts 充当生命周期权威，
-而不是虚构已销毁的业务快照。Transfer helper 显式表达 `ArrayBuffer`
+而不是虚构已销毁的业务快照。
+
+`createVirtualRasterRuntime` 同样要求显式的 `VirtualRasterExecutorBinding`。`borrowed`
+executor 完全由调用方拥有；`owned` executor 必须提供异步 `dispose()`。Runtime 创建开始时
+ownership 即发生转移；创建失败会释放 owned executor，runtime dispose 会先停止并结算
+scheduler work，再严格释放 executor 一次。相互独立的 shutdown failure 会共同保留，不会
+因为一个 authority 失败而跳过另一个。Runtime facts 只报告声明的 executor ownership，
+不会虚构 executor 业务状态。Transfer helper 显式表达 `ArrayBuffer`
 ownership。Residency stage page 并发布 coherent snapshot；lease 防止
 submission 仍可能采样时 physical slot 被回收。GPU feedback ring 限制异步 readback，
 并拒绝 stale slot。Feedback lowering 会把缺席的 in-flight page 严格延续一个后续 feedback
@@ -45,3 +52,4 @@ grid 或 editable raster，而无需让 shader 与 tile neighbor 或 atlas coord
 - `docs/decisions/ADR-055-high-precision-virtual-raster-dem.md`
 - `docs/decisions/ADR-056-generic-worker-webmercator-virtual-raster-cache.md`
 - `docs/decisions/ADR-072-worker-context-pool-and-typed-protocols.md`
+- `docs/decisions/ADR-073-virtual-raster-executor-authority.md`

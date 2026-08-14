@@ -270,6 +270,7 @@ export type {
     VirtualRasterDemandController,
     VirtualRasterDemandControllerDescriptor,
     VirtualRasterDemandControllerFacts,
+    VirtualRasterExecutorBinding,
     VirtualRasterFeedbackReconciliation,
     VirtualRasterRuntime,
     VirtualRasterRuntimeDescriptor,
