@@ -236,16 +236,29 @@ fn clipPolygonToPlane(
     return output;
 }
 
-fn projectedAxisCellSpanPixels(clip: vec4f, delta: vec4f) -> f32 {
-    let halfDelta = delta * 0.5f;
-    let start = clip - halfDelta;
-    let end = clip + halfDelta;
-    if (start.w <= 1e-5f || end.w <= 1e-5f) {
+fn projectedAxisCellDeltaPixels(clip: vec4f, delta: vec4f) -> vec2f {
+    let reciprocalW = 1.0f / clip.w;
+    let ndcDelta = (
+        delta.xy - clip.xy * reciprocalW * delta.w
+    ) * reciprocalW;
+    return ndcDelta * mapMeta.viewport * 0.5f;
+}
+
+fn projectedCellAreaScalePixels(
+    clip: vec4f,
+    xDelta: vec4f,
+    yDelta: vec4f,
+) -> f32 {
+    let minimumCellW = clip.w - 0.5f * (
+        abs(xDelta.w) + abs(yDelta.w)
+    );
+    if (minimumCellW <= 1e-5f) {
         return max(mapMeta.viewport.x, mapMeta.viewport.y);
     }
-    let pixelDelta = (end.xy / end.w - start.xy / start.w) *
-        mapMeta.viewport * 0.5f;
-    return length(pixelDelta);
+    let xPixels = projectedAxisCellDeltaPixels(clip, xDelta);
+    let yPixels = projectedAxisCellDeltaPixels(clip, yDelta);
+    let signedArea = xPixels.x * yPixels.y - xPixels.y * yPixels.x;
+    return sqrt(abs(signedArea));
 }
 
 fn projectedPlaneCellSpanPixels(bounds: GpuRenderPatchBounds, elevation: f32) -> f32 {
@@ -279,9 +292,10 @@ fn projectedPlaneCellSpanPixels(bounds: GpuRenderPatchBounds, elevation: f32) ->
     var maximumSpan = 0.0f;
     for (var index = 0u; index < polygon.count; index += 1u) {
         let clip = polygon.vertices[index];
-        let xSpan = projectedAxisCellSpanPixels(clip, xDelta);
-        let ySpan = projectedAxisCellSpanPixels(clip, yDelta);
-        maximumSpan = max(maximumSpan, sqrt(xSpan * ySpan));
+        maximumSpan = max(
+            maximumSpan,
+            projectedCellAreaScalePixels(clip, xDelta, yDelta),
+        );
     }
     return maximumSpan;
 }

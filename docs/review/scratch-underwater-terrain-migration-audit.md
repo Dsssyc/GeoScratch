@@ -11,17 +11,19 @@ this audit only when it identifies the raster data, tile protocol, or removed le
 
 ## Current Architecture Supersession
 
-As of 2026-08-15, ADR-076 completes the separation of the `z4..z10` data-page frontier
-from the `z4..z14` terrain render-patch frontier. The data frontier remains the only
-residency, request, cache, publication, and fallback authority. Geo's render-patch
+As of 2026-08-16, ADR-076 and ADR-077 complete the separation of the `z4..z10` data-page
+frontier from the `z4..z14` terrain render-patch frontier. The data frontier remains the
+only residency, request, cache, publication, and fallback authority. Geo's render-patch
 frontier traverses immutable prefix-free safety-cover roots rather than current source
 pages. It clips each candidate against the complete WebGPU clip volume, evaluates a
-local one-cell projective differential at visible positions, balances the final cut to
-an adjacent level difference of at most one, then writes one terrain indirect argument
-and a global logical-patch lookup. Terrain stitching resolves selected neighbors from
-`(matrixLevel, tileRow, tileCol)`, while the Virtual Raster page table resolves each
-logical sample coordinate to available data. See
-[ADR-076](../decisions/ADR-076-render-root-local-cell-projection.md) and
+local one-cell projective differential at visible positions, and uses the square root
+of its absolute pixel-space Jacobian determinant as a rotation-invariant span. It
+balances the final cut to an adjacent level difference of at most one, then writes one
+terrain indirect argument and a global logical-patch lookup. Terrain stitching resolves
+selected neighbors from `(matrixLevel, tileRow, tileCol)`, while the Virtual Raster page
+table resolves each logical sample coordinate to available data. See
+[ADR-076](../decisions/ADR-076-render-root-local-cell-projection.md),
+[ADR-077](../decisions/ADR-077-rotation-invariant-projected-cell-scale.md), and
 [ADR-068](../decisions/ADR-068-dem-balanced-render-patch-cut.md). ADR-064's horizontal
 spacing and ADR-065's clipped-footprint area formulations are historical.
 
@@ -36,14 +38,15 @@ frontier audit.
 
 ### Current Render-Patch Verification
 
-The 2026-08-15 real Chrome/WebGPU Retina gate holds center, pitch, and bearing fixed
+The 2026-08-16 real Chrome/WebGPU Retina gate holds center, pitch, and bearing fixed
 while zooming from 12 through 14 in quarter steps. The minimum and maximum selected
 render levels never decrease: the sequence advances from `12..12` through `13..13`,
-`13..14`, and finally `14..14`. At pitched zoom 10, the local-cell cut contains 28
-balanced patches across levels 7..11; nearby motion samples retain the same count and
-range. The final maximum adjacent level delta is one. Chrome reports zero descriptor or
-lookup overflow, uncaptured WebGPU errors, device losses, diagnostic incidents,
-console failures, or page errors.
+`13..14`, and finally `14..14`. At pitched zoom 10, bearing 90, the rotation-invariant
+local-cell metric selects 28 patches before balancing; the bounded 2:1 balance adds nine
+patches for a final cut of 37 across levels 7..11. The final maximum adjacent level delta
+is one. Oblique Retina probes at bearings 35, -45, and 45 preserve coherent near-to-far
+cuts. Chrome reports zero descriptor or lookup overflow, uncaptured WebGPU errors,
+device losses, diagnostic incidents, console failures, or page errors.
 
 The current example graph publishes 118 stable identities: 26 resources, five uploads,
 11 BindLayouts, 20 BindSets, 10 Programs, 10 pipelines, two passes, and 34 commands.

@@ -22,9 +22,13 @@ fallback cannot redefine geometry topology. It refines terrain mesh patches by t
 local projected span of one grid cell even when source raster detail has reached its
 maximum. Six-plane homogeneous clipping supplies visible evaluation positions; a
 projective cell differential avoids both off-screen over-refinement and viewport-edge
-coarsening during zoom-in. A normalized budget, bounded balancing passes, hysteresis,
-and revision tokens keep selection stable. The balanced cut enforces edge-adjacent
-level difference at most one before mesh-stitching flags are produced. Trial counting
+coarsening during zoom-in. Its two pixel-space vectors form a local Jacobian; the square
+root of the absolute determinant is the area-equivalent cell span. Unlike multiplying
+the two vector lengths, this metric includes their angle and cannot change merely
+because camera bearing changes the alignment between the fixed grid axes and the
+direction of foreshortening. A normalized budget, bounded balancing passes, hysteresis,
+and revision tokens keep selection stable. The balanced cut enforces edge-adjacent level
+difference at most one before mesh-stitching flags are produced. Trial counting
 saturates immediately above render capacity, so an unusable fine cut cannot turn a
 large root span into unbounded traversal work.
 

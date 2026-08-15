@@ -2,9 +2,11 @@
 
 ## Status
 
-Accepted; supersedes ADR-065's clipped-footprint error metric and ADR-066's
-source-page render roots. ADR-066's global budget selection and hysteresis and
-ADR-068's balanced-cut contract remain in force.
+Partially superseded by ADR-077, which replaces the basis-dependent product of the two
+projected axis lengths with a rotation-invariant Jacobian determinant. This ADR still
+supersedes ADR-065's clipped-footprint error metric and ADR-066's source-page render
+roots. ADR-066's global budget selection and hysteresis and ADR-068's balanced-cut
+contract remain in force.
 
 ## Date
 
@@ -78,6 +80,10 @@ the GPU evaluates a symmetric one-cell displacement along the patch's two horizo
 axes. Perspective division converts those differential displacements to pixel spans.
 The metric is the geometric mean of the two axis spans, and the maximum over all
 evaluated positions and elevation planes controls subdivision.
+
+ADR-077 later corrects how those two vectors are combined. Their length product omits
+the angle between them and is basis-dependent; the current implementation uses the
+square root of the absolute local Jacobian determinant.
 
 This is a local projective Jacobian of one terrain cell. It remains sensitive to
 perspective and foreshortening, but it does not shrink merely because only a sliver of

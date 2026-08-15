@@ -247,7 +247,8 @@ describe('Underwater Terrain clean cut', () => {
         expect(renderPatchShader).not.to.include('sourceDrawArguments')
         expect(renderPatchShader).not.to.include('.samplingLevel')
         expect(renderPatchShader).to.include('projectedCellSpanPixels')
-        expect(renderPatchShader).to.include('projectedAxisCellSpanPixels')
+        expect(renderPatchShader).to.include('projectedAxisCellDeltaPixels')
+        expect(renderPatchShader).to.include('projectedCellAreaScalePixels')
         expect(renderPatchShader).to.include('clipPolygonToPlane')
         expect(renderPatchShader).to.include('plane < 6u')
         expect(renderPatchShader).to.include(
@@ -313,6 +314,47 @@ describe('Underwater Terrain clean cut', () => {
             'shaders',
             'lod-map.wgsl'
         ))).to.equal(false)
+    })
+
+    it('uses a rotation-invariant local projected-cell area scale', () => {
+
+        const renderPatchShader = read(
+            'packages', 'geoscratch', 'src', 'geo', 'gpu-render-patch-frontier-wgsl.ts'
+        )
+        const axisProductScale = (x, y) => Math.sqrt(Math.hypot(...x) * Math.hypot(...y))
+        const areaScale = (x, y) => Math.sqrt(Math.abs(x[0] * y[1] - x[1] * y[0]))
+        const x = [ 12, 0 ]
+        const y = [ 0, 1 ]
+        const cosine = Math.SQRT1_2
+        const sine = Math.SQRT1_2
+        const rotatedX = [
+            cosine * x[0] + sine * y[0],
+            cosine * x[1] + sine * y[1],
+        ]
+        const rotatedY = [
+            -sine * x[0] + cosine * y[0],
+            -sine * x[1] + cosine * y[1],
+        ]
+        const fartherRotatedX = rotatedX.map((value) => value * 0.5)
+        const fartherRotatedY = rotatedY.map((value) => value * 0.5)
+
+        expect(axisProductScale(rotatedX, rotatedY)).to.be.greaterThan(
+            axisProductScale(x, y) * 2
+        )
+        expect(axisProductScale(fartherRotatedX, fartherRotatedY)).to.be.greaterThan(
+            axisProductScale(x, y)
+        )
+        expect(areaScale(rotatedX, rotatedY)).to.be.closeTo(areaScale(x, y), 1e-12)
+        expect(areaScale(fartherRotatedX, fartherRotatedY)).to.be.lessThan(
+            areaScale(x, y)
+        )
+        expect(renderPatchShader).to.include('fn projectedCellAreaScalePixels(')
+        expect(renderPatchShader).to.include(
+            'xPixels.x * yPixels.y - xPixels.y * yPixels.x'
+        )
+        expect(renderPatchShader).to.include('let minimumCellW = clip.w - 0.5f * (')
+        expect(renderPatchShader).to.include('if (minimumCellW <= 1e-5f)')
+        expect(renderPatchShader).not.to.include('sqrt(xSpan * ySpan)')
     })
 
     it('uses a GPU-resident frontier without a CPU selection compatibility path', () => {

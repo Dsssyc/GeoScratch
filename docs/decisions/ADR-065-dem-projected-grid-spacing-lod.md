@@ -2,9 +2,10 @@
 
 ## Status
 
-Partially superseded by ADR-076. Projected terrain-cell spacing remains the policy,
-but ADR-076 replaces this ADR's clipped-footprint area formulation with a local
-projective cell differential.
+Partially superseded by ADR-076 and ADR-077. Projected terrain-cell spacing remains the
+policy. ADR-076 replaces this ADR's clipped-footprint area formulation with a local
+projective cell differential, and ADR-077 defines its rotation-invariant Jacobian
+determinant scale.
 
 ## Date
 

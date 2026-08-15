@@ -52,10 +52,13 @@ bias is read back to control the frame. The previous bias may be retained only
 within the budget hysteresis band and at most one quarter-step coarser than the
 current optimum. Local patch decisions are stateless: projected footprints are
 clipped against the complete WebGPU clip volume to obtain visible evaluation points,
-then a one-cell projective differential measures local grid spacing. It cannot become
-coarser merely because zooming leaves a smaller clipped fragment at a viewport edge.
-The same settled camera, viewport, render roots, policy, and global bias always produce
-the same render cut regardless of camera history or data-frontier residency.
+then a one-cell projective differential measures local grid spacing. The square root of
+the absolute pixel-space Jacobian determinant is an area-equivalent span, so rotating
+the camera bearing cannot make a farther diagonal patch refine first merely by changing
+grid-axis alignment. It also cannot become coarser merely because zooming leaves a
+smaller clipped fragment at a viewport edge. The same settled camera, viewport, render
+roots, policy, and global bias always produce the same render cut regardless of camera
+history or data-frontier residency.
 
 The coarsest trial stops at the fixed render roots. Counts across the 17 trials are
 not assumed to be monotonic: child AABBs can all be rejected while a conservative
