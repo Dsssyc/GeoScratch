@@ -13,7 +13,7 @@ import {
     createDemWorkerRequestExecutor,
 } from './dem-tile-executor.ts'
 import type { DemWorkerRequestExecutor } from './dem-tile-executor.ts'
-import type { DemCachePolicy } from './dem-tile-protocol.ts'
+import type { UnderwaterTerrainCachePolicy } from './cache-policy.ts'
 
 type NumberSequence = ArrayLike<number> & Iterable<number>
 
@@ -110,7 +110,7 @@ export type DemVirtualRaster = VirtualRasterRuntime<DemVirtualRasterModel> & Rea
 type DemVirtualRasterOptions = Readonly<{
     runtime: GPURuntime
     source: DemTileSource
-    cachePolicy: DemCachePolicy
+    cachePolicy: UnderwaterTerrainCachePolicy
     workerModules: WorkerModuleResolver
     workerCount?: number
     maxNetworkRequests?: number

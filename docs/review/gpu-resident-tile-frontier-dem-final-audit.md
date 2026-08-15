@@ -49,7 +49,7 @@ All required scripts emitted `status: "passed"` on headed Chrome
 
 - `node tests/browser/geo-gpu-tile-frontier-core.mjs`;
 - `node tests/browser/scratch-underwater-terrain.mjs`;
-- `node tests/browser/geo-virtual-raster-dem.mjs`;
+- `node tests/browser/underwater-terrain-streaming.mjs`;
 - `node tests/browser/scratch-hello-gaw.mjs`;
 - `node tests/browser/scratch-flow-layer.mjs`;
 - `node tests/browser/geo-virtual-raster-dynamic-flow.mjs`.

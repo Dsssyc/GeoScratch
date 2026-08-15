@@ -1,9 +1,9 @@
 import {
-    DEM_CACHE_PARAMETER_NAMES,
-    DEM_CACHE_POLICY_DEFAULTS,
-    readDemCachePolicy,
-} from './dem-cache-policy.ts'
-import type { DemCachePolicy } from './dem-tile-protocol.ts'
+    UNDERWATER_TERRAIN_CACHE_DEFAULTS,
+    UNDERWATER_TERRAIN_CACHE_PARAMETER_NAMES,
+    readUnderwaterTerrainCachePolicy,
+} from './cache-policy.ts'
+import type { UnderwaterTerrainCachePolicy } from './cache-policy.ts'
 
 export type UnderwaterTerrainCachePanelPolicy =
     | 'disabled'
@@ -65,10 +65,10 @@ export const UNDERWATER_TERRAIN_RENDERING_PREFERENCE_STORAGE_KEY =
 export const UNDERWATER_TERRAIN_CACHE_PANEL_DEFAULT_CONFIG:
     UnderwaterTerrainCachePanelConfig = Object.freeze({
         policy: 'disabled',
-        namespace: DEM_CACHE_POLICY_DEFAULTS.namespace,
-        maxMiB: DEM_CACHE_POLICY_DEFAULTS.maxMiB,
-        maxEntries: DEM_CACHE_POLICY_DEFAULTS.maxEntries,
-        persistence: DEM_CACHE_POLICY_DEFAULTS.persistence,
+        namespace: UNDERWATER_TERRAIN_CACHE_DEFAULTS.namespace,
+        maxMiB: UNDERWATER_TERRAIN_CACHE_DEFAULTS.maxMiB,
+        maxEntries: UNDERWATER_TERRAIN_CACHE_DEFAULTS.maxEntries,
+        persistence: UNDERWATER_TERRAIN_CACHE_DEFAULTS.persistence,
     })
 
 export function resolveUnderwaterTerrainCachePanelConfig(
@@ -81,7 +81,7 @@ export function resolveUnderwaterTerrainCachePanelConfig(
         return Object.freeze({
             source: 'url',
             storageStatus: storedRead.status,
-            config: panelConfigFromPolicy(readDemCachePolicy(current)),
+            config: panelConfigFromPolicy(readUnderwaterTerrainCachePolicy(current)),
             parameters: new URLSearchParams(current),
         })
     }
@@ -123,14 +123,14 @@ export function replaceUnderwaterTerrainCacheParameters(
     result.append('cacheMaxMiB', String(normalized.maxMiB))
     result.append('cacheMaxEntries', String(normalized.maxEntries))
     result.append('cachePersistence', normalized.persistence)
-    readDemCachePolicy(result)
+    readUnderwaterTerrainCachePolicy(result)
     return result
 }
 
 export function removeUnderwaterTerrainCacheParameters(current: URLSearchParams): URLSearchParams {
 
     const result = new URLSearchParams(current)
-    for (const name of DEM_CACHE_PARAMETER_NAMES) result.delete(name)
+    for (const name of UNDERWATER_TERRAIN_CACHE_PARAMETER_NAMES) result.delete(name)
     return result
 }
 
@@ -217,11 +217,13 @@ function normalizeCacheConfig(value: unknown): UnderwaterTerrainCachePanelConfig
         [ 'cacheMaxEntries', String(normalized.maxEntries) ],
         [ 'cachePersistence', normalized.persistence ],
     ])
-    readDemCachePolicy(parameters)
+    readUnderwaterTerrainCachePolicy(parameters)
     return normalized
 }
 
-function panelConfigFromPolicy(policy: DemCachePolicy): UnderwaterTerrainCachePanelConfig {
+function panelConfigFromPolicy(
+    policy: UnderwaterTerrainCachePolicy
+): UnderwaterTerrainCachePanelConfig {
 
     if (policy.mode === 'none') return UNDERWATER_TERRAIN_CACHE_PANEL_DEFAULT_CONFIG
     return Object.freeze({

@@ -13,7 +13,7 @@ const CAMERA_TO_CENTER_DISTANCE = 0.5 / Math.tan(CAMERA_FOV / 2) * VIEWPORT.heig
 const CENTER = Object.freeze([ 120.980697, 31.684162 ])
 const TARGET = Object.freeze([ 120.980997, CENTER[1] ])
 
-describe('DEM camera stability', () => {
+describe('Geo planar view stability', () => {
 
     let viewAdapter
 
@@ -32,8 +32,8 @@ describe('DEM camera stability', () => {
             },
         }
         viewAdapter = mapLibrePlanarViewAdapter({
-            id: 'dem-maplibre-view-adapter',
-            viewId: 'dem-map-view',
+            id: 'camera-stability-maplibre-view-adapter',
+            viewId: 'camera-stability-map-view',
             mercatorCoordinateFromLngLat: globalThis.maplibregl.MercatorCoordinate.fromLngLat,
         })
     })
@@ -94,7 +94,7 @@ describe('DEM camera stability', () => {
 
         expect(view).to.deep.include({
             kind: 'geo-view-snapshot',
-            id: 'dem-map-view',
+            id: 'camera-stability-map-view',
             frameEpoch: 17,
             residencySnapshotEpoch: 9,
             zoomHint: ZOOM,

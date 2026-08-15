@@ -16,7 +16,7 @@ import {
     createDemVirtualRaster,
     fetchDemTileSource,
 } from './dem-source.ts'
-import { readDemCachePolicy } from './dem-cache-policy.ts'
+import { readUnderwaterTerrainCachePolicy } from './cache-policy.ts'
 import { prepareUnderwaterTerrainControlPanel } from './control-panel.ts'
 import terrainPresentationShader from './shaders/terrain-presentation.wgsl?raw'
 
@@ -42,7 +42,7 @@ const workerModuleManifestUrl = new URL(
     '../scratch-workers/manifest.json',
     window.location.href
 )
-const cachePolicy = readDemCachePolicy(parameters)
+const cachePolicy = readUnderwaterTerrainCachePolicy(parameters)
 const maxPhysicalPages = boundedIntegerParameter(parameters.get('atlasPages'), 64, 2, 64)
 let tileWireframeEnabled = preparedControlPanel.renderingPreference.tileWireframe
 let applyTerrainPresentation: ((enabled: boolean) => void) | undefined

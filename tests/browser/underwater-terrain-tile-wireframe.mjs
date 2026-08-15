@@ -21,7 +21,7 @@ const timeout = positiveInteger(
     process.env.UNDERWATER_TERRAIN_TILE_WIREFRAME_TIMEOUT_MS,
     120_000
 )
-const headless = process.env.GEO_VIRTUAL_RASTER_DEM_HEADLESS === '1'
+const headless = process.env.UNDERWATER_TERRAIN_HEADLESS === '1'
 const outputDirectory = resolve(
     process.env.UNDERWATER_TERRAIN_TILE_WIREFRAME_OUTPUT ??
         '/tmp/geoscratch-underwater-terrain-tile-wireframe'

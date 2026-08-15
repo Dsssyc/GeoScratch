@@ -1,5 +1,5 @@
 import { Pane } from 'tweakpane'
-import { DEM_CACHE_POLICY_LIMITS } from './dem-cache-policy.ts'
+import { UNDERWATER_TERRAIN_CACHE_LIMITS } from './cache-policy.ts'
 import {
     UNDERWATER_TERRAIN_CACHE_PANEL_STORAGE_KEY,
     UNDERWATER_TERRAIN_RENDERING_PREFERENCE_STORAGE_KEY,
@@ -157,14 +157,14 @@ function mountUnderwaterTerrainControlPanel(options: UnderwaterTerrainControlPan
     const namespace = advanced.addBinding(cacheDraft, 'namespace', { label: 'Namespace' })
     const maxMiB = advanced.addBinding(cacheDraft, 'maxMiB', {
         label: 'Maximum MiB',
-        min: DEM_CACHE_POLICY_LIMITS.minMiB,
-        max: DEM_CACHE_POLICY_LIMITS.maxMiB,
+        min: UNDERWATER_TERRAIN_CACHE_LIMITS.minMiB,
+        max: UNDERWATER_TERRAIN_CACHE_LIMITS.maxMiB,
         step: 1,
     })
     const maxEntries = advanced.addBinding(cacheDraft, 'maxEntries', {
         label: 'Maximum entries',
-        min: DEM_CACHE_POLICY_LIMITS.minEntries,
-        max: DEM_CACHE_POLICY_LIMITS.maxEntries,
+        min: UNDERWATER_TERRAIN_CACHE_LIMITS.minEntries,
+        max: UNDERWATER_TERRAIN_CACHE_LIMITS.maxEntries,
         step: 1,
     })
     const persistence = advanced.addBinding(cacheDraft, 'persistence', {

@@ -17,19 +17,23 @@ const workerBuildEntry = resolve(
 )
 const tileBuildEntry = resolve(tileServerRoot, '.venv/bin/dem-tile-build')
 const tileServeEntry = resolve(tileServerRoot, '.venv/bin/dem-tile-serve')
-const timeout = positiveInteger(process.env.GEO_VIRTUAL_RASTER_DEM_TIMEOUT_MS, 120_000)
-const headless = process.env.GEO_VIRTUAL_RASTER_DEM_HEADLESS === '1'
-const viteMode = process.env.GEO_VIRTUAL_RASTER_DEM_VITE_MODE === 'preview'
+const timeout = positiveInteger(
+    process.env.UNDERWATER_TERRAIN_STREAMING_TIMEOUT_MS,
+    120_000
+)
+const headless = process.env.UNDERWATER_TERRAIN_HEADLESS === '1'
+const viteMode = process.env.UNDERWATER_TERRAIN_STREAMING_VITE_MODE === 'preview'
     ? 'preview'
     : 'dev'
 const outputDirectory = resolve(
-    process.env.GEO_VIRTUAL_RASTER_DEM_OUTPUT ?? '/tmp/geoscratch-virtual-raster-dem'
+    process.env.UNDERWATER_TERRAIN_STREAMING_OUTPUT ??
+        '/tmp/geoscratch-underwater-terrain-streaming'
 )
 const vitePort = await findAvailablePort()
 const tilePort = await findAvailablePort()
 const baseUrl = `http://127.0.0.1:${vitePort}`
 const tileBaseUrl = `http://127.0.0.1:${tilePort}`
-const cacheNamespace = `geoscratch-dem-proof-${vitePort}-${Date.now()}`
+const cacheNamespace = `geoscratch-underwater-terrain-proof-${vitePort}-${Date.now()}`
 const operationalAtlasPages = 64
 const tightAtlasPages = 2
 const defaultCamera = Object.freeze({ center: [ 120.980697, 31.684162 ], zoom: 10 })

@@ -21,7 +21,7 @@ const timeout = positiveInteger(
     process.env.UNDERWATER_TERRAIN_CACHE_PANEL_TIMEOUT_MS,
     90_000
 )
-const headless = process.env.GEO_VIRTUAL_RASTER_DEM_HEADLESS === '1'
+const headless = process.env.UNDERWATER_TERRAIN_HEADLESS === '1'
 const outputDirectory = resolve(
     process.env.UNDERWATER_TERRAIN_CACHE_PANEL_OUTPUT ??
         '/tmp/geoscratch-underwater-terrain-cache-panel'

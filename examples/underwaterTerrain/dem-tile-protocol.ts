@@ -10,19 +10,7 @@ import { defineWorkerModuleContract } from 'geoscratch/scratch'
 import type {
     PersistentCacheDescriptor,
     PersistentCacheFacts,
-    PersistentCacheLifecycle,
 } from 'geoscratch/scratch'
-
-export type DemCachePolicy =
-    | Readonly<{ mode: 'none' }>
-    | Readonly<{
-        mode: 'persistent'
-        namespace: string
-        maxPayloadBytes: number
-        maxEntries: number
-        requestPersistence: boolean
-        lifecycle: PersistentCacheLifecycle
-    }>
 
 type DemTileCacheConfiguration =
     | Readonly<{ mode: 'none' }>

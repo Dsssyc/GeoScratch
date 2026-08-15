@@ -20,8 +20,8 @@ import {
     fetchDemTileSource,
 } from '../examples/underwaterTerrain/dem-source.ts'
 import {
-    readDemCachePolicy,
-} from '../examples/underwaterTerrain/dem-cache-policy.ts'
+    readUnderwaterTerrainCachePolicy,
+} from '../examples/underwaterTerrain/cache-policy.ts'
 import {
     UNDERWATER_TERRAIN_CACHE_PANEL_DEFAULT_CONFIG,
     UNDERWATER_TERRAIN_CACHE_PANEL_STORAGE_KEY,
@@ -51,7 +51,9 @@ describe('DEM WebMercator virtual raster', () => {
             expect(resolved.storageStatus).to.equal('missing')
             expect(resolved.config).to.deep.equal(UNDERWATER_TERRAIN_CACHE_PANEL_DEFAULT_CONFIG)
             expect(resolved.parameters.toString()).to.equal('')
-            expect(readDemCachePolicy(resolved.parameters)).to.deep.equal({ mode: 'none' })
+            expect(readUnderwaterTerrainCachePolicy(resolved.parameters)).to.deep.equal({
+                mode: 'none',
+            })
         })
 
         it('restores a complete versioned preference for a bare URL', () => {
@@ -83,7 +85,7 @@ describe('DEM WebMercator virtual raster', () => {
             expect(resolved.config.policy).to.equal('durable')
             expect(resolved.parameters.get('tileServer')).to.equal('http://localhost:8787')
             expect(resolved.parameters.get('atlasPages')).to.equal('32')
-            expect(readDemCachePolicy(resolved.parameters)).to.deep.equal({
+            expect(readUnderwaterTerrainCachePolicy(resolved.parameters)).to.deep.equal({
                 mode: 'persistent',
                 namespace: 'editable-dem',
                 maxPayloadBytes: 512 * 1024 * 1024,
@@ -115,7 +117,7 @@ describe('DEM WebMercator virtual raster', () => {
             expect(() => resolveUnderwaterTerrainCachePanelConfig(
                 new URLSearchParams('cache=none&cache=none'),
                 stored
-            )).to.throw('Duplicate DEM cache option: cache')
+            )).to.throw('Duplicate Underwater Terrain cache option: cache')
         })
 
         it('maps every panel policy into the existing strict query contract', () => {
@@ -141,7 +143,7 @@ describe('DEM WebMercator virtual raster', () => {
                     { ...UNDERWATER_TERRAIN_CACHE_PANEL_DEFAULT_CONFIG, policy }
                 )
                 expect(parameters.get('proof')).to.equal('1')
-                expect(readDemCachePolicy(parameters)).to.deep.include(facts)
+                expect(readUnderwaterTerrainCachePolicy(parameters)).to.deep.include(facts)
                 if (policy === 'disabled') {
                     expect(parameters.toString()).to.equal('proof=1&cache=none')
                 } else {
@@ -304,8 +306,12 @@ describe('DEM WebMercator virtual raster', () => {
 
     it('keeps DEM disk caching explicit and application configurable', () => {
 
-        expect(readDemCachePolicy(new URLSearchParams())).to.deep.equal({ mode: 'none' })
-        expect(readDemCachePolicy(new URLSearchParams('cache=persistent'))).to.deep.equal({
+        expect(readUnderwaterTerrainCachePolicy(new URLSearchParams())).to.deep.equal({
+            mode: 'none',
+        })
+        expect(readUnderwaterTerrainCachePolicy(
+            new URLSearchParams('cache=persistent')
+        )).to.deep.equal({
             mode: 'persistent',
             namespace: 'geoscratch-dem-webmercator-raw-v2',
             maxPayloadBytes: 128 * 1024 * 1024,
@@ -313,7 +319,7 @@ describe('DEM WebMercator virtual raster', () => {
             requestPersistence: false,
             lifecycle: { kind: 'session' },
         })
-        expect(readDemCachePolicy(new URLSearchParams([
+        expect(readUnderwaterTerrainCachePolicy(new URLSearchParams([
             [ 'cache', 'persistent' ],
             [ 'cacheNamespace', 'editable-dem' ],
             [ 'cacheLifecycle', 'durable-reuse' ],
@@ -328,7 +334,7 @@ describe('DEM WebMercator virtual raster', () => {
             requestPersistence: true,
             lifecycle: { kind: 'durable', open: 'reuse' },
         })
-        expect(readDemCachePolicy(new URLSearchParams(
+        expect(readUnderwaterTerrainCachePolicy(new URLSearchParams(
             'cache=persistent&cacheLifecycle=durable-clear-before-open'
         )).lifecycle).to.deep.equal({ kind: 'durable', open: 'clear-before-open' })
     })
@@ -344,7 +350,7 @@ describe('DEM WebMercator virtual raster', () => {
             'cache=persistent&cacheUnknown=1',
             'cache=persistent&cacheLifecycle=session&cacheLifecycle=session',
         ]) {
-            expect(() => readDemCachePolicy(new URLSearchParams(query))).to.throw()
+            expect(() => readUnderwaterTerrainCachePolicy(new URLSearchParams(query))).to.throw()
         }
     })
 

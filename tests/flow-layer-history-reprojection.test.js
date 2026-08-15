@@ -24,7 +24,7 @@ const methodBody = (source, name) => {
     return ''
 }
 
-describe('DEM flow history reprojection', () => {
+describe('Flow Layer history reprojection', () => {
 
     it('records the history reprojection decision as a new ADR', () => {
 

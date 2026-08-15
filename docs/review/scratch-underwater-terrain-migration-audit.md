@@ -135,7 +135,7 @@ Observed facts:
 - producerEpochs identify the exact UploadCommand and step;
 - no map, readback, raw queue, or resolver closure occurs.
 
-The gate is `tests/scratch-dem-dynamic-count-capability.test.js` and commit `5515b31`.
+The gate is `tests/scratch-dynamic-indirect-count.test.js` and commit `5515b31`.
 No file under `packages/geoscratch/src/scratch/` changed for DEM.
 
 ## Historical CPU-Migration Persistent Graph Inventory

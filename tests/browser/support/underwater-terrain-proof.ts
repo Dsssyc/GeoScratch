@@ -16,10 +16,12 @@ import type {
 import type { UnderwaterTerrainMap } from '../../../examples/underwaterTerrain/map.ts'
 import type { DemTileSourceFacts } from '../../../examples/underwaterTerrain/dem-source.ts'
 import type {
-    DemCachePolicy,
     DemTileCacheFacts,
     DemTileWorkerFacts,
 } from '../../../examples/underwaterTerrain/dem-tile-protocol.ts'
+import type {
+    UnderwaterTerrainCachePolicy,
+} from '../../../examples/underwaterTerrain/cache-policy.ts'
 
 type UnderwaterTerrainPresentation = 'shaded' | 'tile-wireframe'
 type UnderwaterTerrain = WebMercatorTerrainRenderer<
@@ -52,7 +54,7 @@ type ProofConfiguration = Readonly<{
     lifetime: LifetimeScope
     scenario?: string
     tileServerUrl: string
-    cachePolicy: DemCachePolicy
+    cachePolicy: UnderwaterTerrainCachePolicy
     maxPhysicalPages: number
     controlPanel: Readonly<{
         source: 'url' | 'storage' | 'default'
@@ -344,7 +346,7 @@ function publishFrameFacts({
     latestCamera?: MapLibrePlanarCameraState
     frameController: GeoFrameController
     virtualRasterFacts(): DemVirtualRasterFacts
-    cachePolicy: DemCachePolicy
+    cachePolicy: UnderwaterTerrainCachePolicy
 }) {
 
     const state = graph.state()
@@ -444,7 +446,7 @@ function publishFrameFacts({
 
 function demVirtualRasterProofFacts(
     facts: DemVirtualRasterFacts,
-    policy: DemCachePolicy
+    policy: UnderwaterTerrainCachePolicy
 ) {
 
     const workers = facts.worker.workers
@@ -550,7 +552,7 @@ function finalizeFailureProof({
     })
 }
 
-function cacheLifecycleLabel(policy: DemCachePolicy): string {
+function cacheLifecycleLabel(policy: UnderwaterTerrainCachePolicy): string {
 
     if (policy.mode === 'none') return 'none'
     return policy.lifecycle.kind === 'session'

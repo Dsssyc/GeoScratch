@@ -20,6 +20,8 @@ Scratch is domain-neutral and must not depend on Geo, examples, maps, tiles, DEM
 
 The active terrain example is `examples/underwaterTerrain/`, titled `Underwater Terrain`.
 Use that name for its route, page, controls, runtime labels, tests, and current documentation.
+Application-owned cache controls and full-example browser proofs also use the
+`Underwater Terrain` identity.
 Reserve `DEM` names inside the example for facts that specifically describe the elevation
 raster, tile payload, source protocol, or cache identity. Historical `m_demLayer` references
 may remain only when they identify the removed legacy source.

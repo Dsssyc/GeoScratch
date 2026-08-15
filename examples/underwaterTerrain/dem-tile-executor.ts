@@ -12,8 +12,8 @@ import {
     workerRemoteErrorCode,
 } from 'geoscratch/scratch'
 import type { WorkerModuleResolver } from 'geoscratch/scratch'
+import type { UnderwaterTerrainCachePolicy } from './cache-policy.ts'
 import type {
-    DemCachePolicy,
     DemTileCandidateDescriptor,
     DemTileWorkerFacts,
     DemTileWorkerInit,
@@ -30,7 +30,7 @@ type DemWorkerTileSourceDescriptor = Readonly<{
     decoderVersion: string
     sampleType: 'uint8'
     cacheSchemaVersion: number
-    cachePolicy: DemCachePolicy
+    cachePolicy: UnderwaterTerrainCachePolicy
     workerModules: WorkerModuleResolver
     workerCount?: number
     maxNetworkRequests?: number
@@ -143,7 +143,7 @@ function createCandidate(
 }
 
 export function demCacheConfigurationForShard(
-    policy: DemCachePolicy,
+    policy: UnderwaterTerrainCachePolicy,
     shard: number,
     count: number
 ): DemTileWorkerInit['cache'] {

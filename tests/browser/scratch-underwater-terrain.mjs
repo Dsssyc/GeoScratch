@@ -21,7 +21,7 @@ const timeout = positiveInteger(
     process.env.UNDERWATER_TERRAIN_BROWSER_TIMEOUT_MS,
     120_000
 )
-const headless = process.env.GEO_VIRTUAL_RASTER_DEM_HEADLESS === '1'
+const headless = process.env.UNDERWATER_TERRAIN_HEADLESS === '1'
 const outputDirectory = resolve(
     process.env.UNDERWATER_TERRAIN_BROWSER_OUTPUT ?? '/tmp/geoscratch-underwater-terrain-browser'
 )

@@ -39,7 +39,7 @@ function dynamicCountFacts(submitted, resources) {
         }))
 }
 
-describe('scratch DEM CPU-dynamic count capability', () => {
+describe('scratch CPU-dynamic indirect count capability', () => {
 
     it('reuses stable uploads and indirect draws while payloads advance across submissions', async() => {
 
@@ -68,29 +68,29 @@ describe('scratch DEM CPU-dynamic count capability', () => {
             } ],
         })
         const lodArguments = await runtime.createBuffer({
-            label: 'DEM LoD indirect arguments',
+            label: 'LoD indirect arguments',
             size: 16,
             usage: GPU_BUFFER_USAGE_COPY_DST | GPU_BUFFER_USAGE_INDIRECT,
         })
         const terrainArguments = await runtime.createBuffer({
-            label: 'DEM terrain indirect arguments',
+            label: 'terrain indirect arguments',
             size: 16,
             usage: GPU_BUFFER_USAGE_COPY_DST | GPU_BUFFER_USAGE_INDIRECT,
         })
         const lodPayload = new Uint32Array([ 4, 2, 0, 0 ])
         const terrainPayload = new Uint32Array([ 384, 2, 0, 0 ])
         const uploadLodArguments = runtime.createUploadCommand({
-            label: 'upload DEM LoD indirect arguments',
+            label: 'upload LoD indirect arguments',
             target: lodArguments.region(),
             data: lodPayload,
         })
         const uploadTerrainArguments = runtime.createUploadCommand({
-            label: 'upload DEM terrain indirect arguments',
+            label: 'upload terrain indirect arguments',
             target: terrainArguments.region(),
             data: terrainPayload,
         })
         const drawLod = runtime.createDrawCommand({
-            label: 'draw DEM LoD map',
+            label: 'draw LoD map',
             pipeline,
             count: { indirect: lodArguments.region() },
             resources: {
@@ -100,7 +100,7 @@ describe('scratch DEM CPU-dynamic count capability', () => {
             whenMissing: 'throw',
         })
         const drawTerrain = runtime.createDrawCommand({
-            label: 'draw DEM terrain',
+            label: 'draw terrain',
             pipeline,
             count: { indirect: terrainArguments.region() },
             resources: {

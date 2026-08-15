@@ -340,13 +340,25 @@ describe('Underwater Terrain clean cut', () => {
         expect(mapSource).not.to.match(/\bcenter(?:High|Low)\b|\bcameraPos\b/)
     })
 
-    it('separates DEM cache policy, pure control state, and browser panel ownership', () => {
+    it('separates application cache policy, pure control state, and browser panel ownership', () => {
 
-        const policy = read('examples', 'underwaterTerrain', 'dem-cache-policy.ts')
+        const policy = read('examples', 'underwaterTerrain', 'cache-policy.ts')
         const state = read('examples', 'underwaterTerrain', 'control-state.ts')
         const panel = read('examples', 'underwaterTerrain', 'control-panel.ts')
         const main = read('examples', 'underwaterTerrain', 'main.ts')
 
+        expect(fs.existsSync(path.join(
+            root,
+            'examples',
+            'underwaterTerrain',
+            'cache-policy.ts'
+        ))).to.equal(true)
+        expect(fs.existsSync(path.join(
+            root,
+            'examples',
+            'underwaterTerrain',
+            'dem-cache-policy.ts'
+        ))).to.equal(false)
         expect(fs.existsSync(path.join(
             root,
             'examples',
@@ -356,11 +368,30 @@ describe('Underwater Terrain clean cut', () => {
         expect(policy).not.to.match(/tweakpane|\b(?:window|document|Storage|HTMLElement|Location)\b/)
         expect(state).not.to.match(/tweakpane|\b(?:window|document|Storage|HTMLElement|Location)\b/)
         expect(panel).to.include("from 'tweakpane'")
-        expect(panel).to.include("from './dem-cache-policy.ts'")
+        expect(panel).to.include("from './cache-policy.ts'")
         expect(panel).to.include("from './control-state.ts'")
-        expect(main).to.include("from './dem-cache-policy.ts'")
+        expect(main).to.include("from './cache-policy.ts'")
         expect(main).to.include("from './control-panel.ts'")
         expect(main).not.to.include("from './dem-controls.ts'")
+    })
+
+    it('keeps active browser proofs under the Underwater Terrain identity', () => {
+
+        const browserProofs = [
+            'scratch-underwater-terrain.mjs',
+            'underwater-terrain-cache-panel.mjs',
+            'underwater-terrain-streaming.mjs',
+            'underwater-terrain-tile-wireframe.mjs',
+        ]
+        for (const proof of browserProofs) {
+            expect(read('tests', 'browser', proof)).not.to.include('GEO_VIRTUAL_RASTER_DEM')
+        }
+        expect(fs.existsSync(path.join(
+            root,
+            'tests',
+            'browser',
+            'geo-virtual-raster-dem.mjs'
+        ))).to.equal(false)
     })
 
     it('partitions the application cache budget exactly across Worker shards', () => {

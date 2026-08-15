@@ -54,7 +54,7 @@ Implemented for `examples/m_flowLayer` on 2026-06-15.
 - Camera movement clears screen-space history while keeping simulation and current flow rendering active, then restarts particles after movement settles.
 - Follow-up hardening guards zero `maxSpeed` normalization and clamps velocity color-ramp indices, without changing the retained-history rendering model.
 
-Verification is covered by `tests/dem-flow-cleanup.test.js`, `npm test`, `npm run build`, and WebGPU browser screenshots of `examples/m_flowLayer`.
+Verification is covered by `tests/flow-layer-cleanup.test.js`, `npm test`, `npm run build`, and WebGPU browser screenshots of `examples/m_flowLayer`.
 
 ## Non-Goals
 

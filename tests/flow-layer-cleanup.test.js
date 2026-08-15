@@ -24,7 +24,7 @@ const methodBody = (source, name) => {
     return ''
 }
 
-describe('DEM flow layer cleanup', () => {
+describe('Flow Layer cleanup', () => {
 
     it('makes trail history decay and cutoff configurable in the swap shader', () => {
 
