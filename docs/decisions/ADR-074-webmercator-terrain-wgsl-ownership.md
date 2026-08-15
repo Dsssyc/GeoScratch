@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted
+Accepted. ADR-076 supersedes the patch-level `samplingLevel` contract; Virtual Raster
+now resolves availability per logical coordinate while this ADR's Geo-owned WGSL
+boundary remains current.
 
 ## Date
 
@@ -29,7 +31,7 @@ Geo owns a complete generated module, `webMercatorTerrainWgslModule`, and the hi
 
 - wide-fixed logical position construction and camera-relative projection;
 - bounded render-patch lookup, covering-patch and neighbor queries;
-- mixed-LoD shared-edge snapping and sampling-level reconciliation;
+- mixed-LoD shared-edge snapping and logical-coordinate sampling;
 - logical Virtual Raster height sampling;
 - terrain vertex outputs and a built-in tile-wireframe diagnostic fragment.
 
@@ -52,8 +54,8 @@ There is no compatibility alias. The Web Mercator API uses
   composition rather than a hidden terrain engine.
 - Web Mercator terrain consumers share one precision, stitching, and Virtual Raster
   sampling implementation.
-- Raster LoD and render-patch LoD remain independent and explicit through
-  `samplingLevel`.
+- Raster LoD and render-patch LoD remain independent: render patches own only geometry
+  identity, while Virtual Raster resolves each logical coordinate to available data.
 - Globe, dual-quadtree, and non-Web-Mercator renderers must define their own spatial
   contract instead of inheriting an inaccurate alias.
 - Public API reference and bilingual current API documentation must describe the

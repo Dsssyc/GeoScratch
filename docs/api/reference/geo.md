@@ -2,7 +2,7 @@
 
 # geoscratch/geo API Reference
 
-Public symbols: 299.
+Public symbols: 300.
 
 ## `packages/geoscratch/src/geo/coordinate-domain.ts`
 
@@ -474,16 +474,6 @@ Default screen-space cell span that triggers geometry refinement.
 const GPU_RENDER_PATCH_DEFAULT_MAXIMUM_CELL_SPAN_PIXELS: 8
 ```
 
-### `GPU_RENDER_PATCH_MAXIMUM_EXTRA_LEVELS`
-
-Kind: `Variable`.
-
-Maximum geometry-only refinement levels beyond available raster detail.
-
-```ts
-const GPU_RENDER_PATCH_MAXIMUM_EXTRA_LEVELS: 4
-```
-
 ### `GPU_RENDER_PATCH_MAXIMUM_MATRIX_LEVEL`
 
 Kind: `Variable`.
@@ -543,7 +533,7 @@ type GpuRenderPatchFrontier = Readonly<{ id: string; capture: any; commandsFor: 
 Kind: `Type Alias`.
 
 ```ts
-type GpuRenderPatchFrontierDescriptor = Readonly<{ budgetHysteresisRatio?: number; cellsPerPatchEdge?: number; coordinateBits: number; dataMaximumMatrixLevel: number; elevationRangeMeters: readonly [number, number]; maximumCellSpanPixels?: number; maximumExtraLevels?: number; maximumPatchCountRatio?: number; maximumSourceTiles: number; renderMaximumMatrixLevel?: number; sourceTemplates: readonly [GpuTileFrontierRenderTemplate, GpuTileFrontierRenderTemplate]; vertexCount: number }>
+type GpuRenderPatchFrontierDescriptor = Readonly<{ budgetHysteresisRatio?: number; cellsPerPatchEdge?: number; coordinateBits: number; elevationRangeMeters: readonly [number, number]; maximumCellSpanPixels?: number; maximumPatchCountRatio?: number; maximumRenderPatches: number; renderMaximumMatrixLevel?: number; renderRoots: readonly GpuRenderPatchRootDescriptor[]; vertexCount: number; viewTemplates: readonly [GpuRenderPatchViewTemplate, GpuRenderPatchViewTemplate] }>
 ```
 
 ### `GpuRenderPatchFrontierFacts`
@@ -551,7 +541,7 @@ type GpuRenderPatchFrontierDescriptor = Readonly<{ budgetHysteresisRatio?: numbe
 Kind: `Type Alias`.
 
 ```ts
-type GpuRenderPatchFrontierFacts = Readonly<{ balancePassCount: number; balanceWorkgroupSize: number; biasStepCount: number; biasStepsPerLevel: number; budgetHysteresisRatio: number; cellsPerPatchEdge: number; dataMaximumMatrixLevel: number; disposed: boolean; drawArgumentBytes: number; id: string; maximumCellSpanPixels: number; maximumExtraLevels: number; maximumMatrixLevel: number; maximumPatchCountRatio: number; maximumRenderPatches: number; maximumSourceTiles: number; nominalPatchSpanPixels: number; parity: readonly Readonly<{ balancePatchBufferId: string; balancePatchLookupBufferId: string; commandIds: readonly string[]; drawArgumentBufferId: string; parity: 0 | 1; renderPatchBufferId: string; renderPatchLookupBufferId: string; sourceBufferId: string; stateBufferId: string }>[]; renderPatchBytes: number; renderPatchLookupBytes: number; renderPatchLookupCapacity: number; selectionPath: "gpu-balanced-normalized-projected-grid-render-patches"; workgroupSize: number }>
+type GpuRenderPatchFrontierFacts = Readonly<{ balancePassCount: number; balanceWorkgroupSize: number; biasStepCount: number; biasStepsPerLevel: number; budgetHysteresisRatio: number; cellsPerPatchEdge: number; disposed: boolean; drawArgumentBytes: number; id: string; maximumCellSpanPixels: number; maximumMatrixLevel: number; maximumPatchCountRatio: number; maximumRenderPatches: number; maximumRootMatrixLevel: number; minimumRootMatrixLevel: number; nominalPatchSpanPixels: number; parity: readonly Readonly<{ balancePatchBufferId: string; balancePatchLookupBufferId: string; commandIds: readonly string[]; drawArgumentBufferId: string; mapMetaBufferId: string; parity: 0 | 1; renderPatchBufferId: string; renderPatchLookupBufferId: string; renderRootBufferId: string; stateBufferId: string }>[]; renderPatchBytes: number; renderPatchLookupBytes: number; renderPatchLookupCapacity: number; renderRootCount: number; selectionPath: "gpu-balanced-render-root-local-cell-projection"; workgroupSize: number }>
 ```
 
 ### `GpuRenderPatchIdentityObjects`
@@ -600,12 +590,32 @@ Kind: `Type Alias`.
 type GpuRenderPatchRenderTemplate = Readonly<{ drawArgument: Readonly<{ offset: number; region: BufferRegion; resource: BufferResource; size: 16 }>; frontierId: string; mapMeta: BufferResource; parity: 0 | 1; renderPatchLookup: BufferResource; templateId: "patch-mesh"; visibleInstances: BufferResource }>
 ```
 
+### `GpuRenderPatchRootDescriptor`
+
+Kind: `Type Alias`.
+
+Identifies one immutable, prefix-free tile root for GPU geometry traversal.
+
+```ts
+type GpuRenderPatchRootDescriptor = Readonly<{ matrixLevel: number; tileCol: number; tileRow: number }>
+```
+
 ### `GpuRenderPatchSelectionFacts`
 
 Kind: `Type Alias`.
 
 ```ts
-type GpuRenderPatchSelectionFacts = Readonly<{ balanceOverheadPatchCount: number; balancePassCount: number; balanceSplitCount: number; baselinePatchBudget: number; budgetLimitedByMinimumTrial: boolean; descriptorOverflowCount: number; frameEpoch: number; framePatchBudget: number; lookupOverflowCount: number; maximumAdjacentLevelDelta: number; maximumCellSpanPixels?: number; maximumMatrixLevel?: number; minimumCellSpanPixels?: number; minimumMatrixLevel?: number; minimumTrialPatchCount: number; requestedPatchCount: number; selectedBiasLevels: number; selectedBiasStep: number; selectedPatchCount: number; sourceRootPatchCount: number; unbalancedPatchCount: number }>
+type GpuRenderPatchSelectionFacts = Readonly<{ balanceOverheadPatchCount: number; balancePassCount: number; balanceSplitCount: number; baselinePatchBudget: number; budgetLimitedByMinimumTrial: boolean; descriptorOverflowCount: number; frameEpoch: number; framePatchBudget: number; lookupOverflowCount: number; maximumAdjacentLevelDelta: number; maximumCellSpanPixels?: number; maximumMatrixLevel?: number; minimumCellSpanPixels?: number; minimumMatrixLevel?: number; minimumTrialPatchCount: number; renderRootPatchCount: number; requestedPatchCount: number; selectedBiasLevels: number; selectedBiasStep: number; selectedPatchCount: number; unbalancedPatchCount: number }>
+```
+
+### `GpuRenderPatchViewTemplate`
+
+Kind: `Type Alias`.
+
+Supplies frame parity and current map-view metadata without coupling geometry to data tiles.
+
+```ts
+type GpuRenderPatchViewTemplate = Readonly<{ frontierId: string; mapMeta: BufferResource; parity: 0 | 1 }>
 ```
 
 ### `gpuRenderPatchWgslModule`
@@ -3022,7 +3032,7 @@ type WebMercatorTerrainRendererDescriptor<ViewInput, Presentation extends string
 Kind: `Type Alias`.
 
 ```ts
-type WebMercatorTerrainRendererState<Presentation extends string = string> = Readonly<{ budgetLimitedCount: number; convergenceState: GpuTileFrontierFacts["convergenceState"]; demandCount: number; disposed: boolean; fallbackCount: number; feedback: VirtualRasterGpuFeedbackRingFacts; frame: number; frontierCount: number; frontierFacts?: GpuTileFrontierFacts; initialized: boolean; lastResizeFacts?: WebMercatorTerrainResizeFacts; latestFeedbackDiagnostics: readonly unknown[]; levelRange: readonly [number | undefined, number | undefined]; maximumObservedSse: number; readbackInFlightCount: number; renderPatchBaselineBudget: number; renderPatchBudgetLimitedByMinimumTrial: boolean; renderPatchCellSpanRange: readonly [number | undefined, number | undefined]; renderPatchCount: number; renderPatchDescriptorOverflowCount: number; renderPatchFeedback?: GpuRenderPatchFeedback; renderPatchFrameBudget: number; renderPatchFrameEpoch?: number; renderPatchLevelRange: readonly [number | undefined, number | undefined]; renderPatchLookupOverflowCount: number; renderPatchMinimumTrialCount: number; renderPatchRequestedCount: number; renderPatchSelectedBiasLevels: number; renderPatchSourceRootCount: number; resizeGeneration: number; size: SurfaceSize; staleBindSetPreparationCount: number; staleFeedbackCount: number; staleGenerationCount: number; supersededFeedbackCount: number; terrainPresentation: Presentation; virtualRequestedPageCount: number; virtualSnapshotEpoch: number; visibleNodeCount: number }>
+type WebMercatorTerrainRendererState<Presentation extends string = string> = Readonly<{ budgetLimitedCount: number; convergenceState: GpuTileFrontierFacts["convergenceState"]; demandCount: number; disposed: boolean; fallbackCount: number; feedback: VirtualRasterGpuFeedbackRingFacts; frame: number; frontierCount: number; frontierFacts?: GpuTileFrontierFacts; initialized: boolean; lastResizeFacts?: WebMercatorTerrainResizeFacts; latestFeedbackDiagnostics: readonly unknown[]; levelRange: readonly [number | undefined, number | undefined]; maximumObservedSse: number; readbackInFlightCount: number; renderPatchBaselineBudget: number; renderPatchBudgetLimitedByMinimumTrial: boolean; renderPatchCellSpanRange: readonly [number | undefined, number | undefined]; renderPatchCount: number; renderPatchDescriptorOverflowCount: number; renderPatchFeedback?: GpuRenderPatchFeedback; renderPatchFrameBudget: number; renderPatchFrameEpoch?: number; renderPatchLevelRange: readonly [number | undefined, number | undefined]; renderPatchLookupOverflowCount: number; renderPatchMinimumTrialCount: number; renderPatchRenderRootCount: number; renderPatchRequestedCount: number; renderPatchSelectedBiasLevels: number; resizeGeneration: number; size: SurfaceSize; staleBindSetPreparationCount: number; staleFeedbackCount: number; staleGenerationCount: number; supersededFeedbackCount: number; terrainPresentation: Presentation; virtualRequestedPageCount: number; virtualSnapshotEpoch: number; visibleNodeCount: number }>
 ```
 
 ### `WebMercatorTerrainResizeFacts`

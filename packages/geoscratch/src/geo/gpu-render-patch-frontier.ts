@@ -21,10 +21,7 @@ import {
 import {
     gpuTileFrontierRenderWgslModule,
 } from './gpu-tile-frontier-layout.js'
-import type {
-    GpuTileFrontierFrame,
-    GpuTileFrontierRenderTemplate,
-} from './gpu-tile-frontier.js'
+import type { GpuTileFrontierFrame } from './gpu-tile-frontier.js'
 import {
     createGeoDiagnostic,
     GeoDiagnosticError,
@@ -33,8 +30,6 @@ import { GPU_RENDER_PATCH_FRONTIER_WGSL } from './gpu-render-patch-frontier-wgsl
 
 /** Highest matrix level representable by the current compact render-patch key. */
 export const GPU_RENDER_PATCH_MAXIMUM_MATRIX_LEVEL = 14
-/** Maximum geometry-only refinement levels beyond available raster detail. */
-export const GPU_RENDER_PATCH_MAXIMUM_EXTRA_LEVELS = 4
 /** Default terrain grid resolution along each render-patch edge. */
 export const GPU_RENDER_PATCH_DEFAULT_CELLS_PER_EDGE = 64
 /** Default screen-space cell span that triggers geometry refinement. */
@@ -42,9 +37,10 @@ export const GPU_RENDER_PATCH_DEFAULT_MAXIMUM_CELL_SPAN_PIXELS = 8
 /** Bounded pass count used to enforce adjacent render-patch level balance. */
 export const GPU_RENDER_PATCH_BALANCE_PASS_COUNT = GPU_RENDER_PATCH_MAXIMUM_MATRIX_LEVEL
 const GPU_RENDER_PATCH_DEFAULT_MAXIMUM_COUNT_RATIO = 3
+const GPU_RENDER_PATCH_BUDGET_BIAS_LEVELS = 4
 const GPU_RENDER_PATCH_BIAS_STEPS_PER_LEVEL = 4
 const GPU_RENDER_PATCH_BIAS_STEP_COUNT =
-    GPU_RENDER_PATCH_MAXIMUM_EXTRA_LEVELS * GPU_RENDER_PATCH_BIAS_STEPS_PER_LEVEL + 1
+    GPU_RENDER_PATCH_BUDGET_BIAS_LEVELS * GPU_RENDER_PATCH_BIAS_STEPS_PER_LEVEL + 1
 const GPU_RENDER_PATCH_DEFAULT_BUDGET_HYSTERESIS_RATIO = 0.75
 
 const WORKGROUP_SIZE = 64
@@ -76,11 +72,6 @@ const renderPatchCodec = layoutCodec({
         { name: 'matrixLevel', type: 'u32' },
         { name: 'tileRow', type: 'u32' },
         { name: 'tileCol', type: 'u32' },
-        { name: 'samplingLevel', type: 'u32' },
-        { name: 'sourceMatrixLevel', type: 'u32' },
-        { name: 'sourceTileRow', type: 'u32' },
-        { name: 'sourceTileCol', type: 'u32' },
-        { name: 'sourceCompactIndex', type: 'u32' },
     ],
 }, { usage: [ 'storage', 'readback' ] })
 
@@ -97,9 +88,8 @@ const LOOKUP_ENTRY_BYTES = renderPatchLookupEntryCodec.byteLength()
 const renderPatchPolicyCodec = layoutCodec({
     name: 'GpuRenderPatchPolicy',
     fields: [
-        { name: 'dataMaximumMatrixLevel', type: 'u32' },
         { name: 'renderMaximumMatrixLevel', type: 'u32' },
-        { name: 'maximumExtraLevels', type: 'u32' },
+        { name: 'renderRootCount', type: 'u32' },
         { name: 'maximumRenderPatches', type: 'u32' },
         { name: 'minimumElevationMeters', type: 'f32' },
         { name: 'maximumElevationMeters', type: 'f32' },
@@ -134,9 +124,16 @@ export type GpuRenderPatchRenderTemplate = Readonly<{
     }>
 }>
 
+/** Supplies frame parity and current map-view metadata without coupling geometry to data tiles. */
+export type GpuRenderPatchViewTemplate = Readonly<{
+    frontierId: string
+    parity: 0 | 1
+    mapMeta: BufferResource
+}>
+
 type ParityResources = Readonly<{
     parity: 0 | 1
-    source: GpuTileFrontierRenderTemplate
+    view: GpuRenderPatchViewTemplate
     renderPatches: BufferResource
     renderPatchLookup: BufferResource
     balancePatches: BufferResource
@@ -160,12 +157,12 @@ export type GpuRenderPatchCommands = Readonly<{
 
 export type GpuRenderPatchFrontierFacts = Readonly<{
     id: string
-    selectionPath: 'gpu-balanced-normalized-projected-grid-render-patches'
+    selectionPath: 'gpu-balanced-render-root-local-cell-projection'
     disposed: boolean
-    dataMaximumMatrixLevel: number
     maximumMatrixLevel: number
-    maximumExtraLevels: number
-    maximumSourceTiles: number
+    renderRootCount: number
+    minimumRootMatrixLevel: number
+    maximumRootMatrixLevel: number
     maximumRenderPatches: number
     maximumCellSpanPixels: number
     maximumPatchCountRatio: number
@@ -183,7 +180,8 @@ export type GpuRenderPatchFrontierFacts = Readonly<{
     workgroupSize: number
     parity: readonly Readonly<{
         parity: 0 | 1
-        sourceBufferId: string
+        mapMetaBufferId: string
+        renderRootBufferId: string
         renderPatchBufferId: string
         renderPatchLookupBufferId: string
         balancePatchBufferId: string
@@ -218,7 +216,7 @@ export type GpuRenderPatchSelectionFacts = Readonly<{
     framePatchBudget: number
     requestedPatchCount: number
     minimumTrialPatchCount: number
-    sourceRootPatchCount: number
+    renderRootPatchCount: number
     selectedBiasStep: number
     selectedBiasLevels: number
     budgetLimitedByMinimumTrial: boolean
@@ -292,14 +290,13 @@ export type GpuRenderPatchFrontier = Readonly<{
 }>
 
 export type GpuRenderPatchFrontierDescriptor = Readonly<{
-    sourceTemplates: readonly [
-        GpuTileFrontierRenderTemplate,
-        GpuTileFrontierRenderTemplate,
+    viewTemplates: readonly [
+        GpuRenderPatchViewTemplate,
+        GpuRenderPatchViewTemplate,
     ]
-    maximumSourceTiles: number
-    dataMaximumMatrixLevel: number
+    renderRoots: readonly GpuRenderPatchRootDescriptor[]
+    maximumRenderPatches: number
     renderMaximumMatrixLevel?: number
-    maximumExtraLevels?: number
     coordinateBits: number
     elevationRangeMeters: readonly [number, number]
     vertexCount: number
@@ -307,6 +304,13 @@ export type GpuRenderPatchFrontierDescriptor = Readonly<{
     maximumCellSpanPixels?: number
     maximumPatchCountRatio?: number
     budgetHysteresisRatio?: number
+}>
+
+/** Identifies one immutable, prefix-free tile root for GPU geometry traversal. */
+export type GpuRenderPatchRootDescriptor = Readonly<{
+    matrixLevel: number
+    tileRow: number
+    tileCol: number
 }>
 
 let nextRenderPatchFrontierId = 1
@@ -357,7 +361,7 @@ export function decodeGpuRenderPatchState(
     )
     const balancePassCount = word(STATE_BALANCE_PASS_COUNT_OFFSET_WORDS)
     const balanceScratchCount = word(STATE_BALANCE_SCRATCH_COUNT_OFFSET_WORDS)
-    const sourceRootPatchCount = trialCounts.at(-1)!
+    const renderRootPatchCount = trialCounts.at(-1)!
     const observedMinimumTrialPatchCount = Math.min(...trialCounts)
     const minimumTrialBiasStep = trialCounts.indexOf(observedMinimumTrialPatchCount)
     if (options.expectedFrameEpoch !== undefined && frameEpoch !== options.expectedFrameEpoch) {
@@ -398,7 +402,7 @@ export function decodeGpuRenderPatchState(
             requestedPatchCount,
             selectedBiasStep,
             minimumTrialPatchCount,
-            sourceRootPatchCount,
+            renderRootPatchCount,
             trialCounts,
         })}`)
     }
@@ -407,7 +411,7 @@ export function decodeGpuRenderPatchState(
         framePatchBudget,
         requestedPatchCount,
         minimumTrialPatchCount,
-        sourceRootPatchCount,
+        renderRootPatchCount,
         selectedBiasStep,
         selectedBiasLevels: selectedBiasStep / GPU_RENDER_PATCH_BIAS_STEPS_PER_LEVEL,
         budgetLimitedByMinimumTrial: minimumTrialPatchCount > framePatchBudget,
@@ -446,18 +450,13 @@ export function decodeGpuRenderPatchState(
 }
 
 function gpuRenderPatchLookupCapacity(
-    maximumSourceTiles: number,
-    maximumExtraLevels: number
+    maximumRenderPatches: number
 ): number {
 
-    if (!Number.isSafeInteger(maximumSourceTiles) || maximumSourceTiles < 1) {
-        throw new TypeError('GPU render-patch maximum source tiles must be positive')
+    if (!Number.isSafeInteger(maximumRenderPatches) || maximumRenderPatches < 1) {
+        throw new TypeError('GPU render-patch capacity must be positive')
     }
-    if (!Number.isInteger(maximumExtraLevels) || maximumExtraLevels < 0 ||
-        maximumExtraLevels > GPU_RENDER_PATCH_MAXIMUM_EXTRA_LEVELS) {
-        throw new TypeError('GPU render-patch maximum extra levels is invalid')
-    }
-    const required = maximumSourceTiles * 4 ** maximumExtraLevels * 2
+    const required = maximumRenderPatches * 2
     let capacity = 1
     while (capacity < required) capacity *= 2
     if (!Number.isSafeInteger(capacity) || capacity > 0x4000_0000) {
@@ -523,7 +522,6 @@ export function gpuRenderPatchReadWgslModule(
         `struct ${namespace}Neighbor {\n` +
         `    found: u32,\n` +
         `    matrixLevel: u32,\n` +
-        `    samplingLevel: u32,\n` +
         `    patchIndex: u32,\n` +
         `}\n\n` +
         `@group(${bindings.group}) @binding(${bindings.visibleInstances}) ` +
@@ -531,7 +529,7 @@ export function gpuRenderPatchReadWgslModule(
         `@group(${bindings.group}) @binding(${bindings.lookupEntries}) ` +
         `var<storage, read> ${namespace}_lookup_entries: array<GpuRenderPatchLookupEntry>;\n\n` +
         `fn ${namespace}_missing() -> ${namespace}Neighbor {\n` +
-        `    return ${namespace}Neighbor(0u, 0u, 0u, 0xffffffffu);\n` +
+        `    return ${namespace}Neighbor(0u, 0u, 0xffffffffu);\n` +
         `}\n\n` +
         `fn ${namespace}_lookup(matrix_level: u32, tile_row: u32, tile_col: u32, ` +
         `lookup_capacity: u32) -> ${namespace}Neighbor {\n` +
@@ -544,7 +542,7 @@ export function gpuRenderPatchReadWgslModule(
         `            let selected_patch = ` +
         `${namespace}_visible_instances[entry.patchIndex];\n` +
         `            return ${namespace}Neighbor(1u, selected_patch.matrixLevel, ` +
-        `selected_patch.samplingLevel, entry.patchIndex);\n` +
+        `entry.patchIndex);\n` +
         `        }\n` +
         `    }\n` +
         `    return ${namespace}_missing();\n` +
@@ -617,12 +615,8 @@ export async function createGpuRenderPatchFrontier(
 
     const descriptor = validateOptions(runtime, options)
     const id = `gpu-render-patch-frontier-${nextRenderPatchFrontierId++}`
-    const maximumRenderPatches = descriptor.maximumSourceTiles *
-        4 ** descriptor.maximumExtraLevels
-    const renderPatchLookupCapacity = gpuRenderPatchLookupCapacity(
-        descriptor.maximumSourceTiles,
-        descriptor.maximumExtraLevels
-    )
+    const maximumRenderPatches = descriptor.maximumRenderPatches
+    const renderPatchLookupCapacity = gpuRenderPatchLookupCapacity(maximumRenderPatches)
     const renderPatchBytes = maximumRenderPatches * renderPatchCodec.byteLength()
     const renderPatchLookupBytes = renderPatchLookupCapacity * LOOKUP_ENTRY_BYTES
     const owned: Disposable[] = []
@@ -644,9 +638,8 @@ export async function createGpuRenderPatchFrontier(
             label: 'Upload GPU render-patch policy',
             target: policy.region({ layout: renderPatchPolicyCodec.artifact }),
             data: renderPatchPolicyCodec.pack({
-                dataMaximumMatrixLevel: descriptor.dataMaximumMatrixLevel,
                 renderMaximumMatrixLevel: descriptor.renderMaximumMatrixLevel,
-                maximumExtraLevels: descriptor.maximumExtraLevels,
+                renderRootCount: descriptor.renderRoots.length,
                 maximumRenderPatches,
                 minimumElevationMeters: descriptor.elevationRangeMeters[0],
                 maximumElevationMeters: descriptor.elevationRangeMeters[1],
@@ -662,12 +655,22 @@ export async function createGpuRenderPatchFrontier(
                 balancePassCount: GPU_RENDER_PATCH_BALANCE_PASS_COUNT,
             }),
         }))
-        const parityResources = await Promise.all(descriptor.sourceTemplates.map(
-            async(source, parityValue): Promise<ParityResources> => {
+        const renderRoots = own(await runtime.createBuffer({
+            label: 'GPU render-patch traversal roots',
+            size: descriptor.renderRoots.length * renderPatchCodec.byteLength(),
+            usage: BUFFER_COPY_DST | BUFFER_STORAGE,
+        }))
+        const renderRootUpload = own(runtime.createUploadCommand({
+            label: 'Upload GPU render-patch traversal roots',
+            target: renderRoots.region({ layout: renderPatchCodec.artifact }),
+            data: packRenderRoots(descriptor.renderRoots),
+        }))
+        const parityResources = await Promise.all(descriptor.viewTemplates.map(
+            async(view, parityValue): Promise<ParityResources> => {
                 const parity = parityValue as 0 | 1
                 return Object.freeze({
                     parity,
-                    source,
+                    view,
                     renderPatches: own(await runtime.createBuffer({
                         label: `GPU render patches ${parity}`,
                         size: renderPatchBytes,
@@ -754,7 +757,7 @@ export async function createGpuRenderPatchFrontier(
             'resetRenderPatches',
             'GPU reset render patches',
             [
-                binding(0, 'mapMeta', 'uniform', descriptor.sourceTemplates[0].mapMeta.size),
+                binding(0, 'mapMeta', 'uniform', descriptor.viewTemplates[0].mapMeta.size),
                 binding(1, 'renderPatchPolicy', 'uniform', renderPatchPolicyCodec.byteLength()),
                 binding(5, 'renderPatchState', 'storage', STATE_BYTES),
                 binding(
@@ -772,15 +775,9 @@ export async function createGpuRenderPatchFrontier(
             'countRenderPatchTrials',
             'GPU count render-patch trials',
             [
-                binding(0, 'mapMeta', 'uniform', descriptor.sourceTemplates[0].mapMeta.size),
+                binding(0, 'mapMeta', 'uniform', descriptor.viewTemplates[0].mapMeta.size),
                 binding(1, 'renderPatchPolicy', 'uniform', renderPatchPolicyCodec.byteLength()),
-                binding(
-                    2,
-                    'sourceVisibleInstances',
-                    'read-storage',
-                    descriptor.sourceTemplates[0].visibleInstances.size
-                ),
-                binding(3, 'sourceDrawArguments', 'read-storage', DRAW_ARGUMENT_BYTES),
+                binding(2, 'renderRoots', 'read-storage', renderRoots.size),
                 binding(5, 'renderPatchState', 'storage', STATE_BYTES),
             ],
             own
@@ -791,7 +788,7 @@ export async function createGpuRenderPatchFrontier(
             'selectRenderPatchBudget',
             'GPU select render-patch budget',
             [
-                binding(0, 'mapMeta', 'uniform', descriptor.sourceTemplates[0].mapMeta.size),
+                binding(0, 'mapMeta', 'uniform', descriptor.viewTemplates[0].mapMeta.size),
                 binding(1, 'renderPatchPolicy', 'uniform', renderPatchPolicyCodec.byteLength()),
                 binding(5, 'renderPatchState', 'storage', STATE_BYTES),
             ],
@@ -803,15 +800,9 @@ export async function createGpuRenderPatchFrontier(
             'expandRenderPatches',
             'GPU expand render patches',
             [
-                binding(0, 'mapMeta', 'uniform', descriptor.sourceTemplates[0].mapMeta.size),
+                binding(0, 'mapMeta', 'uniform', descriptor.viewTemplates[0].mapMeta.size),
                 binding(1, 'renderPatchPolicy', 'uniform', renderPatchPolicyCodec.byteLength()),
-                binding(
-                    2,
-                    'sourceVisibleInstances',
-                    'read-storage',
-                    descriptor.sourceTemplates[0].visibleInstances.size
-                ),
-                binding(3, 'sourceDrawArguments', 'read-storage', DRAW_ARGUMENT_BYTES),
+                binding(2, 'renderRoots', 'read-storage', renderRoots.size),
                 binding(4, 'renderPatches', 'storage', renderPatchBytes),
                 binding(5, 'renderPatchState', 'storage', STATE_BYTES),
                 binding(
@@ -862,7 +853,7 @@ export async function createGpuRenderPatchFrontier(
             'validateFinalRenderPatchCut',
             'GPU validate final render-patch cut',
             [
-                binding(0, 'mapMeta', 'uniform', descriptor.sourceTemplates[0].mapMeta.size),
+                binding(0, 'mapMeta', 'uniform', descriptor.viewTemplates[0].mapMeta.size),
                 binding(1, 'renderPatchPolicy', 'uniform', renderPatchPolicyCodec.byteLength()),
                 binding(4, 'renderPatches', 'storage', renderPatchBytes),
                 binding(5, 'renderPatchState', 'storage', STATE_BYTES),
@@ -901,28 +892,26 @@ export async function createGpuRenderPatchFrontier(
         const bindSets: BindSet[] = []
         const commands = await Promise.all(parityResources.map(async resources => {
             const resetSet = own(await runtime.createBindSet(resetKernel.layout, {
-                mapMeta: resources.source.mapMeta.region(),
+                mapMeta: resources.view.mapMeta.region(),
                 renderPatchPolicy: policy.region({ layout: renderPatchPolicyCodec.artifact }),
                 renderPatchState: resources.state.region(),
                 drawArguments: resources.drawArguments.region(),
             }, { label: `GPU reset render patches ${resources.parity}` }))
             const countSet = own(await runtime.createBindSet(countKernel.layout, {
-                mapMeta: resources.source.mapMeta.region(),
+                mapMeta: resources.view.mapMeta.region(),
                 renderPatchPolicy: policy.region({ layout: renderPatchPolicyCodec.artifact }),
-                sourceVisibleInstances: resources.source.visibleInstances.region(),
-                sourceDrawArguments: resources.source.drawArgument.region,
+                renderRoots: renderRoots.region({ layout: renderPatchCodec.artifact }),
                 renderPatchState: resources.state.region(),
             }, { label: `GPU count render-patch trials ${resources.parity}` }))
             const selectSet = own(await runtime.createBindSet(selectKernel.layout, {
-                mapMeta: resources.source.mapMeta.region(),
+                mapMeta: resources.view.mapMeta.region(),
                 renderPatchPolicy: policy.region({ layout: renderPatchPolicyCodec.artifact }),
                 renderPatchState: resources.state.region(),
             }, { label: `GPU select render-patch budget ${resources.parity}` }))
             const expandSet = own(await runtime.createBindSet(expandKernel.layout, {
-                mapMeta: resources.source.mapMeta.region(),
+                mapMeta: resources.view.mapMeta.region(),
                 renderPatchPolicy: policy.region({ layout: renderPatchPolicyCodec.artifact }),
-                sourceVisibleInstances: resources.source.visibleInstances.region(),
-                sourceDrawArguments: resources.source.drawArgument.region,
+                renderRoots: renderRoots.region({ layout: renderPatchCodec.artifact }),
                 renderPatches: resources.renderPatches.region({
                     layout: renderPatchCodec.artifact,
                 }),
@@ -947,7 +936,7 @@ export async function createGpuRenderPatchFrontier(
                 { label: `GPU reset final render-patch diagnostics ${resources.parity}` }
             ))
             const validateSet = own(await runtime.createBindSet(validateKernel.layout, {
-                mapMeta: resources.source.mapMeta.region(),
+                mapMeta: resources.view.mapMeta.region(),
                 renderPatchPolicy: policy.region({ layout: renderPatchPolicyCodec.artifact }),
                 renderPatches: resources.renderPatches.region({
                     layout: renderPatchCodec.artifact,
@@ -982,7 +971,7 @@ export async function createGpuRenderPatchFrontier(
                 count: { workgroups: [ 1, 1, 1 ] },
                 resources: currentAccess(
                     [
-                        resources.source.mapMeta,
+                        resources.view.mapMeta,
                         policy,
                         resources.state,
                         resources.drawArguments,
@@ -997,16 +986,15 @@ export async function createGpuRenderPatchFrontier(
                 bindSets: [ { set: expandSet } ],
                 count: {
                     workgroups: [
-                        Math.ceil(maximumRenderPatches / WORKGROUP_SIZE),
+                        Math.ceil(descriptor.renderRoots.length / WORKGROUP_SIZE),
                         1,
                         1,
                     ],
                 },
                 resources: currentAccess([
-                    resources.source.mapMeta,
+                    resources.view.mapMeta,
                     policy,
-                    resources.source.visibleInstances,
-                    resources.source.drawArgument.resource,
+                    renderRoots,
                     resources.renderPatches,
                     resources.state,
                     resources.renderPatchLookup,
@@ -1044,16 +1032,15 @@ export async function createGpuRenderPatchFrontier(
                 bindSets: [ { set: countSet } ],
                 count: {
                     workgroups: [
-                        Math.ceil(maximumRenderPatches / WORKGROUP_SIZE),
+                        Math.ceil(descriptor.renderRoots.length / WORKGROUP_SIZE),
                         1,
                         1,
                     ],
                 },
                 resources: currentAccess([
-                    resources.source.mapMeta,
+                    resources.view.mapMeta,
                     policy,
-                    resources.source.visibleInstances,
-                    resources.source.drawArgument.resource,
+                    renderRoots,
                     resources.state,
                 ], [ resources.state ]),
                 whenMissing: 'throw',
@@ -1064,7 +1051,7 @@ export async function createGpuRenderPatchFrontier(
                 bindSets: [ { set: selectSet } ],
                 count: { workgroups: [ 1, 1, 1 ] },
                 resources: currentAccess(
-                    [ resources.source.mapMeta, policy, resources.state ],
+                    [ resources.view.mapMeta, policy, resources.state ],
                     [ resources.state ]
                 ),
                 whenMissing: 'throw',
@@ -1092,7 +1079,7 @@ export async function createGpuRenderPatchFrontier(
                     ],
                 },
                 resources: currentAccess([
-                    resources.source.mapMeta,
+                    resources.view.mapMeta,
                     policy,
                     resources.renderPatches,
                     resources.state,
@@ -1177,7 +1164,7 @@ export async function createGpuRenderPatchFrontier(
                     frontierId: id,
                     parity: resources.parity,
                     templateId: 'patch-mesh' as const,
-                    mapMeta: resources.source.mapMeta,
+                    mapMeta: resources.view.mapMeta,
                     visibleInstances: resources.renderPatches,
                     renderPatchLookup: resources.renderPatchLookup,
                     drawArgument: Object.freeze({
@@ -1198,6 +1185,7 @@ export async function createGpuRenderPatchFrontier(
         const identity: GpuRenderPatchIdentityObjects = Object.freeze({
             resources: Object.freeze([
                 policy,
+                renderRoots,
                 ...parityResources.flatMap(resources => [
                     resources.renderPatches,
                     resources.renderPatchLookup,
@@ -1207,7 +1195,7 @@ export async function createGpuRenderPatchFrontier(
                     resources.drawArguments,
                 ]),
             ]),
-            uploads: Object.freeze([ policyUpload ]),
+            uploads: Object.freeze([ policyUpload, renderRootUpload ]),
             bindLayouts: layouts,
             bindSets: Object.freeze([ ...bindSets ]),
             programs,
@@ -1242,6 +1230,7 @@ export async function createGpuRenderPatchFrontier(
                     builder.clear(parityCommands.clearLookup)
                 }
                 builder.upload(policyUpload)
+                builder.upload(renderRootUpload)
                 return builder
             },
             encode(builder: SubmissionBuilder, frame: GpuTileFrontierFrame) {
@@ -1249,8 +1238,8 @@ export async function createGpuRenderPatchFrontier(
                 const parity = frame?.parity
                 if (builder.runtime !== runtime || builder.isSubmitted ||
                     (parity !== 0 && parity !== 1) ||
-                    frame.frontierId !== descriptor.sourceTemplates[parity].frontierId) {
-                    throw new TypeError('GPU render-patch encoding requires the current source frontier frame')
+                    frame.frontierId !== descriptor.viewTemplates[parity].frontierId) {
+                    throw new TypeError('GPU render-patch encoding requires the current view-authority frame')
                 }
                 const selected = commands[parity]
                 builder.clear(selected.clearLookup)
@@ -1285,7 +1274,7 @@ export async function createGpuRenderPatchFrontier(
                 assertActive(disposed)
                 const parity = frame?.parity
                 if ((parity !== 0 && parity !== 1) ||
-                    frame.frontierId !== descriptor.sourceTemplates[parity].frontierId ||
+                    frame.frontierId !== descriptor.viewTemplates[parity].frontierId ||
                     submitted?.runtime !== runtime) {
                     throw new TypeError(
                         'GPU render-patch feedback requires an owned frame submission'
@@ -1317,20 +1306,24 @@ export async function createGpuRenderPatchFrontier(
                 assertActive(disposed)
                 const parity = frame?.parity
                 if ((parity !== 0 && parity !== 1) ||
-                    frame.frontierId !== descriptor.sourceTemplates[parity].frontierId) {
-                    throw new TypeError('GPU render-patch commands require an owned source frame')
+                    frame.frontierId !== descriptor.viewTemplates[parity].frontierId) {
+                    throw new TypeError('GPU render-patch commands require an owned view-authority frame')
                 }
                 return commands[parity]
             },
             facts() {
                 return Object.freeze({
                     id,
-                    selectionPath: 'gpu-balanced-normalized-projected-grid-render-patches' as const,
+                    selectionPath: 'gpu-balanced-render-root-local-cell-projection' as const,
                     disposed,
-                    dataMaximumMatrixLevel: descriptor.dataMaximumMatrixLevel,
                     maximumMatrixLevel: descriptor.renderMaximumMatrixLevel,
-                    maximumExtraLevels: descriptor.maximumExtraLevels,
-                    maximumSourceTiles: descriptor.maximumSourceTiles,
+                    renderRootCount: descriptor.renderRoots.length,
+                    minimumRootMatrixLevel: Math.min(
+                        ...descriptor.renderRoots.map(root => root.matrixLevel)
+                    ),
+                    maximumRootMatrixLevel: Math.max(
+                        ...descriptor.renderRoots.map(root => root.matrixLevel)
+                    ),
                     maximumRenderPatches,
                     maximumCellSpanPixels: descriptor.maximumCellSpanPixels,
                     maximumPatchCountRatio: descriptor.maximumPatchCountRatio,
@@ -1349,7 +1342,8 @@ export async function createGpuRenderPatchFrontier(
                     workgroupSize: WORKGROUP_SIZE,
                     parity: Object.freeze(parityResources.map(resources => Object.freeze({
                         parity: resources.parity,
-                        sourceBufferId: resources.source.visibleInstances.id,
+                        mapMetaBufferId: resources.view.mapMeta.id,
+                        renderRootBufferId: renderRoots.id,
                         renderPatchBufferId: resources.renderPatches.id,
                         renderPatchLookupBufferId: resources.renderPatchLookup.id,
                         balancePatchBufferId: resources.balancePatches.id,
@@ -1459,7 +1453,6 @@ function validateOptions(
 
     const renderMaximumMatrixLevel = options.renderMaximumMatrixLevel ??
         GPU_RENDER_PATCH_MAXIMUM_MATRIX_LEVEL
-    const maximumExtraLevels = options.maximumExtraLevels ?? GPU_RENDER_PATCH_MAXIMUM_EXTRA_LEVELS
     const cellsPerPatchEdge = options.cellsPerPatchEdge ??
         GPU_RENDER_PATCH_DEFAULT_CELLS_PER_EDGE
     const maximumCellSpanPixels = options.maximumCellSpanPixels ??
@@ -1471,18 +1464,16 @@ function validateOptions(
     if (runtime === undefined || typeof runtime.createBuffer !== 'function') {
         throw new TypeError('GPU render-patch frontier requires GPURuntime')
     }
-    if (options.sourceTemplates?.length !== 2 ||
-        options.sourceTemplates.some((template, parity) => (
-            template?.parity !== parity || template.mapMeta === undefined ||
-            template.visibleInstances === undefined || template.drawArgument === undefined
+    if (options.viewTemplates?.length !== 2 ||
+        options.viewTemplates.some((template, parity) => (
+            template?.parity !== parity || typeof template.frontierId !== 'string' ||
+            template.frontierId.length === 0 || template.mapMeta === undefined
         ))) {
-        throw new TypeError('GPU render-patch frontier requires two source parity templates')
+        throw new TypeError('GPU render-patch frontier requires two view-authority templates')
     }
     for (const [ name, value ] of [
-        [ 'maximumSourceTiles', options.maximumSourceTiles ],
-        [ 'dataMaximumMatrixLevel', options.dataMaximumMatrixLevel ],
+        [ 'maximumRenderPatches', options.maximumRenderPatches ],
         [ 'renderMaximumMatrixLevel', renderMaximumMatrixLevel ],
-        [ 'maximumExtraLevels', maximumExtraLevels ],
         [ 'coordinateBits', options.coordinateBits ],
         [ 'vertexCount', options.vertexCount ],
         [ 'cellsPerPatchEdge', cellsPerPatchEdge ],
@@ -1491,13 +1482,17 @@ function validateOptions(
             throw new TypeError(`GPU render-patch ${name} must be a non-negative integer`)
         }
     }
-    if (options.maximumSourceTiles < 1 || options.vertexCount < 1 ||
-        renderMaximumMatrixLevel < options.dataMaximumMatrixLevel ||
+    if (options.maximumRenderPatches < 1 || options.vertexCount < 1 ||
         renderMaximumMatrixLevel > GPU_RENDER_PATCH_MAXIMUM_MATRIX_LEVEL ||
-        maximumExtraLevels > GPU_RENDER_PATCH_MAXIMUM_EXTRA_LEVELS ||
-        maximumExtraLevels > renderMaximumMatrixLevel ||
         options.coordinateBits <= renderMaximumMatrixLevel) {
         throw new TypeError('GPU render-patch policy bounds are invalid')
+    }
+    if (!Array.isArray(options.renderRoots) || options.renderRoots.length === 0 ||
+        options.renderRoots.length > options.maximumRenderPatches ||
+        !validRenderRoots(options.renderRoots, renderMaximumMatrixLevel)) {
+        throw new TypeError(
+            'GPU render-patch roots must be a non-overlapping bounded tile cover'
+        )
     }
     if (options.elevationRangeMeters?.length !== 2 ||
         options.elevationRangeMeters.some(value => !Number.isFinite(value)) ||
@@ -1514,14 +1509,49 @@ function validateOptions(
     }
     return Object.freeze({
         ...options,
-        sourceTemplates: options.sourceTemplates,
+        viewTemplates: options.viewTemplates,
+        renderRoots: Object.freeze(options.renderRoots.map(root => Object.freeze({ ...root }))),
         renderMaximumMatrixLevel,
-        maximumExtraLevels,
         cellsPerPatchEdge,
         maximumCellSpanPixels,
         maximumPatchCountRatio,
         budgetHysteresisRatio,
     })
+}
+
+function validRenderRoots(
+    roots: readonly GpuRenderPatchRootDescriptor[],
+    maximumMatrixLevel: number
+): boolean {
+
+    for (const root of roots) {
+        if (!Number.isInteger(root?.matrixLevel) || root.matrixLevel < 0 ||
+            root.matrixLevel > maximumMatrixLevel ||
+            !Number.isInteger(root.tileRow) || !Number.isInteger(root.tileCol) ||
+            root.tileRow < 0 || root.tileCol < 0 ||
+            root.tileRow >= 2 ** root.matrixLevel ||
+            root.tileCol >= 2 ** root.matrixLevel) {
+            return false
+        }
+    }
+    return roots.every((left, leftIndex) => roots.every((right, rightIndex) => {
+        if (leftIndex === rightIndex) return true
+        const ancestor = left.matrixLevel <= right.matrixLevel ? left : right
+        const descendant = ancestor === left ? right : left
+        const shift = descendant.matrixLevel - ancestor.matrixLevel
+        return ancestor.tileRow !== Math.floor(descendant.tileRow / 2 ** shift) ||
+            ancestor.tileCol !== Math.floor(descendant.tileCol / 2 ** shift)
+    }))
+}
+
+function packRenderRoots(roots: readonly GpuRenderPatchRootDescriptor[]): Uint8Array {
+
+    const stride = renderPatchCodec.byteLength()
+    const bytes = new Uint8Array(roots.length * stride)
+    roots.forEach((root, index) => {
+        bytes.set(renderPatchCodec.pack(root), index * stride)
+    })
+    return bytes
 }
 
 function assertActive(disposed: boolean) {

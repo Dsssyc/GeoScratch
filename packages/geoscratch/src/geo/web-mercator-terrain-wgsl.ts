@@ -230,14 +230,13 @@ fn ${vertexEntryPoint}(input: ${namespace}VertexInput) -> ${namespace}VertexOutp
     let triangle_id = input.vertexIndex / 3u;
     var grid = ${namespace}_grid_position(${indices}[input.vertexIndex]);
     let matrix_level = instance.matrixLevel;
-    var sampling_level = min(instance.samplingLevel, ${fieldNamespace}_level_count - 1u);
+    let sampling_level = 0u;
     let centroid = ${namespace}_triangle_centroid(triangle_id);
 
     if (grid.x == 0u) {
         let neighbor = ${patchNamespace}_neighbor(instance, 0u, centroid,
             ${config}.renderMaximumMatrixLevel, ${config}.renderPatchLookupCapacity);
         if (neighbor.found != 0u) {
-            sampling_level = max(sampling_level, neighbor.samplingLevel);
             grid.y = ${patchNamespace}_snap_edge_coordinate(
                 grid.y, matrix_level, neighbor.matrixLevel, ${namespace}_cells_per_patch_edge);
         }
@@ -246,7 +245,6 @@ fn ${vertexEntryPoint}(input: ${namespace}VertexInput) -> ${namespace}VertexOutp
         let neighbor = ${patchNamespace}_neighbor(instance, 1u, centroid,
             ${config}.renderMaximumMatrixLevel, ${config}.renderPatchLookupCapacity);
         if (neighbor.found != 0u) {
-            sampling_level = max(sampling_level, neighbor.samplingLevel);
             grid.y = ${patchNamespace}_snap_edge_coordinate(
                 grid.y, matrix_level, neighbor.matrixLevel, ${namespace}_cells_per_patch_edge);
         }
@@ -255,7 +253,6 @@ fn ${vertexEntryPoint}(input: ${namespace}VertexInput) -> ${namespace}VertexOutp
         let neighbor = ${patchNamespace}_neighbor(instance, 3u, centroid,
             ${config}.renderMaximumMatrixLevel, ${config}.renderPatchLookupCapacity);
         if (neighbor.found != 0u) {
-            sampling_level = max(sampling_level, neighbor.samplingLevel);
             grid.x = ${patchNamespace}_snap_edge_coordinate(
                 grid.x, matrix_level, neighbor.matrixLevel, ${namespace}_cells_per_patch_edge);
         }
@@ -264,7 +261,6 @@ fn ${vertexEntryPoint}(input: ${namespace}VertexInput) -> ${namespace}VertexOutp
         let neighbor = ${patchNamespace}_neighbor(instance, 2u, centroid,
             ${config}.renderMaximumMatrixLevel, ${config}.renderPatchLookupCapacity);
         if (neighbor.found != 0u) {
-            sampling_level = max(sampling_level, neighbor.samplingLevel);
             grid.x = ${patchNamespace}_snap_edge_coordinate(
                 grid.x, matrix_level, neighbor.matrixLevel, ${namespace}_cells_per_patch_edge);
         }

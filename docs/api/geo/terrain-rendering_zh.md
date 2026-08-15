@@ -2,7 +2,7 @@
 docId: geo.terrain-rendering.zh
 canonical: false
 translationOf: ./terrain-rendering.md
-canonicalDigest: d4c7fc409965a8757b39503c17512ef7b14d4935120fdb769bb6ec175c2a8670
+canonicalDigest: 21cf35d2227a843113c203943bef1e20af5eb25cc4799033ee7ab580718f8913
 ---
 # 地形渲染
 
@@ -24,18 +24,21 @@ entry point。Renderer 的 `presentationShader` 是应用 fragment entry point �
 它消费 `WebMercatorTerrainVertexOutput`，不得重复 position、stitching、tile lookup 或
 height sampling 逻辑。
 
-Raster LoD 与 geometry LoD 保持为不同权威。Data frontier 在数据源 matrix 上限内选择
-resident source page；render-patch frontier 可以继续细化地形网格，并保留显式
-`samplingLevel`。Neighbor stitching 使用 geometry level，共享边高程查询则协调实际可用
-的 sampling level。Virtual Raster 消除 CPU padding 与 physical atlas 耦合；mesh
-stitching 消除 T-junction crack。
+Raster LoD 与 geometry LoD 是两个独立权威。Data frontier 负责不超过数据源 matrix
+上限的 demand、residency、publication 与 fallback。render-patch frontier 从不可变且
+prefix-free 的 geographic safety cover 开始遍历，并可在数据源上限之后继续细化地形网格。
+render patch 只携带 geometry identity。Terrain 请求 Virtual Raster 的最细逻辑层，page
+table 再把每个坐标解析到可用 physical page。Virtual Raster 消除 CPU padding 与
+physical atlas 耦合；mesh stitching 消除 T-junction crack。
 
-对于当前 camera、viewport、source frontier 与已选择的全局 budget bias，render-patch
-细分结果是规范且唯一的。每个水平地形 footprint 会先经过 WebGPU 全部六个齐次裁剪面，
-再计算投影后的 cell span。局部 split 决策不会读取上一 parity 的 patch topology，因此
-相同的稳定输入不会因相机进入路径不同而保留两套空间切分。GPU 只可在有界 frame budget
-迟滞区间内保留上一帧的*全局* bias；这个统一的预算决策不会为单个 patch 提供第二套细分
-阈值。
+对于当前 camera、viewport、render roots、policy 与已选择的全局 budget bias，
+render-patch 细分结果是规范且唯一的。每个水平地形 footprint 会先经过 WebGPU 全部六个
+齐次裁剪面，以获得可见求值位置。GPU 在这些位置沿两个水平轴对称投影一个 cell 的位移，
+并以两轴像素跨度的几何平均作为 refinement metric。该 metric 是局部量，不会因为
+zoom-in 时 viewport 裁剪留下更小的可见窄片而缩小。局部 split 决策既不读取
+data-frontier topology，也不读取上一 parity 的 patch topology。GPU 只可在有界 frame
+budget 迟滞区间内保留上一帧的*全局* bias；这个统一的预算决策不会为单个 patch 提供
+第二套细分阈值。
 
 更底层的消费者可以直接组合 `gpuRenderPatchReadWgslModule`。它通过显式 storage
 binding 与 layout dependency 提供有界 visible-instance lookup、covering-patch lookup、

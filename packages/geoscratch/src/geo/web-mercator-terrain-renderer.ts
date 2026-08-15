@@ -16,7 +16,6 @@ import {
 import {
     GPU_RENDER_PATCH_DEFAULT_CELLS_PER_EDGE,
     GPU_RENDER_PATCH_DEFAULT_MAXIMUM_CELL_SPAN_PIXELS,
-    GPU_RENDER_PATCH_MAXIMUM_EXTRA_LEVELS,
     GPU_RENDER_PATCH_MAXIMUM_MATRIX_LEVEL,
     GpuRenderPatchFeedbackStaleError,
     createGpuRenderPatchFrontier,
@@ -193,7 +192,7 @@ export type WebMercatorTerrainRendererState<Presentation extends string = string
     renderPatchFrameBudget: number
     renderPatchRequestedCount: number
     renderPatchMinimumTrialCount: number
-    renderPatchSourceRootCount: number
+    renderPatchRenderRootCount: number
     renderPatchSelectedBiasLevels: number
     renderPatchBudgetLimitedByMinimumTrial: boolean
     renderPatchFeedback?: GpuRenderPatchFeedback
@@ -255,7 +254,7 @@ type Uniforms = Awaited<ReturnType<typeof createUniformResources>>
 type Buffers = Awaited<ReturnType<typeof createBufferResources>>
 type Textures = Awaited<ReturnType<typeof createTextures>>
 type Frontier = Awaited<ReturnType<typeof createFrontier>>
-type FrontierRenderTemplates = ReturnType<typeof createFrontierRenderTemplates>
+type FrontierViewTemplates = ReturnType<typeof createFrontierViewTemplates>
 type RenderPatchFrontier = GpuRenderPatchFrontier
 type RenderTemplates = ReturnType<typeof createRenderTemplates>
 type Layouts = Awaited<ReturnType<typeof createBindLayouts>>
@@ -278,7 +277,7 @@ type WebMercatorTerrainGraph = {
     buffers: Buffers
     textures: Textures
     frontier: Frontier
-    frontierRenderTemplates: FrontierRenderTemplates
+    frontierViewTemplates: FrontierViewTemplates
     renderPatchFrontier: RenderPatchFrontier
     feedbackRing: VirtualRasterGpuFeedbackRing
     renderTemplates: RenderTemplates
@@ -395,13 +394,21 @@ export async function createWebMercatorTerrainRenderer<
         exaggeratedElevationRange
     )
     const feedbackRing = await VirtualRasterGpuFeedbackRing.create(frontier)
-    const frontierRenderTemplates = createFrontierRenderTemplates(frontier)
+    const frontierViewTemplates = createFrontierViewTemplates(frontier)
     const renderPatchFrontier = await createGpuRenderPatchFrontier(runtime, {
-        sourceTemplates: frontierRenderTemplates.renderPatch,
-        maximumSourceTiles: frontier.descriptor.policy.maximumActiveTiles,
-        dataMaximumMatrixLevel: frontier.descriptor.policy.maximumMatrixLevel,
+        viewTemplates: frontierViewTemplates.renderPatch,
+        renderRoots: virtualRaster.safetyCoverPages.map(page => {
+            if (page.tile === undefined) {
+                throw new TypeError('Web Mercator terrain render roots require tile identities')
+            }
+            return Object.freeze({
+                matrixLevel: terrainFieldLayer.spatialProfile.matrixLevel(page.tile),
+                tileRow: page.tile.tileRow,
+                tileCol: page.tile.tileCol,
+            })
+        }),
+        maximumRenderPatches: frontier.descriptor.policy.maximumActiveTiles * 256,
         renderMaximumMatrixLevel: GPU_RENDER_PATCH_MAXIMUM_MATRIX_LEVEL,
-        maximumExtraLevels: GPU_RENDER_PATCH_MAXIMUM_EXTRA_LEVELS,
         coordinateBits: virtualRaster.addressCodec.coordinateBits,
         elevationRangeMeters: exaggeratedElevationRange,
         vertexCount: geometry.vertexCount,
@@ -463,7 +470,7 @@ export async function createWebMercatorTerrainRenderer<
         buffers,
         textures,
         frontier,
-        frontierRenderTemplates,
+        frontierViewTemplates,
         renderPatchFrontier,
         feedbackRing,
         renderTemplates,
@@ -864,7 +871,7 @@ async function createFrontier(
         }),
         roots: virtualRaster.safetyCoverPages,
         drawTemplates: [
-            { id: 'render-patch-source', vertexCount: 1 },
+            { id: 'render-patch-view', vertexCount: 1 },
         ],
     })
 }
@@ -879,10 +886,10 @@ function scaleElevationRange(
         .sort((left, right) => left - right) as [number, number])
 }
 
-function createFrontierRenderTemplates(frontier: GpuTileFrontier) {
+function createFrontierViewTemplates(frontier: GpuTileFrontier) {
 
     return Object.freeze({
-        renderPatch: frontier.renderTemplates('render-patch-source'),
+        renderPatch: frontier.renderTemplates('render-patch-view'),
     })
 }
 
@@ -1238,22 +1245,12 @@ function verifyFrameProvenance(
 
     const terrainCommand = graph.commands.terrain[terrainPresentation]![frame.parity]!
     const renderPatchCommands = graph.renderPatchFrontier.commandsFor(frame)
-    const sourceTemplate = graph.frontierRenderTemplates.renderPatch[frame.parity]
+    const viewTemplate = graph.frontierViewTemplates.renderPatch[frame.parity]
     const terrainTemplate = graph.renderTemplates.terrain[frame.parity]
     const pairs = [
         {
             name: 'frontier-map-meta-to-render-patch',
-            resource: sourceTemplate.mapMeta,
-            consumerCommandId: renderPatchCommands.expand.id,
-        },
-        {
-            name: 'frontier-visible-to-render-patch',
-            resource: sourceTemplate.visibleInstances,
-            consumerCommandId: renderPatchCommands.expand.id,
-        },
-        {
-            name: 'frontier-indirect-to-render-patch',
-            resource: sourceTemplate.drawArgument.resource,
+            resource: viewTemplate.mapMeta,
             consumerCommandId: renderPatchCommands.expand.id,
         },
         {
@@ -1327,7 +1324,7 @@ function identityObjectsByKind(graph: WebMercatorTerrainGraph) {
 
     const renderPatchIdentity = graph.renderPatchFrontier.identityObjects()
     const templateResources = [
-        ...graph.frontierRenderTemplates.renderPatch,
+        ...graph.frontierViewTemplates.renderPatch,
         ...graph.renderTemplates.terrain,
     ].flatMap(template => [
         template.mapMeta,
@@ -1514,7 +1511,7 @@ function stateSnapshot<Presentation extends string>(
         renderPatchFrameBudget: renderPatches?.framePatchBudget ?? 0,
         renderPatchRequestedCount: renderPatches?.requestedPatchCount ?? 0,
         renderPatchMinimumTrialCount: renderPatches?.minimumTrialPatchCount ?? 0,
-        renderPatchSourceRootCount: renderPatches?.sourceRootPatchCount ?? 0,
+        renderPatchRenderRootCount: renderPatches?.renderRootPatchCount ?? 0,
         renderPatchSelectedBiasLevels: renderPatches?.selectedBiasLevels ?? 0,
         renderPatchBudgetLimitedByMinimumTrial:
             renderPatches?.budgetLimitedByMinimumTrial ?? false,

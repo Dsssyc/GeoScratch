@@ -587,13 +587,12 @@ const typedFrontierDraw: GpuTileFrontierDrawArgument = typedGpuFrontier.drawArgu
 )
 const typedFrontierRenderTemplates: readonly GpuTileFrontierRenderTemplate[] =
     typedGpuFrontier.renderTemplates('terrain')
-const typedRenderPatchSourceTemplates = typedGpuFrontier.renderTemplates('terrain')
+const typedRenderPatchViewTemplates = typedGpuFrontier.renderTemplates('terrain')
 const typedRenderPatchDescriptor: geoApi.GpuRenderPatchFrontierDescriptor = {
-    sourceTemplates: typedRenderPatchSourceTemplates,
-    maximumSourceTiles: 16,
-    dataMaximumMatrixLevel: 10,
+    viewTemplates: typedRenderPatchViewTemplates,
+    renderRoots: [ { matrixLevel: 4, tileRow: 6, tileCol: 13 } ],
+    maximumRenderPatches: 4_096,
     renderMaximumMatrixLevel: 14,
-    maximumExtraLevels: 4,
     coordinateBits: 32,
     elevationRangeMeters: [ -100, 8_000 ],
     vertexCount: 24_576,

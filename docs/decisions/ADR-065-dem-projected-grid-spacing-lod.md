@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted; supersedes ADR-064's render-patch error metric.
+Partially superseded by ADR-076. Projected terrain-cell spacing remains the policy,
+but ADR-076 replaces this ADR's clipped-footprint area formulation with a local
+projective cell differential.
 
 ## Date
 

@@ -122,7 +122,6 @@ export {
     GPU_RENDER_PATCH_BALANCE_PASS_COUNT,
     GPU_RENDER_PATCH_DEFAULT_CELLS_PER_EDGE,
     GPU_RENDER_PATCH_DEFAULT_MAXIMUM_CELL_SPAN_PIXELS,
-    GPU_RENDER_PATCH_MAXIMUM_EXTRA_LEVELS,
     GPU_RENDER_PATCH_MAXIMUM_MATRIX_LEVEL,
     GpuRenderPatchFeedbackStaleError,
     createGpuRenderPatchFrontier,
@@ -140,7 +139,9 @@ export type {
     GpuRenderPatchReadWgslModule,
     GpuRenderPatchReadWgslOptions,
     GpuRenderPatchRenderTemplate,
+    GpuRenderPatchRootDescriptor,
     GpuRenderPatchSelectionFacts,
+    GpuRenderPatchViewTemplate,
 } from './gpu-render-patch-frontier.js'
 export {
     WEB_MERCATOR_TERRAIN_TILE_WIREFRAME_FRAGMENT_ENTRY_POINT,

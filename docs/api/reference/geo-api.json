@@ -406,7 +406,7 @@
           "packages/geoscratch/src/geo/gpu-render-patch-frontier.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/geo/gpu-render-patch-frontier.ts:613"
+          "packages/geoscratch/src/geo/gpu-render-patch-frontier.ts:611"
         ],
         "summary": "Creates a GPU-owned balanced terrain-mesh frontier independent of raster source detail.",
         "declaration": "Function createGpuRenderPatchFrontier",
@@ -491,7 +491,7 @@
           "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:349"
+          "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:348"
         ],
         "summary": "Assembles a WebMercatorQuad Virtual Raster terrain renderer with GPU-driven selection, precision-aware vertex generation, mesh stitching, and explicit lifetime.",
         "declaration": "Function createWebMercatorTerrainRenderer",
@@ -508,7 +508,7 @@
           "packages/geoscratch/src/geo/gpu-render-patch-frontier.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/geo/gpu-render-patch-frontier.ts:315"
+          "packages/geoscratch/src/geo/gpu-render-patch-frontier.ts:319"
         ],
         "summary": "Decodes and validates bounded render-patch counters copied from GPU state.",
         "declaration": "Function decodeGpuRenderPatchState",
@@ -947,7 +947,7 @@
           "packages/geoscratch/src/geo/gpu-render-patch-frontier.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/geo/gpu-render-patch-frontier.ts:43"
+          "packages/geoscratch/src/geo/gpu-render-patch-frontier.ts:38"
         ],
         "summary": "Bounded pass count used to enforce adjacent render-patch level balance.",
         "declaration": "const GPU_RENDER_PATCH_BALANCE_PASS_COUNT: 14"
@@ -961,7 +961,7 @@
           "packages/geoscratch/src/geo/gpu-render-patch-frontier.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/geo/gpu-render-patch-frontier.ts:39"
+          "packages/geoscratch/src/geo/gpu-render-patch-frontier.ts:34"
         ],
         "summary": "Default terrain grid resolution along each render-patch edge.",
         "declaration": "const GPU_RENDER_PATCH_DEFAULT_CELLS_PER_EDGE: 64"
@@ -975,24 +975,10 @@
           "packages/geoscratch/src/geo/gpu-render-patch-frontier.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/geo/gpu-render-patch-frontier.ts:41"
+          "packages/geoscratch/src/geo/gpu-render-patch-frontier.ts:36"
         ],
         "summary": "Default screen-space cell span that triggers geometry refinement.",
         "declaration": "const GPU_RENDER_PATCH_DEFAULT_MAXIMUM_CELL_SPAN_PIXELS: 8"
-      },
-      {
-        "id": "geoscratch/geo#GPU_RENDER_PATCH_MAXIMUM_EXTRA_LEVELS",
-        "name": "GPU_RENDER_PATCH_MAXIMUM_EXTRA_LEVELS",
-        "kind": "Variable",
-        "source": "packages/geoscratch/src/geo/gpu-render-patch-frontier.ts",
-        "sources": [
-          "packages/geoscratch/src/geo/gpu-render-patch-frontier.ts"
-        ],
-        "locations": [
-          "packages/geoscratch/src/geo/gpu-render-patch-frontier.ts:37"
-        ],
-        "summary": "Maximum geometry-only refinement levels beyond available raster detail.",
-        "declaration": "const GPU_RENDER_PATCH_MAXIMUM_EXTRA_LEVELS: 4"
       },
       {
         "id": "geoscratch/geo#GPU_RENDER_PATCH_MAXIMUM_MATRIX_LEVEL",
@@ -1003,7 +989,7 @@
           "packages/geoscratch/src/geo/gpu-render-patch-frontier.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/geo/gpu-render-patch-frontier.ts:35"
+          "packages/geoscratch/src/geo/gpu-render-patch-frontier.ts:32"
         ],
         "summary": "Highest matrix level representable by the current compact render-patch key.",
         "declaration": "const GPU_RENDER_PATCH_MAXIMUM_MATRIX_LEVEL: 14"
@@ -1017,7 +1003,7 @@
           "packages/geoscratch/src/geo/gpu-render-patch-frontier.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/geo/gpu-render-patch-frontier.ts:148"
+          "packages/geoscratch/src/geo/gpu-render-patch-frontier.ts:145"
         ],
         "summary": "",
         "declaration": "type GpuRenderPatchCommands = Readonly<{ balance: DispatchCommand; clearLookup: ClearBufferCommand; count: DispatchCommand; expand: DispatchCommand; feedback: ReadbackCommand; finalize: DispatchCommand; reset: DispatchCommand; resetFinalDiagnostics: DispatchCommand; select: DispatchCommand; validate: DispatchCommand }>"
@@ -1031,7 +1017,7 @@
           "packages/geoscratch/src/geo/gpu-render-patch-frontier.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/geo/gpu-render-patch-frontier.ts:251"
+          "packages/geoscratch/src/geo/gpu-render-patch-frontier.ts:249"
         ],
         "summary": "",
         "declaration": "type GpuRenderPatchFeedback = Readonly<GpuRenderPatchSelectionFacts & { frontierId: string; kind: \"gpu-render-patch-feedback\"; submissionId: string }>"
@@ -1045,7 +1031,7 @@
           "packages/geoscratch/src/geo/gpu-render-patch-frontier.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/geo/gpu-render-patch-frontier.ts:258"
+          "packages/geoscratch/src/geo/gpu-render-patch-frontier.ts:256"
         ],
         "summary": "Reports feedback whose frame epoch no longer matches the requested render-patch decision.",
         "declaration": "class GpuRenderPatchFeedbackStaleError",
@@ -1123,7 +1109,7 @@
           "packages/geoscratch/src/geo/gpu-render-patch-frontier.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/geo/gpu-render-patch-frontier.ts:275"
+          "packages/geoscratch/src/geo/gpu-render-patch-frontier.ts:273"
         ],
         "summary": "",
         "declaration": "type GpuRenderPatchFrontier = Readonly<{ id: string; capture: any; commandsFor: any; dispose: any; encode: any; facts: any; feedback: any; identityObjects: any; initialize: any; renderTemplates: any }>"
@@ -1137,10 +1123,10 @@
           "packages/geoscratch/src/geo/gpu-render-patch-frontier.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/geo/gpu-render-patch-frontier.ts:294"
+          "packages/geoscratch/src/geo/gpu-render-patch-frontier.ts:292"
         ],
         "summary": "",
-        "declaration": "type GpuRenderPatchFrontierDescriptor = Readonly<{ budgetHysteresisRatio?: number; cellsPerPatchEdge?: number; coordinateBits: number; dataMaximumMatrixLevel: number; elevationRangeMeters: readonly [number, number]; maximumCellSpanPixels?: number; maximumExtraLevels?: number; maximumPatchCountRatio?: number; maximumSourceTiles: number; renderMaximumMatrixLevel?: number; sourceTemplates: readonly [GpuTileFrontierRenderTemplate, GpuTileFrontierRenderTemplate]; vertexCount: number }>"
+        "declaration": "type GpuRenderPatchFrontierDescriptor = Readonly<{ budgetHysteresisRatio?: number; cellsPerPatchEdge?: number; coordinateBits: number; elevationRangeMeters: readonly [number, number]; maximumCellSpanPixels?: number; maximumPatchCountRatio?: number; maximumRenderPatches: number; renderMaximumMatrixLevel?: number; renderRoots: readonly GpuRenderPatchRootDescriptor[]; vertexCount: number; viewTemplates: readonly [GpuRenderPatchViewTemplate, GpuRenderPatchViewTemplate] }>"
       },
       {
         "id": "geoscratch/geo#GpuRenderPatchFrontierFacts",
@@ -1151,10 +1137,10 @@
           "packages/geoscratch/src/geo/gpu-render-patch-frontier.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/geo/gpu-render-patch-frontier.ts:161"
+          "packages/geoscratch/src/geo/gpu-render-patch-frontier.ts:158"
         ],
         "summary": "",
-        "declaration": "type GpuRenderPatchFrontierFacts = Readonly<{ balancePassCount: number; balanceWorkgroupSize: number; biasStepCount: number; biasStepsPerLevel: number; budgetHysteresisRatio: number; cellsPerPatchEdge: number; dataMaximumMatrixLevel: number; disposed: boolean; drawArgumentBytes: number; id: string; maximumCellSpanPixels: number; maximumExtraLevels: number; maximumMatrixLevel: number; maximumPatchCountRatio: number; maximumRenderPatches: number; maximumSourceTiles: number; nominalPatchSpanPixels: number; parity: readonly Readonly<{ balancePatchBufferId: string; balancePatchLookupBufferId: string; commandIds: readonly string[]; drawArgumentBufferId: string; parity: 0 | 1; renderPatchBufferId: string; renderPatchLookupBufferId: string; sourceBufferId: string; stateBufferId: string }>[]; renderPatchBytes: number; renderPatchLookupBytes: number; renderPatchLookupCapacity: number; selectionPath: \"gpu-balanced-normalized-projected-grid-render-patches\"; workgroupSize: number }>"
+        "declaration": "type GpuRenderPatchFrontierFacts = Readonly<{ balancePassCount: number; balanceWorkgroupSize: number; biasStepCount: number; biasStepsPerLevel: number; budgetHysteresisRatio: number; cellsPerPatchEdge: number; disposed: boolean; drawArgumentBytes: number; id: string; maximumCellSpanPixels: number; maximumMatrixLevel: number; maximumPatchCountRatio: number; maximumRenderPatches: number; maximumRootMatrixLevel: number; minimumRootMatrixLevel: number; nominalPatchSpanPixels: number; parity: readonly Readonly<{ balancePatchBufferId: string; balancePatchLookupBufferId: string; commandIds: readonly string[]; drawArgumentBufferId: string; mapMetaBufferId: string; parity: 0 | 1; renderPatchBufferId: string; renderPatchLookupBufferId: string; renderRootBufferId: string; stateBufferId: string }>[]; renderPatchBytes: number; renderPatchLookupBytes: number; renderPatchLookupCapacity: number; renderRootCount: number; selectionPath: \"gpu-balanced-render-root-local-cell-projection\"; workgroupSize: number }>"
       },
       {
         "id": "geoscratch/geo#GpuRenderPatchIdentityObjects",
@@ -1165,7 +1151,7 @@
           "packages/geoscratch/src/geo/gpu-render-patch-frontier.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/geo/gpu-render-patch-frontier.ts:197"
+          "packages/geoscratch/src/geo/gpu-render-patch-frontier.ts:195"
         ],
         "summary": "",
         "declaration": "type GpuRenderPatchIdentityObjects = Readonly<{ bindLayouts: readonly BindLayout[]; bindSets: readonly BindSet[]; commands: readonly (ClearBufferCommand | DispatchCommand | ReadbackCommand)[]; passes: readonly ComputePassSpec[]; pipelines: readonly ComputePipeline[]; programs: readonly Program[]; resources: readonly BufferResource[]; uploads: readonly UploadCommand[] }>"
@@ -1179,7 +1165,7 @@
           "packages/geoscratch/src/geo/gpu-render-patch-frontier.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/geo/gpu-render-patch-frontier.ts:499"
+          "packages/geoscratch/src/geo/gpu-render-patch-frontier.ts:498"
         ],
         "summary": "Generates bounded read-side lookup, neighbor, and edge-stitching WGSL for render patches.",
         "declaration": "Function gpuRenderPatchReadWgslModule",
@@ -1196,7 +1182,7 @@
           "packages/geoscratch/src/geo/gpu-render-patch-frontier.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/geo/gpu-render-patch-frontier.ts:239"
+          "packages/geoscratch/src/geo/gpu-render-patch-frontier.ts:237"
         ],
         "summary": "",
         "declaration": "type GpuRenderPatchReadWgslModule = Readonly<{ bindings: Readonly<{ group: number; lookupEntries: number; visibleInstances: number }>; code: string; kind: \"gpu-render-patch-read-wgsl-module\"; layoutDependencies: readonly LayoutArtifact[]; namespace: string }>"
@@ -1210,7 +1196,7 @@
           "packages/geoscratch/src/geo/gpu-render-patch-frontier.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/geo/gpu-render-patch-frontier.ts:232"
+          "packages/geoscratch/src/geo/gpu-render-patch-frontier.ts:230"
         ],
         "summary": "",
         "declaration": "type GpuRenderPatchReadWgslOptions = Readonly<{ group: number; lookupEntriesBinding: number; namespace?: string; visibleInstancesBinding: number }>"
@@ -1224,10 +1210,24 @@
           "packages/geoscratch/src/geo/gpu-render-patch-frontier.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/geo/gpu-render-patch-frontier.ts:122"
+          "packages/geoscratch/src/geo/gpu-render-patch-frontier.ts:112"
         ],
         "summary": "",
         "declaration": "type GpuRenderPatchRenderTemplate = Readonly<{ drawArgument: Readonly<{ offset: number; region: BufferRegion; resource: BufferResource; size: 16 }>; frontierId: string; mapMeta: BufferResource; parity: 0 | 1; renderPatchLookup: BufferResource; templateId: \"patch-mesh\"; visibleInstances: BufferResource }>"
+      },
+      {
+        "id": "geoscratch/geo#GpuRenderPatchRootDescriptor",
+        "name": "GpuRenderPatchRootDescriptor",
+        "kind": "Type Alias",
+        "source": "packages/geoscratch/src/geo/gpu-render-patch-frontier.ts",
+        "sources": [
+          "packages/geoscratch/src/geo/gpu-render-patch-frontier.ts"
+        ],
+        "locations": [
+          "packages/geoscratch/src/geo/gpu-render-patch-frontier.ts:310"
+        ],
+        "summary": "Identifies one immutable, prefix-free tile root for GPU geometry traversal.",
+        "declaration": "type GpuRenderPatchRootDescriptor = Readonly<{ matrixLevel: number; tileCol: number; tileRow: number }>"
       },
       {
         "id": "geoscratch/geo#GpuRenderPatchSelectionFacts",
@@ -1238,10 +1238,24 @@
           "packages/geoscratch/src/geo/gpu-render-patch-frontier.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/geo/gpu-render-patch-frontier.ts:208"
+          "packages/geoscratch/src/geo/gpu-render-patch-frontier.ts:206"
         ],
         "summary": "",
-        "declaration": "type GpuRenderPatchSelectionFacts = Readonly<{ balanceOverheadPatchCount: number; balancePassCount: number; balanceSplitCount: number; baselinePatchBudget: number; budgetLimitedByMinimumTrial: boolean; descriptorOverflowCount: number; frameEpoch: number; framePatchBudget: number; lookupOverflowCount: number; maximumAdjacentLevelDelta: number; maximumCellSpanPixels?: number; maximumMatrixLevel?: number; minimumCellSpanPixels?: number; minimumMatrixLevel?: number; minimumTrialPatchCount: number; requestedPatchCount: number; selectedBiasLevels: number; selectedBiasStep: number; selectedPatchCount: number; sourceRootPatchCount: number; unbalancedPatchCount: number }>"
+        "declaration": "type GpuRenderPatchSelectionFacts = Readonly<{ balanceOverheadPatchCount: number; balancePassCount: number; balanceSplitCount: number; baselinePatchBudget: number; budgetLimitedByMinimumTrial: boolean; descriptorOverflowCount: number; frameEpoch: number; framePatchBudget: number; lookupOverflowCount: number; maximumAdjacentLevelDelta: number; maximumCellSpanPixels?: number; maximumMatrixLevel?: number; minimumCellSpanPixels?: number; minimumMatrixLevel?: number; minimumTrialPatchCount: number; renderRootPatchCount: number; requestedPatchCount: number; selectedBiasLevels: number; selectedBiasStep: number; selectedPatchCount: number; unbalancedPatchCount: number }>"
+      },
+      {
+        "id": "geoscratch/geo#GpuRenderPatchViewTemplate",
+        "name": "GpuRenderPatchViewTemplate",
+        "kind": "Type Alias",
+        "source": "packages/geoscratch/src/geo/gpu-render-patch-frontier.ts",
+        "sources": [
+          "packages/geoscratch/src/geo/gpu-render-patch-frontier.ts"
+        ],
+        "locations": [
+          "packages/geoscratch/src/geo/gpu-render-patch-frontier.ts:128"
+        ],
+        "summary": "Supplies frame parity and current map-view metadata without coupling geometry to data tiles.",
+        "declaration": "type GpuRenderPatchViewTemplate = Readonly<{ frontierId: string; mapMeta: BufferResource; parity: 0 | 1 }>"
       },
       {
         "id": "geoscratch/geo#gpuRenderPatchWgslModule",
@@ -1252,7 +1266,7 @@
           "packages/geoscratch/src/geo/gpu-render-patch-frontier.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/geo/gpu-render-patch-frontier.ts:470"
+          "packages/geoscratch/src/geo/gpu-render-patch-frontier.ts:469"
         ],
         "summary": "Produces WGSL accessors and lookup helpers for GPU-selected render patches.",
         "declaration": "Function gpuRenderPatchWgslModule",
@@ -5673,7 +5687,7 @@
           "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:130"
+          "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:129"
         ],
         "summary": "",
         "declaration": "type WebMercatorTerrainContractFacts = Readonly<{ commandIds: Readonly<{ drawTerrain: Readonly<Record<string, readonly string[]>>; renderPatches: readonly (readonly string[])[] }>; countPath: \"gpu-produced-indirect-arguments\"; dataMaximumMatrixLevel: number; feedback: VirtualRasterGpuFeedbackRingFacts; fieldLayer: Readonly<{ demandProducerId: string; fieldId: string; id: string; representationId: string; spatialProfileId: string; viewAdapterId: string }>; frontier: ReturnType<GpuTileFrontier[\"facts\"]>; passIds: Readonly<{ renderPatches: string; terrain: string }>; persistentIdentityCount: number; renderMaximumMatrixLevel: number; renderPatches: GpuRenderPatchFrontierFacts; selectionPath: \"gpu-resident-active-frontier\"; stageOrder: readonly string[]; terrainVertexCount: number; virtualRaster: Readonly<{ completeImageUpload: false; coordinateEncoding: WebMercatorVirtualRasterField[\"addressCodec\"][\"positionCodec\"][\"facts\"][\"encoding\"]; crossPageFiltering: \"logical-bilinear\"; levelCount: number; maxPhysicalPages: number; pageSize: readonly number[]; sourceRevision: string }> }>"
@@ -5687,7 +5701,7 @@
           "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:96"
+          "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:95"
         ],
         "summary": "",
         "declaration": "type WebMercatorTerrainFrame<Presentation extends string = string> = Readonly<{ feedback?: VirtualRasterGpuFeedbackBatch; needsFollowUp: boolean; observation: Promise<WebMercatorTerrainSubmissionObservation>; provenance: readonly WebMercatorTerrainProvenanceFact[]; reconciliation?: VirtualRasterFeedbackReconciliation; renderPatchFeedback?: GpuRenderPatchFeedback; requestedPageCount: number; residencySettlement: Promise<unknown>; submitted: SubmittedWork; terrainPresentation: Presentation }>"
@@ -5701,7 +5715,7 @@
           "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:109"
+          "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:108"
         ],
         "summary": "",
         "declaration": "type WebMercatorTerrainIdentityFacts = Readonly<{ bindLayouts: number; bindSets: number; commands: number; count: number; hash: string; passes: number; pipelines: number; programs: number; resources: number; uploads: number }>"
@@ -5715,7 +5729,7 @@
           "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:91"
+          "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:90"
         ],
         "summary": "",
         "declaration": "type WebMercatorTerrainInitialization = Readonly<{ observation: Promise<WebMercatorTerrainSubmissionObservation>; submitted: SubmittedWork }>"
@@ -5729,7 +5743,7 @@
           "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:122"
+          "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:121"
         ],
         "summary": "",
         "declaration": "type WebMercatorTerrainPersistentFacts = Readonly<{ bindLayouts: number; bindSets: number; logicalFootprintBytes: number; pipelines: number; resources: number }>"
@@ -5743,7 +5757,7 @@
           "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:56"
+          "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:55"
         ],
         "summary": "",
         "declaration": "type WebMercatorTerrainPresentationDescriptor<Presentation extends string = string> = Readonly<{ fragmentEntryPoint: string; id: Presentation; label?: string }>"
@@ -5757,7 +5771,7 @@
           "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:69"
+          "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:68"
         ],
         "summary": "",
         "declaration": "type WebMercatorTerrainProvenanceFact = Readonly<{ consumerStepIndex: number; declaredContentEpoch: \"current-at-step\"; name: string; producerContentEpoch: number; producerStepIndex: number; readContentEpoch: number; resourceId: string }>"
@@ -5771,7 +5785,7 @@
           "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:207"
+          "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:206"
         ],
         "summary": "",
         "declaration": "type WebMercatorTerrainRenderer<ViewInput, Presentation extends string = string> = Readonly<{ stableIdentities: readonly string[]; stableIdentityFacts: WebMercatorTerrainIdentityFacts; stableIdentityHash: string; contractFacts: any; currentIdentityFacts: any; dispose: any; initialize: any; persistentFacts: any; renderFrame: any; resize: any; setPresentation: any; state: any; virtualRasterFacts: any }>"
@@ -5785,7 +5799,7 @@
           "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:226"
+          "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:225"
         ],
         "summary": "",
         "declaration": "type WebMercatorTerrainRendererDescriptor<ViewInput, Presentation extends string = string> = Readonly<{ elevationRangeMeters: readonly [number, number]; exaggeration?: number; fieldLayer: MapFieldLayer<ViewInput>; fieldSampling: WebMercatorTerrainSamplingWgslOptions; initialPresentation: Presentation; observeProvenance?: (facts: readonly WebMercatorTerrainProvenanceFact[]) => void; presentations: readonly WebMercatorTerrainPresentationDescriptor<Presentation>[]; presentationShader: string; runtime: GPURuntime; size: SurfaceSize; surface: Surface; virtualRaster: VirtualRasterRuntime<WebMercatorVirtualRasterField> }>"
@@ -5799,10 +5813,10 @@
           "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:165"
+          "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:164"
         ],
         "summary": "",
-        "declaration": "type WebMercatorTerrainRendererState<Presentation extends string = string> = Readonly<{ budgetLimitedCount: number; convergenceState: GpuTileFrontierFacts[\"convergenceState\"]; demandCount: number; disposed: boolean; fallbackCount: number; feedback: VirtualRasterGpuFeedbackRingFacts; frame: number; frontierCount: number; frontierFacts?: GpuTileFrontierFacts; initialized: boolean; lastResizeFacts?: WebMercatorTerrainResizeFacts; latestFeedbackDiagnostics: readonly unknown[]; levelRange: readonly [number | undefined, number | undefined]; maximumObservedSse: number; readbackInFlightCount: number; renderPatchBaselineBudget: number; renderPatchBudgetLimitedByMinimumTrial: boolean; renderPatchCellSpanRange: readonly [number | undefined, number | undefined]; renderPatchCount: number; renderPatchDescriptorOverflowCount: number; renderPatchFeedback?: GpuRenderPatchFeedback; renderPatchFrameBudget: number; renderPatchFrameEpoch?: number; renderPatchLevelRange: readonly [number | undefined, number | undefined]; renderPatchLookupOverflowCount: number; renderPatchMinimumTrialCount: number; renderPatchRequestedCount: number; renderPatchSelectedBiasLevels: number; renderPatchSourceRootCount: number; resizeGeneration: number; size: SurfaceSize; staleBindSetPreparationCount: number; staleFeedbackCount: number; staleGenerationCount: number; supersededFeedbackCount: number; terrainPresentation: Presentation; virtualRequestedPageCount: number; virtualSnapshotEpoch: number; visibleNodeCount: number }>"
+        "declaration": "type WebMercatorTerrainRendererState<Presentation extends string = string> = Readonly<{ budgetLimitedCount: number; convergenceState: GpuTileFrontierFacts[\"convergenceState\"]; demandCount: number; disposed: boolean; fallbackCount: number; feedback: VirtualRasterGpuFeedbackRingFacts; frame: number; frontierCount: number; frontierFacts?: GpuTileFrontierFacts; initialized: boolean; lastResizeFacts?: WebMercatorTerrainResizeFacts; latestFeedbackDiagnostics: readonly unknown[]; levelRange: readonly [number | undefined, number | undefined]; maximumObservedSse: number; readbackInFlightCount: number; renderPatchBaselineBudget: number; renderPatchBudgetLimitedByMinimumTrial: boolean; renderPatchCellSpanRange: readonly [number | undefined, number | undefined]; renderPatchCount: number; renderPatchDescriptorOverflowCount: number; renderPatchFeedback?: GpuRenderPatchFeedback; renderPatchFrameBudget: number; renderPatchFrameEpoch?: number; renderPatchLevelRange: readonly [number | undefined, number | undefined]; renderPatchLookupOverflowCount: number; renderPatchMinimumTrialCount: number; renderPatchRenderRootCount: number; renderPatchRequestedCount: number; renderPatchSelectedBiasLevels: number; resizeGeneration: number; size: SurfaceSize; staleBindSetPreparationCount: number; staleFeedbackCount: number; staleGenerationCount: number; supersededFeedbackCount: number; terrainPresentation: Presentation; virtualRequestedPageCount: number; virtualSnapshotEpoch: number; visibleNodeCount: number }>"
       },
       {
         "id": "geoscratch/geo#WebMercatorTerrainResizeFacts",
@@ -5813,7 +5827,7 @@
           "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:79"
+          "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:78"
         ],
         "summary": "",
         "declaration": "type WebMercatorTerrainResizeFacts = Readonly<{ depthAllocationVersion: number; preparedBindSetCount: number; resizeGeneration: number; staleBindSetCount: number }>"
@@ -5827,7 +5841,7 @@
           "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:63"
+          "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:62"
         ],
         "summary": "",
         "declaration": "type WebMercatorTerrainSamplingWgslOptions = Readonly<{ addressNamespace: string; namespace: string; transitionTexels?: number }>"
@@ -5841,7 +5855,7 @@
           "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:86"
+          "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:85"
         ],
         "summary": "",
         "declaration": "type WebMercatorTerrainSubmissionObservation = Readonly<{ nativeStatus: \"observed-succeeded\"; submissionId: string }>"

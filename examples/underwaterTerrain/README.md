@@ -38,10 +38,11 @@ the page, alter cache query parameters, or rebuild the virtual raster.
 The source-backed `WebMercatorQuad` data frontier is capped by the manifest at
 `z10`. Its level metric is one raster texel (`TileMatrix.cellSize`), independent
 of the 64 by 64 render mesh. Terrain geometry is a separate authority: persistent
-GPU compute stages expand visible resident pages into frustum-culled render
-patches through `z14`, then write the logical-patch lookup and terrain indirect
-draw arguments. Zooming beyond `z10` therefore continues to refine geometry
-without requesting, decoding, or caching synthetic higher-level raster pages.
+GPU compute stages traverse an immutable, prefix-free geographic safety cover into
+frustum-culled render patches through `z14`, then write the logical-patch lookup and
+terrain indirect draw arguments. Zooming beyond `z10` therefore continues to refine
+geometry without requesting, decoding, or caching synthetic higher-level raster pages.
+Loading, eviction, and fallback cannot redefine the geometry traversal roots.
 
 Render-patch selection combines local projected grid spacing with a global,
 pitch-aware frame budget. The GPU counts 17 complete quadtree cuts at quarter-LoD
@@ -50,23 +51,28 @@ the indirect draw count in one ordered compute pass. No patch count or selected
 bias is read back to control the frame. The previous bias may be retained only
 within the budget hysteresis band and at most one quarter-step coarser than the
 current optimum. Local patch decisions are stateless: projected footprints are
-clipped against the complete WebGPU clip volume, and the same settled camera,
-source frontier, and global bias always produce the same render cut regardless of
-the camera path used to reach them.
+clipped against the complete WebGPU clip volume to obtain visible evaluation points,
+then a one-cell projective differential measures local grid spacing. It cannot become
+coarser merely because zooming leaves a smaller clipped fragment at a viewport edge.
+The same settled camera, viewport, render roots, policy, and global bias always produce
+the same render cut regardless of camera history or data-frontier residency.
 
-The final trial stops at visible source-page roots. Counts across the 17 trials
-are not assumed to be monotonic: child AABBs can all be rejected while a
-conservative parent AABB still intersects the frustum. The GPU selects the first
-fine-to-coarse trial inside budget; if none fits, it selects the trial with the
-smallest measured count. It never truncates descriptors or leaves terrain holes.
-Delayed feedback reports the baseline and pitch-adjusted budgets, requested and
-selected counts, minimum-trial and source-root counts, selected bias, level range,
-and overflow counters.
+The coarsest trial stops at the fixed render roots. Counts across the 17 trials are
+not assumed to be monotonic: child AABBs can all be rejected while a conservative
+parent AABB still intersects the frustum. The GPU selects the first fine-to-coarse
+trial inside budget; if none fits, it selects the trial with the smallest measured
+count. It never truncates descriptors or leaves terrain holes. Delayed feedback
+reports the baseline and pitch-adjusted budgets, requested and selected counts,
+minimum-trial and render-root counts, selected bias, level range, and overflow counters.
+An over-capacity trial saturates immediately above render capacity, because an exact
+count for a cut that cannot be selected would add traversal work without changing the
+decision.
 
-Every render patch retains its explicit Virtual Raster `samplingLevel`. The LoD
-map stores geometry level and sampling level separately, so edge vertex snapping
-uses render LoD while shared-edge height sampling uses the coarser available data
-LoD. Wireframe mode makes this post-`z10` subdivision directly visible.
+A render patch stores only `(matrixLevel, tileRow, tileCol)`. Terrain asks the logical
+Virtual Raster accessor for its finest level; the page table independently resolves
+each coordinate to the available source page and fallback level. Edge vertex snapping
+therefore uses render LoD without embedding raster residency into mesh topology.
+Wireframe mode makes post-`z10` geometry subdivision directly visible.
 
 The application does not own the terrain vertex shader. Geo's
 `webMercatorTerrainWgslModule` generates logical patch lookup, high-precision

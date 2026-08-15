@@ -21,6 +21,7 @@ const timeout = positiveInteger(
     process.env.UNDERWATER_TERRAIN_BROWSER_TIMEOUT_MS,
     120_000
 )
+const browserShutdownTimeout = 5_000
 const headless = process.env.UNDERWATER_TERRAIN_HEADLESS === '1'
 const outputDirectory = resolve(
     process.env.UNDERWATER_TERRAIN_BROWSER_OUTPUT ?? '/tmp/geoscratch-underwater-terrain-browser'
@@ -40,8 +41,6 @@ const expectedStageOrder = Object.freeze([
 ])
 const requiredProvenanceNames = Object.freeze([
     'frontier-map-meta-to-render-patch',
-    'frontier-visible-to-render-patch',
-    'frontier-indirect-to-render-patch',
     'render-patch-visible-to-terrain-draw',
     'render-patch-lookup-to-terrain-draw',
     'render-patch-indirect-to-terrain-draw',
@@ -72,9 +71,11 @@ await mkdir(outputDirectory, { recursive: true })
 let cogBuild
 let tileServer
 let vite
+let browserServer
 let browser
 let browserVersion
 let browserClosed = false
+let browserShutdownMode = 'not-started'
 let adapter
 let normalProof
 let failureProofs
@@ -95,11 +96,12 @@ try {
     await waitForHttpProcess(tileServer, `${tileBaseUrl}/health`, 'DEM tile server')
     vite = startVite(port)
     await waitForVite(vite, `${baseUrl}/underwaterTerrain/index.html`)
-    browser = await chromium.launch({
+    browserServer = await chromium.launchServer({
         channel: 'chrome',
         headless,
         args: [ '--enable-unsafe-webgpu' ],
     })
+    browser = await chromium.connect(browserServer.wsEndpoint())
     browserVersion = await browser.version()
     const verified = await verifyUnderwaterTerrain(browser)
     adapter = verified.adapter
@@ -113,7 +115,9 @@ try {
 } finally {
     const cleanupFailures = []
     try {
-        if (browser !== undefined) await withTimeout(browser.close(), 5_000, 'Chrome shutdown')
+        if (browserServer !== undefined) {
+            browserShutdownMode = await stopBrowserServer(browserServer)
+        }
         browserClosed = true
     } catch (error) {
         cleanupFailures.push(serializeError(error))
@@ -176,6 +180,7 @@ const result = {
         stderr: failures.length === 0 ? undefined : tileServer?.stderr,
     },
     browserClosed,
+    browserShutdownMode,
     adapter,
     normalProof: normalProof === undefined ? undefined : summarizeNormalProof(normalProof),
     failureProofs: failureProofs?.map(summarizeFailureProof),
@@ -1109,8 +1114,8 @@ function validateUnderwaterTerrainFacts(label, facts, failures, expectedStatus =
         contract?.dataMaximumMatrixLevel !== 10 ||
         contract?.renderMaximumMatrixLevel !== 14 ||
         contract?.renderPatches?.selectionPath !==
-            'gpu-balanced-normalized-projected-grid-render-patches' ||
-        contract?.renderPatches?.maximumExtraLevels !== 4 ||
+            'gpu-balanced-render-root-local-cell-projection' ||
+        contract?.renderPatches?.renderRootCount < 1 ||
         contract?.renderPatches?.maximumCellSpanPixels !== 8 ||
         contract?.renderPatches?.nominalPatchSpanPixels !== 512 ||
         contract?.renderPatches?.maximumPatchCountRatio !== 3 ||
@@ -1163,8 +1168,8 @@ function validateUnderwaterTerrainFacts(label, facts, failures, expectedStatus =
         renderPatchFeedback.minimumTrialPatchCount < 0 ||
         renderPatchFeedback.minimumTrialPatchCount >
             renderPatchFeedback.selectedPatchCount ||
-        !Number.isSafeInteger(renderPatchFeedback?.sourceRootPatchCount) ||
-        renderPatchFeedback.sourceRootPatchCount <
+        !Number.isSafeInteger(renderPatchFeedback?.renderRootPatchCount) ||
+        renderPatchFeedback.renderRootPatchCount <
             renderPatchFeedback.minimumTrialPatchCount ||
         renderPatchFeedback?.budgetLimitedByMinimumTrial !== minimumTrialLimited ||
         (!minimumTrialLimited &&
@@ -1647,6 +1652,29 @@ async function stopProcess(state, label) {
         } catch {
             throw new Error(`${label} process ${state.child.pid} did not stop`)
         }
+    }
+}
+
+async function stopBrowserServer(server) {
+
+    const child = server.process()
+    if (child.exitCode !== null || child.signalCode !== null) return 'already-closed'
+    try {
+        await withTimeout(server.close(), browserShutdownTimeout, 'Chrome graceful shutdown')
+        return 'graceful'
+    } catch (gracefulError) {
+        if (child.exitCode === null && child.signalCode === null) {
+            try {
+                await withTimeout(server.kill(), browserShutdownTimeout, 'Chrome forced shutdown')
+            } catch (forcedError) {
+                throw new AggregateError(
+                    [ gracefulError, forcedError ],
+                    `Chrome process ${child.pid} did not stop`
+                )
+            }
+        }
+        await waitForExit(child, browserShutdownTimeout)
+        return 'forced'
     }
 }
 

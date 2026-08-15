@@ -74,7 +74,10 @@ try {
         args: [ '--enable-unsafe-webgpu' ],
     })
     browserVersion = await browser.version()
-    proof = await runWireframeProof(browser)
+    proof = Object.freeze({
+        ...await runWireframeProof(browser),
+        zoomMonotonicity: await runZoomMonotonicityProof(browser),
+    })
 } catch (error) {
     fatalError = serializeError(error)
 } finally {
@@ -243,6 +246,57 @@ async function runWireframeProof(activeBrowser) {
             motionStability: Object.freeze(motionStability),
             refinement: Object.freeze(refinement),
             restored: Object.freeze({ ...restored, capture: restoredCapture }),
+            events,
+        })
+    } finally {
+        await context.close()
+    }
+}
+
+async function runZoomMonotonicityProof(activeBrowser) {
+
+    const context = await activeBrowser.newContext({
+        viewport: { width: 1512, height: 860 },
+        deviceScaleFactor: 2,
+    })
+    const page = await context.newPage()
+    const events = observePage(page)
+    try {
+        const parameters = new URLSearchParams({
+            proof: '1',
+            cache: 'none',
+            tileServer: tileBaseUrl,
+        })
+        await page.goto(`${baseUrl}/underwaterTerrain/?${parameters}`, {
+            waitUntil: 'domcontentloaded',
+            timeout,
+        })
+        await page.locator('#GPUFrame[data-status="ready"]').waitFor({ timeout })
+        let previous = await readFacts(page)
+        const samples = []
+        for (const zoom of [ 12, 12.25, 12.5, 12.75, 13, 13.25, 13.5, 13.75, 14 ]) {
+            const view = Object.freeze({
+                ...camera,
+                zoom,
+                pitch: 0,
+                bearing: 0,
+            })
+            await page.evaluate(
+                value => window.__UNDERWATER_TERRAIN_PROOF__.moveCamera(value),
+                view
+            )
+            const facts = await waitForStableMode(
+                page,
+                'shaded',
+                previous.observedFrames,
+                view
+            )
+            samples.push(facts)
+            previous = facts
+        }
+        return Object.freeze({
+            viewport: Object.freeze({ width: 1512, height: 860, deviceScaleFactor: 2 }),
+            samples: Object.freeze(samples),
             events,
         })
     } finally {
@@ -474,6 +528,7 @@ function validateProof(value, processState) {
         motionStability,
         refinement,
         restored,
+        zoomMonotonicity,
     } = value
     expect(failures,
         baseline?.terrainPresentation === 'shaded' &&
@@ -521,6 +576,32 @@ function validateProof(value, processState) {
         canonicalSignatures
     )}`)
 
+    const zoomSamples = zoomMonotonicity?.samples ?? []
+    const zoomRegressions = zoomSamples.slice(1).flatMap((sample, index) => {
+        const previous = zoomSamples[index]
+        const previousRange = previous?.renderPatchLevelRange
+        const currentRange = sample?.renderPatchLevelRange
+        if (!Array.isArray(previousRange) || !Array.isArray(currentRange) ||
+            currentRange[0] < previousRange[0] || currentRange[1] < previousRange[1]) {
+            return [ {
+                from: previous?.cameraView?.zoom,
+                to: sample?.cameraView?.zoom,
+                previousRange,
+                currentRange,
+                previousBias: previous?.renderPatchFeedback?.selectedBiasStep,
+                currentBias: sample?.renderPatchFeedback?.selectedBiasStep,
+                previousSourceLevels: previous?.frontier?.levels,
+                currentSourceLevels: sample?.frontier?.levels,
+            } ]
+        }
+        return []
+    })
+    expect(failures,
+        zoomSamples.length === 9 && zoomRegressions.length === 0,
+    `settled top-down zoom-in reintroduced coarser render patches: ${JSON.stringify(
+        zoomRegressions
+    )}`)
+
     expect(failures,
         baseline?.graphContract?.commandIds?.drawTerrain?.shaded?.length === 2 &&
         baseline.graphContract.commandIds.drawTerrain['tile-wireframe']?.length === 2 &&
@@ -528,7 +609,7 @@ function validateProof(value, processState) {
         baseline.graphContract.commandIds.renderPatches.every(ids => ids.length === 10) &&
         baseline.graphContract.dataMaximumMatrixLevel === 10 &&
         baseline.graphContract.renderMaximumMatrixLevel === 14 &&
-        baseline.graphContract.renderPatches?.maximumExtraLevels === 4,
+        baseline.graphContract.renderPatches?.renderRootCount >= 1,
     'graph contract does not expose both persistent parity command sets')
 
     const refinementDataLevels = [ wireframe, ...(refinement ?? []) ].map(sample => (
@@ -540,7 +621,7 @@ function validateProof(value, processState) {
     const requestedDataLevels = value.events?.tileRequestLevels ?? []
     expect(failures,
         baseline.graphContract?.renderPatches?.selectionPath ===
-            'gpu-balanced-normalized-projected-grid-render-patches' &&
+            'gpu-balanced-render-root-local-cell-projection' &&
         baseline.graphContract.renderPatches.maximumCellSpanPixels === 8 &&
         baseline.graphContract.renderPatches.nominalPatchSpanPixels === 512 &&
         !Object.hasOwn(
@@ -565,6 +646,7 @@ function validateProof(value, processState) {
         baseline,
         wireframe,
         ...canonicalCuts,
+        ...zoomSamples,
         ...(refinement ?? []),
         restored,
     ]
@@ -662,7 +744,10 @@ function validateProof(value, processState) {
     expect(failures,
         wireframe?.renderPatchFeedback?.unbalancedPatchCount <=
             wireframe?.renderPatchFeedback?.framePatchBudget &&
-        wireframe.renderPatchLevelRange?.[0] >= 9 &&
+        wireframe.renderPatchCount <= wireframe.renderPatchFeedback.framePatchBudget +
+            wireframe.renderPatchFeedback.balanceOverheadPatchCount &&
+        wireframe.renderPatchLevelRange?.[0] >
+            baseline.graphContract.renderPatches.minimumRootMatrixLevel &&
         wireframe.renderPatchLevelRange?.[1] <= 11 &&
         wireframe.renderPatchCellSpanRange?.[1] <= 8 * 2 **
             wireframe.renderPatchFeedback.selectedBiasLevels,
@@ -707,6 +792,10 @@ function validateProof(value, processState) {
     }
     expect(failures, unexpectedEvents(value.events).length === 0,
         `browser emitted failures: ${JSON.stringify(unexpectedEvents(value.events))}`)
+    expect(failures, unexpectedEvents(zoomMonotonicity?.events).length === 0,
+        `zoom proof emitted failures: ${JSON.stringify(
+            unexpectedEvents(zoomMonotonicity?.events)
+        )}`)
     expect(failures,
         processState.browserClosed && processState.viteClosed && processState.tileServerClosed,
     'managed Chrome, Vite, or tile server remained reachable')

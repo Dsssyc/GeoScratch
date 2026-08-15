@@ -207,7 +207,7 @@ function createTestTerrainRenderer({
 
 describe('Underwater Terrain clean cut', () => {
 
-    it('consumes Geo-owned projected-grid render patches after the data frontier', () => {
+    it('traverses Geo-owned render roots independently of the data frontier', () => {
 
         const layerSource = read(
             'packages', 'geoscratch', 'src', 'geo', 'web-mercator-terrain-renderer.ts'
@@ -230,9 +230,11 @@ describe('Underwater Terrain clean cut', () => {
         expect(layerSource).to.include('renderPatchFrontier.capture(builder, frame)')
         expect(layerSource).to.include("'render-patch-compute'")
         expect(renderPatchSource).to.include('GPU_RENDER_PATCH_MAXIMUM_MATRIX_LEVEL = 14')
-        expect(renderPatchSource).to.include('GPU_RENDER_PATCH_MAXIMUM_EXTRA_LEVELS = 4')
-        expect(renderPatchSource).to.include('dataMaximumMatrixLevel')
+        expect(renderPatchSource).not.to.include('GPU_RENDER_PATCH_MAXIMUM_EXTRA_LEVELS')
+        expect(renderPatchSource).not.to.include('dataMaximumMatrixLevel')
         expect(renderPatchSource).to.include('renderMaximumMatrixLevel')
+        expect(renderPatchSource).to.include('renderRoots')
+        expect(renderPatchSource).to.include('viewTemplates')
         expect(renderPatchSource).to.include('maximumCellSpanPixels')
         expect(renderPatchSource).to.include(
             'GPU_RENDER_PATCH_DEFAULT_MAXIMUM_CELL_SPAN_PIXELS = 8'
@@ -241,8 +243,11 @@ describe('Underwater Terrain clean cut', () => {
         expect(renderPatchSource).to.include('createReadbackCommand')
         expect(renderPatchSource).to.include('renderPatchLookupCapacity')
         expect(renderPatchSource).not.to.include('previousRenderPatchLookup')
-        expect(renderPatchShader).to.include('source.samplingLevel')
+        expect(renderPatchShader).not.to.include('sourceVisibleInstances')
+        expect(renderPatchShader).not.to.include('sourceDrawArguments')
+        expect(renderPatchShader).not.to.include('.samplingLevel')
         expect(renderPatchShader).to.include('projectedCellSpanPixels')
+        expect(renderPatchShader).to.include('projectedAxisCellSpanPixels')
         expect(renderPatchShader).to.include('clipPolygonToPlane')
         expect(renderPatchShader).to.include('plane < 6u')
         expect(renderPatchShader).to.include(
@@ -251,13 +256,16 @@ describe('Underwater Terrain clean cut', () => {
         expect(renderPatchShader).not.to.include('return 65535.0f')
         expect(renderPatchShader).not.to.include('historyAwareRefinementThreshold')
         expect(renderPatchShader).not.to.include('previousLookupContains')
-        expect(renderPatchShader).to.include('cellSpans[depth] > nominalThreshold')
         expect(renderPatchShader).to.include('cellSpanPixels > nominalThreshold')
+        expect(renderPatchShader).to.include('var stack: array<GpuRenderPatch, 64>')
         expect(renderPatchShader).to.include('let nominalPatchSpan = max(')
         expect(renderPatchShader).to.include('countRenderPatchTrials')
         expect(renderPatchShader).to.include('selectRenderPatchBudget')
         expect(renderPatchShader).to.include('trialCounts')
         expect(renderPatchShader).to.include('step < finalStep &&')
+        expect(renderPatchShader).to.include(
+            'previousTrialCount >= renderPatchPolicy.maximumRenderPatches'
+        )
         expect(renderPatchShader).to.include('clipFromRelativeWorld')
         expect(renderPatchShader).to.include('minimumCellSpanQ8')
         expect(renderPatchShader).to.include('frameEpoch')
@@ -644,7 +652,7 @@ describe('Underwater Terrain clean cut', () => {
         await initialized.observation
 
         const frame = await graph.renderFrame(cameraState(9, [ 320, 180 ]))
-        expect(frame.provenance).to.have.length(6)
+        expect(frame.provenance).to.have.length(4)
         let observedFailure
         try {
             await frame.observation
@@ -713,8 +721,6 @@ describe('Underwater Terrain clean cut', () => {
 
         expect(first.provenance.map(fact => fact.name)).to.deep.equal([
             'frontier-map-meta-to-render-patch',
-            'frontier-visible-to-render-patch',
-            'frontier-indirect-to-render-patch',
             'render-patch-visible-to-terrain-draw',
             'render-patch-lookup-to-terrain-draw',
             'render-patch-indirect-to-terrain-draw',
@@ -729,7 +735,7 @@ describe('Underwater Terrain clean cut', () => {
         expect(graph.currentIdentityFacts()).not.to.equal(graph.currentIdentityFacts())
         expect(initialIdentityFacts).to.deep.include({
             hash: initialIdentityHash,
-            uploads: 4,
+            uploads: 5,
             bindLayouts: 11,
             bindSets: 20,
             programs: 10,
@@ -770,10 +776,11 @@ describe('Underwater Terrain clean cut', () => {
             renderMaximumMatrixLevel: 14,
         })
         expect(graph.contractFacts().renderPatches).to.deep.include({
-            selectionPath: 'gpu-balanced-normalized-projected-grid-render-patches',
-            maximumExtraLevels: 4,
+            selectionPath: 'gpu-balanced-render-root-local-cell-projection',
             maximumMatrixLevel: 14,
-            dataMaximumMatrixLevel: 10,
+            renderRootCount: 1,
+            minimumRootMatrixLevel: 4,
+            maximumRootMatrixLevel: 4,
             maximumCellSpanPixels: 8,
             maximumPatchCountRatio: 3,
             biasStepsPerLevel: 4,

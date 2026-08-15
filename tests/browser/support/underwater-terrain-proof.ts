@@ -389,7 +389,7 @@ function publishFrameFacts({
     canvas.dataset.renderPatchFrameBudget = String(state.renderPatchFrameBudget)
     canvas.dataset.renderPatchRequestedCount = String(state.renderPatchRequestedCount)
     canvas.dataset.renderPatchMinimumTrialCount = String(state.renderPatchMinimumTrialCount)
-    canvas.dataset.renderPatchSourceRootCount = String(state.renderPatchSourceRootCount)
+    canvas.dataset.renderPatchRenderRootCount = String(state.renderPatchRenderRootCount)
     canvas.dataset.renderPatchSelectedBiasLevels = String(
         state.renderPatchSelectedBiasLevels
     )

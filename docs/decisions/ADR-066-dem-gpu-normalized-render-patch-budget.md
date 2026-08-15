@@ -6,7 +6,8 @@ Accepted; extends ADR-065 with a global frame budget. Amended after the rapid-ca
 transition regression and again after the path-dependent top-down cut described below.
 The latest amendment withdraws per-patch historical thresholds while retaining global
 budget hysteresis. ADR-068 adds a correctness-owned balance pass after this ADR's
-budget-selected cut.
+budget-selected cut. ADR-076 supersedes this ADR's source-page render roots and
+clipped-footprint metric; the global 17-trial budget and hysteresis remain current.
 
 ## Date
 

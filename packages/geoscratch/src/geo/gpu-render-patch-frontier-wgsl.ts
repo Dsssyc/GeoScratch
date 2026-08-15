@@ -48,9 +48,7 @@ struct GpuRenderPatchClipPolygon {
 
 @group(0) @binding(0) var<uniform> mapMeta: GpuTileFrontierMapMeta;
 @group(0) @binding(1) var<uniform> renderPatchPolicy: GpuRenderPatchPolicy;
-@group(0) @binding(2) var<storage, read> sourceVisibleInstances:
-    array<GpuTileFrontierVisibleInstance>;
-@group(0) @binding(3) var<storage, read> sourceDrawArguments: array<u32>;
+@group(0) @binding(2) var<storage, read> renderRoots: array<GpuRenderPatch>;
 @group(0) @binding(4) var<storage, read_write> renderPatches: array<GpuRenderPatch>;
 @group(0) @binding(5) var<storage, read_write> renderPatchState: GpuRenderPatchState;
 @group(0) @binding(6) var<storage, read_write> drawArguments: array<u32>;
@@ -238,6 +236,18 @@ fn clipPolygonToPlane(
     return output;
 }
 
+fn projectedAxisCellSpanPixels(clip: vec4f, delta: vec4f) -> f32 {
+    let halfDelta = delta * 0.5f;
+    let start = clip - halfDelta;
+    let end = clip + halfDelta;
+    if (start.w <= 1e-5f || end.w <= 1e-5f) {
+        return max(mapMeta.viewport.x, mapMeta.viewport.y);
+    }
+    let pixelDelta = (end.xy / end.w - start.xy / start.w) *
+        mapMeta.viewport * 0.5f;
+    return length(pixelDelta);
+}
+
 fn projectedPlaneCellSpanPixels(bounds: GpuRenderPatchBounds, elevation: f32) -> f32 {
     var polygon: GpuRenderPatchClipPolygon;
     polygon.count = 4u;
@@ -260,22 +270,20 @@ fn projectedPlaneCellSpanPixels(bounds: GpuRenderPatchBounds, elevation: f32) ->
         }
     }
 
-    var minimumNdc = vec2f(1e20f);
-    var maximumNdc = vec2f(-1e20f);
+    let cellMeters = max(
+        bounds.maximum.x - bounds.minimum.x,
+        bounds.maximum.y - bounds.minimum.y,
+    ) / f32(renderPatchPolicy.cellsPerPatchEdge);
+    let xDelta = mapMeta.clipFromRelativeWorld[0] * cellMeters;
+    let yDelta = mapMeta.clipFromRelativeWorld[1] * cellMeters;
+    var maximumSpan = 0.0f;
     for (var index = 0u; index < polygon.count; index += 1u) {
         let clip = polygon.vertices[index];
-        if (clip.w > 1e-5f) {
-            let ndc = clip.xy / clip.w;
-            minimumNdc = min(minimumNdc, ndc);
-            maximumNdc = max(maximumNdc, ndc);
-        }
+        let xSpan = projectedAxisCellSpanPixels(clip, xDelta);
+        let ySpan = projectedAxisCellSpanPixels(clip, yDelta);
+        maximumSpan = max(maximumSpan, sqrt(xSpan * ySpan));
     }
-    let projectedSize = max(
-        (maximumNdc - minimumNdc) * mapMeta.viewport * 0.5f,
-        vec2f(0.0f),
-    );
-    return sqrt(projectedSize.x * projectedSize.y) /
-        f32(renderPatchPolicy.cellsPerPatchEdge);
+    return maximumSpan;
 }
 
 fn projectedCellSpanPixels(bounds: GpuRenderPatchBounds) -> f32 {
@@ -289,13 +297,6 @@ fn trialCellSpanThreshold(biasStep: u32) -> f32 {
     return renderPatchPolicy.maximumCellSpanPixels * exp2(
         f32(biasStep) / f32(renderPatchPolicy.biasStepsPerLevel),
     );
-}
-
-fn canonicalTerminalForDepth(terminalRow: u32, terminalCol: u32, depth: u32) -> bool {
-    let remainingBits = renderPatchPolicy.maximumExtraLevels - depth;
-    let duplicateMask = (1u << remainingBits) - 1u;
-    return (terminalRow & duplicateMask) == 0u &&
-        (terminalCol & duplicateMask) == 0u;
 }
 
 fn cellSpanQ8(cellSpanPixels: f32) -> u32 {
@@ -405,11 +406,11 @@ fn inputRenderPatch(fromScratch: bool, patchIndex: u32) -> GpuRenderPatch {
 
 fn maximumFinerNeighborDelta(fromScratch: bool, candidate: GpuRenderPatch) -> u32 {
     let availableDelta = min(
-        renderPatchPolicy.maximumExtraLevels + 1u,
+        14u,
         renderPatchPolicy.renderMaximumMatrixLevel - candidate.matrixLevel,
     );
     var maximumDelta = 0u;
-    for (var delta = 1u; delta <= 5u; delta += 1u) {
+    for (var delta = 1u; delta <= 14u; delta += 1u) {
         if (delta > availableDelta) { break; }
         let scale = 1u << delta;
         let level = candidate.matrixLevel + delta;
@@ -418,7 +419,7 @@ fn maximumFinerNeighborDelta(fromScratch: bool, candidate: GpuRenderPatch) -> u3
         let firstCol = candidate.tileCol * scale;
         let westCol = (firstCol + levelWidth - 1u) & (levelWidth - 1u);
         let eastCol = (firstCol + scale) & (levelWidth - 1u);
-        for (var offset = 0u; offset < 32u; offset += 1u) {
+        for (var offset = 0u; offset < 16384u; offset += 1u) {
             if (offset >= scale) { break; }
             let row = firstRow + offset;
             let col = firstCol + offset;
@@ -488,17 +489,11 @@ fn writeBalancedChildren(toScratch: bool, candidate: GpuRenderPatch) {
             childLevel,
             firstRow + (child >> 1u),
             firstCol + (child & 1u),
-            candidate.samplingLevel,
-            candidate.sourceMatrixLevel,
-            candidate.sourceTileRow,
-            candidate.sourceTileCol,
-            candidate.sourceCompactIndex,
         ));
     }
 }
 
 fn emitRenderPatch(
-    source: GpuTileFrontierVisibleInstance,
     matrixLevel: u32,
     tileRow: u32,
     tileCol: u32,
@@ -513,11 +508,6 @@ fn emitRenderPatch(
         matrixLevel,
         tileRow,
         tileCol,
-        source.samplingLevel,
-        source.matrixLevel,
-        source.tileRow,
-        source.tileCol,
-        source.compactIndex,
     );
     if (!insertRenderPatchLookup(matrixLevel, tileRow, tileCol, outputIndex)) {
         atomicAdd(&renderPatchState.lookupOverflowCount, 1u);
@@ -559,56 +549,50 @@ fn resetRenderPatches() {
 
 @compute @workgroup_size(64)
 fn countRenderPatchTrials(@builtin(global_invocation_id) globalId: vec3u) {
-    let terminalWidth = 1u << renderPatchPolicy.maximumExtraLevels;
-    let candidatesPerSource = terminalWidth * terminalWidth;
-    let sourceIndex = globalId.x / candidatesPerSource;
-    let terminalIndex = globalId.x % candidatesPerSource;
-    let sourceCount = sourceDrawArguments[1];
-    if (sourceIndex >= sourceCount) {
-        return;
-    }
-    let source = sourceVisibleInstances[sourceIndex];
-    let terminalRow = terminalIndex / terminalWidth;
-    let terminalCol = terminalIndex % terminalWidth;
-    let availableDepth = min(
-        renderPatchPolicy.maximumExtraLevels,
-        renderPatchPolicy.renderMaximumMatrixLevel - source.matrixLevel,
-    );
-    var visibleDepthMask = 0u;
-    var cellSpans: array<f32, 5>;
-
-    for (var depth = 0u; depth <= 4u; depth += 1u) {
-        if (depth > availableDepth) { break; }
-        let remainingBits = renderPatchPolicy.maximumExtraLevels - depth;
-        let scale = 1u << depth;
-        let matrixLevel = source.matrixLevel + depth;
-        let tileRow = source.tileRow * scale + (terminalRow >> remainingBits);
-        let tileCol = source.tileCol * scale + (terminalCol >> remainingBits);
-        let bounds = patchBounds(matrixLevel, tileRow, tileCol);
-        if (!patchVisible(bounds)) { break; }
-        visibleDepthMask |= 1u << depth;
-        cellSpans[depth] = projectedCellSpanPixels(bounds);
-    }
-
+    let rootIndex = globalId.x;
+    if (rootIndex >= renderPatchPolicy.renderRootCount) { return; }
+    let root = renderRoots[rootIndex];
     let finalStep = renderPatchPolicy.biasStepCount - 1u;
     for (var step = 0u; step < 17u; step += 1u) {
         let nominalThreshold = trialCellSpanThreshold(step);
-        for (var depth = 0u; depth <= 4u; depth += 1u) {
-            if (depth > availableDepth || (visibleDepthMask & (1u << depth)) == 0u) {
-                break;
-            }
-            let remainingBits = renderPatchPolicy.maximumExtraLevels - depth;
-            let scale = 1u << depth;
-            let matrixLevel = source.matrixLevel + depth;
-            let tileRow = source.tileRow * scale + (terminalRow >> remainingBits);
-            let tileCol = source.tileCol * scale + (terminalCol >> remainingBits);
+        var stack: array<GpuRenderPatch, 64>;
+        var stackSize = 1u;
+        stack[0] = root;
+        loop {
+            if (stackSize == 0u) { break; }
+            stackSize -= 1u;
+            let candidate = stack[stackSize];
+            let bounds = patchBounds(
+                candidate.matrixLevel,
+                candidate.tileRow,
+                candidate.tileCol,
+            );
+            if (!patchVisible(bounds)) { continue; }
+            let cellSpanPixels = projectedCellSpanPixels(bounds);
             let refine = step < finalStep &&
-                depth < availableDepth && cellSpans[depth] > nominalThreshold;
-            if (refine) { continue; }
-            if (canonicalTerminalForDepth(terminalRow, terminalCol, depth)) {
-                atomicAdd(&renderPatchState.trialCounts[step], 1u);
+                candidate.matrixLevel < renderPatchPolicy.renderMaximumMatrixLevel &&
+                cellSpanPixels > nominalThreshold;
+            if (!refine) {
+                let previousTrialCount = atomicAdd(
+                    &renderPatchState.trialCounts[step],
+                    1u,
+                );
+                if (previousTrialCount >= renderPatchPolicy.maximumRenderPatches) {
+                    break;
+                }
+                continue;
             }
-            break;
+            let childLevel = candidate.matrixLevel + 1u;
+            let firstRow = candidate.tileRow * 2u;
+            let firstCol = candidate.tileCol * 2u;
+            for (var child = 0u; child < 4u; child += 1u) {
+                stack[stackSize] = GpuRenderPatch(
+                    childLevel,
+                    firstRow + (child >> 1u),
+                    firstCol + (child & 1u),
+                );
+                stackSize += 1u;
+            }
         }
     }
 }
@@ -679,44 +663,47 @@ fn selectRenderPatchBudget() {
 
 @compute @workgroup_size(64)
 fn expandRenderPatches(@builtin(global_invocation_id) globalId: vec3u) {
-    let terminalWidth = 1u << renderPatchPolicy.maximumExtraLevels;
-    let candidatesPerSource = terminalWidth * terminalWidth;
-    let sourceIndex = globalId.x / candidatesPerSource;
-    let terminalIndex = globalId.x % candidatesPerSource;
-    let sourceCount = sourceDrawArguments[1];
-    if (sourceIndex >= sourceCount) {
-        return;
-    }
-    let source = sourceVisibleInstances[sourceIndex];
-    let terminalRow = terminalIndex / terminalWidth;
-    let terminalCol = terminalIndex % terminalWidth;
-    let availableDepth = min(
-        renderPatchPolicy.maximumExtraLevels,
-        renderPatchPolicy.renderMaximumMatrixLevel - source.matrixLevel,
-    );
+    let rootIndex = globalId.x;
+    if (rootIndex >= renderPatchPolicy.renderRootCount) { return; }
     let selectedBiasStep = atomicLoad(&renderPatchState.selectedBiasStep);
     let nominalThreshold = trialCellSpanThreshold(selectedBiasStep);
-
-    for (var depth = 0u; depth <= 4u; depth += 1u) {
-        if (depth > availableDepth) { return; }
-        let remainingBits = renderPatchPolicy.maximumExtraLevels - depth;
-        let scale = 1u << depth;
-        let matrixLevel = source.matrixLevel + depth;
-        let tileRow = source.tileRow * scale + (terminalRow >> remainingBits);
-        let tileCol = source.tileCol * scale + (terminalCol >> remainingBits);
-        let bounds = patchBounds(matrixLevel, tileRow, tileCol);
-        if (!patchVisible(bounds)) { return; }
-
+    var stack: array<GpuRenderPatch, 64>;
+    var stackSize = 1u;
+    stack[0] = renderRoots[rootIndex];
+    loop {
+        if (stackSize == 0u) { break; }
+        stackSize -= 1u;
+        let candidate = stack[stackSize];
+        let bounds = patchBounds(
+            candidate.matrixLevel,
+            candidate.tileRow,
+            candidate.tileCol,
+        );
+        if (!patchVisible(bounds)) { continue; }
         let cellSpanPixels = projectedCellSpanPixels(bounds);
         let refine = selectedBiasStep < renderPatchPolicy.biasStepCount - 1u &&
-            depth < availableDepth && cellSpanPixels > nominalThreshold;
-        if (refine) { continue; }
-
-        if (!canonicalTerminalForDepth(terminalRow, terminalCol, depth)) {
-            return;
+            candidate.matrixLevel < renderPatchPolicy.renderMaximumMatrixLevel &&
+            cellSpanPixels > nominalThreshold;
+        if (!refine) {
+            emitRenderPatch(
+                candidate.matrixLevel,
+                candidate.tileRow,
+                candidate.tileCol,
+                cellSpanPixels,
+            );
+            continue;
         }
-        emitRenderPatch(source, matrixLevel, tileRow, tileCol, cellSpanPixels);
-        return;
+        let childLevel = candidate.matrixLevel + 1u;
+        let firstRow = candidate.tileRow * 2u;
+        let firstCol = candidate.tileCol * 2u;
+        for (var child = 0u; child < 4u; child += 1u) {
+            stack[stackSize] = GpuRenderPatch(
+                childLevel,
+                firstRow + (child >> 1u),
+                firstCol + (child & 1u),
+            );
+            stackSize += 1u;
+        }
     }
 }
 

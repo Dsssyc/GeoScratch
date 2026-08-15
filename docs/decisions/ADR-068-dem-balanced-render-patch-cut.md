@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted
+Accepted. ADR-076 changes the traversal roots and error metric; this ADR's final-cut
+balance and validation contract remains current.
 
 ## Date
 
@@ -87,4 +88,3 @@ stage exists to provide.
 
 Rejected because it adds a delayed second authority, host-authored patch uploads, and
 camera-transition latency to an otherwise GPU-driven frame.
-
