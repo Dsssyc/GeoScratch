@@ -49,7 +49,10 @@ thresholds, selects the finest cut inside the budget, emits that cut, and finali
 the indirect draw count in one ordered compute pass. No patch count or selected
 bias is read back to control the frame. The previous bias may be retained only
 within the budget hysteresis band and at most one quarter-step coarser than the
-current optimum.
+current optimum. Local patch decisions are stateless: projected footprints are
+clipped against the complete WebGPU clip volume, and the same settled camera,
+source frontier, and global bias always produce the same render cut regardless of
+the camera path used to reach them.
 
 The final trial stops at visible source-page roots. Counts across the 17 trials
 are not assumed to be monotonic: child AABBs can all be rejected while a

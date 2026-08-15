@@ -153,8 +153,45 @@ async function runWireframeProof(activeBrowser) {
         )
         const wireframeCapture = await captureState(page, 'tile-wireframe')
 
-        const motionStability = []
+        const topDownCamera = Object.freeze({
+            ...camera,
+            zoom: 10.25,
+            pitch: 0,
+            bearing: 0,
+        })
+        const canonicalTopDown = []
         let previous = wireframe
+        for (const [ name, zoom ] of [
+            [ 'from-coarse', topDownCamera.zoom - 0.6 ],
+            [ 'from-fine', topDownCamera.zoom + 0.6 ],
+        ]) {
+            const approachCamera = Object.freeze({ ...topDownCamera, zoom })
+            await page.evaluate(
+                value => window.__UNDERWATER_TERRAIN_PROOF__.moveCamera(value),
+                approachCamera
+            )
+            const approached = await waitForStableMode(
+                page,
+                'tile-wireframe',
+                previous.observedFrames,
+                approachCamera
+            )
+            await page.evaluate(
+                value => window.__UNDERWATER_TERRAIN_PROOF__.moveCamera(value),
+                topDownCamera
+            )
+            const converged = await waitForStableMode(
+                page,
+                'tile-wireframe',
+                approached.observedFrames,
+                topDownCamera
+            )
+            const capture = await captureState(page, `canonical-top-down-${name}`)
+            canonicalTopDown.push(Object.freeze({ ...converged, capture }))
+            previous = converged
+        }
+
+        const motionStability = []
         const pitchedCamera = Object.freeze({ ...camera, pitch: 80 })
         for (const zoom of [ 10.02, 10.04, 10.06, 13.66, 13.70, 13.84 ]) {
             const motionCamera = Object.freeze({ ...pitchedCamera, zoom })
@@ -202,6 +239,7 @@ async function runWireframeProof(activeBrowser) {
             url: page.url(),
             baseline: Object.freeze({ ...baseline, capture: shadedCapture }),
             wireframe: Object.freeze({ ...wireframe, capture: wireframeCapture }),
+            canonicalTopDown: Object.freeze(canonicalTopDown),
             motionStability: Object.freeze(motionStability),
             refinement: Object.freeze(refinement),
             restored: Object.freeze({ ...restored, capture: restoredCapture }),
@@ -429,7 +467,14 @@ function validateProof(value, processState) {
 
     const failures = []
     if (value === undefined) return [ 'DEM tile wireframe proof was not produced' ]
-    const { baseline, wireframe, motionStability, refinement, restored } = value
+    const {
+        baseline,
+        wireframe,
+        canonicalTopDown,
+        motionStability,
+        refinement,
+        restored,
+    } = value
     expect(failures,
         baseline?.terrainPresentation === 'shaded' &&
         baseline.tileWireframeChecked === false &&
@@ -457,6 +502,25 @@ function validateProof(value, processState) {
         wireframe.persistentFacts?.resources === restored.persistentFacts?.resources,
     'live presentation switching changed runtime persistent resource counts')
 
+    const canonicalCuts = canonicalTopDown ?? []
+    const canonicalSignatures = canonicalCuts.map(sample => ({
+        selectedPatchCount: sample?.renderPatchFeedback?.selectedPatchCount,
+        minimumMatrixLevel: sample?.renderPatchFeedback?.minimumMatrixLevel,
+        maximumMatrixLevel: sample?.renderPatchFeedback?.maximumMatrixLevel,
+        selectedBiasStep: sample?.renderPatchFeedback?.selectedBiasStep,
+        unbalancedPatchCount: sample?.renderPatchFeedback?.unbalancedPatchCount,
+        balanceSplitCount: sample?.renderPatchFeedback?.balanceSplitCount,
+        sourceLevels: sample?.frontier?.levels,
+        sourceVisibleCount: sample?.frontier?.visibleInstanceCount,
+        canvasHash: sample?.capture?.canvas?.sha256,
+    }))
+    expect(failures,
+        canonicalSignatures.length === 2 &&
+        JSON.stringify(canonicalSignatures[0]) === JSON.stringify(canonicalSignatures[1]),
+    `the same settled top-down camera retained a history-dependent render cut: ${JSON.stringify(
+        canonicalSignatures
+    )}`)
+
     expect(failures,
         baseline?.graphContract?.commandIds?.drawTerrain?.shaded?.length === 2 &&
         baseline.graphContract.commandIds.drawTerrain['tile-wireframe']?.length === 2 &&
@@ -479,7 +543,10 @@ function validateProof(value, processState) {
             'gpu-balanced-normalized-projected-grid-render-patches' &&
         baseline.graphContract.renderPatches.maximumCellSpanPixels === 8 &&
         baseline.graphContract.renderPatches.nominalPatchSpanPixels === 512 &&
-        baseline.graphContract.renderPatches.refinementHysteresisLevels === 0.25 &&
+        !Object.hasOwn(
+            baseline.graphContract.renderPatches,
+            'refinementHysteresisLevels'
+        ) &&
         baseline.graphContract.renderPatches.balancePassCount === 14 &&
         baseline.graphContract.renderPatches.balanceWorkgroupSize === 256 &&
         baseline.graphContract.renderPatches.renderPatchLookupCapacity >
@@ -494,7 +561,13 @@ function validateProof(value, processState) {
         requestedDataLevels,
     })}`)
 
-    const patchSamples = [ baseline, wireframe, ...(refinement ?? []), restored ]
+    const patchSamples = [
+        baseline,
+        wireframe,
+        ...canonicalCuts,
+        ...(refinement ?? []),
+        restored,
+    ]
     expect(failures,
         patchSamples.every(sample => (
             Number.isSafeInteger(sample?.renderPatchCount) &&

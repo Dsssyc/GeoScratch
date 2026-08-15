@@ -240,13 +240,19 @@ describe('Underwater Terrain clean cut', () => {
         expect(renderPatchSource).to.include('decodeGpuRenderPatchState')
         expect(renderPatchSource).to.include('createReadbackCommand')
         expect(renderPatchSource).to.include('renderPatchLookupCapacity')
-        expect(renderPatchSource).to.include('previousRenderPatchLookup')
+        expect(renderPatchSource).not.to.include('previousRenderPatchLookup')
         expect(renderPatchShader).to.include('source.samplingLevel')
         expect(renderPatchShader).to.include('projectedCellSpanPixels')
-        expect(renderPatchShader).to.include('start.z / (start.z - end.z)')
+        expect(renderPatchShader).to.include('clipPolygonToPlane')
+        expect(renderPatchShader).to.include('plane < 6u')
+        expect(renderPatchShader).to.include(
+            'startDistance / (startDistance - endDistance)'
+        )
         expect(renderPatchShader).not.to.include('return 65535.0f')
-        expect(renderPatchShader).to.include('historyAwareRefinementThreshold')
-        expect(renderPatchShader).to.include('previousLookupContains')
+        expect(renderPatchShader).not.to.include('historyAwareRefinementThreshold')
+        expect(renderPatchShader).not.to.include('previousLookupContains')
+        expect(renderPatchShader).to.include('cellSpans[depth] > nominalThreshold')
+        expect(renderPatchShader).to.include('cellSpanPixels > nominalThreshold')
         expect(renderPatchShader).to.include('let nominalPatchSpan = max(')
         expect(renderPatchShader).to.include('countRenderPatchTrials')
         expect(renderPatchShader).to.include('selectRenderPatchBudget')
@@ -772,7 +778,6 @@ describe('Underwater Terrain clean cut', () => {
             maximumPatchCountRatio: 3,
             biasStepsPerLevel: 4,
             biasStepCount: 17,
-            refinementHysteresisLevels: 0.25,
             budgetHysteresisRatio: 0.75,
             balancePassCount: 14,
             balanceWorkgroupSize: 256,

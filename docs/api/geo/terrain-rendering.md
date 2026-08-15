@@ -35,6 +35,15 @@ continue refining the terrain grid beyond that level while retaining an explicit
 height lookup reconciles the available sampling levels. Virtual Raster removes CPU
 padding and physical-atlas coupling; mesh stitching removes T-junction cracks.
 
+Render-patch refinement is canonical for the current camera, viewport, source
+frontier, and selected global budget bias. Each horizontal terrain footprint is
+clipped against all six WebGPU homogeneous clip planes before its projected cell span
+is measured. Local split decisions never read the previous parity's patch topology, so
+the same settled inputs cannot retain different spatial cuts depending on camera
+history. The GPU may retain the previous *global* bias only inside the bounded frame
+budget hysteresis band; that uniform budget decision does not grant individual patches
+a second refinement threshold.
+
 Lower-level consumers may compose `gpuRenderPatchReadWgslModule` directly. It exposes
 bounded visible-instance lookup, covering-patch lookup, neighbor resolution, and edge
 coordinate snapping with explicit storage bindings and layout dependencies. Generated

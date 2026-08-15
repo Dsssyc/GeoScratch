@@ -2,7 +2,7 @@
 docId: geo.terrain-rendering.zh
 canonical: false
 translationOf: ./terrain-rendering.md
-canonicalDigest: cfa41d7272d9593e9b0f7ae44fdae1191b153d7ec8bcdbafe3acf3b9d738f450
+canonicalDigest: d4c7fc409965a8757b39503c17512ef7b14d4935120fdb769bb6ec175c2a8670
 ---
 # 地形渲染
 
@@ -29,6 +29,13 @@ resident source page；render-patch frontier 可以继续细化地形网格，�
 `samplingLevel`。Neighbor stitching 使用 geometry level，共享边高程查询则协调实际可用
 的 sampling level。Virtual Raster 消除 CPU padding 与 physical atlas 耦合；mesh
 stitching 消除 T-junction crack。
+
+对于当前 camera、viewport、source frontier 与已选择的全局 budget bias，render-patch
+细分结果是规范且唯一的。每个水平地形 footprint 会先经过 WebGPU 全部六个齐次裁剪面，
+再计算投影后的 cell span。局部 split 决策不会读取上一 parity 的 patch topology，因此
+相同的稳定输入不会因相机进入路径不同而保留两套空间切分。GPU 只可在有界 frame budget
+迟滞区间内保留上一帧的*全局* bias；这个统一的预算决策不会为单个 patch 提供第二套细分
+阈值。
 
 更底层的消费者可以直接组合 `gpuRenderPatchReadWgslModule`。它通过显式 storage
 binding 与 layout dependency 提供有界 visible-instance lookup、covering-patch lookup、

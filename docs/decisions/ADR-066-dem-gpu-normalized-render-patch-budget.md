@@ -3,12 +3,16 @@
 ## Status
 
 Accepted; extends ADR-065 with a global frame budget. Amended after the rapid-camera
-transition regression and the local refinement pulse described below. ADR-068 adds a
-correctness-owned balance pass after this ADR's budget-selected cut.
+transition regression and again after the path-dependent top-down cut described below.
+The latest amendment withdraws per-patch historical thresholds while retaining global
+budget hysteresis. ADR-068 adds a correctness-owned balance pass after this ADR's
+budget-selected cut.
 
 ## Date
 
 2026-08-07
+
+Last amended 2026-08-15.
 
 ## Context
 
@@ -49,11 +53,12 @@ maximum-elevation horizontal planes. The larger projected footprint wins. The
 vertical span of a conservative terrain AABB therefore cannot masquerade as
 horizontal patch coverage when the camera is pitched.
 
-The footprint polygon is clipped against WebGPU's homogeneous near plane
-(`clip.z >= 0`) before perspective division. Edges crossing that plane contribute
-their intersection points. A corner behind the eye is not converted into an
-arbitrary maximum footprint: that discontinuity previously made the measured span
-jump from about 8 pixels to the `65535` diagnostic ceiling over a narrow zoom range.
+The footprint polygon is clipped against all six WebGPU homogeneous clip planes
+before perspective division. Edges crossing a plane contribute their intersection
+points. A corner behind the eye is not converted into an arbitrary maximum footprint,
+and an off-screen polygon is not approximated by clamping an uncut projected bounding
+box. The former discontinuity made the measured span jump from about 8 pixels to the
+`65535` diagnostic ceiling; the latter created a narrow off-screen footprint peak.
 
 ### Select a complete cut from measured GPU counts
 
@@ -85,27 +90,26 @@ previous choice is retained only when its current count is within 75% through 10
 of the budget and it is no more than one quarter-step coarser than the newly desired
 cut.
 
-### Keep each local refinement decision temporally stable
+### Keep local refinement canonical
 
-Global budget hysteresis cannot stabilize a single distant patch whose projected
-footprint briefly crosses the local threshold. The two existing parity lookup
-buffers therefore also form a GPU-resident history: each frame reads the opposite
-parity's final balanced cut while writing its own.
+An earlier amendment read the opposite parity's final lookup and gave a patch that
+was terminal in the previous cut a one-quarter-level coarsening threshold. That
+suppressed one observed distant-patch pulse, but it also made the previous topology a
+second selection authority. A fixed top-down camera could then retain either a coarse
+parent or its fine children indefinitely, depending only on whether the camera entered
+from a coarser or finer zoom. It also allowed arbitrary spatial asymmetry among patches
+with equivalent current projected error.
 
-For a nominal threshold `T`, a patch that was terminal in the previous cut remains
-terminal until its footprint exceeds:
+That local historical threshold is withdrawn. Trial counting and final emission now
+derive every local split from the current camera, viewport, source frontier, and the
+single selected global bias. The opposite parity lookup remains a current-cut rendering
+and balancing resource, but it is not an input to local refinement. Complete six-plane
+homogeneous clipping removes the off-screen projected-footprint peak that the historical
+threshold had concealed.
 
-```text
-T * 2^(1 / 4)
-```
-
-A previously refined patch remains refined until its parent footprint falls to
-`T`. This one-quarter-level band separates the refine and coarsen boundaries without
-delaying a newly visible patch or requiring descendant scans. Trial counting and
-final emission use the same history-aware threshold, so the budget still describes
-the cut that is actually emitted. Both lookup buffers are explicitly cleared during
-frontier initialization to make the first frame valid under Scratch's resource
-readiness model.
+Global frame-budget hysteresis remains. It selects one uniform threshold step for the
+complete cut and cannot independently preserve a stale branch. Therefore a settled
+camera, source frontier, and selected global bias produce one canonical local cut.
 
 The persistent compute order is:
 
@@ -139,8 +143,8 @@ source-page floor.
   truncating them into holes.
 - The frame graph adds persistent count and selection kernels but no per-frame GPU
   objects, host-authored instance list, or control readback.
-- Local temporal stability reuses the existing parity lookup allocations; it adds
-  no CPU traversal, GPU readback, persistent buffer, or per-frame command.
+- Current-cut lookup allocations remain available to rendering and 2:1 balancing,
+  but opposite-parity topology is not a local refinement input.
 - Diagnostics expose baseline and frame budgets, requested, unbalanced, and final counts,
   minimum-trial and source-root counts, selected bias, level range, and both
   overflow counters, plus balance splits and maximum adjacent level delta.
@@ -167,11 +171,19 @@ The wireframe gate confirms distinct stable tile colors, post-stitch triangle
 edges, mixed geometry levels at `z14`, and complete viewport coverage.
 
 The pitched-motion gate fixes the source frontier and samples `z10.02`, `z10.04`,
-and `z10.06`. Before this amendment the render cut pulsed from 18 `z10` patches to
-19 `z10/z11` patches and immediately back to 18 `z10` patches. The same gate also
-samples `z13.66`, `z13.70`, and `z13.84`; no projected span may reach the former
-`65535` near-plane sentinel. Both checks run in Chrome WebGPU with zero pending
-demands, overflow counters, console errors, diagnostic incidents, or device loss.
+and `z10.06`. Near-plane-only clipping produced 18, 19, and 18 patches; complete
+homogeneous clipping produces 18 `z10` patches at all three samples without reading
+previous patch topology. The same gate also samples `z13.66`, `z13.70`, and `z13.84`;
+no projected span may reach the former `65535` near-plane sentinel. Both checks run in
+Chrome WebGPU with zero pending demands, overflow counters, console errors, diagnostic
+incidents, or device loss.
+
+The canonical top-down gate reaches the same `z10.25`, zero-pitch camera once from
+`z9.65` and once from `z10.85`. The previous local-history implementation stabilized
+at two different cuts: 6 `z10` patches from the coarse path and 9 `z10/z11` patches
+from the fine path, despite equal source frontier and global bias. The amended
+implementation produces 9 `z10/z11` patches on both paths, with identical feedback
+and canvas SHA-256.
 
 The amended rapid-camera gate executes 84 continuous center, zoom, pitch, and
 bearing changes, including a pitched-to-top-down return. It remains `ready` with
@@ -200,6 +212,12 @@ leave holes. The selected result must be a complete cut.
 
 Rejected because it creates host latency and split authority. Count, selection,
 emission, and indirect draw remain ordered in one GPU submission.
+
+### Use the previous patch topology as a local hysteresis authority
+
+Rejected after implementation because it permits multiple permanent cuts for the same
+settled inputs. Temporal smoothing must not make an old local topology authoritative
+over current geometric facts.
 
 ## References
 

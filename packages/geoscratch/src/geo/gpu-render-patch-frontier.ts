@@ -171,7 +171,6 @@ export type GpuRenderPatchFrontierFacts = Readonly<{
     maximumPatchCountRatio: number
     biasStepsPerLevel: number
     biasStepCount: number
-    refinementHysteresisLevels: number
     budgetHysteresisRatio: number
     nominalPatchSpanPixels: number
     cellsPerPatchEdge: number
@@ -783,12 +782,6 @@ export async function createGpuRenderPatchFrontier(
                 ),
                 binding(3, 'sourceDrawArguments', 'read-storage', DRAW_ARGUMENT_BYTES),
                 binding(5, 'renderPatchState', 'storage', STATE_BYTES),
-                binding(
-                    10,
-                    'previousRenderPatchLookup',
-                    'read-storage',
-                    renderPatchLookupBytes
-                ),
             ],
             own
         )
@@ -825,12 +818,6 @@ export async function createGpuRenderPatchFrontier(
                     7,
                     'renderPatchLookup',
                     'storage',
-                    renderPatchLookupBytes
-                ),
-                binding(
-                    10,
-                    'previousRenderPatchLookup',
-                    'read-storage',
                     renderPatchLookupBytes
                 ),
             ],
@@ -913,7 +900,6 @@ export async function createGpuRenderPatchFrontier(
         )
         const bindSets: BindSet[] = []
         const commands = await Promise.all(parityResources.map(async resources => {
-            const previousResources = parityResources[resources.parity === 0 ? 1 : 0]
             const resetSet = own(await runtime.createBindSet(resetKernel.layout, {
                 mapMeta: resources.source.mapMeta.region(),
                 renderPatchPolicy: policy.region({ layout: renderPatchPolicyCodec.artifact }),
@@ -926,7 +912,6 @@ export async function createGpuRenderPatchFrontier(
                 sourceVisibleInstances: resources.source.visibleInstances.region(),
                 sourceDrawArguments: resources.source.drawArgument.region,
                 renderPatchState: resources.state.region(),
-                previousRenderPatchLookup: previousResources.renderPatchLookup.region(),
             }, { label: `GPU count render-patch trials ${resources.parity}` }))
             const selectSet = own(await runtime.createBindSet(selectKernel.layout, {
                 mapMeta: resources.source.mapMeta.region(),
@@ -943,7 +928,6 @@ export async function createGpuRenderPatchFrontier(
                 }),
                 renderPatchState: resources.state.region(),
                 renderPatchLookup: resources.renderPatchLookup.region(),
-                previousRenderPatchLookup: previousResources.renderPatchLookup.region(),
             }, { label: `GPU expand render patches ${resources.parity}` }))
             const balanceSet = own(await runtime.createBindSet(balanceKernel.layout, {
                 renderPatchPolicy: policy.region({ layout: renderPatchPolicyCodec.artifact }),
@@ -1026,7 +1010,6 @@ export async function createGpuRenderPatchFrontier(
                     resources.renderPatches,
                     resources.state,
                     resources.renderPatchLookup,
-                    previousResources.renderPatchLookup,
                 ], [
                     resources.renderPatches,
                     resources.state,
@@ -1072,7 +1055,6 @@ export async function createGpuRenderPatchFrontier(
                     resources.source.visibleInstances,
                     resources.source.drawArgument.resource,
                     resources.state,
-                    previousResources.renderPatchLookup,
                 ], [ resources.state ]),
                 whenMissing: 'throw',
             }))
@@ -1354,8 +1336,6 @@ export async function createGpuRenderPatchFrontier(
                     maximumPatchCountRatio: descriptor.maximumPatchCountRatio,
                     biasStepsPerLevel: GPU_RENDER_PATCH_BIAS_STEPS_PER_LEVEL,
                     biasStepCount: GPU_RENDER_PATCH_BIAS_STEP_COUNT,
-                    refinementHysteresisLevels:
-                        1 / GPU_RENDER_PATCH_BIAS_STEPS_PER_LEVEL,
                     budgetHysteresisRatio: descriptor.budgetHysteresisRatio,
                     nominalPatchSpanPixels: descriptor.cellsPerPatchEdge *
                         descriptor.maximumCellSpanPixels,

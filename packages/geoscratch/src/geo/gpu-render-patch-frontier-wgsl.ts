@@ -26,11 +26,6 @@ struct GpuRenderPatchAtomicLookupEntry {
     patchIndex: u32,
 };
 
-struct GpuRenderPatchLookupEntry {
-    key: u32,
-    patchIndex: u32,
-};
-
 struct GpuRenderPatchBounds {
     minimum: vec3f,
     maximum: vec3f,
@@ -46,6 +41,11 @@ struct GpuRenderPatchQuanta {
     high: u32,
 };
 
+struct GpuRenderPatchClipPolygon {
+    vertices: array<vec4f, 12>,
+    count: u32,
+};
+
 @group(0) @binding(0) var<uniform> mapMeta: GpuTileFrontierMapMeta;
 @group(0) @binding(1) var<uniform> renderPatchPolicy: GpuRenderPatchPolicy;
 @group(0) @binding(2) var<storage, read> sourceVisibleInstances:
@@ -59,8 +59,6 @@ struct GpuRenderPatchQuanta {
 @group(0) @binding(8) var<storage, read_write> balancePatches: array<GpuRenderPatch>;
 @group(0) @binding(9) var<storage, read_write> balancePatchLookup:
     array<GpuRenderPatchAtomicLookupEntry>;
-@group(0) @binding(10) var<storage, read> previousRenderPatchLookup:
-    array<GpuRenderPatchLookupEntry>;
 
 const WEB_MERCATOR_WORLD_WIDTH_METERS: f32 = 40075016.0f;
 
@@ -199,8 +197,50 @@ fn patchVisible(bounds: GpuRenderPatchBounds) -> bool {
     return true;
 }
 
+fn clipPlaneDistance(point: vec4f, plane: u32) -> f32 {
+    switch plane {
+        case 0u: { return point.z; }
+        case 1u: { return point.w - point.z; }
+        case 2u: { return point.x + point.w; }
+        case 3u: { return point.w - point.x; }
+        case 4u: { return point.y + point.w; }
+        default: { return point.w - point.y; }
+    }
+}
+
+fn clipPolygonToPlane(
+    input: GpuRenderPatchClipPolygon,
+    plane: u32,
+) -> GpuRenderPatchClipPolygon {
+    var output: GpuRenderPatchClipPolygon;
+    if (input.count == 0u) {
+        return output;
+    }
+    var start = input.vertices[input.count - 1u];
+    var startDistance = clipPlaneDistance(start, plane);
+    for (var index = 0u; index < input.count; index += 1u) {
+        let end = input.vertices[index];
+        let endDistance = clipPlaneDistance(end, plane);
+        let startInside = startDistance >= 0.0f;
+        let endInside = endDistance >= 0.0f;
+        if (startInside != endInside) {
+            let ratio = startDistance / (startDistance - endDistance);
+            output.vertices[output.count] = mix(start, end, ratio);
+            output.count += 1u;
+        }
+        if (endInside) {
+            output.vertices[output.count] = end;
+            output.count += 1u;
+        }
+        start = end;
+        startDistance = endDistance;
+    }
+    return output;
+}
+
 fn projectedPlaneCellSpanPixels(bounds: GpuRenderPatchBounds, elevation: f32) -> f32 {
-    var clipCorners: array<vec4f, 4>;
+    var polygon: GpuRenderPatchClipPolygon;
+    polygon.count = 4u;
     for (var index = 0u; index < 4u; index += 1u) {
         let point = vec3f(
             select(
@@ -211,41 +251,27 @@ fn projectedPlaneCellSpanPixels(bounds: GpuRenderPatchBounds, elevation: f32) ->
             select(bounds.minimum.y, bounds.maximum.y, index >= 2u),
             elevation,
         );
-        clipCorners[index] = mapMeta.clipFromRelativeWorld * vec4f(point, 1.0f);
+        polygon.vertices[index] = mapMeta.clipFromRelativeWorld * vec4f(point, 1.0f);
+    }
+    for (var plane = 0u; plane < 6u; plane += 1u) {
+        polygon = clipPolygonToPlane(polygon, plane);
+        if (polygon.count == 0u) {
+            return 0.0f;
+        }
     }
 
     var minimumNdc = vec2f(1e20f);
     var maximumNdc = vec2f(-1e20f);
-    var clippedPointCount = 0u;
-    for (var index = 0u; index < 4u; index += 1u) {
-        let clip = clipCorners[index];
-        if (clip.z >= 0.0f && clip.w > 1e-5f) {
+    for (var index = 0u; index < polygon.count; index += 1u) {
+        let clip = polygon.vertices[index];
+        if (clip.w > 1e-5f) {
             let ndc = clip.xy / clip.w;
             minimumNdc = min(minimumNdc, ndc);
             maximumNdc = max(maximumNdc, ndc);
-            clippedPointCount += 1u;
         }
     }
-    for (var index = 0u; index < 4u; index += 1u) {
-        let start = clipCorners[index];
-        let end = clipCorners[(index + 1u) & 3u];
-        if ((start.z >= 0.0f) != (end.z >= 0.0f)) {
-            let intersection = mix(start, end, start.z / (start.z - end.z));
-            if (intersection.w > 1e-5f) {
-                let ndc = intersection.xy / intersection.w;
-                minimumNdc = min(minimumNdc, ndc);
-                maximumNdc = max(maximumNdc, ndc);
-                clippedPointCount += 1u;
-            }
-        }
-    }
-    if (clippedPointCount == 0u) {
-        return 0.0f;
-    }
-    let clippedMinimum = clamp(minimumNdc, vec2f(-1.0f), vec2f(1.0f));
-    let clippedMaximum = clamp(maximumNdc, vec2f(-1.0f), vec2f(1.0f));
     let projectedSize = max(
-        (clippedMaximum - clippedMinimum) * mapMeta.viewport * 0.5f,
+        (maximumNdc - minimumNdc) * mapMeta.viewport * 0.5f,
         vec2f(0.0f),
     );
     return sqrt(projectedSize.x * projectedSize.y) /
@@ -262,35 +288,6 @@ fn projectedCellSpanPixels(bounds: GpuRenderPatchBounds) -> f32 {
 fn trialCellSpanThreshold(biasStep: u32) -> f32 {
     return renderPatchPolicy.maximumCellSpanPixels * exp2(
         f32(biasStep) / f32(renderPatchPolicy.biasStepsPerLevel),
-    );
-}
-
-fn previousLookupContains(matrixLevel: u32, tileRow: u32, tileCol: u32) -> bool {
-    let key = GpuRenderPatch_lookupKey(matrixLevel, tileRow, tileCol);
-    for (var probe = 0u; probe < renderPatchPolicy.renderPatchLookupCapacity; probe += 1u) {
-        let slot = GpuRenderPatch_lookupSlot(
-            key,
-            probe,
-            renderPatchPolicy.renderPatchLookupCapacity,
-        );
-        let observed = previousRenderPatchLookup[slot].key;
-        if (observed == key) { return true; }
-        if (observed == 0u) { return false; }
-    }
-    return false;
-}
-
-fn historyAwareRefinementThreshold(
-    nominalThreshold: f32,
-    matrixLevel: u32,
-    tileRow: u32,
-    tileCol: u32,
-) -> f32 {
-    if (!previousLookupContains(matrixLevel, tileRow, tileCol)) {
-        return nominalThreshold;
-    }
-    return nominalThreshold * exp2(
-        1.0f / f32(renderPatchPolicy.biasStepsPerLevel),
     );
 }
 
@@ -605,14 +602,8 @@ fn countRenderPatchTrials(@builtin(global_invocation_id) globalId: vec3u) {
             let matrixLevel = source.matrixLevel + depth;
             let tileRow = source.tileRow * scale + (terminalRow >> remainingBits);
             let tileCol = source.tileCol * scale + (terminalCol >> remainingBits);
-            let threshold = historyAwareRefinementThreshold(
-                nominalThreshold,
-                matrixLevel,
-                tileRow,
-                tileCol,
-            );
             let refine = step < finalStep &&
-                depth < availableDepth && cellSpans[depth] > threshold;
+                depth < availableDepth && cellSpans[depth] > nominalThreshold;
             if (refine) { continue; }
             if (canonicalTerminalForDepth(terminalRow, terminalCol, depth)) {
                 atomicAdd(&renderPatchState.trialCounts[step], 1u);
@@ -717,14 +708,8 @@ fn expandRenderPatches(@builtin(global_invocation_id) globalId: vec3u) {
         if (!patchVisible(bounds)) { return; }
 
         let cellSpanPixels = projectedCellSpanPixels(bounds);
-        let selectedThreshold = historyAwareRefinementThreshold(
-            nominalThreshold,
-            matrixLevel,
-            tileRow,
-            tileCol,
-        );
         let refine = selectedBiasStep < renderPatchPolicy.biasStepCount - 1u &&
-            depth < availableDepth && cellSpanPixels > selectedThreshold;
+            depth < availableDepth && cellSpanPixels > nominalThreshold;
         if (refine) { continue; }
 
         if (!canonicalTerminalForDepth(terminalRow, terminalCol, depth)) {
