@@ -394,6 +394,20 @@ describe('Underwater Terrain clean cut', () => {
         ))).to.equal(false)
     })
 
+    it('keeps application controls and generic Worker budgets out of the DEM data suite', () => {
+
+        const demSuite = read('tests', 'geo-virtual-raster-dem.test.js')
+        const controlSuite = read('tests', 'underwater-terrain-control-state.test.js')
+        const budgetSuite = read('tests', 'scratch-task-phase-budget.test.js')
+
+        expect(demSuite).not.to.include('control-state.ts')
+        expect(demSuite).not.to.include('control-panel.ts')
+        expect(demSuite).not.to.include('TaskPhaseBudget')
+        expect(controlSuite).to.include("describe('Underwater Terrain control state'")
+        expect(budgetSuite).to.include("describe('Scratch task phase budget'")
+        expect(budgetSuite).not.to.match(/\bDEM\b|\bDem\b|\bdem\b/)
+    })
+
     it('partitions the application cache budget exactly across Worker shards', () => {
 
         const policy = Object.freeze({
