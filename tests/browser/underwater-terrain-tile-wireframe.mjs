@@ -212,6 +212,28 @@ async function runWireframeProof(activeBrowser) {
             previous = facts
         }
 
+        const pitchBudgetPriority = []
+        for (const pitch of [ 55, 58, 61 ]) {
+            const pitchCamera = Object.freeze({
+                ...camera,
+                zoom: 10,
+                pitch,
+                bearing: 90,
+            })
+            await page.evaluate(
+                value => window.__UNDERWATER_TERRAIN_PROOF__.moveCamera(value),
+                pitchCamera
+            )
+            const facts = await waitForStableMode(
+                page,
+                'tile-wireframe',
+                previous.observedFrames,
+                pitchCamera
+            )
+            pitchBudgetPriority.push(facts)
+            previous = facts
+        }
+
         const refinement = []
         for (const zoom of [ 11, 12, 14 ]) {
             const refinementCamera = Object.freeze({ ...camera, zoom })
@@ -244,6 +266,7 @@ async function runWireframeProof(activeBrowser) {
             wireframe: Object.freeze({ ...wireframe, capture: wireframeCapture }),
             canonicalTopDown: Object.freeze(canonicalTopDown),
             motionStability: Object.freeze(motionStability),
+            pitchBudgetPriority: Object.freeze(pitchBudgetPriority),
             refinement: Object.freeze(refinement),
             restored: Object.freeze({ ...restored, capture: restoredCapture }),
             events,
@@ -526,6 +549,7 @@ function validateProof(value, processState) {
         wireframe,
         canonicalTopDown,
         motionStability,
+        pitchBudgetPriority,
         refinement,
         restored,
         zoomMonotonicity,
@@ -545,9 +569,9 @@ function validateProof(value, processState) {
         wireframe.stableIdentityHash === restored?.stableIdentityHash &&
         JSON.stringify(baseline.identityFacts) === JSON.stringify(wireframe.identityFacts) &&
         JSON.stringify(wireframe.identityFacts) === JSON.stringify(restored.identityFacts) &&
-        baseline.identityFacts?.programs === 10 &&
-        baseline.identityFacts?.pipelines === 10 &&
-        baseline.identityFacts?.commands === 34,
+        baseline.identityFacts?.programs === 11 &&
+        baseline.identityFacts?.pipelines === 11 &&
+        baseline.identityFacts?.commands === 36,
     'live presentation switching rebuilt or replaced the persistent Underwater Terrain graph')
 
     expect(failures,
@@ -606,7 +630,7 @@ function validateProof(value, processState) {
         baseline?.graphContract?.commandIds?.drawTerrain?.shaded?.length === 2 &&
         baseline.graphContract.commandIds.drawTerrain['tile-wireframe']?.length === 2 &&
         baseline.graphContract.commandIds.renderPatches?.length === 2 &&
-        baseline.graphContract.commandIds.renderPatches.every(ids => ids.length === 10) &&
+        baseline.graphContract.commandIds.renderPatches.every(ids => ids.length === 11) &&
         baseline.graphContract.dataMaximumMatrixLevel === 10 &&
         baseline.graphContract.renderMaximumMatrixLevel === 14 &&
         baseline.graphContract.renderPatches?.renderRootCount >= 1,
@@ -621,7 +645,7 @@ function validateProof(value, processState) {
     const requestedDataLevels = value.events?.tileRequestLevels ?? []
     expect(failures,
         baseline.graphContract?.renderPatches?.selectionPath ===
-            'gpu-balanced-render-root-local-cell-projection' &&
+            'gpu-balanced-priority-filled-render-root-local-cell-projection' &&
         baseline.graphContract.renderPatches.maximumCellSpanPixels === 8 &&
         baseline.graphContract.renderPatches.nominalPatchSpanPixels === 512 &&
         !Object.hasOwn(
@@ -630,6 +654,7 @@ function validateProof(value, processState) {
         ) &&
         baseline.graphContract.renderPatches.balancePassCount === 14 &&
         baseline.graphContract.renderPatches.balanceWorkgroupSize === 256 &&
+        baseline.graphContract.renderPatches.budgetFillWorkgroupSize === 1 &&
         baseline.graphContract.renderPatches.renderPatchLookupCapacity >
             baseline.graphContract.renderPatches.maximumRenderPatches &&
         refinementDataLevels.every(level => Number.isInteger(level) && level <= 10) &&
@@ -659,6 +684,15 @@ function validateProof(value, processState) {
             sample.renderPatchFeedback?.selectedPatchCount === sample.renderPatchCount &&
             sample.renderPatchFeedback?.requestedPatchCount >=
                 sample.renderPatchFeedback?.unbalancedPatchCount &&
+            sample.renderPatchFeedback?.basePatchCount <=
+                sample.renderPatchFeedback?.unbalancedPatchCount &&
+            sample.renderPatchFeedback?.budgetFillSplitCount >= 0 &&
+            sample.renderPatchFeedback?.budgetLimitedRefinementCount >= 0 &&
+            sample.renderPatchFeedback?.budgetLimitedRefinementCount <=
+                sample.renderPatchFeedback?.unbalancedPatchCount &&
+            (sample.renderPatchFeedback?.budgetFillSplitCount > 0 ||
+                sample.renderPatchFeedback?.basePatchCount ===
+                    sample.renderPatchFeedback?.unbalancedPatchCount) &&
             sample.renderPatchCount ===
                 sample.renderPatchFeedback?.unbalancedPatchCount +
                     sample.renderPatchFeedback?.balanceSplitCount * 3 &&
@@ -740,6 +774,41 @@ function validateProof(value, processState) {
             cellSpans: sample?.renderPatchCellSpanRange,
         }))
     )}`)
+
+    const pitchPrioritySamples = pitchBudgetPriority ?? []
+    const pitchPriorityMaximumLevels = pitchPrioritySamples.map(
+        sample => sample?.renderPatchLevelRange?.[1]
+    )
+    expect(failures,
+        pitchPrioritySamples.length === 3 &&
+        pitchPriorityMaximumLevels.slice(1).every((level, index) => (
+            level >= pitchPriorityMaximumLevels[index]
+        )) &&
+        pitchPrioritySamples.every(sample => (
+            sample?.renderPatchFeedback?.basePatchCount <=
+                sample?.renderPatchFeedback?.unbalancedPatchCount &&
+            sample?.renderPatchFeedback?.budgetFillSplitCount >= 0 &&
+            sample?.renderPatchFeedback?.budgetLimitedRefinementCount >= 0
+        )),
+    `pitch growth discarded high-priority detail while leaving render budget unused: ${JSON.stringify(
+        pitchPrioritySamples.map(sample => ({
+            pitch: sample?.cameraView?.pitch,
+            levels: sample?.renderPatchLevelRange,
+            frameBudget: sample?.renderPatchFeedback?.framePatchBudget,
+            unbalancedPatchCount: sample?.renderPatchFeedback?.unbalancedPatchCount,
+            budgetFillSplitCount: sample?.renderPatchFeedback?.budgetFillSplitCount,
+            budgetLimitedRefinementCount:
+                sample?.renderPatchFeedback?.budgetLimitedRefinementCount,
+        }))
+    )}`)
+
+    expect(failures,
+        patchSamples.some(sample => (
+            sample?.renderPatchFeedback?.budgetFillSplitCount > 0 &&
+            sample.renderPatchFeedback.basePatchCount <
+                sample.renderPatchFeedback.unbalancedPatchCount
+        )),
+    'no camera exercised priority filling between the uniform base cut and balance')
 
     expect(failures,
         wireframe?.renderPatchFeedback?.unbalancedPatchCount <=

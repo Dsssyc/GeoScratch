@@ -778,12 +778,12 @@ describe('Underwater Terrain clean cut', () => {
         expect(initialIdentityFacts).to.deep.include({
             hash: initialIdentityHash,
             uploads: 5,
-            bindLayouts: 11,
-            bindSets: 20,
-            programs: 10,
-            pipelines: 10,
+            bindLayouts: 12,
+            bindSets: 22,
+            programs: 11,
+            pipelines: 11,
             passes: 2,
-            commands: 34,
+            commands: 36,
         })
         expect(graph.persistentFacts()).to.deep.equal(initialPersistentFacts)
 
@@ -818,7 +818,8 @@ describe('Underwater Terrain clean cut', () => {
             renderMaximumMatrixLevel: 14,
         })
         expect(graph.contractFacts().renderPatches).to.deep.include({
-            selectionPath: 'gpu-balanced-render-root-local-cell-projection',
+            selectionPath:
+                'gpu-balanced-priority-filled-render-root-local-cell-projection',
             maximumMatrixLevel: 14,
             renderRootCount: 1,
             minimumRootMatrixLevel: 4,
@@ -827,9 +828,9 @@ describe('Underwater Terrain clean cut', () => {
             maximumPatchCountRatio: 3,
             biasStepsPerLevel: 4,
             biasStepCount: 17,
-            budgetHysteresisRatio: 0.75,
             balancePassCount: 14,
             balanceWorkgroupSize: 256,
+            budgetFillWorkgroupSize: 1,
             nominalPatchSpanPixels: 512,
             cellsPerPatchEdge: 64,
         })
@@ -839,7 +840,7 @@ describe('Underwater Terrain clean cut', () => {
         expect(fake.calls.maps.filter(mapping => (
             mapping.size === graph.contractFacts().frontier.feedbackOutput.layout.byteLength
         ))).to.have.length(2)
-        expect(fake.calls.maps.filter(mapping => mapping.size === 140)).to.have.length(2)
+        expect(fake.calls.maps.filter(mapping => mapping.size === 148)).to.have.length(2)
 
         graph.dispose()
         expect(() => graph.setPresentation('tile-wireframe'))

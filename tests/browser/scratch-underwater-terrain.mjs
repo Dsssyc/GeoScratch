@@ -1114,7 +1114,7 @@ function validateUnderwaterTerrainFacts(label, facts, failures, expectedStatus =
         contract?.dataMaximumMatrixLevel !== 10 ||
         contract?.renderMaximumMatrixLevel !== 14 ||
         contract?.renderPatches?.selectionPath !==
-            'gpu-balanced-render-root-local-cell-projection' ||
+            'gpu-balanced-priority-filled-render-root-local-cell-projection' ||
         contract?.renderPatches?.renderRootCount < 1 ||
         contract?.renderPatches?.maximumCellSpanPixels !== 8 ||
         contract?.renderPatches?.nominalPatchSpanPixels !== 512 ||
@@ -1122,6 +1122,7 @@ function validateUnderwaterTerrainFacts(label, facts, failures, expectedStatus =
         contract?.renderPatches?.biasStepCount !== 17 ||
         contract?.renderPatches?.balancePassCount !== 14 ||
         contract?.renderPatches?.balanceWorkgroupSize !== 256 ||
+        contract?.renderPatches?.budgetFillWorkgroupSize !== 1 ||
         contract?.renderPatches?.renderPatchLookupCapacity <=
             contract?.renderPatches?.maximumRenderPatches ||
         contract?.terrainVertexCount !== 24_576 ||
@@ -1157,6 +1158,15 @@ function validateUnderwaterTerrainFacts(label, facts, failures, expectedStatus =
         renderPatchFeedback?.framePatchBudget < renderPatchFeedback?.baselinePatchBudget ||
         renderPatchFeedback?.requestedPatchCount <
             renderPatchFeedback?.unbalancedPatchCount ||
+        renderPatchFeedback?.basePatchCount >
+            renderPatchFeedback?.unbalancedPatchCount ||
+        renderPatchFeedback?.budgetFillSplitCount < 0 ||
+        renderPatchFeedback?.budgetLimitedRefinementCount < 0 ||
+        renderPatchFeedback?.budgetLimitedRefinementCount >
+            renderPatchFeedback?.unbalancedPatchCount ||
+        (renderPatchFeedback?.budgetFillSplitCount === 0 &&
+            renderPatchFeedback?.basePatchCount !==
+                renderPatchFeedback?.unbalancedPatchCount) ||
         renderPatchFeedback?.selectedPatchCount !==
             renderPatchFeedback?.unbalancedPatchCount +
                 renderPatchFeedback?.balanceSplitCount * 3 ||

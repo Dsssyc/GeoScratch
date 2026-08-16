@@ -2,7 +2,7 @@
 docId: geo.gpu-frontiers.zh
 canonical: false
 translationOf: ./gpu-frontiers.md
-canonicalDigest: 7886679cc448a13c50b654550f75205a5f06d03214778fb3fc40046078530b12
+canonicalDigest: 252f42c1ffe2ff4e34661409ee726d53741451f353023b0b72d15f61eb989599
 ---
 # GPU Frontier
 
@@ -20,15 +20,17 @@ terrain mesh patch。六平面 homogeneous clipping 提供可见求值位置；�
 cell differential 同时避免离屏过度细化与 zoom-in 时的 viewport-edge 降级。
 它的两个像素空间向量构成局部 Jacobian；行列式绝对值的平方根是面积等效的
 cell span。与直接相乘两个向量的长度不同，这个度量包含它们的夹角，不会仅因
-camera bearing 改变固定 grid axis 与 foreshortening 方向的对齐关系而变化。Normalized budget、
-有界 balance pass、hysteresis 与 revision token 共同保持选择稳定。Balanced cut 在生成
-mesh-stitching flag 前，保证 edge-adjacent level difference 不超过一级。Trial count
-会在刚超过 render capacity 时立即饱和，因此不可采用的 fine cut 不会因 root 跨越多个
-层级而产生无界遍历工作量。
+camera bearing 改变固定 grid axis 与 foreshortening 方向的对齐关系而变化。Normalized
+budget 会先从 17 个实测 trial 中无历史状态地选择完整 base cut。随后 GPU-resident
+best-first pass 会把剩余预算分配给局部 projected error 最大的 patch，并以 logical patch
+identity 稳定处理同值；它绝不把上一帧 topology 或 bias 作为权威。Balanced cut 在生成
+mesh-stitching flag 前，保证 edge-adjacent level difference 不超过一级。Trial count 会在
+刚超过 render capacity 时立即饱和，因此不可采用的 fine cut 不会因 root 跨越多个层级而
+产生无界遍历工作量。
 
 只有 resident 或可 seed 的 metadata 能参与 GPU pass，因此延迟 demand 可能在后续帧才
 生效。这是有意的 eventual refinement，并不宣称所有 desired tile 已加载。Feedback
-decoder 校验 counter 与 budget fact；stale 或 inconsistent result 会被拒绝，而不会破坏
-active frontier。
+decoder 校验 base、priority-fill、budget-limit 与 balance fact；stale 或 inconsistent
+result 会被拒绝，而不会破坏 active frontier。
 Render-patch feedback 报告 render-root 与 selected-cut fact，raster feedback 报告 data
 demand 与 residency；两种 readback 都不会成为 CPU selection authority。

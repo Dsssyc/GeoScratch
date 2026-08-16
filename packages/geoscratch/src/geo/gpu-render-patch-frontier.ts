@@ -41,10 +41,10 @@ const GPU_RENDER_PATCH_BUDGET_BIAS_LEVELS = 4
 const GPU_RENDER_PATCH_BIAS_STEPS_PER_LEVEL = 4
 const GPU_RENDER_PATCH_BIAS_STEP_COUNT =
     GPU_RENDER_PATCH_BUDGET_BIAS_LEVELS * GPU_RENDER_PATCH_BIAS_STEPS_PER_LEVEL + 1
-const GPU_RENDER_PATCH_DEFAULT_BUDGET_HYSTERESIS_RATIO = 0.75
 
 const WORKGROUP_SIZE = 64
 const BALANCE_WORKGROUP_SIZE = 256
+const BUDGET_FILL_WORKGROUP_SIZE = 1
 const DRAW_ARGUMENT_BYTES = 16
 const DRAW_ARGUMENT_COUNT = 1
 const STATE_TRIAL_COUNTS_OFFSET_WORDS = 13
@@ -58,7 +58,11 @@ const STATE_BALANCE_PASS_COUNT_OFFSET_WORDS =
     STATE_MAXIMUM_ADJACENT_LEVEL_DELTA_OFFSET_WORDS + 1
 const STATE_BALANCE_SCRATCH_COUNT_OFFSET_WORDS =
     STATE_BALANCE_PASS_COUNT_OFFSET_WORDS + 1
-const STATE_WORDS = STATE_BALANCE_SCRATCH_COUNT_OFFSET_WORDS + 1
+const STATE_BUDGET_FILL_SPLIT_COUNT_OFFSET_WORDS =
+    STATE_BALANCE_SCRATCH_COUNT_OFFSET_WORDS + 1
+const STATE_BUDGET_LIMITED_REFINEMENT_COUNT_OFFSET_WORDS =
+    STATE_BUDGET_FILL_SPLIT_COUNT_OFFSET_WORDS + 1
+const STATE_WORDS = STATE_BUDGET_LIMITED_REFINEMENT_COUNT_OFFSET_WORDS + 1
 const STATE_BYTES = STATE_WORDS * Uint32Array.BYTES_PER_ELEMENT
 const BUFFER_COPY_DST = 0x08
 const BUFFER_COPY_SRC = 0x04
@@ -101,7 +105,6 @@ const renderPatchPolicyCodec = layoutCodec({
         { name: 'maximumPatchCountRatio', type: 'f32' },
         { name: 'biasStepsPerLevel', type: 'u32' },
         { name: 'biasStepCount', type: 'u32' },
-        { name: 'budgetHysteresisRatio', type: 'f32' },
         { name: 'balancePassCount', type: 'u32' },
     ],
 }, { usage: [ 'uniform', 'storage', 'readback' ] })
@@ -142,12 +145,14 @@ type ParityResources = Readonly<{
     drawArguments: BufferResource
 }>
 
+/** Names the persistent GPU commands that derive one render-patch cut for a frame. */
 export type GpuRenderPatchCommands = Readonly<{
     clearLookup: ClearBufferCommand
     reset: DispatchCommand
     count: DispatchCommand
     select: DispatchCommand
     expand: DispatchCommand
+    fill: DispatchCommand
     balance: DispatchCommand
     resetFinalDiagnostics: DispatchCommand
     validate: DispatchCommand
@@ -155,9 +160,10 @@ export type GpuRenderPatchCommands = Readonly<{
     feedback: ReadbackCommand
 }>
 
+/** Describes immutable render-patch graph identity, policy, and owned GPU objects. */
 export type GpuRenderPatchFrontierFacts = Readonly<{
     id: string
-    selectionPath: 'gpu-balanced-render-root-local-cell-projection'
+    selectionPath: 'gpu-balanced-priority-filled-render-root-local-cell-projection'
     disposed: boolean
     maximumMatrixLevel: number
     renderRootCount: number
@@ -168,7 +174,6 @@ export type GpuRenderPatchFrontierFacts = Readonly<{
     maximumPatchCountRatio: number
     biasStepsPerLevel: number
     biasStepCount: number
-    budgetHysteresisRatio: number
     nominalPatchSpanPixels: number
     cellsPerPatchEdge: number
     renderPatchBytes: number
@@ -176,6 +181,7 @@ export type GpuRenderPatchFrontierFacts = Readonly<{
     renderPatchLookupBytes: number
     balancePassCount: number
     balanceWorkgroupSize: number
+    budgetFillWorkgroupSize: number
     drawArgumentBytes: number
     workgroupSize: number
     parity: readonly Readonly<{
@@ -203,6 +209,7 @@ export type GpuRenderPatchIdentityObjects = Readonly<{
     commands: readonly (ClearBufferCommand | DispatchCommand | ReadbackCommand)[]
 }>
 
+/** Reports validated delayed facts for base selection, priority fill, and balancing. */
 export type GpuRenderPatchSelectionFacts = Readonly<{
     selectedPatchCount: number
     descriptorOverflowCount: number
@@ -220,6 +227,9 @@ export type GpuRenderPatchSelectionFacts = Readonly<{
     selectedBiasStep: number
     selectedBiasLevels: number
     budgetLimitedByMinimumTrial: boolean
+    basePatchCount: number
+    budgetFillSplitCount: number
+    budgetLimitedRefinementCount: number
     unbalancedPatchCount: number
     balanceSplitCount: number
     balanceOverheadPatchCount: number
@@ -289,6 +299,7 @@ export type GpuRenderPatchFrontier = Readonly<{
     dispose(): void
 }>
 
+/** Configures one stateless GPU render-patch authority over immutable geographic roots. */
 export type GpuRenderPatchFrontierDescriptor = Readonly<{
     viewTemplates: readonly [
         GpuRenderPatchViewTemplate,
@@ -303,7 +314,6 @@ export type GpuRenderPatchFrontierDescriptor = Readonly<{
     cellsPerPatchEdge?: number
     maximumCellSpanPixels?: number
     maximumPatchCountRatio?: number
-    budgetHysteresisRatio?: number
 }>
 
 /** Identifies one immutable, prefix-free tile root for GPU geometry traversal. */
@@ -361,6 +371,10 @@ export function decodeGpuRenderPatchState(
     )
     const balancePassCount = word(STATE_BALANCE_PASS_COUNT_OFFSET_WORDS)
     const balanceScratchCount = word(STATE_BALANCE_SCRATCH_COUNT_OFFSET_WORDS)
+    const budgetFillSplitCount = word(STATE_BUDGET_FILL_SPLIT_COUNT_OFFSET_WORDS)
+    const budgetLimitedRefinementCount = word(
+        STATE_BUDGET_LIMITED_REFINEMENT_COUNT_OFFSET_WORDS
+    )
     const renderRootPatchCount = trialCounts.at(-1)!
     const observedMinimumTrialPatchCount = Math.min(...trialCounts)
     const minimumTrialBiasStep = trialCounts.indexOf(observedMinimumTrialPatchCount)
@@ -368,6 +382,7 @@ export function decodeGpuRenderPatchState(
         throw new GpuRenderPatchFeedbackStaleError(options.expectedFrameEpoch, frameEpoch)
     }
     const selectedPatchCount = Math.min(attemptedPatchCount, options.maximumRenderPatches)
+    const basePatchCount = trialCounts[selectedBiasStep] ?? 0
     if (attemptedPatchCount > options.maximumRenderPatches ||
         balanceScratchCount > options.maximumRenderPatches ||
         descriptorOverflowCount !== 0) {
@@ -383,14 +398,18 @@ export function decodeGpuRenderPatchState(
         selectedBiasStep >= GPU_RENDER_PATCH_BIAS_STEP_COUNT ||
         requestedPatchCount !== trialCounts[0] ||
         minimumTrialPatchCount !== observedMinimumTrialPatchCount ||
-        unbalancedPatchCount !== trialCounts[selectedBiasStep] ||
+        unbalancedPatchCount < basePatchCount ||
+        budgetLimitedRefinementCount > unbalancedPatchCount ||
+        (budgetFillSplitCount === 0 && unbalancedPatchCount !== basePatchCount) ||
         attemptedPatchCount !== unbalancedPatchCount + balanceSplitCount * 3 ||
         balancePassCount !== GPU_RENDER_PATCH_BALANCE_PASS_COUNT ||
         (minimumTrialPatchCount <= framePatchBudget &&
             unbalancedPatchCount > framePatchBudget) ||
         (minimumTrialPatchCount > framePatchBudget &&
             (selectedBiasStep !== minimumTrialBiasStep ||
-                unbalancedPatchCount !== minimumTrialPatchCount))) {
+                basePatchCount !== minimumTrialPatchCount ||
+                unbalancedPatchCount !== minimumTrialPatchCount ||
+                budgetFillSplitCount !== 0))) {
         throw new RangeError(`GPU render-patch budget feedback is inconsistent: ${JSON.stringify({
             attemptedPatchCount,
             unbalancedPatchCount,
@@ -401,6 +420,9 @@ export function decodeGpuRenderPatchState(
             framePatchBudget,
             requestedPatchCount,
             selectedBiasStep,
+            basePatchCount,
+            budgetFillSplitCount,
+            budgetLimitedRefinementCount,
             minimumTrialPatchCount,
             renderRootPatchCount,
             trialCounts,
@@ -415,6 +437,9 @@ export function decodeGpuRenderPatchState(
         selectedBiasStep,
         selectedBiasLevels: selectedBiasStep / GPU_RENDER_PATCH_BIAS_STEPS_PER_LEVEL,
         budgetLimitedByMinimumTrial: minimumTrialPatchCount > framePatchBudget,
+        basePatchCount,
+        budgetFillSplitCount,
+        budgetLimitedRefinementCount,
         unbalancedPatchCount,
         balanceSplitCount,
         balanceOverheadPatchCount: selectedPatchCount - unbalancedPatchCount,
@@ -651,7 +676,6 @@ export async function createGpuRenderPatchFrontier(
                 maximumPatchCountRatio: descriptor.maximumPatchCountRatio,
                 biasStepsPerLevel: GPU_RENDER_PATCH_BIAS_STEPS_PER_LEVEL,
                 biasStepCount: GPU_RENDER_PATCH_BIAS_STEP_COUNT,
-                budgetHysteresisRatio: descriptor.budgetHysteresisRatio,
                 balancePassCount: GPU_RENDER_PATCH_BALANCE_PASS_COUNT,
             }),
         }))
@@ -805,6 +829,19 @@ export async function createGpuRenderPatchFrontier(
                 binding(2, 'renderRoots', 'read-storage', renderRoots.size),
                 binding(4, 'renderPatches', 'storage', renderPatchBytes),
                 binding(5, 'renderPatchState', 'storage', STATE_BYTES),
+            ],
+            own
+        )
+        const fillKernel = await createKernel(
+            runtime,
+            shader,
+            'fillRenderPatchBudget',
+            'GPU priority-fill render-patch budget',
+            [
+                binding(0, 'mapMeta', 'uniform', descriptor.viewTemplates[0].mapMeta.size),
+                binding(1, 'renderPatchPolicy', 'uniform', renderPatchPolicyCodec.byteLength()),
+                binding(4, 'renderPatches', 'storage', renderPatchBytes),
+                binding(5, 'renderPatchState', 'storage', STATE_BYTES),
                 binding(
                     7,
                     'renderPatchLookup',
@@ -916,8 +953,16 @@ export async function createGpuRenderPatchFrontier(
                     layout: renderPatchCodec.artifact,
                 }),
                 renderPatchState: resources.state.region(),
-                renderPatchLookup: resources.renderPatchLookup.region(),
             }, { label: `GPU expand render patches ${resources.parity}` }))
+            const fillSet = own(await runtime.createBindSet(fillKernel.layout, {
+                mapMeta: resources.view.mapMeta.region(),
+                renderPatchPolicy: policy.region({ layout: renderPatchPolicyCodec.artifact }),
+                renderPatches: resources.renderPatches.region({
+                    layout: renderPatchCodec.artifact,
+                }),
+                renderPatchState: resources.state.region(),
+                renderPatchLookup: resources.renderPatchLookup.region(),
+            }, { label: `GPU priority-fill render-patch budget ${resources.parity}` }))
             const balanceSet = own(await runtime.createBindSet(balanceKernel.layout, {
                 renderPatchPolicy: policy.region({ layout: renderPatchPolicyCodec.artifact }),
                 renderPatches: resources.renderPatches.region({
@@ -955,6 +1000,7 @@ export async function createGpuRenderPatchFrontier(
                 countSet,
                 selectSet,
                 expandSet,
+                fillSet,
                 balanceSet,
                 resetFinalDiagnosticsSet,
                 validateSet,
@@ -995,6 +1041,22 @@ export async function createGpuRenderPatchFrontier(
                     resources.view.mapMeta,
                     policy,
                     renderRoots,
+                    resources.renderPatches,
+                    resources.state,
+                ], [
+                    resources.renderPatches,
+                    resources.state,
+                ]),
+                whenMissing: 'throw',
+            }))
+            const fill = own(runtime.createDispatchCommand({
+                label: `Priority-fill GPU render-patch budget ${resources.parity}`,
+                pipeline: fillKernel.pipeline,
+                bindSets: [ { set: fillSet } ],
+                count: { workgroups: [ 1, 1, 1 ] },
+                resources: currentAccess([
+                    resources.view.mapMeta,
+                    policy,
                     resources.renderPatches,
                     resources.state,
                     resources.renderPatchLookup,
@@ -1119,6 +1181,7 @@ export async function createGpuRenderPatchFrontier(
                 count,
                 select,
                 expand,
+                fill,
                 balance,
                 resetFinalDiagnostics,
                 validate,
@@ -1131,6 +1194,7 @@ export async function createGpuRenderPatchFrontier(
             countKernel.program,
             selectKernel.program,
             expandKernel.program,
+            fillKernel.program,
             balanceKernel.program,
             resetFinalDiagnosticsKernel.program,
             validateKernel.program,
@@ -1141,6 +1205,7 @@ export async function createGpuRenderPatchFrontier(
             countKernel.pipeline,
             selectKernel.pipeline,
             expandKernel.pipeline,
+            fillKernel.pipeline,
             balanceKernel.pipeline,
             resetFinalDiagnosticsKernel.pipeline,
             validateKernel.pipeline,
@@ -1151,6 +1216,7 @@ export async function createGpuRenderPatchFrontier(
             countKernel.layout,
             selectKernel.layout,
             expandKernel.layout,
+            fillKernel.layout,
             balanceKernel.layout,
             resetFinalDiagnosticsKernel.layout,
             validateKernel.layout,
@@ -1209,6 +1275,7 @@ export async function createGpuRenderPatchFrontier(
                     parity.count,
                     parity.select,
                     parity.expand,
+                    parity.fill,
                     parity.balance,
                     parity.resetFinalDiagnostics,
                     parity.validate,
@@ -1248,6 +1315,7 @@ export async function createGpuRenderPatchFrontier(
                     selected.count,
                     selected.select,
                     selected.expand,
+                    selected.fill,
                     selected.balance,
                     selected.resetFinalDiagnostics,
                     selected.validate,
@@ -1314,7 +1382,8 @@ export async function createGpuRenderPatchFrontier(
             facts() {
                 return Object.freeze({
                     id,
-                    selectionPath: 'gpu-balanced-render-root-local-cell-projection' as const,
+                    selectionPath:
+                        'gpu-balanced-priority-filled-render-root-local-cell-projection' as const,
                     disposed,
                     maximumMatrixLevel: descriptor.renderMaximumMatrixLevel,
                     renderRootCount: descriptor.renderRoots.length,
@@ -1329,7 +1398,6 @@ export async function createGpuRenderPatchFrontier(
                     maximumPatchCountRatio: descriptor.maximumPatchCountRatio,
                     biasStepsPerLevel: GPU_RENDER_PATCH_BIAS_STEPS_PER_LEVEL,
                     biasStepCount: GPU_RENDER_PATCH_BIAS_STEP_COUNT,
-                    budgetHysteresisRatio: descriptor.budgetHysteresisRatio,
                     nominalPatchSpanPixels: descriptor.cellsPerPatchEdge *
                         descriptor.maximumCellSpanPixels,
                     cellsPerPatchEdge: descriptor.cellsPerPatchEdge,
@@ -1338,6 +1406,7 @@ export async function createGpuRenderPatchFrontier(
                     renderPatchLookupBytes,
                     balancePassCount: GPU_RENDER_PATCH_BALANCE_PASS_COUNT,
                     balanceWorkgroupSize: BALANCE_WORKGROUP_SIZE,
+                    budgetFillWorkgroupSize: BUDGET_FILL_WORKGROUP_SIZE,
                     drawArgumentBytes: DRAW_ARGUMENT_BYTES * DRAW_ARGUMENT_COUNT,
                     workgroupSize: WORKGROUP_SIZE,
                     parity: Object.freeze(parityResources.map(resources => Object.freeze({
@@ -1356,6 +1425,7 @@ export async function createGpuRenderPatchFrontier(
                             commands[resources.parity].count.id,
                             commands[resources.parity].select.id,
                             commands[resources.parity].expand.id,
+                            commands[resources.parity].fill.id,
                             commands[resources.parity].balance.id,
                             commands[resources.parity].resetFinalDiagnostics.id,
                             commands[resources.parity].validate.id,
@@ -1459,8 +1529,6 @@ function validateOptions(
         GPU_RENDER_PATCH_DEFAULT_MAXIMUM_CELL_SPAN_PIXELS
     const maximumPatchCountRatio = options.maximumPatchCountRatio ??
         GPU_RENDER_PATCH_DEFAULT_MAXIMUM_COUNT_RATIO
-    const budgetHysteresisRatio = options.budgetHysteresisRatio ??
-        GPU_RENDER_PATCH_DEFAULT_BUDGET_HYSTERESIS_RATIO
     if (runtime === undefined || typeof runtime.createBuffer !== 'function') {
         throw new TypeError('GPU render-patch frontier requires GPURuntime')
     }
@@ -1502,9 +1570,7 @@ function validateOptions(
     if (!Number.isFinite(maximumCellSpanPixels) || maximumCellSpanPixels <= 0) {
         throw new TypeError('GPU render-patch maximum cell span must be positive and finite')
     }
-    if (!Number.isFinite(maximumPatchCountRatio) || maximumPatchCountRatio < 1 ||
-        !Number.isFinite(budgetHysteresisRatio) || budgetHysteresisRatio < 0 ||
-        budgetHysteresisRatio > 1) {
+    if (!Number.isFinite(maximumPatchCountRatio) || maximumPatchCountRatio < 1) {
         throw new TypeError('GPU render-patch budget policy is invalid')
     }
     return Object.freeze({
@@ -1515,7 +1581,6 @@ function validateOptions(
         cellsPerPatchEdge,
         maximumCellSpanPixels,
         maximumPatchCountRatio,
-        budgetHysteresisRatio,
     })
 }
 

@@ -73,9 +73,9 @@ describe('Geo GPU render-patch frontier', () => {
 
     it('decodes bounded delayed GPU selection facts', () => {
 
-        const words = new Uint32Array(35)
+        const words = new Uint32Array(37)
         words.set([
-            23,
+            25,
             0,
             0,
             10,
@@ -94,11 +94,13 @@ describe('Geo GPU render-patch frontier', () => {
             10, 9, 9, 8, 8, 8, 8, 8,
         ], 13)
         words.set([
-            20,
+            22,
             1,
             1,
             14,
-            23,
+            25,
+            2,
+            4,
         ], 30)
         const facts = decodeGpuRenderPatchState(
             new Uint8Array(words.buffer),
@@ -106,7 +108,7 @@ describe('Geo GPU render-patch frontier', () => {
         )
 
         expect(facts).to.deep.equal({
-            selectedPatchCount: 23,
+            selectedPatchCount: 25,
             descriptorOverflowCount: 0,
             lookupOverflowCount: 0,
             minimumMatrixLevel: 10,
@@ -122,7 +124,10 @@ describe('Geo GPU render-patch frontier', () => {
             selectedBiasStep: 3,
             selectedBiasLevels: 0.75,
             budgetLimitedByMinimumTrial: false,
-            unbalancedPatchCount: 20,
+            basePatchCount: 20,
+            budgetFillSplitCount: 2,
+            budgetLimitedRefinementCount: 4,
+            unbalancedPatchCount: 22,
             balanceSplitCount: 1,
             balanceOverheadPatchCount: 3,
             maximumAdjacentLevelDelta: 1,
@@ -132,7 +137,7 @@ describe('Geo GPU render-patch frontier', () => {
 
     it('accepts a non-monotonic complete-cut series and reports its actual minimum', () => {
 
-        const words = new Uint32Array(35)
+        const words = new Uint32Array(37)
         words.set([
             9,
             0,
@@ -166,6 +171,9 @@ describe('Geo GPU render-patch frontier', () => {
             minimumTrialPatchCount: 2,
             renderRootPatchCount: 3,
             budgetLimitedByMinimumTrial: false,
+            basePatchCount: 9,
+            budgetFillSplitCount: 0,
+            budgetLimitedRefinementCount: 0,
             unbalancedPatchCount: 9,
             balanceSplitCount: 0,
             balanceOverheadPatchCount: 0,
@@ -179,14 +187,14 @@ describe('Geo GPU render-patch frontier', () => {
     it('rejects feedback from a different frame epoch', () => {
 
         expect(() => decodeGpuRenderPatchState(
-            new Uint8Array(140),
+            new Uint8Array(148),
             { maximumRenderPatches: 12_544, expectedFrameEpoch: 9 }
         )).to.throw(GeoDiagnosticError, 'frame epoch')
     })
 
     it('rejects a final render cut whose adjacent patch levels differ by more than one', () => {
 
-        const words = new Uint32Array(35)
+        const words = new Uint32Array(37)
         words.set([
             4,
             0,

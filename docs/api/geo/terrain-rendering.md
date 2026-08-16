@@ -37,15 +37,22 @@ each coordinate to the available physical page. Virtual Raster removes CPU paddi
 physical-atlas coupling; mesh stitching removes T-junction cracks.
 
 Render-patch refinement is canonical for the current camera, viewport, render roots,
-policy, and selected global budget bias. Each horizontal terrain footprint is clipped
-against all six WebGPU homogeneous clip planes to obtain visible evaluation positions.
-At those positions, the GPU projects a symmetric one-cell displacement along both
-horizontal axes and uses their geometric-mean pixel span as the refinement metric. The
+and policy. Each horizontal terrain footprint is clipped against all six WebGPU
+homogeneous clip planes to obtain visible evaluation positions. At those positions,
+the GPU projects a symmetric one-cell displacement along both horizontal axes and uses
+the area-equivalent pixel span of their local Jacobian as the refinement metric. The
 metric is local and does not shrink merely because viewport clipping leaves a smaller
-visible sliver during zoom-in. Local split decisions never read data-frontier topology
-or the previous parity's patch topology. The GPU may retain the previous *global* bias
-only inside the bounded frame-budget hysteresis band; that uniform budget decision
-does not grant individual patches a second refinement threshold.
+visible sliver during zoom-in.
+
+The GPU counts 17 complete uniform-bias cuts and chooses a stateless in-budget base.
+It then spends residual frame budget by repeatedly splitting the above-threshold
+terminal patch with the greatest quantized local span, with logical patch identity as
+the deterministic tie-break. A split replaces its parent only when all visible
+children fit; unused slots are valid when no complete quality split fits. The primary
+lookup is rebuilt from that priority-filled cut before bounded 2:1 balancing. Local
+selection never reads data-frontier topology, previous-parity topology, or a previous
+bias. Delayed feedback exposes base, fill, budget-limited, unbalanced, and balance
+facts, but never controls a later frame.
 
 Lower-level consumers may compose `gpuRenderPatchReadWgslModule` directly. It exposes
 bounded visible-instance lookup, covering-patch lookup, neighbor resolution, and edge

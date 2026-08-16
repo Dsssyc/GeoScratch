@@ -610,7 +610,7 @@ const typedRenderPatchWgsl = geoApi.gpuRenderPatchWgslModule()
 const typedRenderPatchFacts: geoApi.GpuRenderPatchFrontierFacts =
     typedRenderPatchFrontier.facts()
 const typedDecodedRenderPatch: geoApi.GpuRenderPatchSelectionFacts =
-    geoApi.decodeGpuRenderPatchState(new Uint8Array(140), {
+    geoApi.decodeGpuRenderPatchState(new Uint8Array(148), {
         maximumRenderPatches: 12_544,
     })
 const typedFrontierRenderWgsl: GpuTileFrontierRenderWgslModule =

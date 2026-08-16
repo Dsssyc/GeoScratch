@@ -2,18 +2,17 @@
 
 ## Status
 
-Accepted; extends ADR-065 with a global frame budget. Amended after the rapid-camera
-transition regression and again after the path-dependent top-down cut described below.
-The latest amendment withdraws per-patch historical thresholds while retaining global
-budget hysteresis. ADR-068 adds a correctness-owned balance pass after this ADR's
-budget-selected cut. ADR-076 supersedes this ADR's source-page render roots and
-clipped-footprint metric; the global 17-trial budget and hysteresis remain current.
+Partially superseded by ADR-078. This ADR still defines the normalized frame budget and
+the 17 measured complete-cut trials, but the selected trial is now a safe base cut.
+ADR-078 removes global history and fills residual budget by current local priority
+before ADR-068 balancing. ADR-076 supersedes this ADR's source-page render roots and
+clipped-footprint metric.
 
 ## Date
 
 2026-08-07
 
-Last amended 2026-08-15.
+Last amended 2026-08-16.
 
 ## Context
 
@@ -83,13 +82,12 @@ For a nominal 512-pixel patch span, the vertical-view baseline is:
 (ceil(viewportWidth / 512) + 1) * (ceil(viewportHeight / 512) + 1)
 ```
 
-The pitch-adjusted budget interpolates from that baseline to three times the
-baseline with `sin(pitch)^2`. The GPU scans fine to coarse and chooses the first
-complete cut inside the budget. If none fits, it chooses the trial with the minimum
-measured count rather than assuming the final source-root trial is smallest. A
-previous choice is retained only when its current count is within 75% through 100%
-of the budget and it is no more than one quarter-step coarser than the newly desired
-cut.
+The pitch-adjusted budget interpolates from that baseline to three times the baseline
+with `sin(pitch)^2`. The GPU scans fine to coarse and chooses the first complete cut
+inside the budget. If none fits, it chooses the trial with the minimum measured count
+rather than assuming the final source-root trial is smallest. ADR-078 makes this
+selection stateless and uses it as a base for local priority filling; the earlier 75%
+global hysteresis rule is superseded.
 
 ### Keep local refinement canonical
 
@@ -108,14 +106,15 @@ and balancing resource, but it is not an input to local refinement. Complete six
 homogeneous clipping removes the off-screen projected-footprint peak that the historical
 threshold had concealed.
 
-Global frame-budget hysteresis remains. It selects one uniform threshold step for the
-complete cut and cannot independently preserve a stale branch. Therefore a settled
-camera, source frontier, and selected global bias produce one canonical local cut.
+ADR-078 also withdraws global frame-budget hysteresis. A settled camera, source
+frontier, render roots, and policy now produce one canonical base bias and one
+priority-filled local cut without previous-frame authority.
 
 The persistent compute order is:
 
 ```text
-reset -> count 17 trials -> select -> emit -> balance -> validate -> finalize indirect draw
+reset -> count 17 trials -> select base -> emit base -> priority fill
+      -> balance -> validate -> finalize indirect draw
 ```
 
 The CPU uploads camera metadata but neither traverses the patch tree nor reads a
@@ -146,9 +145,10 @@ source-page floor.
   objects, host-authored instance list, or control readback.
 - Current-cut lookup allocations remain available to rendering and 2:1 balancing,
   but opposite-parity topology is not a local refinement input.
-- Diagnostics expose baseline and frame budgets, requested, unbalanced, and final counts,
-  minimum-trial and source-root counts, selected bias, level range, and both
-  overflow counters, plus balance splits and maximum adjacent level delta.
+- Diagnostics expose baseline and frame budgets, requested, base, priority-filled,
+  unbalanced, and final counts, minimum-trial and source-root counts, selected bias,
+  budget-limited refinements, level range, both overflow counters, balance splits, and
+  maximum adjacent level delta.
 - Coarsening below every available complete cut would require a separate render-root
   authority capable of merging source pages while preserving virtual-raster sampling;
   this ADR does not hide that as an achieved property.

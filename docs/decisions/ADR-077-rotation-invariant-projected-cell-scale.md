@@ -4,8 +4,9 @@
 
 Accepted; supersedes ADR-076 only for the way the two local projected cell-axis
 differentials are combined. ADR-076's immutable render roots, visible evaluation
-positions, canonical local decisions, global budget selection, and bounded balancing
-remain in force.
+positions, canonical local decisions, and bounded balancing remain in force. ADR-078
+later replaces the final uniform budget cut and hysteresis with a stateless base cut
+plus local priority fill; it does not change this ADR's metric.
 
 ## Date
 
@@ -68,9 +69,10 @@ protection previously supplied by the finite endpoint calculation.
 - A farther oblique patch cannot outrank a nearer equivalent patch because of the old
   basis-dependent axis product.
 - Perspective area, foreshortening, elevation bounds, viewport scale, the global patch
-  budget, hysteresis, and the balanced-cut contract continue to affect the final cut.
-- The public frontier shape, render-patch descriptor, feedback layout, and indirect
-  rendering path do not change.
+  budget, and the balanced-cut contract continue to affect the final cut. ADR-078
+  subsequently removes hysteresis.
+- This metric decision did not change the public frontier shape. ADR-078 subsequently
+  changes the descriptor and feedback facts for priority filling.
 - The computation remains GPU-resident and adds no CPU traversal or readback authority.
 
 ## Verification

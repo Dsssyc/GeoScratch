@@ -2,7 +2,7 @@
 docId: geo.terrain-rendering.zh
 canonical: false
 translationOf: ./terrain-rendering.md
-canonicalDigest: 21cf35d2227a843113c203943bef1e20af5eb25cc4799033ee7ab580718f8913
+canonicalDigest: 4bf213cd568ef71684ef3362af2953824c123f7a03b48725e79534a8c4c64cd1
 ---
 # 地形渲染
 
@@ -31,14 +31,19 @@ render patch 只携带 geometry identity。Terrain 请求 Virtual Raster 的最�
 table 再把每个坐标解析到可用 physical page。Virtual Raster 消除 CPU padding 与
 physical atlas 耦合；mesh stitching 消除 T-junction crack。
 
-对于当前 camera、viewport、render roots、policy 与已选择的全局 budget bias，
-render-patch 细分结果是规范且唯一的。每个水平地形 footprint 会先经过 WebGPU 全部六个
-齐次裁剪面，以获得可见求值位置。GPU 在这些位置沿两个水平轴对称投影一个 cell 的位移，
-并以两轴像素跨度的几何平均作为 refinement metric。该 metric 是局部量，不会因为
-zoom-in 时 viewport 裁剪留下更小的可见窄片而缩小。局部 split 决策既不读取
-data-frontier topology，也不读取上一 parity 的 patch topology。GPU 只可在有界 frame
-budget 迟滞区间内保留上一帧的*全局* bias；这个统一的预算决策不会为单个 patch 提供
-第二套细分阈值。
+对于当前 camera、viewport、render roots 与 policy，render-patch 细分结果是规范且唯一
+的。每个水平地形 footprint 会先经过 WebGPU 全部六个齐次裁剪面，以获得可见求值位置。
+GPU 在这些位置沿两个水平轴对称投影一个 cell 的位移，并以其局部 Jacobian 的面积等效
+像素跨度作为 refinement metric。该 metric 是局部量，不会因为 zoom-in 时 viewport
+裁剪留下更小的可见窄片而缩小。
+
+GPU 会计算 17 个完整的统一 bias cut，并以无历史状态的方式选择预算内 base cut。随后
+它用剩余 frame budget 反复细分超过阈值且量化局部 span 最大的 terminal patch，并以
+logical patch identity 作为确定性同值排序。只有全部可见 children 都能放入预算时，
+split 才替换 parent；没有完整 quality split 可容纳时，保留未使用 slot 是合法结果。
+Primary lookup 会从 priority-filled cut 重建，然后才执行有界 2:1 balance。局部选择不会
+读取 data-frontier topology、上一 parity topology 或上一帧 bias。延迟 feedback 会暴露
+base、fill、budget-limited、unbalanced 与 balance fact，但不会控制后续帧。
 
 更底层的消费者可以直接组合 `gpuRenderPatchReadWgslModule`。它通过显式 storage
 binding 与 layout dependency 提供有界 visible-instance lookup、covering-patch lookup、

@@ -488,8 +488,10 @@ const GPU_RENDER_PATCH_MAXIMUM_MATRIX_LEVEL: 14
 
 Kind: `Type Alias`.
 
+Names the persistent GPU commands that derive one render-patch cut for a frame.
+
 ```ts
-type GpuRenderPatchCommands = Readonly<{ balance: DispatchCommand; clearLookup: ClearBufferCommand; count: DispatchCommand; expand: DispatchCommand; feedback: ReadbackCommand; finalize: DispatchCommand; reset: DispatchCommand; resetFinalDiagnostics: DispatchCommand; select: DispatchCommand; validate: DispatchCommand }>
+type GpuRenderPatchCommands = Readonly<{ balance: DispatchCommand; clearLookup: ClearBufferCommand; count: DispatchCommand; expand: DispatchCommand; feedback: ReadbackCommand; fill: DispatchCommand; finalize: DispatchCommand; reset: DispatchCommand; resetFinalDiagnostics: DispatchCommand; select: DispatchCommand; validate: DispatchCommand }>
 ```
 
 ### `GpuRenderPatchFeedback`
@@ -532,16 +534,20 @@ type GpuRenderPatchFrontier = Readonly<{ id: string; capture: any; commandsFor: 
 
 Kind: `Type Alias`.
 
+Configures one stateless GPU render-patch authority over immutable geographic roots.
+
 ```ts
-type GpuRenderPatchFrontierDescriptor = Readonly<{ budgetHysteresisRatio?: number; cellsPerPatchEdge?: number; coordinateBits: number; elevationRangeMeters: readonly [number, number]; maximumCellSpanPixels?: number; maximumPatchCountRatio?: number; maximumRenderPatches: number; renderMaximumMatrixLevel?: number; renderRoots: readonly GpuRenderPatchRootDescriptor[]; vertexCount: number; viewTemplates: readonly [GpuRenderPatchViewTemplate, GpuRenderPatchViewTemplate] }>
+type GpuRenderPatchFrontierDescriptor = Readonly<{ cellsPerPatchEdge?: number; coordinateBits: number; elevationRangeMeters: readonly [number, number]; maximumCellSpanPixels?: number; maximumPatchCountRatio?: number; maximumRenderPatches: number; renderMaximumMatrixLevel?: number; renderRoots: readonly GpuRenderPatchRootDescriptor[]; vertexCount: number; viewTemplates: readonly [GpuRenderPatchViewTemplate, GpuRenderPatchViewTemplate] }>
 ```
 
 ### `GpuRenderPatchFrontierFacts`
 
 Kind: `Type Alias`.
 
+Describes immutable render-patch graph identity, policy, and owned GPU objects.
+
 ```ts
-type GpuRenderPatchFrontierFacts = Readonly<{ balancePassCount: number; balanceWorkgroupSize: number; biasStepCount: number; biasStepsPerLevel: number; budgetHysteresisRatio: number; cellsPerPatchEdge: number; disposed: boolean; drawArgumentBytes: number; id: string; maximumCellSpanPixels: number; maximumMatrixLevel: number; maximumPatchCountRatio: number; maximumRenderPatches: number; maximumRootMatrixLevel: number; minimumRootMatrixLevel: number; nominalPatchSpanPixels: number; parity: readonly Readonly<{ balancePatchBufferId: string; balancePatchLookupBufferId: string; commandIds: readonly string[]; drawArgumentBufferId: string; mapMetaBufferId: string; parity: 0 | 1; renderPatchBufferId: string; renderPatchLookupBufferId: string; renderRootBufferId: string; stateBufferId: string }>[]; renderPatchBytes: number; renderPatchLookupBytes: number; renderPatchLookupCapacity: number; renderRootCount: number; selectionPath: "gpu-balanced-render-root-local-cell-projection"; workgroupSize: number }>
+type GpuRenderPatchFrontierFacts = Readonly<{ balancePassCount: number; balanceWorkgroupSize: number; biasStepCount: number; biasStepsPerLevel: number; budgetFillWorkgroupSize: number; cellsPerPatchEdge: number; disposed: boolean; drawArgumentBytes: number; id: string; maximumCellSpanPixels: number; maximumMatrixLevel: number; maximumPatchCountRatio: number; maximumRenderPatches: number; maximumRootMatrixLevel: number; minimumRootMatrixLevel: number; nominalPatchSpanPixels: number; parity: readonly Readonly<{ balancePatchBufferId: string; balancePatchLookupBufferId: string; commandIds: readonly string[]; drawArgumentBufferId: string; mapMetaBufferId: string; parity: 0 | 1; renderPatchBufferId: string; renderPatchLookupBufferId: string; renderRootBufferId: string; stateBufferId: string }>[]; renderPatchBytes: number; renderPatchLookupBytes: number; renderPatchLookupCapacity: number; renderRootCount: number; selectionPath: "gpu-balanced-priority-filled-render-root-local-cell-projection"; workgroupSize: number }>
 ```
 
 ### `GpuRenderPatchIdentityObjects`
@@ -604,8 +610,10 @@ type GpuRenderPatchRootDescriptor = Readonly<{ matrixLevel: number; tileCol: num
 
 Kind: `Type Alias`.
 
+Reports validated delayed facts for base selection, priority fill, and balancing.
+
 ```ts
-type GpuRenderPatchSelectionFacts = Readonly<{ balanceOverheadPatchCount: number; balancePassCount: number; balanceSplitCount: number; baselinePatchBudget: number; budgetLimitedByMinimumTrial: boolean; descriptorOverflowCount: number; frameEpoch: number; framePatchBudget: number; lookupOverflowCount: number; maximumAdjacentLevelDelta: number; maximumCellSpanPixels?: number; maximumMatrixLevel?: number; minimumCellSpanPixels?: number; minimumMatrixLevel?: number; minimumTrialPatchCount: number; renderRootPatchCount: number; requestedPatchCount: number; selectedBiasLevels: number; selectedBiasStep: number; selectedPatchCount: number; unbalancedPatchCount: number }>
+type GpuRenderPatchSelectionFacts = Readonly<{ balanceOverheadPatchCount: number; balancePassCount: number; balanceSplitCount: number; baselinePatchBudget: number; basePatchCount: number; budgetFillSplitCount: number; budgetLimitedByMinimumTrial: boolean; budgetLimitedRefinementCount: number; descriptorOverflowCount: number; frameEpoch: number; framePatchBudget: number; lookupOverflowCount: number; maximumAdjacentLevelDelta: number; maximumCellSpanPixels?: number; maximumMatrixLevel?: number; minimumCellSpanPixels?: number; minimumMatrixLevel?: number; minimumTrialPatchCount: number; renderRootPatchCount: number; requestedPatchCount: number; selectedBiasLevels: number; selectedBiasStep: number; selectedPatchCount: number; unbalancedPatchCount: number }>
 ```
 
 ### `GpuRenderPatchViewTemplate`

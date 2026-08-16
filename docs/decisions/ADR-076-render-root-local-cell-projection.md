@@ -5,8 +5,9 @@
 Partially superseded by ADR-077, which replaces the basis-dependent product of the two
 projected axis lengths with a rotation-invariant Jacobian determinant. This ADR still
 supersedes ADR-065's clipped-footprint error metric and ADR-066's source-page render
-roots. ADR-066's global budget selection and hysteresis and ADR-068's balanced-cut
-contract remain in force.
+roots. ADR-078 supersedes ADR-066's final uniform-cut and hysteresis policy with a
+stateless base cut plus local priority fill. ADR-068's balanced-cut contract remains in
+force.
 
 ## Date
 
@@ -91,10 +92,10 @@ the parent patch is inside the viewport.
 
 ### Keep the settled cut canonical
 
-For fixed render roots, camera metadata, viewport, render policy, and selected global
-bias, local split decisions are stateless and canonical. Previous-parity topology is
-not an error-metric input. Global budget hysteresis may retain only the bounded uniform
-bias permitted by ADR-066; it cannot preserve or erase an individual branch.
+For fixed render roots, camera metadata, viewport, and render policy, local split
+decisions are stateless and canonical. Previous-parity topology and bias are not
+error-metric inputs. ADR-078 allocates the current frame's residual budget by local
+projected-cell priority without historical authority.
 
 ## Consequences
 

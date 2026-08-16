@@ -26,15 +26,18 @@ coarsening during zoom-in. Its two pixel-space vectors form a local Jacobian; th
 root of the absolute determinant is the area-equivalent cell span. Unlike multiplying
 the two vector lengths, this metric includes their angle and cannot change merely
 because camera bearing changes the alignment between the fixed grid axes and the
-direction of foreshortening. A normalized budget, bounded balancing passes, hysteresis,
-and revision tokens keep selection stable. The balanced cut enforces edge-adjacent level
-difference at most one before mesh-stitching flags are produced. Trial counting
-saturates immediately above render capacity, so an unusable fine cut cannot turn a
-large root span into unbounded traversal work.
+direction of foreshortening. A normalized budget first selects a stateless complete
+base cut from 17 measured trials. A GPU-resident best-first pass then spends residual
+budget on the greatest local projected errors, using logical patch identity for stable
+ties. It never uses previous-frame topology or bias as authority. The balanced cut
+enforces edge-adjacent level difference at most one before mesh-stitching flags are
+produced. Trial counting saturates immediately above render capacity, so an unusable
+fine cut cannot turn a large root span into unbounded traversal work.
 
 Only resident or seedable metadata can participate in a GPU pass, so delayed demand
 may affect later frames. This is deliberate eventual refinement, not a claim that every
-desired tile is already loaded. Feedback decoders validate counters and budget facts;
-stale or inconsistent results are rejected rather than corrupting the active frontier.
+desired tile is already loaded. Feedback decoders validate base, priority-fill,
+budget-limit, and balance facts; stale or inconsistent results are rejected rather
+than corrupting the active frontier.
 Render-patch feedback reports render-root and selected-cut facts, while raster feedback
 reports data demand and residency; neither readback becomes a CPU selection authority.
