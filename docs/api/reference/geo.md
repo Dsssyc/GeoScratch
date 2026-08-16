@@ -2,7 +2,7 @@
 
 # geoscratch/geo API Reference
 
-Public symbols: 302.
+Public symbols: 303.
 
 ## `packages/geoscratch/src/geo/coordinate-domain.ts`
 
@@ -215,12 +215,24 @@ Function createGeoFrameController
 ```
 
 ```ts
-createGeoFrameController<Value>(descriptor: GeoFrameControllerDescriptor<Value>): GeoFrameController
+createGeoFrameController<Value, Capture = undefined>(descriptor: GeoFrameControllerDescriptor<Value, Capture>): GeoFrameController
+```
+
+### `GeoFrameCapture`
+
+Kind: `Type Alias`.
+
+Immutable host state captured synchronously with a monotonically increasing revision.
+
+```ts
+type GeoFrameCapture<Snapshot> = Readonly<{ revision: number; snapshot: Snapshot }>
 ```
 
 ### `GeoFrameController`
 
 Kind: `Type Alias`.
+
+Latest-only Geo frame authority with optional host-revision capture.
 
 ```ts
 type GeoFrameController = Readonly<{ invalidate: any; invalidateNow: any; snapshot: any; stop: any }>
@@ -230,8 +242,10 @@ type GeoFrameController = Readonly<{ invalidate: any; invalidateNow: any; snapsh
 
 Kind: `Type Alias`.
 
+Host capture, frame construction, observation, and bounded convergence policy.
+
 ```ts
-type GeoFrameControllerDescriptor<Value> = Readonly<{ maximumFollowUpFrames?: number; maximumInFlightFrames?: number; scheduler?: GeoFrameScheduler; onError?: any; onObserved?: any; onSubmitted?: any; render: any; track?: any }>
+type GeoFrameControllerDescriptor<Value, Capture = undefined> = Readonly<{ maximumFollowUpFrames?: number; maximumInFlightFrames?: number; scheduler?: GeoFrameScheduler; capture?: any; onError?: any; onObserved?: any; onSubmitted?: any; render: any; track?: any }>
 ```
 
 ### `GeoFrameControllerFrame`
@@ -246,8 +260,10 @@ type GeoFrameControllerFrame<Value> = GeoFrameResult<Value> & Readonly<{ frameNu
 
 Kind: `Type Alias`.
 
+Immutable scheduling, capture, submission, and convergence counters.
+
 ```ts
-type GeoFrameControllerSnapshot = Readonly<{ cancelledFrameCount: number; completedFrameCount: number; followUpFrameCount: number; inFlightFrameCount: number; invalidationCount: number; maximumInFlightFrames: number; observedFrameCount: number; pendingTaskCount: number; rendering: boolean; scheduledFrameCount: number; state: GeoFrameControllerState; submittedFrameCount: number }>
+type GeoFrameControllerSnapshot = Readonly<{ cancelledFrameCount: number; completedFrameCount: number; deduplicatedInvalidationCount: number; followUpFrameCount: number; inFlightFrameCount: number; invalidationCount: number; latestCaptureRevision?: number; maximumInFlightFrames: number; observedFrameCount: number; pendingTaskCount: number; rendering: boolean; scheduledFrameCount: number; state: GeoFrameControllerState; submittedCaptureRevision?: number; submittedFrameCount: number }>
 ```
 
 ### `GeoFrameControllerState`

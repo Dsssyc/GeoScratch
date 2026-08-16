@@ -213,6 +213,7 @@ async function verifyUnderwaterTerrain(activeBrowser) {
             facts.status === 'ready' && Number(facts.observedFrames) >= 1
         ))
         const adapterFacts = await readRuntimeAdapterFacts(page, loadedFacts)
+        const cameraAbaTransition = await captureCameraAbaTransition(page)
         const rapidCameraTransition = await captureRapidCameraTransition(page)
         const scenarios = []
         for (const definition of cameraScenarios) {
@@ -245,6 +246,7 @@ async function verifyUnderwaterTerrain(activeBrowser) {
         return {
             adapter: adapterFacts,
             proof: {
+                cameraAbaTransition,
                 rapidCameraTransition,
                 scenarios,
                 resizedFacts,
@@ -266,6 +268,83 @@ async function verifyUnderwaterTerrain(activeBrowser) {
     } finally {
         await context.close()
     }
+}
+
+async function captureCameraAbaTransition(page) {
+
+    const cameraA = Object.freeze({
+        center: cameraCenter,
+        zoom: 9.5,
+        pitch: 30,
+        bearing: 35,
+    })
+    const cameraB = Object.freeze({
+        center: [ cameraCenter[0] + 0.04, cameraCenter[1] - 0.03 ],
+        zoom: 10.25,
+        pitch: 70,
+        bearing: 145,
+    })
+    const issued = await page.evaluate(async({ cameraA, cameraB, timeoutMs }) => {
+        const proof = window.__UNDERWATER_TERRAIN_PROOF__
+        const canvas = document.querySelector('#GPUFrame')
+        if (proof === undefined || !(canvas instanceof HTMLCanvasElement)) {
+            throw new Error('Underwater Terrain ABA proof is unavailable')
+        }
+        return await new Promise((resolve, reject) => {
+            let phase = 'first-a'
+            let firstAFrame = -1
+            let cameraBFrame = -1
+            const timer = setTimeout(() => {
+                observer.disconnect()
+                reject(new Error(`Timed out during camera ABA transition at ${phase}`))
+            }, timeoutMs)
+            const matches = (actual, expected) => actual !== null &&
+                Math.abs(actual.center[0] - expected.center[0]) < 1e-8 &&
+                Math.abs(actual.center[1] - expected.center[1]) < 1e-8 &&
+                Math.abs(actual.zoom - expected.zoom) < 1e-6 &&
+                Math.abs(actual.pitch - expected.pitch) < 1e-6
+            const observer = new MutationObserver(() => {
+                let camera
+                try { camera = JSON.parse(canvas.dataset.cameraView ?? 'null') } catch { return }
+                if (phase === 'first-a' && matches(camera, cameraA)) {
+                    firstAFrame = Number(canvas.dataset.frames)
+                    phase = 'camera-b'
+                    proof.moveCamera(cameraB)
+                } else if (phase === 'camera-b' && matches(camera, cameraB)) {
+                    cameraBFrame = Number(canvas.dataset.frames)
+                    phase = 'final-a'
+                    proof.moveCamera(cameraA)
+                    observer.disconnect()
+                    clearTimeout(timer)
+                    resolve({ firstAFrame, cameraBFrame })
+                }
+            })
+            observer.observe(canvas, {
+                attributes: true,
+                attributeFilter: [ 'data-camera-view' ],
+            })
+            proof.moveCamera(cameraA)
+        })
+    }, { cameraA, cameraB, timeoutMs: timeout })
+    const finalFacts = await waitForConvergedFacts(page, facts => (
+        Number(facts.observedFrames) > issued.cameraBFrame && cameraMatches(facts, cameraA)
+    ))
+    const previousFrames = Number(finalFacts.observedFrames)
+    await page.evaluate(camera => window.__UNDERWATER_TERRAIN_PROOF__.moveCamera(camera), cameraA)
+    const repeatedFacts = await waitForConvergedFacts(page, facts => (
+        Number(facts.observedFrames) > previousFrames && cameraMatches(facts, cameraA)
+    ))
+    return Object.freeze({
+        cameraA,
+        cameraB,
+        issued,
+        finalFacts,
+        repeatedFacts,
+        signatures: Object.freeze([
+            frontierSignature(finalFacts),
+            frontierSignature(repeatedFacts),
+        ]),
+    })
 }
 
 async function captureRapidCameraTransition(page) {
@@ -876,6 +955,7 @@ function validateResult(result) {
 function validateNormalProof(proof, failures) {
 
     const scenarios = proof.scenarios ?? []
+    const cameraAbaTransition = proof.cameraAbaTransition
     const rapidCameraTransition = proof.rapidCameraTransition
     const resized = proof.resizedFacts
     const drained = proof.drainedFacts
@@ -883,6 +963,24 @@ function validateNormalProof(proof, failures) {
         failures.push('normal Underwater Terrain proof did not run every camera scenario')
     }
     const allFacts = []
+    if (cameraAbaTransition?.issued?.firstAFrame < 1 ||
+        cameraAbaTransition?.issued?.cameraBFrame <= cameraAbaTransition.issued.firstAFrame ||
+        cameraAbaTransition?.signatures?.length !== 2 ||
+        new Set(cameraAbaTransition.signatures).size !== 1) {
+        failures.push('camera A-B-A replacement reused an obsolete decision episode')
+    } else {
+        validateUnderwaterTerrainFacts(
+            'camera A-B-A final decision',
+            cameraAbaTransition.finalFacts,
+            failures
+        )
+        validateUnderwaterTerrainFacts(
+            'camera A-B-A repeated decision',
+            cameraAbaTransition.repeatedFacts,
+            failures
+        )
+        allFacts.push(cameraAbaTransition.finalFacts, cameraAbaTransition.repeatedFacts)
+    }
     if (rapidCameraTransition?.stepCount !== 84 ||
         !cameraMatches(
             rapidCameraTransition?.finalFacts ?? {},
@@ -1012,6 +1110,15 @@ function validateNormalProof(proof, failures) {
     if (frameWork?.active !== 0) {
         failures.push('Underwater Terrain frame scheduler remained active after drain')
     }
+    const deduplicatedInvalidations = Number(drained.deduplicatedFrameInvalidations)
+    const latestCaptureRevision = Number(drained.latestFrameCaptureRevision)
+    const submittedCaptureRevision = Number(drained.submittedFrameCaptureRevision)
+    if (!Number.isSafeInteger(deduplicatedInvalidations) || deduplicatedInvalidations < 0 ||
+        !Number.isSafeInteger(latestCaptureRevision) || latestCaptureRevision < 0 ||
+        !Number.isSafeInteger(submittedCaptureRevision) || submittedCaptureRevision < 0 ||
+        latestCaptureRevision !== submittedCaptureRevision) {
+        failures.push('Underwater Terrain host-capture revisions did not drain to one latest state')
+    }
 
     if (!proof.cleanupPair?.equivalentReports || proof.cleanupPair.reports?.length !== 2) {
         failures.push('double disposal did not return two equivalent cleanup reports')
@@ -1019,6 +1126,7 @@ function validateNormalProof(proof, failures) {
         validateCleanup(proof.cleanupPair.reports[0], [
             'underwater-terrain-frame-scheduler',
             'window-resize-listener',
+            'map-view-revision-listeners',
             'map-render-listener',
             'underwater-terrain-presentation-control',
             'dem-virtual-raster-demand',
@@ -1368,6 +1476,13 @@ function summarizeNormalProof(proof) {
 
     const resize = parseJsonOrUndefined(proof.resizedFacts.lastResizeFacts)
     return {
+        cameraAbaTransition: {
+            cameraA: proof.cameraAbaTransition.cameraA,
+            cameraB: proof.cameraAbaTransition.cameraB,
+            issued: proof.cameraAbaTransition.issued,
+            stableSignatureCount: new Set(proof.cameraAbaTransition.signatures).size,
+            final: summarizeFacts(proof.cameraAbaTransition.finalFacts),
+        },
         rapidCameraTransition: {
             stepCount: proof.rapidCameraTransition.stepCount,
             finalCamera: proof.rapidCameraTransition.finalCamera,
@@ -1400,6 +1515,15 @@ function summarizeNormalProof(proof) {
                 proof.drainedFacts.currentEffectfulSubmittedWork
             ),
             frameWork: parseJsonOrUndefined(proof.drainedFacts.frameWork),
+            deduplicatedFrameInvalidations: Number(
+                proof.drainedFacts.deduplicatedFrameInvalidations
+            ),
+            latestFrameCaptureRevision: Number(
+                proof.drainedFacts.latestFrameCaptureRevision
+            ),
+            submittedFrameCaptureRevision: Number(
+                proof.drainedFacts.submittedFrameCaptureRevision
+            ),
         },
         cleanup: summarizeCleanupProof(proof.cleanupPair.reports?.[0]),
         terminalStatus: proof.terminalStatus,

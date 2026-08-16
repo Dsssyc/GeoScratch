@@ -48,6 +48,20 @@ an obsolete camera decision. The controller does not inspect a DEM, tile atlas,
 MapLibre map, shader, canvas, or GPU resource. Applications still own event wiring,
 presentation controls, source URLs, cache policy, and page lifetime.
 
+### 2026-08-17 host-capture amendment
+
+An optional synchronous `capture()` freezes external host state before asynchronous frame
+construction. Captures carry a non-negative monotonic revision. `invalidateNow()` stores only
+the newest captured revision and suppresses identical host repaint revisions, while
+`invalidate()` and controller-owned residency or convergence follow-ups remain forceful even
+when the host revision is unchanged. The render callback receives the frozen snapshot rather
+than rereading mutable host state after a Promise boundary.
+
+This amendment preserves the bounded native-observation policy. It does not make a separate
+WebGPU canvas share MapLibre's WebGL context, render pass, depth buffer, or compositor timeline.
+It instead makes the unavoidable two-context boundary explicit and observable through capture
+and deduplication counters.
+
 ## Consequences
 
 - DEM no longer carries a private RAF and asynchronous convergence state machine.
@@ -55,11 +69,16 @@ presentation controls, source URLs, cache policy, and page lifetime.
   source semantics.
 - Scratch remains the generic asynchronous lifetime owner; Geo owns camera/residency
   frame convergence; the application only connects events and business policy.
-- Map-host camera submission is not serialized behind GPU readback, resource loading,
-  or `queue.onSubmittedWorkDone()`, while a bounded three-frame default prevents continuous
-  host motion from building an unbounded WebGPU queue.
+- Frame construction is not serialized behind delayed residency or feedback settlement.
+  `maximumInFlightFrames` separately decides whether native observation backpressures newer
+  submissions; camera-locked overlays can select one while throughput-oriented work can use
+  the bounded default of three.
 - Browser-only proof instrumentation lives under `tests/browser/support` and is loaded
   only for explicit development proof runs.
+- Unrelated host style or source repaints can be rejected by an unchanged capture revision
+  without suppressing field residency or convergence work.
+- A camera state used by one submission is now a synchronous host observation rather than an
+  asynchronous reread of a mutable map.
 
 ## Rejected Alternatives
 

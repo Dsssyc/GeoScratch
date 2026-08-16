@@ -298,9 +298,15 @@ async function runCameraTrackingProof(page, baseCamera) {
             try { return JSON.parse(canvas.dataset.cameraView ?? 'null') } catch { return null }
         }
         const samples = []
+        const frameIntervals = []
         let issuedIndex = -1
+        let previousTimestamp
         await new Promise(resolve => {
-            const tick = () => {
+            const tick = timestamp => {
+                if (previousTimestamp !== undefined) {
+                    frameIntervals.push(timestamp - previousTimestamp)
+                }
+                previousTimestamp = timestamp
                 if (issuedIndex >= 0) {
                     const submitted = parseCamera()
                     const submittedIndex = submitted === null
@@ -343,8 +349,21 @@ async function runCameraTrackingProof(page, baseCamera) {
         const submissionTransitions = samples.filter((sample, index) =>
             index === 0 || sample.submittedIndex !== samples[index - 1].submittedIndex
         )
+        const percentile = (values, fraction) => {
+            const sorted = [ ...values ].sort((left, right) => left - right)
+            return sorted[
+                Math.max(0, Math.ceil(sorted.length * fraction) - 1)
+            ] ?? 0
+        }
         return {
             frameCount,
+            frameIntervalP50Ms: percentile(frameIntervals, 0.5),
+            frameIntervalP95Ms: percentile(frameIntervals, 0.95),
+            frameIntervalOver20MsCount: frameIntervals.filter(value => value > 20).length,
+            submissionLagP95Frames: percentile(
+                samples.map(sample => sample.submissionLagFrames),
+                0.95
+            ),
             maximumSubmissionLagFrames: Math.max(
                 ...samples.map(sample => sample.submissionLagFrames)
             ),
@@ -734,9 +753,27 @@ function validateProof(value, processState) {
         cameraTracking.staleSubmissionTransitionCount === 0,
     `camera submission replayed an intermediate invalidated state: ${JSON.stringify({
         maximumSubmissionLagFrames: cameraTracking?.maximumSubmissionLagFrames,
+        frameIntervalP50Ms: cameraTracking?.frameIntervalP50Ms,
+        frameIntervalP95Ms: cameraTracking?.frameIntervalP95Ms,
+        frameIntervalOver20MsCount: cameraTracking?.frameIntervalOver20MsCount,
         submissionTransitionCount: cameraTracking?.submissionTransitionCount,
         staleSubmissionTransitionCount: cameraTracking?.staleSubmissionTransitionCount,
         samples: cameraTracking?.samples,
+    })}`)
+
+    expect(failures,
+        Number.isFinite(cameraTracking?.frameIntervalP50Ms) &&
+        cameraTracking.frameIntervalP50Ms > 0 &&
+        Number.isFinite(cameraTracking?.frameIntervalP95Ms) &&
+        cameraTracking.frameIntervalP95Ms <= 20 &&
+        cameraTracking.submissionLagP95Frames <= 1 &&
+        cameraTracking.maximumSubmissionLagFrames <= 3,
+    `continuous camera tracking exceeded its display-paced latency budget: ${JSON.stringify({
+        frameIntervalP50Ms: cameraTracking?.frameIntervalP50Ms,
+        frameIntervalP95Ms: cameraTracking?.frameIntervalP95Ms,
+        frameIntervalOver20MsCount: cameraTracking?.frameIntervalOver20MsCount,
+        submissionLagP95Frames: cameraTracking?.submissionLagP95Frames,
+        maximumSubmissionLagFrames: cameraTracking?.maximumSubmissionLagFrames,
     })}`)
 
     expect(failures,

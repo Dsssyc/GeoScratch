@@ -60,7 +60,11 @@ render cut.
 delayed GPU feedback, feedback-driven residency, and convergence are separate promises;
 none retains frame-submission authority. Feedback for an older camera is reported as
 superseded and cannot reconcile residency or overwrite current facts. A decision is
-settled only after its frontier is converged and it requests no additional pages.
+settled only after its frontier is converged and it requests no additional pages. When
+the camera or residency decision key changes, the renderer immediately withdraws the
+previous frontier and render-patch facts and reports `transitioning` until feedback for
+the current decision settles. Returning to an earlier camera does not reuse its old
+settled status because intervening decisions have mutated the GPU-resident frontier.
 
 Lower-level consumers may compose `gpuRenderPatchReadWgslModule` directly. It exposes
 bounded visible-instance lookup, covering-patch lookup, neighbor resolution, and edge

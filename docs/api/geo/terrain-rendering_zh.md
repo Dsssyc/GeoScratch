@@ -2,7 +2,7 @@
 docId: geo.terrain-rendering.zh
 canonical: false
 translationOf: ./terrain-rendering.md
-canonicalDigest: 8ebf5766dd0f7f0a769188ca67dfaab230c596cfd396875489aa946e343a71f3
+canonicalDigest: 19f7712e6c4a23feb55dc435a2ea89a86b953a9caf152bb45d21705b7d6d0c26
 ---
 # 地形渲染
 
@@ -51,7 +51,10 @@ fact，但不会控制后续 render cut。
 feedback 驱动的 residency 与 convergence 分别由独立 promise 表达；它们都不会持有
 frame submission authority。旧 camera 的 feedback 会被标记为 superseded，不能协调
 residency 或覆盖当前 facts。只有 frontier 已 converged 且没有请求额外 page 时，一个
-decision 才会被标记为 settled。
+decision 才会被标记为 settled。当 camera 或 residency decision key 变化时，renderer
+会立即撤销上一 decision 的 frontier 与 render-patch facts，并在当前 decision 的 feedback
+完成前报告 `transitioning`。即使返回之前访问过的 camera，也不会复用旧 settled 状态，
+因为中间的 decision 已经改写 GPU-resident frontier。
 
 更底层的消费者可以直接组合 `gpuRenderPatchReadWgslModule`。它通过显式 storage
 binding 与 layout dependency 提供有界 visible-instance lookup、covering-patch lookup、

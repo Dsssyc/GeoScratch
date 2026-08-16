@@ -18061,12 +18061,12 @@
             "packages/geoscratch/src/geo/frame-controller.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/frame-controller.ts:80"
+            "packages/geoscratch/src/geo/frame-controller.ts:98"
           ],
           "summary": "Coordinates immediate submission, bounded native frames in flight, and Geo follow-up work.",
           "declaration": "Function createGeoFrameController",
           "signatures": [
-            "createGeoFrameController<Value>(descriptor: GeoFrameControllerDescriptor<Value>): GeoFrameController"
+            "createGeoFrameController<Value, Capture = undefined>(descriptor: GeoFrameControllerDescriptor<Value, Capture>): GeoFrameController"
           ]
         },
         {
@@ -18197,7 +18197,7 @@
             "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:370"
+            "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:371"
           ],
           "summary": "Assembles a WebMercatorQuad Virtual Raster terrain renderer with GPU-driven selection, precision-aware vertex generation, mesh stitching, and explicit lifetime.",
           "declaration": "Function createWebMercatorTerrainRenderer",
@@ -18463,6 +18463,20 @@
           "declaration": "type GeoFieldInterpolation = \"nearest\" | \"linear\""
         },
         {
+          "id": "geoscratch/geo#GeoFrameCapture",
+          "name": "GeoFrameCapture",
+          "kind": "Type Alias",
+          "source": "packages/geoscratch/src/geo/frame-controller.ts",
+          "sources": [
+            "packages/geoscratch/src/geo/frame-controller.ts"
+          ],
+          "locations": [
+            "packages/geoscratch/src/geo/frame-controller.ts:11"
+          ],
+          "summary": "Immutable host state captured synchronously with a monotonically increasing revision.",
+          "declaration": "type GeoFrameCapture<Snapshot> = Readonly<{ revision: number; snapshot: Snapshot }>"
+        },
+        {
           "id": "geoscratch/geo#GeoFrameController",
           "name": "GeoFrameController",
           "kind": "Type Alias",
@@ -18471,9 +18485,9 @@
             "packages/geoscratch/src/geo/frame-controller.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/frame-controller.ts:55"
+            "packages/geoscratch/src/geo/frame-controller.ts:70"
           ],
-          "summary": "",
+          "summary": "Latest-only Geo frame authority with optional host-revision capture.",
           "declaration": "type GeoFrameController = Readonly<{ invalidate: any; invalidateNow: any; snapshot: any; stop: any }>"
         },
         {
@@ -18485,10 +18499,10 @@
             "packages/geoscratch/src/geo/frame-controller.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/frame-controller.ts:44"
+            "packages/geoscratch/src/geo/frame-controller.ts:55"
           ],
-          "summary": "",
-          "declaration": "type GeoFrameControllerDescriptor<Value> = Readonly<{ maximumFollowUpFrames?: number; maximumInFlightFrames?: number; scheduler?: GeoFrameScheduler; onError?: any; onObserved?: any; onSubmitted?: any; render: any; track?: any }>"
+          "summary": "Host capture, frame construction, observation, and bounded convergence policy.",
+          "declaration": "type GeoFrameControllerDescriptor<Value, Capture = undefined> = Readonly<{ maximumFollowUpFrames?: number; maximumInFlightFrames?: number; scheduler?: GeoFrameScheduler; capture?: any; onError?: any; onObserved?: any; onSubmitted?: any; render: any; track?: any }>"
         },
         {
           "id": "geoscratch/geo#GeoFrameControllerFrame",
@@ -18499,7 +18513,7 @@
             "packages/geoscratch/src/geo/frame-controller.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/frame-controller.ts:25"
+            "packages/geoscratch/src/geo/frame-controller.ts:31"
           ],
           "summary": "",
           "declaration": "type GeoFrameControllerFrame<Value> = GeoFrameResult<Value> & Readonly<{ frameNumber: number }>"
@@ -18513,10 +18527,10 @@
             "packages/geoscratch/src/geo/frame-controller.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/frame-controller.ts:29"
+            "packages/geoscratch/src/geo/frame-controller.ts:36"
           ],
-          "summary": "",
-          "declaration": "type GeoFrameControllerSnapshot = Readonly<{ cancelledFrameCount: number; completedFrameCount: number; followUpFrameCount: number; inFlightFrameCount: number; invalidationCount: number; maximumInFlightFrames: number; observedFrameCount: number; pendingTaskCount: number; rendering: boolean; scheduledFrameCount: number; state: GeoFrameControllerState; submittedFrameCount: number }>"
+          "summary": "Immutable scheduling, capture, submission, and convergence counters.",
+          "declaration": "type GeoFrameControllerSnapshot = Readonly<{ cancelledFrameCount: number; completedFrameCount: number; deduplicatedInvalidationCount: number; followUpFrameCount: number; inFlightFrameCount: number; invalidationCount: number; latestCaptureRevision?: number; maximumInFlightFrames: number; observedFrameCount: number; pendingTaskCount: number; rendering: boolean; scheduledFrameCount: number; state: GeoFrameControllerState; submittedCaptureRevision?: number; submittedFrameCount: number }>"
         },
         {
           "id": "geoscratch/geo#GeoFrameControllerState",
@@ -18541,7 +18555,7 @@
             "packages/geoscratch/src/geo/frame-controller.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/frame-controller.ts:11"
+            "packages/geoscratch/src/geo/frame-controller.ts:17"
           ],
           "summary": "Work submitted for one Geo frame plus independently observed asynchronous outcomes.",
           "declaration": "type GeoFrameResult<Value> = Readonly<{ needsFollowUp: boolean; observation: PromiseLike<unknown>; settlement?: PromiseLike<GeoFrameSettlement>; value: Value }>"
@@ -18569,7 +18583,7 @@
             "packages/geoscratch/src/geo/frame-controller.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/frame-controller.ts:19"
+            "packages/geoscratch/src/geo/frame-controller.ts:25"
           ],
           "summary": "Delayed feedback and residency facts that may request another bounded frame.",
           "declaration": "type GeoFrameSettlement = Readonly<{ needsFollowUp: boolean; residencySettlement?: PromiseLike<unknown>; residencyWorkCount: number }>"

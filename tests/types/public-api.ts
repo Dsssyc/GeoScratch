@@ -462,14 +462,19 @@ const typedGeoFrameSettlement: geoApi.GeoFrameSettlement = {
     residencyWorkCount: 0,
     needsFollowUp: false,
 }
+const typedGeoFrameCapture: geoApi.GeoFrameCapture<Readonly<{ zoom: number }>> = {
+    revision: 1,
+    snapshot: Object.freeze({ zoom: 8 }),
+}
 const typedGeoFrameController: geoApi.GeoFrameController =
     geoApi.createGeoFrameController({
         maximumInFlightFrames: 3,
-        render: async frameNumber => ({
+        capture: () => typedGeoFrameCapture,
+        render: async(frameNumber, capture) => ({
             observation: Promise.resolve(),
             settlement: Promise.resolve(typedGeoFrameSettlement),
             needsFollowUp: false,
-            value: frameNumber,
+            value: frameNumber + capture.zoom,
         }),
         onSubmitted(frame: geoApi.GeoFrameControllerFrame<number>) {
             const value: number = frame.value
@@ -479,6 +484,10 @@ const typedGeoFrameController: geoApi.GeoFrameController =
 const typedGeoFrameSnapshot: geoApi.GeoFrameControllerSnapshot =
     typedGeoFrameController.snapshot()
 const typedInFlightFrameCount: number = typedGeoFrameSnapshot.inFlightFrameCount
+const typedDeduplicatedInvalidationCount: number =
+    typedGeoFrameSnapshot.deduplicatedInvalidationCount
+const typedLatestCaptureRevision: number | undefined =
+    typedGeoFrameSnapshot.latestCaptureRevision
 const typedImmediateInvalidation: boolean = typedGeoFrameController.invalidateNow()
 declare const typedTerrainFrame: geoApi.WebMercatorTerrainFrame<'shaded' | 'wireframe'>
 const typedTerrainSettlement: Promise<geoApi.WebMercatorTerrainFrameSettlement> =
@@ -492,6 +501,8 @@ void typedMapLibreView
 void typedTerrainRendererCreation
 void typedGeoFrameSnapshot
 void typedInFlightFrameCount
+void typedDeduplicatedInvalidationCount
+void typedLatestCaptureRevision
 void typedImmediateInvalidation
 void typedTerrainSettlement
 declare const typedFrontierGpuState: VirtualRasterGpuState

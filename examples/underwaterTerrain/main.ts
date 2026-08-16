@@ -27,6 +27,10 @@ type UnderwaterTerrainProof = ReturnType<UnderwaterTerrainProofModule['createUnd
 type PageSettlement = Promise<unknown>
 type CameraMoveOptions = Parameters<UnderwaterTerrainMap['jumpTo']>[0]
 type FailureDetails = Error & { diagnostic?: unknown }
+type UnderwaterTerrainFrameCapture = Readonly<{
+    camera: ReturnType<typeof underwaterTerrainViewAdapter.camera>
+    size: SurfaceSize
+}>
 
 const TERRAIN_EXAGGERATION = 50
 const canvas = document.getElementById('GPUFrame') as HTMLCanvasElement
@@ -213,19 +217,32 @@ async function main(lifetime: LifetimeScope, activeProof?: UnderwaterTerrainProo
     lifetime.assertActive()
 
     const minimumTerrainElevationMeters = elevationRangeMeters[0] * TERRAIN_EXAGGERATION
+    let hostViewRevision = 0
+    let cachedHostCapture: Readonly<{
+        revision: number
+        snapshot: UnderwaterTerrainFrameCapture
+    }> | undefined
     const frameController = createGeoFrameController({
         track: (work, label) => lifetime.track(work, label),
         maximumInFlightFrames: 1,
-        async render() {
-            const nextSize = canvasPixelSize(canvas)
-            if (!sameSize(graph.state().size, nextSize)) await graph.resize(nextSize)
-            lifetime.assertActive()
+        capture() {
+            if (cachedHostCapture?.revision === hostViewRevision) return cachedHostCapture
+            const size = canvasPixelSize(canvas)
             const camera = underwaterTerrainViewAdapter.camera({
                 map,
-                viewport: nextSize,
+                viewport: size,
                 minimumElevationMeters: minimumTerrainElevationMeters,
             })
-            const frame = await graph.renderFrame(camera)
+            cachedHostCapture = Object.freeze({
+                revision: hostViewRevision,
+                snapshot: Object.freeze({ camera, size }),
+            })
+            return cachedHostCapture
+        },
+        async render(_frameNumber, captured) {
+            if (!sameSize(graph.state().size, captured.size)) await graph.resize(captured.size)
+            lifetime.assertActive()
+            const frame = await graph.renderFrame(captured.camera)
             return {
                 observation: frame.observation,
                 settlement: frame.settlement.then(settlement => ({
@@ -234,7 +251,7 @@ async function main(lifetime: LifetimeScope, activeProof?: UnderwaterTerrainProo
                     needsFollowUp: settlement.needsFollowUp,
                 })),
                 needsFollowUp: frame.needsFollowUp,
-                value: { frame, camera },
+                value: { frame, camera: captured.camera },
             }
         },
         onSubmitted({ value }) {
@@ -268,16 +285,27 @@ async function main(lifetime: LifetimeScope, activeProof?: UnderwaterTerrainProo
         run: () => { applyTerrainPresentation = undefined },
     })
 
+    const handleMapViewChange = () => { hostViewRevision++ }
     const handleMapRender = () => { frameController.invalidateNow() }
     const handleResize = () => {
+        handleMapViewChange()
         map.resize()
         frameController.invalidate()
     }
+    map.on('move', handleMapViewChange)
+    map.on('resize', handleMapViewChange)
     map.on('render', handleMapRender)
     window.addEventListener('resize', handleResize)
     lifetime.deferStop({
         label: 'map-render-listener',
         run: () => map.off('render', handleMapRender),
+    })
+    lifetime.deferStop({
+        label: 'map-view-revision-listeners',
+        run: () => {
+            map.off('move', handleMapViewChange)
+            map.off('resize', handleMapViewChange)
+        },
     })
     lifetime.deferStop({
         label: 'window-resize-listener',

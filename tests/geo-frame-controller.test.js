@@ -98,6 +98,188 @@ describe('Geo frame controller', () => {
         })
     })
 
+    it('captures host state synchronously before asynchronous frame construction', async() => {
+
+        const scheduler = fakeFrameScheduler()
+        const submittedStates = []
+        const errors = []
+        let hostState = 4
+        const controller = createGeoFrameController({
+            scheduler,
+            capture() {
+                return {
+                    revision: hostState,
+                    snapshot: Object.freeze({ hostState }),
+                }
+            },
+            async render(_frameNumber, capture) {
+                submittedStates.push(capture.hostState)
+                return {
+                    observation: Promise.resolve(),
+                    needsFollowUp: false,
+                    value: capture.hostState,
+                }
+            },
+            onError: error => errors.push(error),
+        })
+
+        expect(controller.invalidateNow()).to.equal(true)
+        hostState = 5
+        await flushTasks()
+
+        expect(errors).to.deep.equal([])
+        expect(submittedStates).to.deep.equal([ 4 ])
+    })
+
+    it('deduplicates host invalidations that retain the same captured revision', async() => {
+
+        const scheduler = fakeFrameScheduler()
+        const submittedStates = []
+        const errors = []
+        let hostState = 7
+        const controller = createGeoFrameController({
+            scheduler,
+            capture() {
+                return {
+                    revision: hostState,
+                    snapshot: Object.freeze({ hostState }),
+                }
+            },
+            async render(_frameNumber, capture) {
+                submittedStates.push(capture.hostState)
+                return {
+                    observation: Promise.resolve(),
+                    needsFollowUp: false,
+                    value: capture.hostState,
+                }
+            },
+            onError: error => errors.push(error),
+        })
+
+        expect(controller.invalidateNow()).to.equal(true)
+        await flushTasks()
+        expect(controller.invalidateNow()).to.equal(false)
+        await flushTasks()
+
+        expect(errors).to.deep.equal([])
+        expect(submittedStates).to.deep.equal([ 7 ])
+        expect(scheduler.pendingCount).to.equal(0)
+        expect(controller.snapshot()).to.deep.include({
+            invalidationCount: 2,
+            deduplicatedInvalidationCount: 1,
+            latestCaptureRevision: 7,
+            submittedCaptureRevision: 7,
+            submittedFrameCount: 1,
+        })
+    })
+
+    it('keeps internal invalidation forceful when the host capture revision is unchanged', async() => {
+
+        const scheduler = fakeFrameScheduler()
+        const submittedStates = []
+        const controller = createGeoFrameController({
+            scheduler,
+            capture: () => ({
+                revision: 3,
+                snapshot: Object.freeze({ hostState: 3 }),
+            }),
+            async render(_frameNumber, capture) {
+                submittedStates.push(capture.hostState)
+                return {
+                    observation: Promise.resolve(),
+                    needsFollowUp: false,
+                    value: capture.hostState,
+                }
+            },
+        })
+
+        controller.invalidateNow()
+        await flushTasks()
+        controller.invalidate()
+        await scheduler.runNext()
+        await flushTasks()
+
+        expect(submittedStates).to.deep.equal([ 3, 3 ])
+        expect(controller.snapshot()).to.deep.include({
+            deduplicatedInvalidationCount: 0,
+            submittedFrameCount: 2,
+        })
+    })
+
+    it('stops with a structured diagnostic when capture revisions move backwards', async() => {
+
+        const scheduler = fakeFrameScheduler()
+        const errors = []
+        let revision = 2
+        const controller = createGeoFrameController({
+            scheduler,
+            capture: () => ({ revision, snapshot: revision }),
+            async render(_frameNumber, capture) {
+                return {
+                    observation: Promise.resolve(),
+                    needsFollowUp: false,
+                    value: capture,
+                }
+            },
+            onError: error => errors.push(error),
+        })
+
+        controller.invalidateNow()
+        await flushTasks()
+        revision = 1
+        expect(controller.invalidateNow()).to.equal(false)
+
+        expect(errors).to.have.length(1)
+        expect(errors[0].diagnostic.code).to.equal('GEO_FRAME_CAPTURE_STALE')
+        expect(controller.snapshot().state).to.equal('stopped')
+    })
+
+    it('delivers only the latest captured host state after native capacity is released', async() => {
+
+        const scheduler = fakeFrameScheduler()
+        const firstObservation = deferred()
+        const submittedStates = []
+        const errors = []
+        let hostState = 0
+        const controller = createGeoFrameController({
+            scheduler,
+            maximumInFlightFrames: 1,
+            capture() {
+                return {
+                    revision: hostState,
+                    snapshot: Object.freeze({ hostState }),
+                }
+            },
+            async render(frameNumber, capture) {
+                submittedStates.push(capture.hostState)
+                return {
+                    observation: frameNumber === 1
+                        ? firstObservation.promise
+                        : Promise.resolve(),
+                    needsFollowUp: false,
+                    value: capture.hostState,
+                }
+            },
+            onError: error => errors.push(error),
+        })
+
+        controller.invalidateNow()
+        await flushTasks()
+        hostState = 1
+        controller.invalidateNow()
+        hostState = 2
+        controller.invalidateNow()
+
+        expect(submittedStates).to.deep.equal([ 0 ])
+        firstObservation.resolve()
+        await flushTasks()
+        await scheduler.runNext()
+        await flushTasks()
+
+        expect(errors).to.deep.equal([])
+        expect(submittedStates).to.deep.equal([ 0, 2 ])
+    })
+
     it('coalesces invalidation and resumes after residency settlement', async() => {
 
         const scheduler = fakeFrameScheduler()

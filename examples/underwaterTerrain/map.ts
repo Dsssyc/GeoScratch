@@ -35,9 +35,9 @@ type MapStyle = {
 export type UnderwaterTerrainMap = MapLibrePlanarMap & Readonly<{
     loaded(): boolean
     once(event: 'load', listener: () => void): void
-    off(event: 'render' | 'load', listener: () => void): void
+    off(event: 'render' | 'load' | 'move' | 'resize', listener: () => void): void
     resize(): void
-    on(event: 'render', listener: () => void): void
+    on(event: 'render' | 'move' | 'resize', listener: () => void): void
     jumpTo(options: {
         center?: readonly [number, number]
         zoom?: number

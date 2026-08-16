@@ -89,6 +89,17 @@ change cancellation into an unbounded cache. Only a current feedback demand admi
 after reserving the safety-cover budget can enter the next grace generation, and grace
 facts count only demands admitted to the bounded scheduler set.
 
+### 2026-08-17 current-decision convergence amendment
+
+Convergence and render-patch facts belong to one camera/residency decision, not merely
+to the renderer instance. Issuing a different decision immediately invalidates the
+previous settled key and withdraws its exposed facts until current feedback arrives.
+Returning to an earlier decision also requires fresh convergence because intervening
+GPU frontier transactions changed the A/B frontier state. This prevents a newly
+submitted camera from being paired with stale `converged` diagnostics and removes the
+previous accidental dependence on unrelated MapLibre repaints to expose the next
+frontier generation.
+
 ### Clean cut
 
 `examples/underwaterTerrain/terrain-selection.ts` and the CPU node/box/count upload path are

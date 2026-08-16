@@ -7,6 +7,12 @@ export type GeoFrameScheduler = Readonly<{
     cancel(handle: number): void
 }>
 
+/** Immutable host state captured synchronously with a monotonically increasing revision. */
+export type GeoFrameCapture<Snapshot> = Readonly<{
+    revision: number
+    snapshot: Snapshot
+}>
+
 /** Work submitted for one Geo frame plus independently observed asynchronous outcomes. */
 export type GeoFrameResult<Value> = Readonly<{
     observation: PromiseLike<unknown>
@@ -26,11 +32,15 @@ export type GeoFrameControllerFrame<Value> = GeoFrameResult<Value> & Readonly<{
     frameNumber: number
 }>
 
+/** Immutable scheduling, capture, submission, and convergence counters. */
 export type GeoFrameControllerSnapshot = Readonly<{
     state: GeoFrameControllerState
     maximumInFlightFrames: number
     inFlightFrameCount: number
     invalidationCount: number
+    deduplicatedInvalidationCount: number
+    latestCaptureRevision?: number
+    submittedCaptureRevision?: number
     scheduledFrameCount: number
     completedFrameCount: number
     cancelledFrameCount: number
@@ -41,8 +51,12 @@ export type GeoFrameControllerSnapshot = Readonly<{
     rendering: boolean
 }>
 
-export type GeoFrameControllerDescriptor<Value> = Readonly<{
-    render(frameNumber: number): PromiseLike<GeoFrameResult<Value>>
+/** Host capture, frame construction, observation, and bounded convergence policy. */
+export type GeoFrameControllerDescriptor<Value, Capture = undefined> = Readonly<{
+    /** Reads one immutable host snapshot synchronously before asynchronous construction. */
+    capture?(): GeoFrameCapture<Capture>
+    /** Constructs one frame from the frozen capture selected for this submission. */
+    render(frameNumber: number, capture: Capture): PromiseLike<GeoFrameResult<Value>>
     scheduler?: GeoFrameScheduler
     track?<Result>(work: Promise<Result>, label: string): Promise<Result>
     maximumInFlightFrames?: number
@@ -52,10 +66,11 @@ export type GeoFrameControllerDescriptor<Value> = Readonly<{
     onError?(error: unknown): void
 }>
 
+/** Latest-only Geo frame authority with optional host-revision capture. */
 export type GeoFrameController = Readonly<{
     /** Coalesces an invalidation onto the configured frame scheduler. */
     invalidate(): boolean
-    /** Starts submission from the current host callback after cancelling queued work. */
+    /** Captures host state now and starts its submission after cancelling queued work. */
     invalidateNow(): boolean
     stop(): boolean
     snapshot(): GeoFrameControllerSnapshot
@@ -66,6 +81,9 @@ type MutableState = {
     maximumInFlightFrames: number
     inFlightFrameCount: number
     invalidationCount: number
+    deduplicatedInvalidationCount: number
+    latestCaptureRevision?: number
+    submittedCaptureRevision?: number
     scheduledFrameCount: number
     completedFrameCount: number
     cancelledFrameCount: number
@@ -77,8 +95,8 @@ type MutableState = {
 }
 
 /** Coordinates immediate submission, bounded native frames in flight, and Geo follow-up work. */
-export function createGeoFrameController<Value>(
-    descriptor: GeoFrameControllerDescriptor<Value>
+export function createGeoFrameController<Value, Capture = undefined>(
+    descriptor: GeoFrameControllerDescriptor<Value, Capture>
 ): GeoFrameController {
 
     const validated = validateDescriptor(descriptor)
@@ -90,6 +108,7 @@ export function createGeoFrameController<Value>(
         maximumInFlightFrames,
         inFlightFrameCount: 0,
         invalidationCount: 0,
+        deduplicatedInvalidationCount: 0,
         scheduledFrameCount: 0,
         completedFrameCount: 0,
         cancelledFrameCount: 0,
@@ -102,6 +121,8 @@ export function createGeoFrameController<Value>(
     let scheduledHandle: number | undefined
     let renderRequested = false
     let consecutiveFollowUps = 0
+    let latestCapture: GeoFrameCapture<Capture> | undefined
+    let pendingCapture: GeoFrameCapture<Capture> | undefined
 
     function invalidate(): boolean {
 
@@ -116,6 +137,23 @@ export function createGeoFrameController<Value>(
 
         if (state.state === 'stopped') return false
         state.invalidationCount++
+        if (validated.capture !== undefined) {
+            let capture: GeoFrameCapture<Capture>
+            try {
+                capture = readCapture(validated.capture)
+                assertCaptureOrder(capture, latestCapture)
+            } catch (error) {
+                stopWithError(error)
+                return false
+            }
+            if (capture.revision === latestCapture?.revision) {
+                state.deduplicatedInvalidationCount++
+                return false
+            }
+            latestCapture = capture
+            pendingCapture = capture
+            state.latestCaptureRevision = capture.revision
+        }
         consecutiveFollowUps = 0
         renderRequested = true
         if (state.rendering) return true
@@ -145,10 +183,25 @@ export function createGeoFrameController<Value>(
         state.completedFrameCount++
         if (state.state === 'stopped' || state.rendering || !hasSubmissionCapacity()) return
         state.rendering = true
+        let capture = pendingCapture
+        try {
+            if (capture === undefined && validated.capture !== undefined) {
+                capture = readCapture(validated.capture)
+                assertCaptureOrder(capture, latestCapture)
+                latestCapture = capture
+                state.latestCaptureRevision = capture.revision
+            }
+        } catch (error) {
+            releaseRenderSlot()
+            stopWithError(error)
+            return
+        }
+        pendingCapture = undefined
         renderRequested = false
+        if (capture !== undefined) state.submittedCaptureRevision = capture.revision
         const frameNumber = state.submittedFrameCount + 1
         const task = Promise.resolve()
-            .then(() => validated.render(frameNumber))
+            .then(() => validated.render(frameNumber, capture?.snapshot as Capture))
             .then(
                 result => {
                     const observation = observeFrame(frameNumber, result)
@@ -271,6 +324,7 @@ export function createGeoFrameController<Value>(
         if (state.state === 'stopped') return false
         state.state = 'stopped'
         renderRequested = false
+        pendingCapture = undefined
         if (scheduledHandle !== undefined) {
             scheduler.cancel(scheduledHandle)
             scheduledHandle = undefined
@@ -287,8 +341,8 @@ export function createGeoFrameController<Value>(
     return Object.freeze({ invalidate, invalidateNow, stop, snapshot })
 }
 
-function trackWork<Value, Result>(
-    descriptor: GeoFrameControllerDescriptor<Value>,
+function trackWork<Value, Capture, Result>(
+    descriptor: GeoFrameControllerDescriptor<Value, Capture>,
     work: Promise<Result>,
     label: string
 ): Promise<Result> {
@@ -296,13 +350,57 @@ function trackWork<Value, Result>(
     return descriptor.track === undefined ? work : descriptor.track(work, label)
 }
 
-function validateDescriptor<Value>(
-    descriptor: GeoFrameControllerDescriptor<Value>
-): GeoFrameControllerDescriptor<Value> {
+function readCapture<Capture>(
+    capture: () => GeoFrameCapture<Capture>
+): GeoFrameCapture<Capture> {
+
+    const value = capture()
+    if (value === null || typeof value !== 'object' ||
+        !Number.isSafeInteger(value.revision) || value.revision < 0 ||
+        !Object.prototype.hasOwnProperty.call(value, 'snapshot')) {
+        return throwGeoDiagnostic({
+            code: 'GEO_FRAME_CAPTURE_INVALID',
+            phase: 'selection',
+            subject: { kind: 'geo-frame-controller' },
+            message: 'A Geo frame capture requires a non-negative monotonic revision and a snapshot.',
+            expected: {
+                revision: 'non-negative safe integer',
+                snapshot: 'immutable host state',
+            },
+            actual: value,
+        })
+    }
+    return Object.freeze({
+        revision: value.revision,
+        snapshot: value.snapshot,
+    })
+}
+
+function assertCaptureOrder<Capture>(
+    capture: GeoFrameCapture<Capture>,
+    latest: GeoFrameCapture<Capture> | undefined
+): void {
+
+    if (latest !== undefined && capture.revision < latest.revision) {
+        return throwGeoDiagnostic({
+            code: 'GEO_FRAME_CAPTURE_STALE',
+            phase: 'selection',
+            subject: { kind: 'geo-frame-controller' },
+            message: 'A Geo host capture revision cannot move backwards.',
+            expected: { minimumRevision: latest.revision },
+            actual: { revision: capture.revision },
+        })
+    }
+}
+
+function validateDescriptor<Value, Capture>(
+    descriptor: GeoFrameControllerDescriptor<Value, Capture>
+): GeoFrameControllerDescriptor<Value, Capture> {
 
     if (descriptor === null || typeof descriptor !== 'object') {
         return invalidDescriptor(descriptor)
     }
+    const capture = descriptor.capture
     const render = descriptor.render
     const scheduler = descriptor.scheduler
     const track = descriptor.track
@@ -313,7 +411,8 @@ function validateDescriptor<Value>(
     const onError = descriptor.onError
     const schedulerRequest = scheduler?.request
     const schedulerCancel = scheduler?.cancel
-    if (typeof render !== 'function' ||
+    if ((capture !== undefined && typeof capture !== 'function') ||
+        typeof render !== 'function' ||
         !Number.isSafeInteger(maximumInFlightFrames) ||
         maximumInFlightFrames < 1 || maximumInFlightFrames > 8 ||
         !Number.isSafeInteger(maximumFollowUpFrames) || maximumFollowUpFrames < 0 ||
@@ -326,6 +425,7 @@ function validateDescriptor<Value>(
         return invalidDescriptor(descriptor)
     }
     return Object.freeze({
+        ...(capture === undefined ? {} : { capture }),
         render,
         maximumInFlightFrames,
         maximumFollowUpFrames,
@@ -342,8 +442,8 @@ function validateDescriptor<Value>(
     })
 }
 
-function invalidDescriptor<Value>(
-    descriptor: GeoFrameControllerDescriptor<Value>
+function invalidDescriptor<Value, Capture>(
+    descriptor: GeoFrameControllerDescriptor<Value, Capture>
 ): never {
 
     return throwGeoDiagnostic({
@@ -352,6 +452,7 @@ function invalidDescriptor<Value>(
         subject: { kind: 'geo-frame-controller' },
         message: 'A Geo frame controller requires a render operation and bounded scheduling configuration.',
         expected: {
+            capture: 'optional synchronous function returning GeoFrameCapture',
             render: 'function',
             maximumInFlightFrames: 'safe integer from 1 through 8',
             maximumFollowUpFrames: 'non-negative safe integer',

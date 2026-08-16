@@ -330,6 +330,7 @@ type PendingFeedback = Readonly<{
     view: GeoViewSnapshot
     submitted: SubmittedWork
     decisionKey: string
+    decisionSerial: number
     settlement: Deferred<WebMercatorTerrainFrameSettlement>
 }>
 
@@ -505,7 +506,7 @@ export async function createWebMercatorTerrainRenderer<
     }
     const state = createState(size, initialPresentation)
     const pendingFeedback: PendingFeedback[] = []
-    const feedbackByDecision = new Map<string, PendingFeedback>()
+    const feedbackByDecision = new Map<number, PendingFeedback>()
     const stableIdentities = Object.freeze(stableIdentitySnapshot(graph))
     const stableIdentityFacts = identityFactSnapshot(graph)
     const stableIdentityHash = stableIdentityFacts.hash
@@ -517,6 +518,7 @@ export async function createWebMercatorTerrainRenderer<
     let activePublication: ActivePublication | undefined
     let feedbackPump: Promise<void> | undefined
     let latestDecisionKey: string | undefined
+    let latestDecisionSerial = 0
     let latestSettledDecisionKey: string | undefined
     let latestIssuedFrameEpoch = 0
 
@@ -576,12 +578,20 @@ export async function createWebMercatorTerrainRenderer<
             residencySnapshotEpoch,
         })
         const decisionKey = frontierDecisionKey(view)
+        if (latestDecisionKey !== decisionKey) {
+            latestDecisionSerial++
+            if (latestDecisionKey !== undefined) {
+                latestSettledDecisionKey = undefined
+                clearDecisionFeedback(state)
+            }
+        }
         latestDecisionKey = decisionKey
+        const decisionSerial = latestDecisionSerial
         const viewToken = frontier.writeView(view)
         let frame: GpuTileFrontierFrame
         let submitted: SubmittedWork
         let capturedFeedback = false
-        let feedbackEntry = feedbackByDecision.get(decisionKey)
+        let feedbackEntry = feedbackByDecision.get(decisionSerial)
         try {
             frame = frontier.frame(viewToken)
             const builder = runtime.createSubmission({ validation: 'throw' })
@@ -644,10 +654,11 @@ export async function createWebMercatorTerrainRenderer<
                 view,
                 submitted: submitted!,
                 decisionKey,
+                decisionSerial,
                 settlement: deferred<WebMercatorTerrainFrameSettlement>(),
             })
             pendingFeedback.push(feedbackEntry)
-            feedbackByDecision.set(decisionKey, feedbackEntry)
+            feedbackByDecision.set(decisionSerial, feedbackEntry)
         }
         latestIssuedFrameEpoch = frame!.frameEpoch
         startFeedbackPump()
@@ -699,8 +710,8 @@ export async function createWebMercatorTerrainRenderer<
                 if (state.disposed) settleDeferred(ready.settlement, emptyFrameSettlement())
                 else rejectDeferred(ready.settlement, error)
             } finally {
-                if (feedbackByDecision.get(ready.decisionKey) === ready) {
-                    feedbackByDecision.delete(ready.decisionKey)
+                if (feedbackByDecision.get(ready.decisionSerial) === ready) {
+                    feedbackByDecision.delete(ready.decisionSerial)
                 }
             }
         }
@@ -711,7 +722,7 @@ export async function createWebMercatorTerrainRenderer<
         consumed: ConsumedFeedback
     ): void {
 
-        if (ready.decisionKey !== latestDecisionKey) {
+        if (ready.decisionSerial !== latestDecisionSerial) {
             if (consumed.feedback !== undefined || consumed.renderPatchFeedback !== undefined) {
                 state.supersededFeedbackCount++
             }
@@ -1623,6 +1634,15 @@ function createState<Presentation extends string>(
         latestFeedbackDiagnostics: Object.freeze([]),
         terrainPresentation,
     }
+}
+
+function clearDecisionFeedback<Presentation extends string>(
+    state: WebMercatorTerrainState<Presentation>
+): void {
+
+    delete state.latestFrontierFacts
+    delete state.latestRenderPatchFeedback
+    state.latestFeedbackDiagnostics = Object.freeze([])
 }
 
 function stateSnapshot<Presentation extends string>(

@@ -430,6 +430,15 @@ function publishFrameFacts({
     canvas.dataset.lastResizeFacts = JSON.stringify(state.lastResizeFacts ?? null)
     canvas.dataset.pendingObservationCount = String(lifecycle.pendingObservationCount)
     canvas.dataset.frameWork = JSON.stringify(frameWork)
+    canvas.dataset.deduplicatedFrameInvalidations = String(
+        controller.deduplicatedInvalidationCount
+    )
+    canvas.dataset.latestFrameCaptureRevision = String(
+        controller.latestCaptureRevision ?? ''
+    )
+    canvas.dataset.submittedFrameCaptureRevision = String(
+        controller.submittedCaptureRevision ?? ''
+    )
     canvas.dataset.diagnosticsBounded = String(bounded)
     canvas.dataset.diagnosticOperations = String(diagnostics.recorder.retainedOperationCount)
     canvas.dataset.diagnosticIncidents = String(diagnostics.recorder.retainedIncidentCount)
