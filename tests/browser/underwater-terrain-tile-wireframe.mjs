@@ -730,8 +730,8 @@ function validateProof(value, processState) {
     })}`)
 
     expect(failures,
-        cameraTracking?.maximumInFlightFrames <= 3,
-    `continuous camera tracking exceeded the native in-flight frame budget: ${JSON.stringify({
+        cameraTracking?.maximumInFlightFrames <= 2,
+    `continuous camera tracking exceeded its low-latency native in-flight budget: ${JSON.stringify({
         maximumInFlightFrames: cameraTracking?.maximumInFlightFrames,
     })}`)
 

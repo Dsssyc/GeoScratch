@@ -37,3 +37,9 @@ without replaying intermediate camera states. This keeps map tracking asynchrono
 building an unbounded GPU queue. Only the latest submitted frame may request bounded
 convergence or residency follow-ups, so stale async results cannot revive an obsolete camera
 decision. `snapshot()` exposes both the configured budget and current in-flight count.
+
+The budget is an application latency-throughput choice, not a universal quality setting.
+Camera-locked overlays should normally select one or two in-flight frames so an external map
+cannot build a throughput-oriented queue of obsolete camera presentations; independent
+rendering or compute workloads may use a larger bounded value when throughput matters more
+than newest-state latency.

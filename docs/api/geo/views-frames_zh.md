@@ -2,7 +2,7 @@
 docId: geo.views-frames.zh
 canonical: false
 translationOf: ./views-frames.md
-canonicalDigest: 2969bb34642727eaa382ea243299fc1ea51c873b5c0e7e6e6df90c876c553212
+canonicalDigest: 7217b2a95ddc6a2a914c5323e0765dbf2bccd941097581160d88e33d2df7ecb5
 ---
 # 视图与帧控制
 
@@ -31,3 +31,8 @@ observation 完成后只会释放该最新请求，不会重放中间 camera sta
 也不会建立无界 GPU queue。只有最新 submitted frame 可以请求有界 convergence 或
 residency follow-up，因此过期异步结果不能重新激活旧 camera decision。`snapshot()` 会暴露
 配置的 budget 与当前 in-flight 数量。
+
+该 budget 是由应用选择的 latency-throughput 权衡，而不是通用 quality 设置。与 camera
+锁定的 overlay 通常应选择一个或两个 in-flight frame，避免外部 map 建立以吞吐为导向的
+过期 camera presentation 队列；独立 rendering 或 compute workload 可在吞吐量比
+newest-state latency 更重要时使用更大的有界值。
