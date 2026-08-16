@@ -2,7 +2,7 @@
 docId: geo.views-frames.zh
 canonical: false
 translationOf: ./views-frames.md
-canonicalDigest: d3b244499465b2338ea11991bac78e6dfce05c97401ce571c3850cebe1982edd
+canonicalDigest: 2969bb34642727eaa382ea243299fc1ea51c873b5c0e7e6e6df90c876c553212
 ---
 # 视图与帧控制
 
@@ -23,7 +23,11 @@ authority。它不拥有外部 map、GPU runtime 或 field resource，除非这�
 
 `invalidate()` 会把工作合并到配置的 frame scheduler；`invalidateNow()` 会取消已排队的
 callback，并从正在执行的 host render callback 启动当前 submission，使 overlay 能消费与
-地图宿主相同的 camera revision。互斥范围只覆盖一个 submitted frame 的构建。Submission
-slot 会在 native observation 与延迟 settlement 完成前释放；这些 promise 会被独立追踪，
-不能拖延更新 camera 的提交。只有最新 submitted frame 可以请求有界 convergence 或
-residency follow-up，因此过期异步结果不能重新激活旧 camera decision。
+地图宿主相同的 camera revision。互斥范围只覆盖一个 submitted frame 的构建。构建 slot
+会在 native observation 与延迟 settlement 完成前释放；另一个独立的
+`maximumInFlightFrames` budget 会约束等待 native observation 的 submission。默认值为 3，
+合法范围为 1 到 8。达到上限后，重复 invalidation 会合并为一个 newest-state request；任一
+observation 完成后只会释放该最新请求，不会重放中间 camera state。这样既保持异步地图跟随，
+也不会建立无界 GPU queue。只有最新 submitted frame 可以请求有界 convergence 或
+residency follow-up，因此过期异步结果不能重新激活旧 camera decision。`snapshot()` 会暴露
+配置的 budget 与当前 in-flight 数量。

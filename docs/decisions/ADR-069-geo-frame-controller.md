@@ -29,6 +29,8 @@ Geo exports `createGeoFrameController()`. A controller:
 - coalesces external invalidations into animation frames;
 - permits one frame-construction operation at a time and releases that submission slot
   before native observation or delayed settlement completes;
+- permits one through eight native frames in flight, defaults to three, and collapses
+  capacity-blocked invalidations into one newest-state request;
 - lets an already-running host render callback use `invalidateNow()` to cancel a queued
   callback and submit against the host's current camera revision;
 - observes submitted native work independently from delayed feedback settlement;
@@ -54,7 +56,8 @@ presentation controls, source URLs, cache policy, and page lifetime.
 - Scratch remains the generic asynchronous lifetime owner; Geo owns camera/residency
   frame convergence; the application only connects events and business policy.
 - Map-host camera submission is not serialized behind GPU readback, resource loading,
-  or `queue.onSubmittedWorkDone()`, so a WebGPU overlay can track continuous host motion.
+  or `queue.onSubmittedWorkDone()`, while a bounded three-frame default prevents continuous
+  host motion from building an unbounded WebGPU queue.
 - Browser-only proof instrumentation lives under `tests/browser/support` and is loaded
   only for explicit development proof runs.
 

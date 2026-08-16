@@ -28,6 +28,8 @@ export type GeoFrameControllerFrame<Value> = GeoFrameResult<Value> & Readonly<{
 
 export type GeoFrameControllerSnapshot = Readonly<{
     state: GeoFrameControllerState
+    maximumInFlightFrames: number
+    inFlightFrameCount: number
     invalidationCount: number
     scheduledFrameCount: number
     completedFrameCount: number
@@ -43,6 +45,7 @@ export type GeoFrameControllerDescriptor<Value> = Readonly<{
     render(frameNumber: number): PromiseLike<GeoFrameResult<Value>>
     scheduler?: GeoFrameScheduler
     track?<Result>(work: Promise<Result>, label: string): Promise<Result>
+    maximumInFlightFrames?: number
     maximumFollowUpFrames?: number
     onSubmitted?(frame: GeoFrameControllerFrame<Value>): void
     onObserved?(frame: GeoFrameControllerFrame<Value>): void
@@ -60,6 +63,8 @@ export type GeoFrameController = Readonly<{
 
 type MutableState = {
     state: GeoFrameControllerState
+    maximumInFlightFrames: number
+    inFlightFrameCount: number
     invalidationCount: number
     scheduledFrameCount: number
     completedFrameCount: number
@@ -71,16 +76,19 @@ type MutableState = {
     rendering: boolean
 }
 
-/** Coordinates immediate submission, asynchronous observation, and bounded Geo follow-up frames. */
+/** Coordinates immediate submission, bounded native frames in flight, and Geo follow-up work. */
 export function createGeoFrameController<Value>(
     descriptor: GeoFrameControllerDescriptor<Value>
 ): GeoFrameController {
 
     const validated = validateDescriptor(descriptor)
     const scheduler = validated.scheduler ?? browserFrameScheduler()
+    const maximumInFlightFrames = validated.maximumInFlightFrames ?? 3
     const maximumFollowUpFrames = validated.maximumFollowUpFrames ?? 8
     const state: MutableState = {
         state: 'running',
+        maximumInFlightFrames,
+        inFlightFrameCount: 0,
         invalidationCount: 0,
         scheduledFrameCount: 0,
         completedFrameCount: 0,
@@ -116,6 +124,7 @@ export function createGeoFrameController<Value>(
             scheduledHandle = undefined
             state.cancelledFrameCount++
         }
+        if (!hasSubmissionCapacity()) return true
         state.scheduledFrameCount++
         runScheduledFrame()
         return true
@@ -125,7 +134,7 @@ export function createGeoFrameController<Value>(
 
         if (state.state === 'stopped') return
         renderRequested = true
-        if (scheduledHandle !== undefined || state.rendering) return
+        if (scheduledHandle !== undefined || state.rendering || !hasSubmissionCapacity()) return
         scheduledHandle = scheduler.request(runScheduledFrame)
         state.scheduledFrameCount++
     }
@@ -134,7 +143,7 @@ export function createGeoFrameController<Value>(
 
         scheduledHandle = undefined
         state.completedFrameCount++
-        if (state.state === 'stopped' || state.rendering) return
+        if (state.state === 'stopped' || state.rendering || !hasSubmissionCapacity()) return
         state.rendering = true
         renderRequested = false
         const frameNumber = state.submittedFrameCount + 1
@@ -160,6 +169,11 @@ export function createGeoFrameController<Value>(
         if (renderRequested) requestFrame()
     }
 
+    function hasSubmissionCapacity(): boolean {
+
+        return state.inFlightFrameCount < maximumInFlightFrames
+    }
+
     async function observeFrame(
         frameNumber: number,
         result: GeoFrameResult<Value>
@@ -171,19 +185,25 @@ export function createGeoFrameController<Value>(
             frameNumber,
         }) satisfies GeoFrameControllerFrame<Value>
         state.submittedFrameCount++
-        validated.onSubmitted?.(frame)
+        state.inFlightFrameCount++
+        try {
+            validated.onSubmitted?.(frame)
 
-        if (result.settlement !== undefined) {
-            const settlement = Promise.resolve(result.settlement).then(value => {
-                observeFrameSettlement(frameNumber, value)
-            })
-            observeTracked(settlement, `geo-frame-settlement-${frameNumber}`)
+            if (result.settlement !== undefined) {
+                const settlement = Promise.resolve(result.settlement).then(value => {
+                    observeFrameSettlement(frameNumber, value)
+                })
+                observeTracked(settlement, `geo-frame-settlement-${frameNumber}`)
+            }
+
+            await result.observation
+            state.observedFrameCount++
+            validated.onObserved?.(frame)
+            requestConvergenceFollowUp(frameNumber, result.needsFollowUp)
+        } finally {
+            state.inFlightFrameCount--
+            if (state.state === 'running' && renderRequested) requestFrame()
         }
-
-        await result.observation
-        state.observedFrameCount++
-        validated.onObserved?.(frame)
-        requestConvergenceFollowUp(frameNumber, result.needsFollowUp)
     }
 
     function observeFrameSettlement(
@@ -286,6 +306,7 @@ function validateDescriptor<Value>(
     const render = descriptor.render
     const scheduler = descriptor.scheduler
     const track = descriptor.track
+    const maximumInFlightFrames = descriptor.maximumInFlightFrames ?? 3
     const maximumFollowUpFrames = descriptor.maximumFollowUpFrames ?? 8
     const onSubmitted = descriptor.onSubmitted
     const onObserved = descriptor.onObserved
@@ -293,6 +314,8 @@ function validateDescriptor<Value>(
     const schedulerRequest = scheduler?.request
     const schedulerCancel = scheduler?.cancel
     if (typeof render !== 'function' ||
+        !Number.isSafeInteger(maximumInFlightFrames) ||
+        maximumInFlightFrames < 1 || maximumInFlightFrames > 8 ||
         !Number.isSafeInteger(maximumFollowUpFrames) || maximumFollowUpFrames < 0 ||
         (track !== undefined && typeof track !== 'function') ||
         (onSubmitted !== undefined && typeof onSubmitted !== 'function') ||
@@ -304,6 +327,7 @@ function validateDescriptor<Value>(
     }
     return Object.freeze({
         render,
+        maximumInFlightFrames,
         maximumFollowUpFrames,
         ...(scheduler === undefined ? {} : {
             scheduler: Object.freeze({
@@ -329,6 +353,7 @@ function invalidDescriptor<Value>(
         message: 'A Geo frame controller requires a render operation and bounded scheduling configuration.',
         expected: {
             render: 'function',
+            maximumInFlightFrames: 'safe integer from 1 through 8',
             maximumFollowUpFrames: 'non-negative safe integer',
             scheduler: 'optional request/cancel pair',
             callbacks: 'optional functions',

@@ -28,8 +28,12 @@ or field resources unless those are explicitly registered for cleanup.
 `invalidate()` coalesces work onto the configured frame scheduler. `invalidateNow()`
 cancels a queued callback and starts the current submission from an already-running host
 render callback, which lets an overlay consume the same camera revision as its map host.
-Only construction of one submitted frame is mutually exclusive. The submission slot is
-released before native observation and delayed settlement complete; those promises are
-tracked independently and cannot delay a newer camera submission. Only the latest
-submitted frame may request bounded convergence or residency follow-ups, so stale async
-results cannot revive an obsolete camera decision.
+Only construction of one submitted frame is mutually exclusive. The construction slot is
+released before native observation and delayed settlement complete, while a separate
+`maximumInFlightFrames` budget bounds submissions awaiting native observation. Its default
+is three and its accepted range is one through eight. At capacity, repeated invalidations
+collapse into one newest-state request; the next completed observation releases that request
+without replaying intermediate camera states. This keeps map tracking asynchronous without
+building an unbounded GPU queue. Only the latest submitted frame may request bounded
+convergence or residency follow-ups, so stale async results cannot revive an obsolete camera
+decision. `snapshot()` exposes both the configured budget and current in-flight count.

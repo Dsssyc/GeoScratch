@@ -312,6 +312,9 @@ async function runCameraTrackingProof(page, baseCamera) {
                         issuedIndex,
                         submittedIndex,
                         submissionLagFrames: issuedIndex - submittedIndex,
+                        inFlightFrames:
+                            Number(canvas.dataset.frames) -
+                            Number(canvas.dataset.observedFrames),
                     })
                 }
                 if (issuedIndex + 1 >= frameCount) {
@@ -341,6 +344,9 @@ async function runCameraTrackingProof(page, baseCamera) {
             frameCount,
             maximumSubmissionLagFrames: Math.max(
                 ...samples.map(sample => sample.submissionLagFrames)
+            ),
+            maximumInFlightFrames: Math.max(
+                ...samples.map(sample => sample.inFlightFrames)
             ),
             samples,
             finalCamera,
@@ -721,6 +727,12 @@ function validateProof(value, processState) {
     `WebGPU camera submissions lagged the map during continuous drag: ${JSON.stringify({
         maximumSubmissionLagFrames: cameraTracking?.maximumSubmissionLagFrames,
         samples: cameraTracking?.samples,
+    })}`)
+
+    expect(failures,
+        cameraTracking?.maximumInFlightFrames <= 3,
+    `continuous camera tracking exceeded the native in-flight frame budget: ${JSON.stringify({
+        maximumInFlightFrames: cameraTracking?.maximumInFlightFrames,
     })}`)
 
     const zoomSamples = zoomMonotonicity?.samples ?? []

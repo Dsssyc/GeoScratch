@@ -3,6 +3,57 @@ import { createGeoFrameController } from 'geoscratch/geo'
 
 describe('Geo frame controller', () => {
 
+    it('bounds native frames in flight and coalesces invalidation onto the newest state', async() => {
+
+        const scheduler = fakeFrameScheduler()
+        const observations = Array.from({ length: 4 }, deferred)
+        let renderCount = 0
+        const controller = createGeoFrameController({
+            scheduler,
+            maximumInFlightFrames: 2,
+            async render(frameNumber) {
+                renderCount++
+                return {
+                    observation: observations[frameNumber - 1].promise,
+                    needsFollowUp: false,
+                    value: frameNumber,
+                }
+            },
+        })
+
+        controller.invalidate()
+        await scheduler.runNext()
+        controller.invalidate()
+        await scheduler.runNext()
+        expect(controller.snapshot()).to.deep.include({
+            maximumInFlightFrames: 2,
+            inFlightFrameCount: 2,
+            submittedFrameCount: 2,
+            observedFrameCount: 0,
+        })
+
+        controller.invalidate()
+        controller.invalidate()
+        expect(scheduler.pendingCount).to.equal(0)
+        expect(renderCount).to.equal(2)
+
+        observations[0].resolve()
+        await flushTasks()
+        expect(scheduler.pendingCount).to.equal(1)
+        await scheduler.runNext()
+        expect(renderCount).to.equal(3)
+
+        observations[1].resolve()
+        observations[2].resolve()
+        observations[3].resolve()
+        await flushTasks()
+        expect(controller.snapshot()).to.deep.include({
+            inFlightFrameCount: 0,
+            submittedFrameCount: 3,
+            observedFrameCount: 3,
+        })
+    })
+
     it('coalesces invalidation and resumes after residency settlement', async() => {
 
         const scheduler = fakeFrameScheduler()
@@ -208,6 +259,7 @@ describe('Geo frame controller', () => {
         const submitted = []
         const descriptor = {
             scheduler,
+            maximumInFlightFrames: 2,
             maximumFollowUpFrames: 0,
             async render() {
                 return {
@@ -221,6 +273,7 @@ describe('Geo frame controller', () => {
         const controller = createGeoFrameController(descriptor)
         descriptor.render = async() => { throw new Error('mutated render') }
         descriptor.onSubmitted = () => { throw new Error('mutated callback') }
+        descriptor.maximumInFlightFrames = 7
         descriptor.maximumFollowUpFrames = 10
 
         controller.invalidate()
@@ -230,6 +283,7 @@ describe('Geo frame controller', () => {
         expect(submitted).to.deep.equal([ 'captured' ])
         expect(controller.snapshot()).to.deep.include({
             state: 'running',
+            maximumInFlightFrames: 2,
             submittedFrameCount: 1,
             observedFrameCount: 1,
         })

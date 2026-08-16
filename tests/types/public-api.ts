@@ -464,6 +464,7 @@ const typedGeoFrameSettlement: geoApi.GeoFrameSettlement = {
 }
 const typedGeoFrameController: geoApi.GeoFrameController =
     geoApi.createGeoFrameController({
+        maximumInFlightFrames: 3,
         render: async frameNumber => ({
             observation: Promise.resolve(),
             settlement: Promise.resolve(typedGeoFrameSettlement),
@@ -477,6 +478,7 @@ const typedGeoFrameController: geoApi.GeoFrameController =
     })
 const typedGeoFrameSnapshot: geoApi.GeoFrameControllerSnapshot =
     typedGeoFrameController.snapshot()
+const typedInFlightFrameCount: number = typedGeoFrameSnapshot.inFlightFrameCount
 const typedImmediateInvalidation: boolean = typedGeoFrameController.invalidateNow()
 declare const typedTerrainFrame: geoApi.WebMercatorTerrainFrame<'shaded' | 'wireframe'>
 const typedTerrainSettlement: Promise<geoApi.WebMercatorTerrainFrameSettlement> =
@@ -489,6 +491,7 @@ void typedViewDemands
 void typedMapLibreView
 void typedTerrainRendererCreation
 void typedGeoFrameSnapshot
+void typedInFlightFrameCount
 void typedImmediateInvalidation
 void typedTerrainSettlement
 declare const typedFrontierGpuState: VirtualRasterGpuState

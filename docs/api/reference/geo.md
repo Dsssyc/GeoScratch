@@ -208,7 +208,7 @@ isGeoDiagnosticError(value: unknown): value is GeoDiagnosticError
 
 Kind: `Function`.
 
-Coordinates immediate submission, asynchronous observation, and bounded Geo follow-up frames.
+Coordinates immediate submission, bounded native frames in flight, and Geo follow-up work.
 
 ```ts
 Function createGeoFrameController
@@ -231,7 +231,7 @@ type GeoFrameController = Readonly<{ invalidate: any; invalidateNow: any; snapsh
 Kind: `Type Alias`.
 
 ```ts
-type GeoFrameControllerDescriptor<Value> = Readonly<{ maximumFollowUpFrames?: number; scheduler?: GeoFrameScheduler; onError?: any; onObserved?: any; onSubmitted?: any; render: any; track?: any }>
+type GeoFrameControllerDescriptor<Value> = Readonly<{ maximumFollowUpFrames?: number; maximumInFlightFrames?: number; scheduler?: GeoFrameScheduler; onError?: any; onObserved?: any; onSubmitted?: any; render: any; track?: any }>
 ```
 
 ### `GeoFrameControllerFrame`
@@ -247,7 +247,7 @@ type GeoFrameControllerFrame<Value> = GeoFrameResult<Value> & Readonly<{ frameNu
 Kind: `Type Alias`.
 
 ```ts
-type GeoFrameControllerSnapshot = Readonly<{ cancelledFrameCount: number; completedFrameCount: number; followUpFrameCount: number; invalidationCount: number; observedFrameCount: number; pendingTaskCount: number; rendering: boolean; scheduledFrameCount: number; state: GeoFrameControllerState; submittedFrameCount: number }>
+type GeoFrameControllerSnapshot = Readonly<{ cancelledFrameCount: number; completedFrameCount: number; followUpFrameCount: number; inFlightFrameCount: number; invalidationCount: number; maximumInFlightFrames: number; observedFrameCount: number; pendingTaskCount: number; rendering: boolean; scheduledFrameCount: number; state: GeoFrameControllerState; submittedFrameCount: number }>
 ```
 
 ### `GeoFrameControllerState`

@@ -355,9 +355,9 @@
           "packages/geoscratch/src/geo/frame-controller.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/geo/frame-controller.ts:75"
+          "packages/geoscratch/src/geo/frame-controller.ts:80"
         ],
-        "summary": "Coordinates immediate submission, asynchronous observation, and bounded Geo follow-up frames.",
+        "summary": "Coordinates immediate submission, bounded native frames in flight, and Geo follow-up work.",
         "declaration": "Function createGeoFrameController",
         "signatures": [
           "createGeoFrameController<Value>(descriptor: GeoFrameControllerDescriptor<Value>): GeoFrameController"
@@ -765,7 +765,7 @@
           "packages/geoscratch/src/geo/frame-controller.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/geo/frame-controller.ts:52"
+          "packages/geoscratch/src/geo/frame-controller.ts:55"
         ],
         "summary": "",
         "declaration": "type GeoFrameController = Readonly<{ invalidate: any; invalidateNow: any; snapshot: any; stop: any }>"
@@ -779,10 +779,10 @@
           "packages/geoscratch/src/geo/frame-controller.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/geo/frame-controller.ts:42"
+          "packages/geoscratch/src/geo/frame-controller.ts:44"
         ],
         "summary": "",
-        "declaration": "type GeoFrameControllerDescriptor<Value> = Readonly<{ maximumFollowUpFrames?: number; scheduler?: GeoFrameScheduler; onError?: any; onObserved?: any; onSubmitted?: any; render: any; track?: any }>"
+        "declaration": "type GeoFrameControllerDescriptor<Value> = Readonly<{ maximumFollowUpFrames?: number; maximumInFlightFrames?: number; scheduler?: GeoFrameScheduler; onError?: any; onObserved?: any; onSubmitted?: any; render: any; track?: any }>"
       },
       {
         "id": "geoscratch/geo#GeoFrameControllerFrame",
@@ -810,7 +810,7 @@
           "packages/geoscratch/src/geo/frame-controller.ts:29"
         ],
         "summary": "",
-        "declaration": "type GeoFrameControllerSnapshot = Readonly<{ cancelledFrameCount: number; completedFrameCount: number; followUpFrameCount: number; invalidationCount: number; observedFrameCount: number; pendingTaskCount: number; rendering: boolean; scheduledFrameCount: number; state: GeoFrameControllerState; submittedFrameCount: number }>"
+        "declaration": "type GeoFrameControllerSnapshot = Readonly<{ cancelledFrameCount: number; completedFrameCount: number; followUpFrameCount: number; inFlightFrameCount: number; invalidationCount: number; maximumInFlightFrames: number; observedFrameCount: number; pendingTaskCount: number; rendering: boolean; scheduledFrameCount: number; state: GeoFrameControllerState; submittedFrameCount: number }>"
       },
       {
         "id": "geoscratch/geo#GeoFrameControllerState",
