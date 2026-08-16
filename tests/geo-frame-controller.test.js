@@ -54,6 +54,50 @@ describe('Geo frame controller', () => {
         })
     })
 
+    it('single-flights a camera overlay and skips intermediate invalidated states', async() => {
+
+        const scheduler = fakeFrameScheduler()
+        const firstObservation = deferred()
+        const submittedStates = []
+        let cameraState = 0
+        const controller = createGeoFrameController({
+            scheduler,
+            maximumInFlightFrames: 1,
+            async render() {
+                submittedStates.push(cameraState)
+                return {
+                    observation: submittedStates.length === 1
+                        ? firstObservation.promise
+                        : Promise.resolve(),
+                    needsFollowUp: false,
+                    value: cameraState,
+                }
+            },
+        })
+
+        controller.invalidate()
+        await scheduler.runNext()
+        cameraState = 1
+        controller.invalidate()
+        cameraState = 2
+        controller.invalidate()
+
+        expect(submittedStates).to.deep.equal([ 0 ])
+        expect(scheduler.pendingCount).to.equal(0)
+        firstObservation.resolve()
+        await flushTasks()
+        await scheduler.runNext()
+        await flushTasks()
+
+        expect(submittedStates).to.deep.equal([ 0, 2 ])
+        expect(controller.snapshot()).to.deep.include({
+            maximumInFlightFrames: 1,
+            inFlightFrameCount: 0,
+            submittedFrameCount: 2,
+            observedFrameCount: 2,
+        })
+    })
+
     it('coalesces invalidation and resumes after residency settlement', async() => {
 
         const scheduler = fakeFrameScheduler()

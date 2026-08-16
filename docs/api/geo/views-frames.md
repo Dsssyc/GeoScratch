@@ -39,7 +39,7 @@ convergence or residency follow-ups, so stale async results cannot revive an obs
 decision. `snapshot()` exposes both the configured budget and current in-flight count.
 
 The budget is an application latency-throughput choice, not a universal quality setting.
-Camera-locked overlays should normally select one or two in-flight frames so an external map
-cannot build a throughput-oriented queue of obsolete camera presentations; independent
-rendering or compute workloads may use a larger bounded value when throughput matters more
-than newest-state latency.
+Camera-locked overlays should normally select one in-flight frame so an external map cannot
+build a throughput-oriented queue of obsolete camera presentations. Capacity-blocked
+invalidations still coalesce to the newest camera. Independent rendering or compute workloads
+may use a larger bounded value when throughput matters more than newest-state latency.

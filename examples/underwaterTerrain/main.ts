@@ -215,7 +215,7 @@ async function main(lifetime: LifetimeScope, activeProof?: UnderwaterTerrainProo
     const minimumTerrainElevationMeters = elevationRangeMeters[0] * TERRAIN_EXAGGERATION
     const frameController = createGeoFrameController({
         track: (work, label) => lifetime.track(work, label),
-        maximumInFlightFrames: 2,
+        maximumInFlightFrames: 1,
         async render() {
             const nextSize = canvasPixelSize(canvas)
             if (!sameSize(graph.state().size, nextSize)) await graph.resize(nextSize)

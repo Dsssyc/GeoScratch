@@ -2,7 +2,7 @@
 docId: geo.views-frames.zh
 canonical: false
 translationOf: ./views-frames.md
-canonicalDigest: 7217b2a95ddc6a2a914c5323e0765dbf2bccd941097581160d88e33d2df7ecb5
+canonicalDigest: e4ff7da82004daeb24050540de64ce1721c409a9e7c8a75268c8c053102021ed
 ---
 # 视图与帧控制
 
@@ -33,6 +33,6 @@ residency follow-up，因此过期异步结果不能重新激活旧 camera decis
 配置的 budget 与当前 in-flight 数量。
 
 该 budget 是由应用选择的 latency-throughput 权衡，而不是通用 quality 设置。与 camera
-锁定的 overlay 通常应选择一个或两个 in-flight frame，避免外部 map 建立以吞吐为导向的
-过期 camera presentation 队列；独立 rendering 或 compute workload 可在吞吐量比
-newest-state latency 更重要时使用更大的有界值。
+锁定的 overlay 通常应选择一个 in-flight frame，避免外部 map 建立以吞吐为导向的过期
+camera presentation 队列；达到容量上限的 invalidation 仍会合并到最新 camera。独立
+rendering 或 compute workload 可在吞吐量比 newest-state latency 更重要时使用更大的有界值。

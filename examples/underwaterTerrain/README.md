@@ -10,10 +10,10 @@ virtual-raster atlas. Start the local tile service as documented in
 [`tile-server/README.md`](./tile-server/README.md), then run `npm run dev` from the
 repository root.
 
-The WebGPU overlay permits at most two native frames in flight. MapLibre `render` events submit
-the newest camera immediately, while capacity-blocked invalidations coalesce until a frame is
-observed; this low-latency budget avoids a throughput-oriented queue of stale camera views
-during drag without serializing every new camera behind one native observation.
+The WebGPU overlay permits one native frame in flight. MapLibre `render` events submit the
+newest camera immediately, while capacity-blocked invalidations coalesce until that frame is
+observed. The next submission reads the newest camera instead of replaying intermediate views,
+so continuous drag cannot turn native WebGPU observation into a stale throughput queue.
 
 The root `npm run dev` and `npm run build` commands first run the generic
 `geoscratch-worker` build declared by [`../worker-modules.ts`](../worker-modules.ts).

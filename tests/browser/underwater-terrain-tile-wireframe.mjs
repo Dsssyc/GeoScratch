@@ -340,6 +340,9 @@ async function runCameraTrackingProof(page, baseCamera) {
                 baseCamera.center[1],
             ],
         }
+        const submissionTransitions = samples.filter((sample, index) =>
+            index === 0 || sample.submittedIndex !== samples[index - 1].submittedIndex
+        )
         return {
             frameCount,
             maximumSubmissionLagFrames: Math.max(
@@ -348,6 +351,10 @@ async function runCameraTrackingProof(page, baseCamera) {
             maximumInFlightFrames: Math.max(
                 ...samples.map(sample => sample.inFlightFrames)
             ),
+            submissionTransitionCount: submissionTransitions.length,
+            staleSubmissionTransitionCount: submissionTransitions.filter(
+                sample => sample.submittedIndex !== sample.issuedIndex
+            ).length,
             samples,
             finalCamera,
         }
@@ -723,15 +730,18 @@ function validateProof(value, processState) {
     expect(failures,
         cameraTracking?.frameCount === 90 &&
         cameraTracking.samples?.length === 90 &&
-        cameraTracking.maximumSubmissionLagFrames <= 1,
-    `WebGPU camera submissions lagged the map during continuous drag: ${JSON.stringify({
+        cameraTracking.submissionTransitionCount > 1 &&
+        cameraTracking.staleSubmissionTransitionCount === 0,
+    `camera submission replayed an intermediate invalidated state: ${JSON.stringify({
         maximumSubmissionLagFrames: cameraTracking?.maximumSubmissionLagFrames,
+        submissionTransitionCount: cameraTracking?.submissionTransitionCount,
+        staleSubmissionTransitionCount: cameraTracking?.staleSubmissionTransitionCount,
         samples: cameraTracking?.samples,
     })}`)
 
     expect(failures,
-        cameraTracking?.maximumInFlightFrames <= 2,
-    `continuous camera tracking exceeded its low-latency native in-flight budget: ${JSON.stringify({
+        cameraTracking?.maximumInFlightFrames === 1,
+    `continuous camera tracking did not preserve single-flight native observation: ${JSON.stringify({
         maximumInFlightFrames: cameraTracking?.maximumInFlightFrames,
     })}`)
 
