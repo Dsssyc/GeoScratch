@@ -27,18 +27,24 @@ residency, or Geo-frame policy.
 Geo exports `createGeoFrameController()`. A controller:
 
 - coalesces external invalidations into animation frames;
-- permits one asynchronous render operation at a time;
-- observes submitted native work before completing a frame;
+- permits one frame-construction operation at a time and releases that submission slot
+  before native observation or delayed settlement completes;
+- lets an already-running host render callback use `invalidateNow()` to cancel a queued
+  callback and submit against the host's current camera revision;
+- observes submitted native work independently from delayed feedback settlement;
 - schedules a new frame when bounded residency work settles;
 - permits at most a configured number of autonomous convergence follow-ups;
 - exposes immutable counters for diagnostics and browser proof; and
 - stops idempotently while caller-owned `LifetimeScope` remains responsible for
   draining tracked work and releasing resources.
 
-The renderer callback returns explicit `observation`, `residencySettlement`,
-`residencyWorkCount`, and `needsFollowUp` facts. The controller does not inspect a DEM,
-tile atlas, MapLibre map, shader, canvas, or GPU resource. Applications still own event
-wiring, presentation controls, source URLs, cache policy, and page lifetime.
+The renderer callback returns immediate `observation` and `needsFollowUp` facts plus an
+optional delayed `settlement`. Settlement carries `residencySettlement`,
+`residencyWorkCount`, and its own `needsFollowUp` fact. Only the latest submitted frame
+may schedule work from either async path; stale observation or settlement cannot revive
+an obsolete camera decision. The controller does not inspect a DEM, tile atlas,
+MapLibre map, shader, canvas, or GPU resource. Applications still own event wiring,
+presentation controls, source URLs, cache policy, and page lifetime.
 
 ## Consequences
 
@@ -47,6 +53,8 @@ wiring, presentation controls, source URLs, cache policy, and page lifetime.
   source semantics.
 - Scratch remains the generic asynchronous lifetime owner; Geo owns camera/residency
   frame convergence; the application only connects events and business policy.
+- Map-host camera submission is not serialized behind GPU readback, resource loading,
+  or `queue.onSubmittedWorkDone()`, so a WebGPU overlay can track continuous host motion.
 - Browser-only proof instrumentation lives under `tests/browser/support` and is loaded
   only for explicit development proof runs.
 

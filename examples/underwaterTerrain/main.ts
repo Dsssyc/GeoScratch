@@ -227,8 +227,11 @@ async function main(lifetime: LifetimeScope, activeProof?: UnderwaterTerrainProo
             const frame = await graph.renderFrame(camera)
             return {
                 observation: frame.observation,
-                residencySettlement: frame.residencySettlement,
-                residencyWorkCount: frame.requestedPageCount,
+                settlement: frame.settlement.then(settlement => ({
+                    residencySettlement: settlement.residencySettlement,
+                    residencyWorkCount: settlement.requestedPageCount,
+                    needsFollowUp: settlement.needsFollowUp,
+                })),
                 needsFollowUp: frame.needsFollowUp,
                 value: { frame, camera },
             }
@@ -264,7 +267,7 @@ async function main(lifetime: LifetimeScope, activeProof?: UnderwaterTerrainProo
         run: () => { applyTerrainPresentation = undefined },
     })
 
-    const handleMapRender = () => { frameController.invalidate() }
+    const handleMapRender = () => { frameController.invalidateNow() }
     const handleResize = () => {
         map.resize()
         frameController.invalidate()

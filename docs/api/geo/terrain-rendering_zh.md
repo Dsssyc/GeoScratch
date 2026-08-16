@@ -2,7 +2,7 @@
 docId: geo.terrain-rendering.zh
 canonical: false
 translationOf: ./terrain-rendering.md
-canonicalDigest: 4bf213cd568ef71684ef3362af2953824c123f7a03b48725e79534a8c4c64cd1
+canonicalDigest: 8ebf5766dd0f7f0a769188ca67dfaab230c596cfd396875489aa946e343a71f3
 ---
 # 地形渲染
 
@@ -38,12 +38,20 @@ GPU 在这些位置沿两个水平轴对称投影一个 cell 的位移，并以�
 裁剪留下更小的可见窄片而缩小。
 
 GPU 会计算 17 个完整的统一 bias cut，并以无历史状态的方式选择预算内 base cut。随后
-它用剩余 frame budget 反复细分超过阈值且量化局部 span 最大的 terminal patch，并以
-logical patch identity 作为确定性同值排序。只有全部可见 children 都能放入预算时，
-split 才替换 parent；没有完整 quality split 可容纳时，保留未使用 slot 是合法结果。
-Primary lookup 会从 priority-filled cut 重建，然后才执行有界 2:1 balance。局部选择不会
-读取 data-frontier topology、上一 parity topology 或上一帧 bias。延迟 feedback 会暴露
-base、fill、budget-limited、unbalanced 与 balance fact，但不会控制后续帧。
+它反复找出超过阈值且 Q8 量化局部 span 最大的一组 patch。所有具有完全相同 error 的
+terminal patch 构成一个不可分割 cohort：只有该 cohort 的全部可见 children 都能放入
+剩余 frame budget 时，GPU 才会整体细分。它不会按 logical tile identity、遍历顺序或
+屏幕方向选择同误差子集。当下一个完整 quality cohort 无法容纳时，保留未使用 slot 是
+合法结果。Primary lookup 会从 error-cohort-filled cut 重建，然后才执行有界 2:1
+balance。局部选择不会读取 data-frontier topology、上一 parity topology 或上一帧 bias。
+延迟 render-patch feedback 会暴露 base、fill、budget-limited、unbalanced 与 balance
+fact，但不会控制后续 render cut。
+
+`renderFrame()` 在当前 work 提交后立即返回。Native observation、延迟 GPU feedback、
+feedback 驱动的 residency 与 convergence 分别由独立 promise 表达；它们都不会持有
+frame submission authority。旧 camera 的 feedback 会被标记为 superseded，不能协调
+residency 或覆盖当前 facts。只有 frontier 已 converged 且没有请求额外 page 时，一个
+decision 才会被标记为 settled。
 
 更底层的消费者可以直接组合 `gpuRenderPatchReadWgslModule`。它通过显式 storage
 binding 与 layout dependency 提供有界 visible-instance lookup、covering-patch lookup、

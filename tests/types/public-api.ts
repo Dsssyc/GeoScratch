@@ -457,11 +457,16 @@ const typedTerrainRendererCreation: Promise<
     ],
     initialPresentation: 'shaded',
 })
+const typedGeoFrameSettlement: geoApi.GeoFrameSettlement = {
+    residencySettlement: Promise.resolve(),
+    residencyWorkCount: 0,
+    needsFollowUp: false,
+}
 const typedGeoFrameController: geoApi.GeoFrameController =
     geoApi.createGeoFrameController({
         render: async frameNumber => ({
             observation: Promise.resolve(),
-            residencyWorkCount: 0,
+            settlement: Promise.resolve(typedGeoFrameSettlement),
             needsFollowUp: false,
             value: frameNumber,
         }),
@@ -472,6 +477,10 @@ const typedGeoFrameController: geoApi.GeoFrameController =
     })
 const typedGeoFrameSnapshot: geoApi.GeoFrameControllerSnapshot =
     typedGeoFrameController.snapshot()
+const typedImmediateInvalidation: boolean = typedGeoFrameController.invalidateNow()
+declare const typedTerrainFrame: geoApi.WebMercatorTerrainFrame<'shaded' | 'wireframe'>
+const typedTerrainSettlement: Promise<geoApi.WebMercatorTerrainFrameSettlement> =
+    typedTerrainFrame.settlement
 // @ts-expect-error MapFieldLayer does not own resource scheduling.
 typedMapField.scheduler
 // @ts-expect-error MapFieldLayer does not own a GPU runtime.
@@ -480,6 +489,8 @@ void typedViewDemands
 void typedMapLibreView
 void typedTerrainRendererCreation
 void typedGeoFrameSnapshot
+void typedImmediateInvalidation
+void typedTerrainSettlement
 declare const typedFrontierGpuState: VirtualRasterGpuState
 const typedFrontierPolicy: GpuTileFrontierPolicy = gpuTileFrontierPolicy({
     refineErrorPixels: 2,

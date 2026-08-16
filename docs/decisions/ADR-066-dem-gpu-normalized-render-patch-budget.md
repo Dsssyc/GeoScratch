@@ -108,12 +108,12 @@ threshold had concealed.
 
 ADR-078 also withdraws global frame-budget hysteresis. A settled camera, source
 frontier, render roots, and policy now produce one canonical base bias and one
-priority-filled local cut without previous-frame authority.
+error-cohort-filled local cut without previous-frame authority.
 
 The persistent compute order is:
 
 ```text
-reset -> count 17 trials -> select base -> emit base -> priority fill
+reset -> count 17 trials -> select base -> emit base -> error-cohort fill
       -> balance -> validate -> finalize indirect draw
 ```
 
@@ -145,7 +145,7 @@ source-page floor.
   objects, host-authored instance list, or control readback.
 - Current-cut lookup allocations remain available to rendering and 2:1 balancing,
   but opposite-parity topology is not a local refinement input.
-- Diagnostics expose baseline and frame budgets, requested, base, priority-filled,
+- Diagnostics expose baseline and frame budgets, requested, base, error-cohort-filled,
   unbalanced, and final counts, minimum-trial and source-root counts, selected bias,
   budget-limited refinements, level range, both overflow counters, balance splits, and
   maximum adjacent level delta.

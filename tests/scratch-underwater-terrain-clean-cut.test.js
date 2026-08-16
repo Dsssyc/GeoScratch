@@ -374,7 +374,8 @@ describe('Underwater Terrain clean cut', () => {
         expect(layerSource).to.include('frontier.encode(builder, frame)')
         expect(layerSource).to.include('feedbackRing.encode(builder, frame)')
         expect(layerSource).to.include("feedback.facts.convergenceState === 'transitioning'")
-        expect(layerSource).to.include('consumed?.decisionKey === decisionKey')
+        expect(layerSource).to.include('ready.decisionKey !== latestDecisionKey')
+        expect(layerSource).to.include('feedbackCaptureAvailable(graph, frame)')
         expect(layerSource).to.include('state.supersededFeedbackCount++')
         expect(layerSource).not.to.match(/selectTerrainNodes|nodeLevels|nodeBoxes|canonicalNodes/)
         expect(layerSource).not.to.match(/lodArguments\.upload|terrainArguments\.upload/)
@@ -536,6 +537,7 @@ describe('Underwater Terrain clean cut', () => {
             layerSource.indexOf('async function renderFrame(input: ViewInput)'),
             layerSource.indexOf('async function resize(nextSize: SurfaceSize)')
         )
+        const submissionSource = frameSource.slice(0, frameSource.indexOf('function startFeedbackPump'))
         const allSources = [
             layerSource,
             mainSource,
@@ -558,7 +560,8 @@ describe('Underwater Terrain clean cut', () => {
         }
         expect(frameSource).to.include("runtime.createSubmission({ validation: 'throw' })")
         expect(frameSource).to.include('frontier.writeView(view)')
-        expect(frameSource).to.include('virtualRaster.reconcileFeedback(feedback, consumed!.view)')
+        expect(frameSource).to.include('virtualRaster.reconcileFeedback(feedback, consumed.view)')
+        expect(submissionSource).not.to.include('await consumeFeedback')
         expect(frameSource).to.include('frontier.encode(builder, frame)')
         expect(frameSource).to.include('feedbackRing.encode(builder, frame)')
         expect(frameSource).to.include('.render(passes.terrain')
@@ -819,7 +822,7 @@ describe('Underwater Terrain clean cut', () => {
         })
         expect(graph.contractFacts().renderPatches).to.deep.include({
             selectionPath:
-                'gpu-balanced-priority-filled-render-root-local-cell-projection',
+                'gpu-balanced-error-cohort-filled-render-root-local-cell-projection',
             maximumMatrixLevel: 14,
             renderRootCount: 1,
             minimumRootMatrixLevel: 4,

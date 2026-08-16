@@ -2,7 +2,7 @@
 
 # geoscratch/geo API Reference
 
-Public symbols: 300.
+Public symbols: 302.
 
 ## `packages/geoscratch/src/geo/coordinate-domain.ts`
 
@@ -208,7 +208,7 @@ isGeoDiagnosticError(value: unknown): value is GeoDiagnosticError
 
 Kind: `Function`.
 
-Coordinates invalidation, asynchronous preparation, rendering, and bounded follow-up frames.
+Coordinates immediate submission, asynchronous observation, and bounded Geo follow-up frames.
 
 ```ts
 Function createGeoFrameController
@@ -223,7 +223,7 @@ createGeoFrameController<Value>(descriptor: GeoFrameControllerDescriptor<Value>)
 Kind: `Type Alias`.
 
 ```ts
-type GeoFrameController = Readonly<{ invalidate: any; snapshot: any; stop: any }>
+type GeoFrameController = Readonly<{ invalidate: any; invalidateNow: any; snapshot: any; stop: any }>
 ```
 
 ### `GeoFrameControllerDescriptor`
@@ -262,8 +262,10 @@ type GeoFrameControllerState = "running" | "stopped"
 
 Kind: `Type Alias`.
 
+Work submitted for one Geo frame plus independently observed asynchronous outcomes.
+
 ```ts
-type GeoFrameResult<Value> = Readonly<{ needsFollowUp: boolean; observation: PromiseLike<unknown>; residencySettlement?: PromiseLike<unknown>; residencyWorkCount: number; value: Value }>
+type GeoFrameResult<Value> = Readonly<{ needsFollowUp: boolean; observation: PromiseLike<unknown>; settlement?: PromiseLike<GeoFrameSettlement>; value: Value }>
 ```
 
 ### `GeoFrameScheduler`
@@ -272,6 +274,16 @@ Kind: `Type Alias`.
 
 ```ts
 type GeoFrameScheduler = Readonly<{ cancel: any; request: any }>
+```
+
+### `GeoFrameSettlement`
+
+Kind: `Type Alias`.
+
+Delayed feedback and residency facts that may request another bounded frame.
+
+```ts
+type GeoFrameSettlement = Readonly<{ needsFollowUp: boolean; residencySettlement?: PromiseLike<unknown>; residencyWorkCount: number }>
 ```
 
 ## `packages/geoscratch/src/geo/geo-field.ts`
@@ -547,7 +559,7 @@ Kind: `Type Alias`.
 Describes immutable render-patch graph identity, policy, and owned GPU objects.
 
 ```ts
-type GpuRenderPatchFrontierFacts = Readonly<{ balancePassCount: number; balanceWorkgroupSize: number; biasStepCount: number; biasStepsPerLevel: number; budgetFillWorkgroupSize: number; cellsPerPatchEdge: number; disposed: boolean; drawArgumentBytes: number; id: string; maximumCellSpanPixels: number; maximumMatrixLevel: number; maximumPatchCountRatio: number; maximumRenderPatches: number; maximumRootMatrixLevel: number; minimumRootMatrixLevel: number; nominalPatchSpanPixels: number; parity: readonly Readonly<{ balancePatchBufferId: string; balancePatchLookupBufferId: string; commandIds: readonly string[]; drawArgumentBufferId: string; mapMetaBufferId: string; parity: 0 | 1; renderPatchBufferId: string; renderPatchLookupBufferId: string; renderRootBufferId: string; stateBufferId: string }>[]; renderPatchBytes: number; renderPatchLookupBytes: number; renderPatchLookupCapacity: number; renderRootCount: number; selectionPath: "gpu-balanced-priority-filled-render-root-local-cell-projection"; workgroupSize: number }>
+type GpuRenderPatchFrontierFacts = Readonly<{ balancePassCount: number; balanceWorkgroupSize: number; biasStepCount: number; biasStepsPerLevel: number; budgetFillWorkgroupSize: number; cellsPerPatchEdge: number; disposed: boolean; drawArgumentBytes: number; id: string; maximumCellSpanPixels: number; maximumMatrixLevel: number; maximumPatchCountRatio: number; maximumRenderPatches: number; maximumRootMatrixLevel: number; minimumRootMatrixLevel: number; nominalPatchSpanPixels: number; parity: readonly Readonly<{ balancePatchBufferId: string; balancePatchLookupBufferId: string; commandIds: readonly string[]; drawArgumentBufferId: string; mapMetaBufferId: string; parity: 0 | 1; renderPatchBufferId: string; renderPatchLookupBufferId: string; renderRootBufferId: string; stateBufferId: string }>[]; renderPatchBytes: number; renderPatchLookupBytes: number; renderPatchLookupCapacity: number; renderRootCount: number; selectionPath: "gpu-balanced-error-cohort-filled-render-root-local-cell-projection"; workgroupSize: number }>
 ```
 
 ### `GpuRenderPatchIdentityObjects`
@@ -1892,6 +1904,8 @@ Members:
   - `create(runtime: GPURuntime, descriptor: VirtualRasterGpuStateDescriptor): Promise<VirtualRasterGpuState>`
 - `dispose`: `Method dispose`
   - `dispose(): void`
+- `encode`: `Method encode`
+  - `encode(builder: SubmissionBuilder, update: VirtualRasterGpuUpdate): SubmissionBuilder`
 - `facts`: `Method facts`
   - `facts(): VirtualRasterGpuFacts`
 - `maxPhysicalPages`: `maxPhysicalPages: number` (readonly)
@@ -2975,8 +2989,20 @@ type WebMercatorTerrainContractFacts = Readonly<{ commandIds: Readonly<{ drawTer
 
 Kind: `Type Alias`.
 
+Submitted terrain work whose native observation and delayed settlement are independent.
+
 ```ts
-type WebMercatorTerrainFrame<Presentation extends string = string> = Readonly<{ feedback?: VirtualRasterGpuFeedbackBatch; needsFollowUp: boolean; observation: Promise<WebMercatorTerrainSubmissionObservation>; provenance: readonly WebMercatorTerrainProvenanceFact[]; reconciliation?: VirtualRasterFeedbackReconciliation; renderPatchFeedback?: GpuRenderPatchFeedback; requestedPageCount: number; residencySettlement: Promise<unknown>; submitted: SubmittedWork; terrainPresentation: Presentation }>
+type WebMercatorTerrainFrame<Presentation extends string = string> = Readonly<{ needsFollowUp: boolean; observation: Promise<WebMercatorTerrainSubmissionObservation>; provenance: readonly WebMercatorTerrainProvenanceFact[]; settlement: Promise<WebMercatorTerrainFrameSettlement>; submitted: SubmittedWork; terrainPresentation: Presentation }>
+```
+
+### `WebMercatorTerrainFrameSettlement`
+
+Kind: `Type Alias`.
+
+Delayed frontier feedback, residency work, and convergence state for one terrain frame.
+
+```ts
+type WebMercatorTerrainFrameSettlement = Readonly<{ feedback?: VirtualRasterGpuFeedbackBatch; needsFollowUp: boolean; reconciliation?: VirtualRasterFeedbackReconciliation; renderPatchFeedback?: GpuRenderPatchFeedback; requestedPageCount: number; residencySettlement: Promise<unknown>; superseded: boolean }>
 ```
 
 ### `WebMercatorTerrainIdentityFacts`

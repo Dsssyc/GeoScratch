@@ -61,6 +61,14 @@ request budget.
 The reported deferred count includes only pages admitted to that bounded scheduling
 set, not grace candidates dropped by the budget.
 
+`VirtualRasterGpuState.encode()` records exact update ownership and appends a staged
+publication before dependent commands in one open submission. After that submission
+has entered the same WebGPU queue, later frames may reference its staged snapshot while
+native acknowledgement is still pending because queue order preserves the dependency.
+An unencoded staged snapshot, a different runtime, or a different update remains
+invalid. Acknowledgement is still the commit authority: it advances the public snapshot
+epoch only after every update command is present and native execution succeeds.
+
 The runtime composes those authorities but does not invent camera demand, cache policy,
 network format, or rendering geometry. Cache addresses are pure mappings into Scratch
 Cache; cache remains optional. Applications can use Virtual Raster for DEM, imagery,

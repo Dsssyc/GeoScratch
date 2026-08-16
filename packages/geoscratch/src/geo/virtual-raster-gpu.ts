@@ -1,6 +1,7 @@
 import type {
     BufferResource,
     GPURuntime,
+    SubmissionBuilder,
     SubmissionAuthorityStamp,
     SubmittedWork,
     TextureResource,
@@ -59,6 +60,15 @@ const residencySubmissionAuthorities = new WeakMap<
     ReturnType<GPURuntime['createSubmissionAuthority']>
 >()
 const acknowledgedSnapshots = new WeakMap<VirtualRasterGpuState, VirtualRasterSnapshot>()
+const updateOwners = new WeakMap<VirtualRasterGpuUpdate, VirtualRasterGpuState>()
+const encodedUpdates = new WeakMap<
+    SubmissionBuilder,
+    Map<VirtualRasterGpuState, number>
+>()
+const submittedUpdates = new WeakMap<
+    VirtualRasterGpuState,
+    Readonly<{ snapshotEpoch: number; submitted: SubmittedWork }>
+>()
 
 /** Owns the finite atlas and mapping buffers that publish coherent Virtual Raster snapshots. */
 export class VirtualRasterGpuState {
@@ -244,11 +254,13 @@ export class VirtualRasterGpuState {
             this.#stagedSnapshotEpoch = snapshot.epoch
             this.#stagedSlotGenerations = new Map(this.#uploadedSlotGenerations)
             this.#stagedPublication = publication
-            return Object.freeze({
+            const update = Object.freeze({
                 snapshotEpoch: snapshot.epoch,
                 commands: Object.freeze([]),
                 atlasUploads: Object.freeze([]),
             })
+            updateOwners.set(update, this)
+            return update
         }
         const physicalPages = physicalPagesForSnapshot(snapshot)
         const atlasUploads: TextureUploadCommand[] = []
@@ -318,13 +330,49 @@ export class VirtualRasterGpuState {
             [ ...atlasUploads, this.#pageTableUpload, this.#slotTableUpload ].map(command => command.id)
         )
         this.#stagedPublication = publication
-        return Object.freeze({
+        const update = Object.freeze({
             snapshotEpoch: snapshot.epoch,
             commands: Object.freeze([ ...atlasUploads, this.#pageTableUpload, this.#slotTableUpload ]),
             atlasUploads: Object.freeze(atlasUploads),
             pageTableUpload: this.#pageTableUpload,
             slotTableUpload: this.#slotTableUpload,
         })
+        updateOwners.set(update, this)
+        return update
+    }
+
+    /** Appends one owned staged update before dependent work in the same submission. */
+    encode(builder: SubmissionBuilder, update: VirtualRasterGpuUpdate): SubmissionBuilder {
+
+        this.#assertActive()
+        const encoded = encodedUpdates.get(builder)
+        if (builder?.runtime !== this.runtime || builder.isSubmitted ||
+            updateOwners.get(update) !== this ||
+            update.snapshotEpoch !== this.#stagedSnapshotEpoch || encoded?.has(this)) {
+            return throwGeoDiagnostic({
+                code: 'GEO_VIRTUAL_RASTER_GPU_UPDATE_INVALID',
+                phase: 'residency',
+                subject: { kind: 'virtual-raster-gpu-state', id: this.addressSpace.id },
+                message: 'A staged Virtual Raster GPU update can be encoded once into an owned open submission.',
+                expected: {
+                    runtimeId: this.runtime.id,
+                    stagedSnapshotEpoch: this.#stagedSnapshotEpoch,
+                    encodedOnce: false,
+                },
+                actual: {
+                    runtimeId: builder?.runtime?.id,
+                    snapshotEpoch: update?.snapshotEpoch,
+                    submitted: builder?.isSubmitted,
+                    owned: updateOwners.get(update) === this,
+                    encoded: encoded?.has(this) ?? false,
+                },
+            })
+        }
+        for (const command of update.commands) builder.upload(command)
+        const byState = encoded ?? new Map<VirtualRasterGpuState, number>()
+        byState.set(this, update.snapshotEpoch)
+        if (encoded === undefined) encodedUpdates.set(builder, byState)
+        return builder
     }
 
     async acknowledge(publication: VirtualRasterPublication, submitted: SubmittedWork): Promise<void> {
@@ -376,6 +424,11 @@ export class VirtualRasterGpuState {
                     actual: { missingCommandIds: Object.freeze(missingCommandIds) },
                 })
             }
+            const submittedUpdate = Object.freeze({
+                snapshotEpoch: snapshot.epoch,
+                submitted,
+            })
+            submittedUpdates.set(this, submittedUpdate)
             if (this.#stagedCommandIds.size > 0) {
                 const nativeOutcome = await submitted.nativeOutcome
                 this.#assertStagedPublication(publication)
@@ -422,6 +475,9 @@ export class VirtualRasterGpuState {
             }
             throw error
         } finally {
+            if (submittedUpdates.get(this)?.submitted === submitted) {
+                submittedUpdates.delete(this)
+            }
             if (this.#settlingPublication === publication) {
                 this.#settlingPublication = undefined
             }
@@ -618,6 +674,23 @@ export function virtualRasterGpuAcknowledgedSnapshot(
 ): VirtualRasterSnapshot | undefined {
 
     return acknowledgedSnapshots.get(gpuState)
+}
+
+/** @internal Reports the staged snapshot explicitly encoded before a dependent Geo command. */
+export function virtualRasterGpuEncodedSnapshotEpoch(
+    gpuState: VirtualRasterGpuState,
+    builder: SubmissionBuilder
+): number | undefined {
+
+    return encodedUpdates.get(builder)?.get(gpuState)
+}
+
+/** @internal Reports a staged snapshot whose update already precedes later queue submissions. */
+export function virtualRasterGpuSubmittedSnapshotEpoch(
+    gpuState: VirtualRasterGpuState
+): number | undefined {
+
+    return submittedUpdates.get(gpuState)?.snapshotEpoch
 }
 
 function residencySubmissionAuthorityFor(

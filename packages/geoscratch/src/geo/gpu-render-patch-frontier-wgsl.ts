@@ -541,21 +541,6 @@ fn visibleChildCount(candidate: GpuRenderPatch) -> u32 {
     return count;
 }
 
-fn betterBudgetFillCandidate(
-    candidateSpanQ8: u32,
-    candidateKey: u32,
-    candidateIndex: u32,
-    currentSpanQ8: u32,
-    currentKey: u32,
-    currentIndex: u32,
-) -> bool {
-    return candidateIndex != 0xffffffffu && (
-        currentIndex == 0xffffffffu ||
-        candidateSpanQ8 > currentSpanQ8 ||
-        (candidateSpanQ8 == currentSpanQ8 && candidateKey < currentKey)
-    );
-}
-
 @compute @workgroup_size(1)
 fn resetRenderPatches() {
     atomicStore(&renderPatchState.count, 0u);
@@ -744,8 +729,6 @@ fn fillRenderPatchBudget() {
     let framePatchBudget = atomicLoad(&renderPatchState.framePatchBudget);
     loop {
         var bestSpanQ8 = 0u;
-        var bestKey = 0xffffffffu;
-        var bestIndex = 0xffffffffu;
         if (patchCount <= framePatchBudget) {
             for (var patchIndex = 0u; patchIndex < patchCount; patchIndex += 1u) {
                 let candidate = renderPatches[patchIndex];
@@ -762,50 +745,72 @@ fn fillRenderPatchBudget() {
                 }
                 let childCount = visibleChildCount(candidate);
                 if (childCount == 0u) { continue; }
-                let incrementalCost = childCount - 1u;
-                if (incrementalCost > framePatchBudget - patchCount) { continue; }
                 let spanQ8 = cellSpanQ8(span);
-                let key = GpuRenderPatch_lookupKey(
-                    candidate.matrixLevel,
-                    candidate.tileRow,
-                    candidate.tileCol,
-                );
-                if (betterBudgetFillCandidate(
-                    spanQ8,
-                    key,
-                    patchIndex,
-                    bestSpanQ8,
-                    bestKey,
-                    bestIndex,
-                )) {
-                    bestSpanQ8 = spanQ8;
-                    bestKey = key;
-                    bestIndex = patchIndex;
+                bestSpanQ8 = max(bestSpanQ8, spanQ8);
+            }
+        }
+        if (bestSpanQ8 == 0u) { break; }
+
+        var cohortIncrementalCost = 0u;
+        for (var patchIndex = 0u; patchIndex < patchCount; patchIndex += 1u) {
+            let candidate = renderPatches[patchIndex];
+            if (candidate.matrixLevel >= renderPatchPolicy.renderMaximumMatrixLevel) {
+                continue;
+            }
+            let span = projectedCellSpanPixels(patchBounds(
+                candidate.matrixLevel,
+                candidate.tileRow,
+                candidate.tileCol,
+            ));
+            if (span <= renderPatchPolicy.maximumCellSpanPixels ||
+                cellSpanQ8(span) != bestSpanQ8) {
+                continue;
+            }
+            let childCount = visibleChildCount(candidate);
+            if (childCount > 0u) {
+                cohortIncrementalCost += childCount - 1u;
+            }
+        }
+        if (cohortIncrementalCost > framePatchBudget - patchCount) { break; }
+
+        let sourcePatchCount = patchCount;
+        var appendedCount = 0u;
+        for (var patchIndex = 0u; patchIndex < sourcePatchCount; patchIndex += 1u) {
+            let selected = renderPatches[patchIndex];
+            if (selected.matrixLevel >= renderPatchPolicy.renderMaximumMatrixLevel) {
+                continue;
+            }
+            let span = projectedCellSpanPixels(patchBounds(
+                selected.matrixLevel,
+                selected.tileRow,
+                selected.tileCol,
+            ));
+            if (span <= renderPatchPolicy.maximumCellSpanPixels ||
+                cellSpanQ8(span) != bestSpanQ8) {
+                continue;
+            }
+            let childLevel = selected.matrixLevel + 1u;
+            let firstRow = selected.tileRow * 2u;
+            let firstCol = selected.tileCol * 2u;
+            var wroteFirst = false;
+            for (var child = 0u; child < 4u; child += 1u) {
+                let row = firstRow + (child >> 1u);
+                let col = firstCol + (child & 1u);
+                if (!patchVisible(patchBounds(childLevel, row, col))) { continue; }
+                let childPatch = GpuRenderPatch(childLevel, row, col);
+                if (!wroteFirst) {
+                    renderPatches[patchIndex] = childPatch;
+                    wroteFirst = true;
+                } else {
+                    renderPatches[sourcePatchCount + appendedCount] = childPatch;
+                    appendedCount += 1u;
                 }
             }
-        }
-        if (bestIndex == 0xffffffffu) { break; }
-        let selected = renderPatches[bestIndex];
-        let childLevel = selected.matrixLevel + 1u;
-        let firstRow = selected.tileRow * 2u;
-        let firstCol = selected.tileCol * 2u;
-        var wroteFirst = false;
-        var appendedCount = 0u;
-        for (var child = 0u; child < 4u; child += 1u) {
-            let row = firstRow + (child >> 1u);
-            let col = firstCol + (child & 1u);
-            if (!patchVisible(patchBounds(childLevel, row, col))) { continue; }
-            let childPatch = GpuRenderPatch(childLevel, row, col);
-            if (!wroteFirst) {
-                renderPatches[bestIndex] = childPatch;
-                wroteFirst = true;
-            } else {
-                renderPatches[patchCount + appendedCount] = childPatch;
-                appendedCount += 1u;
+            if (wroteFirst) {
+                atomicAdd(&renderPatchState.budgetFillSplitCount, 1u);
             }
         }
-        patchCount += appendedCount;
-        atomicAdd(&renderPatchState.budgetFillSplitCount, 1u);
+        patchCount = sourcePatchCount + appendedCount;
     }
 
     var limitedCount = 0u;
@@ -822,11 +827,7 @@ fn fillRenderPatchBudget() {
         if (span <= renderPatchPolicy.maximumCellSpanPixels) { continue; }
         let childCount = visibleChildCount(candidate);
         if (childCount == 0u) { continue; }
-        let incrementalCost = childCount - 1u;
-        if (patchCount > framePatchBudget ||
-            incrementalCost > framePatchBudget - patchCount) {
-            limitedCount += 1u;
-        }
+        limitedCount += 1u;
     }
     atomicStore(&renderPatchState.budgetLimitedRefinementCount, limitedCount);
     atomicStore(&renderPatchState.count, patchCount);

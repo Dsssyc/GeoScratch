@@ -2,7 +2,7 @@
 docId: geo.views-frames.zh
 canonical: false
 translationOf: ./views-frames.md
-canonicalDigest: 78426bc0f404ea32d71dc85472e1f8856d018793ddd3c50ecf949b03c5b6db10
+canonicalDigest: d3b244499465b2338ea11991bac78e6dfce05c97401ce571c3850cebe1982edd
 ---
 # 视图与帧控制
 
@@ -20,3 +20,10 @@ camera locality 成为普遍资源策略。
 render、feedback 与 invalidation。只有 descriptor 明确赋予责任时，它才拥有 frame-loop
 authority。它不拥有外部 map、GPU runtime 或 field resource，除非这些对象被显式注册
 清理。
+
+`invalidate()` 会把工作合并到配置的 frame scheduler；`invalidateNow()` 会取消已排队的
+callback，并从正在执行的 host render callback 启动当前 submission，使 overlay 能消费与
+地图宿主相同的 camera revision。互斥范围只覆盖一个 submitted frame 的构建。Submission
+slot 会在 native observation 与延迟 settlement 完成前释放；这些 promise 会被独立追踪，
+不能拖延更新 camera 的提交。只有最新 submitted frame 可以请求有界 convergence 或
+residency follow-up，因此过期异步结果不能重新激活旧 camera decision。

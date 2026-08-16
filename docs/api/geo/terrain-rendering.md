@@ -45,14 +45,22 @@ metric is local and does not shrink merely because viewport clipping leaves a sm
 visible sliver during zoom-in.
 
 The GPU counts 17 complete uniform-bias cuts and chooses a stateless in-budget base.
-It then spends residual frame budget by repeatedly splitting the above-threshold
-terminal patch with the greatest quantized local span, with logical patch identity as
-the deterministic tie-break. A split replaces its parent only when all visible
-children fit; unused slots are valid when no complete quality split fits. The primary
-lookup is rebuilt from that priority-filled cut before bounded 2:1 balancing. Local
-selection never reads data-frontier topology, previous-parity topology, or a previous
-bias. Delayed feedback exposes base, fill, budget-limited, unbalanced, and balance
-facts, but never controls a later frame.
+It then repeatedly identifies the greatest above-threshold Q8-quantized local span.
+Every terminal patch with that exact error belongs to one indivisible cohort: the GPU
+splits the complete cohort only when all of its visible children fit the residual frame
+budget. It never selects an equal-error subset by logical tile identity, traversal
+order, or screen direction. Unused slots are valid when the next complete quality
+cohort does not fit. The primary lookup is rebuilt from that error-cohort-filled cut
+before bounded 2:1 balancing. Local selection never reads data-frontier topology,
+previous-parity topology, or a previous bias. Delayed render-patch feedback exposes
+base, fill, budget-limited, unbalanced, and balance facts, but never controls a later
+render cut.
+
+`renderFrame()` returns as soon as the current work is submitted. Native observation,
+delayed GPU feedback, feedback-driven residency, and convergence are separate promises;
+none retains frame-submission authority. Feedback for an older camera is reported as
+superseded and cannot reconcile residency or overwrite current facts. A decision is
+settled only after its frontier is converged and it requests no additional pages.
 
 Lower-level consumers may compose `gpuRenderPatchReadWgslModule` directly. It exposes
 bounded visible-instance lookup, covering-patch lookup, neighbor resolution, and edge

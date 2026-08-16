@@ -2,7 +2,7 @@
 docId: geo.virtual-raster.zh
 canonical: false
 translationOf: ./virtual-raster.md
-canonicalDigest: d7b50de1cfeb12bc4248a68705571d75bd5ae2bc4c8c2f9e9bbf0698ad45c877
+canonicalDigest: 56f6f4a3f18e410503d644641e4755446760ea4e0aa79eb05d2fbe93ada92d0e
 ---
 # Virtual Raster
 
@@ -45,6 +45,13 @@ Deferred work 会降级为 background prefetch，因此在有界 request budget 
 和 safety cover 始终优先。
 报告的 deferred count 只包含真正进入该有界调度集的 page，不包括因预算被丢弃的 grace
 candidate。
+
+`VirtualRasterGpuState.encode()` 会记录精确 update ownership，并在同一个 open
+submission 中把 staged publication 排在依赖它的 command 之前。该 submission 进入同一
+WebGPU queue 后，后续 frame 可以在 native acknowledgement 尚未完成时引用这个 staged
+snapshot，因为 queue order 会保留依赖关系。未编码的 staged snapshot、不同 runtime 或
+不同 update 仍然非法。Acknowledgement 仍是 commit authority：只有全部 update command
+均存在且 native execution 成功后，它才推进公开 snapshot epoch。
 
 Runtime 组合这些权威，但不虚构 camera demand、cache policy、network format 或
 rendering geometry。Cache address 只是映射到 Scratch Cache 的纯函数，cache 始终可选。

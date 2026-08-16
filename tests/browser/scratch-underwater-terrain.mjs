@@ -1114,7 +1114,7 @@ function validateUnderwaterTerrainFacts(label, facts, failures, expectedStatus =
         contract?.dataMaximumMatrixLevel !== 10 ||
         contract?.renderMaximumMatrixLevel !== 14 ||
         contract?.renderPatches?.selectionPath !==
-            'gpu-balanced-priority-filled-render-root-local-cell-projection' ||
+            'gpu-balanced-error-cohort-filled-render-root-local-cell-projection' ||
         contract?.renderPatches?.renderRootCount < 1 ||
         contract?.renderPatches?.maximumCellSpanPixels !== 8 ||
         contract?.renderPatches?.nominalPatchSpanPixels !== 512 ||

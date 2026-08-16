@@ -163,7 +163,7 @@ export type GpuRenderPatchCommands = Readonly<{
 /** Describes immutable render-patch graph identity, policy, and owned GPU objects. */
 export type GpuRenderPatchFrontierFacts = Readonly<{
     id: string
-    selectionPath: 'gpu-balanced-priority-filled-render-root-local-cell-projection'
+    selectionPath: 'gpu-balanced-error-cohort-filled-render-root-local-cell-projection'
     disposed: boolean
     maximumMatrixLevel: number
     renderRootCount: number
@@ -1383,7 +1383,7 @@ export async function createGpuRenderPatchFrontier(
                 return Object.freeze({
                     id,
                     selectionPath:
-                        'gpu-balanced-priority-filled-render-root-local-cell-projection' as const,
+                        'gpu-balanced-error-cohort-filled-render-root-local-cell-projection' as const,
                     disposed,
                     maximumMatrixLevel: descriptor.renderMaximumMatrixLevel,
                     renderRootCount: descriptor.renderRoots.length,

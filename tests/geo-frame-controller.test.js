@@ -21,8 +21,11 @@ describe('Geo frame controller', () => {
                 renderCount++
                 return {
                     observation: Promise.resolve(),
-                    residencySettlement: residency.promise,
-                    residencyWorkCount: frameNumber === 1 ? 1 : 0,
+                    settlement: Promise.resolve({
+                        residencySettlement: residency.promise,
+                        residencyWorkCount: frameNumber === 1 ? 1 : 0,
+                        needsFollowUp: false,
+                    }),
                     needsFollowUp: false,
                     value: `frame-${frameNumber}`,
                 }
@@ -51,8 +54,10 @@ describe('Geo frame controller', () => {
         expect(renderCount).to.equal(2)
         expect(tracked).to.deep.equal([
             'geo-frame-1',
+            'geo-frame-settlement-1',
             'geo-frame-residency-1',
             'geo-frame-2',
+            'geo-frame-settlement-2',
         ])
         expect(controller.snapshot()).to.deep.include({
             state: 'running',
@@ -62,6 +67,83 @@ describe('Geo frame controller', () => {
             submittedFrameCount: 2,
             observedFrameCount: 2,
             pendingTaskCount: 0,
+        })
+    })
+
+    it('does not let native observation block a newer invalidated submission', async() => {
+
+        const scheduler = fakeFrameScheduler()
+        const firstObservation = deferred()
+        const submitted = []
+        const observed = []
+        const controller = createGeoFrameController({
+            scheduler,
+            async render(frameNumber) {
+                return {
+                    observation: frameNumber === 1
+                        ? firstObservation.promise
+                        : Promise.resolve(),
+                    needsFollowUp: false,
+                    value: `frame-${frameNumber}`,
+                }
+            },
+            onSubmitted: frame => submitted.push(frame.value),
+            onObserved: frame => observed.push(frame.value),
+        })
+
+        controller.invalidate()
+        await scheduler.runNext()
+        await flushTasks()
+        expect(submitted).to.deep.equal([ 'frame-1' ])
+        expect(observed).to.deep.equal([])
+
+        controller.invalidate()
+        expect(scheduler.pendingCount).to.equal(1)
+        await scheduler.runNext()
+        await flushTasks()
+        expect(submitted).to.deep.equal([ 'frame-1', 'frame-2' ])
+        expect(observed).to.deep.equal([ 'frame-2' ])
+
+        firstObservation.resolve()
+        await flushTasks()
+        expect(observed).to.deep.equal([ 'frame-2', 'frame-1' ])
+        expect(controller.snapshot()).to.deep.include({
+            submittedFrameCount: 2,
+            observedFrameCount: 2,
+            rendering: false,
+        })
+    })
+
+    it('can align a pending invalidation with the current host render frame', async() => {
+
+        const scheduler = fakeFrameScheduler()
+        const submitted = []
+        const controller = createGeoFrameController({
+            scheduler,
+            async render(frameNumber) {
+                return {
+                    observation: Promise.resolve(),
+                    needsFollowUp: false,
+                    value: `frame-${frameNumber}`,
+                }
+            },
+            onSubmitted: frame => submitted.push(frame.value),
+        })
+
+        controller.invalidate()
+        expect(scheduler.pendingCount).to.equal(1)
+        expect(controller.invalidateNow()).to.equal(true)
+        expect(scheduler.pendingCount).to.equal(0)
+        await flushTasks()
+
+        expect(submitted).to.deep.equal([ 'frame-1' ])
+        expect(controller.snapshot()).to.deep.include({
+            invalidationCount: 2,
+            scheduledFrameCount: 2,
+            completedFrameCount: 1,
+            cancelledFrameCount: 1,
+            submittedFrameCount: 1,
+            observedFrameCount: 1,
         })
     })
 
@@ -76,7 +158,6 @@ describe('Geo frame controller', () => {
                 renderCount++
                 return {
                     observation: Promise.resolve(),
-                    residencyWorkCount: 0,
                     needsFollowUp: true,
                     value: undefined,
                 }
@@ -131,7 +212,6 @@ describe('Geo frame controller', () => {
             async render() {
                 return {
                     observation: Promise.resolve(),
-                    residencyWorkCount: 0,
                     needsFollowUp: false,
                     value: 'captured',
                 }
@@ -164,7 +244,10 @@ describe('Geo frame controller', () => {
             async render() {
                 return {
                     observation: Promise.resolve(),
-                    residencyWorkCount: 1,
+                    settlement: Promise.resolve({
+                        residencyWorkCount: 1,
+                        needsFollowUp: false,
+                    }),
                     needsFollowUp: false,
                     value: undefined,
                 }
@@ -177,11 +260,11 @@ describe('Geo frame controller', () => {
         await flushTasks()
 
         expect(errors).to.have.length(1)
-        expect(errors[0].diagnostic.code).to.equal('GEO_FRAME_RESULT_INVALID')
+        expect(errors[0].diagnostic.code).to.equal('GEO_FRAME_SETTLEMENT_INVALID')
         expect(controller.snapshot()).to.deep.include({
             state: 'stopped',
-            submittedFrameCount: 0,
-            observedFrameCount: 0,
+            submittedFrameCount: 1,
+            observedFrameCount: 1,
             pendingTaskCount: 0,
         })
     })

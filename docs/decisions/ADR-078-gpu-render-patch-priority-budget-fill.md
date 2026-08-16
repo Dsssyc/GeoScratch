@@ -1,4 +1,4 @@
-# ADR-078: Fill the GPU Render-Patch Budget by Local Priority
+# ADR-078: Fill the GPU Render-Patch Budget by Complete Error Cohorts
 
 ## Status
 
@@ -39,19 +39,20 @@ Selection is stateless. The previous frame's bias and topology are not read, ret
 or compared. Equal current camera, viewport, render roots, and policy facts therefore
 produce the same base cut regardless of the approach path.
 
-### Spend residual budget on the highest local error
+### Spend residual budget on complete highest-error cohorts
 
 After emitting the base cut, one GPU compute invocation repeatedly examines its
 terminal patches. A patch is eligible when it is below the render maximum level and
-its current projected-cell span exceeds `maximumCellSpanPixels`. The eligible patch
-with the greatest Q8-quantized span is selected; equal spans are ordered by the
-canonical logical patch key.
+its current projected-cell span exceeds `maximumCellSpanPixels`. The pass finds the
+greatest Q8-quantized span and treats every eligible patch with that span as one
+indivisible error cohort.
 
-The selected parent is replaced only by its frustum-visible children. A split executes
-only when the resulting increase in terminal patch count fits the remaining frame
-budget. The pass repeats until no eligible split fits. It then rebuilds the primary
-lookup from the completed cut. No CPU traversal, count readback, or next-frame control
-loop participates.
+Every selected parent is replaced only by its frustum-visible children. The complete
+cohort executes only when the resulting increase in terminal patch count fits the
+remaining frame budget. Equal-error patches are never selected by logical identity,
+buffer order, or screen direction. The pass repeats until no complete highest-error
+cohort fits, then rebuilds the primary lookup from the completed cut. No CPU traversal,
+count readback, or next-frame control loop participates.
 
 The frame budget is a limit, not a target count. It may remain partly unused when every
 terminal patch already meets the quality threshold or the remaining slots cannot hold
@@ -62,7 +63,7 @@ the next complete visible split. Descriptor truncation remains forbidden.
 The persistent compute order is:
 
 ```text
-reset -> count 17 trials -> select base -> emit base -> priority fill
+reset -> count 17 trials -> select base -> emit base -> error-cohort fill
       -> 2:1 balance -> validate -> finalize indirect draw
 ```
 
@@ -74,7 +75,7 @@ That overhead remains explicit and is never confused with quality allocation.
 Feedback adds:
 
 - `basePatchCount`: the selected uniform trial count;
-- `budgetFillSplitCount`: local priority splits executed before balancing;
+- `budgetFillSplitCount`: complete error-cohort splits executed before balancing;
 - `budgetLimitedRefinementCount`: remaining above-threshold terminal patches whose
   complete visible split does not fit the residual budget.
 
@@ -90,24 +91,25 @@ retaining a no-op compatibility option would falsely imply temporal selection au
 - A discrete global bias change no longer forces all branches to lose detail together.
 - Current local projected error, not previous-frame state, determines which branches
   receive residual budget.
-- The selected topology is deterministic for current inputs: priority is quantized and
-  ties use logical patch identity rather than storage or invocation order.
+- The selected topology is deterministic and direction-neutral for current inputs:
+  quantized ties form an all-or-none cohort rather than using geographic identity as a
+  hidden north-west-to-south-east priority.
 - The pass is GPU-resident and bounded by the declared render-patch capacity. The first
   implementation uses one compute invocation because the active pre-balance cut is
   small and mutation is strictly ordered; this is an execution detail exposed through
   `budgetFillWorkgroupSize`, not a CPU authority.
-- The primary lookup is populated only after priority filling, so rendering and 2:1
+- The primary lookup is populated only after error-cohort filling, so rendering and 2:1
   balancing observe one complete topology.
 
 ## Verification
 
 The Chrome/WebGPU wireframe proof covers identical-camera approach paths, settled
-top-down zoom from 12 through 14, oblique motion, near-plane motion, and pitch samples
-55, 58, and 61 degrees. The pitch sequence keeps its maximum render level at 11 instead
-of dropping at a global bias boundary. Another pitched sample reports a 28-patch base,
-three priority splits, a 34-patch unbalanced cut, and two balance splits for a 40-patch
-final cut. Descriptor and lookup overflow, uncaptured errors, device loss, and
-level-difference violations remain zero.
+top-down zoom from 12 through 14, oblique motion, near-plane motion, pitch samples 55,
+58, and 61 degrees, and per-frame camera tracking. The two opposite approach paths to
+the canonical top-down camera produce identical topology and canvas hashes. Their
+maximum-to-minimum quadrant wireframe-density ratio is 1.0903 under a 1.25 gate. The
+90-frame tracking proof reports zero submission-frame lag. Descriptor and lookup
+overflow, uncaptured errors, device loss, and level-difference violations remain zero.
 
 ## Rejected Alternatives
 
@@ -121,11 +123,12 @@ spends more traversal work without allocating budget according to local error.
 Rejected because equal current inputs could retain different biases. Temporal history
 is not allowed to select a permanent geometry topology.
 
-### Fill remaining slots by buffer order
+### Break equal-error ties by logical identity or buffer order
 
-Rejected because parallel base emission order is not a spatial policy. It would make
-topology depend on GPU scheduling and could favor a distant patch over a nearer,
-higher-error patch.
+Rejected because neither geographic identity nor parallel base emission order is a
+quality fact. Geographic keys impose a stable screen-direction bias in top-down views;
+buffer order makes topology depend on GPU scheduling. Equal current error therefore
+has equal allocation authority.
 
 ### Truncate children when a split does not fit
 

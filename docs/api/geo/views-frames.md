@@ -24,3 +24,12 @@ universal resource policy.
 and invalidation for one assembled field. It owns frame-loop authority only when the
 descriptor gives it that responsibility. It does not own the external map, GPU runtime,
 or field resources unless those are explicitly registered for cleanup.
+
+`invalidate()` coalesces work onto the configured frame scheduler. `invalidateNow()`
+cancels a queued callback and starts the current submission from an already-running host
+render callback, which lets an overlay consume the same camera revision as its map host.
+Only construction of one submitted frame is mutually exclusive. The submission slot is
+released before native observation and delayed settlement complete; those promises are
+tracked independently and cannot delay a newer camera submission. Only the latest
+submitted frame may request bounded convergence or residency follow-ups, so stale async
+results cannot revive an obsolete camera decision.

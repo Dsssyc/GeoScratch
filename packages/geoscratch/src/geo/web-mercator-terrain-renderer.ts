@@ -50,6 +50,7 @@ import type {
     VirtualRasterFeedbackReconciliation,
     VirtualRasterRuntime,
     VirtualRasterRuntimeFacts,
+    VirtualRasterRuntimePublication,
 } from './virtual-raster-runtime.js'
 
 export type WebMercatorTerrainPresentationDescriptor<Presentation extends string = string> =
@@ -92,15 +93,23 @@ export type WebMercatorTerrainInitialization = Readonly<{
     observation: Promise<WebMercatorTerrainSubmissionObservation>
 }>
 
-export type WebMercatorTerrainFrame<Presentation extends string = string> = Readonly<{
-    submitted: SubmittedWork
-    observation: Promise<WebMercatorTerrainSubmissionObservation>
-    provenance: readonly WebMercatorTerrainProvenanceFact[]
+/** Delayed frontier feedback, residency work, and convergence state for one terrain frame. */
+export type WebMercatorTerrainFrameSettlement = Readonly<{
     feedback?: VirtualRasterGpuFeedbackBatch
     renderPatchFeedback?: GpuRenderPatchFeedback
     reconciliation?: VirtualRasterFeedbackReconciliation
     residencySettlement: Promise<unknown>
     requestedPageCount: number
+    needsFollowUp: boolean
+    superseded: boolean
+}>
+
+/** Submitted terrain work whose native observation and delayed settlement are independent. */
+export type WebMercatorTerrainFrame<Presentation extends string = string> = Readonly<{
+    submitted: SubmittedWork
+    observation: Promise<WebMercatorTerrainSubmissionObservation>
+    settlement: Promise<WebMercatorTerrainFrameSettlement>
+    provenance: readonly WebMercatorTerrainProvenanceFact[]
     needsFollowUp: boolean
     terrainPresentation: Presentation
 }>
@@ -321,6 +330,7 @@ type PendingFeedback = Readonly<{
     view: GeoViewSnapshot
     submitted: SubmittedWork
     decisionKey: string
+    settlement: Deferred<WebMercatorTerrainFrameSettlement>
 }>
 
 type ConsumedFeedback = Readonly<{
@@ -328,6 +338,18 @@ type ConsumedFeedback = Readonly<{
     view: GeoViewSnapshot
     feedback?: VirtualRasterGpuFeedbackBatch
     renderPatchFeedback?: GpuRenderPatchFeedback
+}>
+
+type Deferred<Value> = {
+    promise: Promise<Value>
+    resolve(value: Value): void
+    reject(reason: unknown): void
+    settled: boolean
+}
+
+type ActivePublication = Readonly<{
+    publication: VirtualRasterRuntimePublication
+    acknowledgment: Promise<void>
 }>
 
 const WEB_MERCATOR_TERRAIN_STAGE_ORDER = Object.freeze([
@@ -483,6 +505,7 @@ export async function createWebMercatorTerrainRenderer<
     }
     const state = createState(size, initialPresentation)
     const pendingFeedback: PendingFeedback[] = []
+    const feedbackByDecision = new Map<string, PendingFeedback>()
     const stableIdentities = Object.freeze(stableIdentitySnapshot(graph))
     const stableIdentityFacts = identityFactSnapshot(graph)
     const stableIdentityHash = stableIdentityFacts.hash
@@ -491,6 +514,11 @@ export async function createWebMercatorTerrainRenderer<
         submitted: SubmittedWork
         observation: Promise<Readonly<{ submissionId: string; nativeStatus: 'observed-succeeded' }>>
     }>> | undefined
+    let activePublication: ActivePublication | undefined
+    let feedbackPump: Promise<void> | undefined
+    let latestDecisionKey: string | undefined
+    let latestSettledDecisionKey: string | undefined
+    let latestIssuedFrameEpoch = 0
 
     function initialize() {
 
@@ -537,32 +565,55 @@ export async function createWebMercatorTerrainRenderer<
         assertPersistentCounts(persistentBaseline, persistentFactSnapshot(runtime), 'frame')
         const frameTerrainPresentation = state.terrainPresentation
 
-        const noOpPublication = await publishChangedResidency(graph, state)
-        const residencySnapshotEpoch = virtualRaster.gpu.facts().snapshotEpoch
+        const publication = activePublication === undefined
+            ? virtualRaster.publish()
+            : undefined
+        const residencySnapshotEpoch = publication?.snapshotEpoch ??
+            activePublication?.publication.snapshotEpoch ??
+            virtualRaster.gpu.facts().snapshotEpoch
         const view = fieldLayer.viewAdapter.read(input, {
             frameEpoch: state.frame + 1,
             residencySnapshotEpoch,
         })
         const decisionKey = frontierDecisionKey(view)
+        latestDecisionKey = decisionKey
         const viewToken = frontier.writeView(view)
         let frame: GpuTileFrontierFrame
         let submitted: SubmittedWork
+        let capturedFeedback = false
+        let feedbackEntry = feedbackByDecision.get(decisionKey)
         try {
             frame = frontier.frame(viewToken)
             const builder = runtime.createSubmission({ validation: 'throw' })
+            if (publication !== undefined) virtualRaster.gpu.encode(builder, publication.update)
             frontier.encode(builder, frame)
             renderPatchFrontier.encode(builder, frame)
             builder.render(passes.terrain, [
                 commands.terrain[frameTerrainPresentation][frame.parity]!,
             ])
-            renderPatchFrontier.capture(builder, frame)
-            feedbackRing.encode(builder, frame)
+            capturedFeedback = latestSettledDecisionKey !== decisionKey &&
+                feedbackEntry === undefined && feedbackCaptureAvailable(graph, frame)
+            if (capturedFeedback) {
+                renderPatchFrontier.capture(builder, frame)
+                feedbackRing.encode(builder, frame)
+            }
             submitted = builder.submit()
         } finally {
             viewToken.dispose()
         }
-        if (noOpPublication !== undefined) {
-            await virtualRaster.acknowledge(noOpPublication, submitted!)
+        let publicationAcknowledgment: Promise<void> | undefined
+        if (publication !== undefined) {
+            publicationAcknowledgment = virtualRaster.acknowledge(publication, submitted!)
+                .then(() => {
+                    if (activePublication?.publication === publication) {
+                        activePublication = undefined
+                    }
+                    state.virtualSnapshotEpoch = virtualRaster.gpu.facts().snapshotEpoch
+                })
+            activePublication = Object.freeze({
+                publication,
+                acknowledgment: publicationAcknowledgment,
+            })
         }
 
         let provenance: readonly WebMercatorTerrainProvenanceFact[] = Object.freeze([])
@@ -579,26 +630,108 @@ export async function createWebMercatorTerrainRenderer<
             provenanceFailure = error
         }
         const nativeObservation = observeSubmittedWork(submitted!)
-        const observation = provenanceFailure === undefined
-            ? nativeObservation
-            : nativeObservation.then(() => { throw provenanceFailure })
+        const observation = Promise.all([
+            nativeObservation,
+            ...(publicationAcknowledgment === undefined ? [] : [ publicationAcknowledgment ]),
+        ]).then(([ result ]) => {
+            if (provenanceFailure !== undefined) throw provenanceFailure
+            return result!
+        })
 
-        pendingFeedback.push(Object.freeze({
-            frame: frame!,
-            view,
+        if (capturedFeedback) {
+            feedbackEntry = Object.freeze({
+                frame: frame!,
+                view,
+                submitted: submitted!,
+                decisionKey,
+                settlement: deferred<WebMercatorTerrainFrameSettlement>(),
+            })
+            pendingFeedback.push(feedbackEntry)
+            feedbackByDecision.set(decisionKey, feedbackEntry)
+        }
+        latestIssuedFrameEpoch = frame!.frameEpoch
+        startFeedbackPump()
+
+        state.frame++
+        state.virtualSnapshotEpoch = residencySnapshotEpoch
+        const decisionNeedsFeedback = latestSettledDecisionKey !== decisionKey
+        const needsFollowUp = decisionNeedsFeedback && (
+            feedbackEntry === undefined || feedbackEntry.frame.frameEpoch === frame!.frameEpoch
+        )
+
+        return Object.freeze({
             submitted: submitted!,
-            decisionKey,
-        }))
-        const consumed = await consumeReadyFeedback(graph, pendingFeedback, state)
-        if (consumed?.renderPatchFeedback !== undefined) {
+            observation,
+            settlement: feedbackEntry?.settlement.promise ??
+                Promise.resolve(emptyFrameSettlement()),
+            provenance,
+            needsFollowUp,
+            terrainPresentation: frameTerrainPresentation,
+        }) satisfies WebMercatorTerrainFrame<Presentation>
+    }
+
+    function startFeedbackPump(): void {
+
+        const ready = pendingFeedback[0]
+        if (feedbackPump !== undefined || state.disposed || ready === undefined ||
+            ready.frame.frameEpoch >= latestIssuedFrameEpoch) return
+        feedbackPump = drainReadyFeedback().finally(() => {
+            feedbackPump = undefined
+            startFeedbackPump()
+        })
+        void feedbackPump.catch(() => undefined)
+    }
+
+    async function drainReadyFeedback(): Promise<void> {
+
+        while (!state.disposed) {
+            const ready = pendingFeedback[0]
+            if (ready === undefined || ready.frame.frameEpoch >= latestIssuedFrameEpoch) return
+            pendingFeedback.shift()
+            try {
+                const consumed = await consumeFeedback(graph, ready, state)
+                if (state.disposed) {
+                    settleDeferred(ready.settlement, emptyFrameSettlement())
+                } else {
+                    settleConsumedFeedback(ready, consumed)
+                }
+            } catch (error) {
+                if (state.disposed) settleDeferred(ready.settlement, emptyFrameSettlement())
+                else rejectDeferred(ready.settlement, error)
+            } finally {
+                if (feedbackByDecision.get(ready.decisionKey) === ready) {
+                    feedbackByDecision.delete(ready.decisionKey)
+                }
+            }
+        }
+    }
+
+    function settleConsumedFeedback(
+        ready: PendingFeedback,
+        consumed: ConsumedFeedback
+    ): void {
+
+        if (ready.decisionKey !== latestDecisionKey) {
+            if (consumed.feedback !== undefined || consumed.renderPatchFeedback !== undefined) {
+                state.supersededFeedbackCount++
+            }
+            settleDeferred(ready.settlement, Object.freeze({
+                ...(consumed.feedback === undefined ? {} : { feedback: consumed.feedback }),
+                ...(consumed.renderPatchFeedback === undefined
+                    ? {}
+                    : { renderPatchFeedback: consumed.renderPatchFeedback }),
+                residencySettlement: Promise.resolve(undefined),
+                requestedPageCount: 0,
+                needsFollowUp: false,
+                superseded: true,
+            }))
+            return
+        }
+
+        if (consumed.renderPatchFeedback !== undefined) {
             state.latestRenderPatchFeedback = consumed.renderPatchFeedback
         }
-        const feedback = consumed?.decisionKey === decisionKey
-            ? consumed.feedback
-            : undefined
-        if (consumed?.feedback !== undefined && consumed.decisionKey !== decisionKey) {
-            state.supersededFeedbackCount++
-        }
+        const feedback = consumed.feedback
         if (feedback === undefined) {
             delete state.latestFrontierFacts
             state.latestFeedbackDiagnostics = Object.freeze([])
@@ -608,31 +741,25 @@ export async function createWebMercatorTerrainRenderer<
         }
         const reconciliation = feedback === undefined
             ? undefined
-            : virtualRaster.reconcileFeedback(feedback, consumed!.view)
+            : virtualRaster.reconcileFeedback(feedback, consumed.view)
         if (reconciliation !== undefined) {
             state.virtualRequestedPageCount += reconciliation.requestedCount
         }
-
-        state.frame++
-        state.virtualSnapshotEpoch = virtualRaster.gpu.facts().snapshotEpoch
         const needsFollowUp = feedback === undefined ||
             feedback.facts.convergenceState === 'transitioning' ||
             (reconciliation?.requestedCount ?? 0) > 0
-
-        return Object.freeze({
-            submitted: submitted!,
-            observation,
-            provenance,
+        if (!needsFollowUp) latestSettledDecisionKey = ready.decisionKey
+        settleDeferred(ready.settlement, Object.freeze({
             ...(feedback === undefined ? {} : { feedback }),
-            ...(consumed?.renderPatchFeedback === undefined
+            ...(consumed.renderPatchFeedback === undefined
                 ? {}
                 : { renderPatchFeedback: consumed.renderPatchFeedback }),
             ...(reconciliation === undefined ? {} : { reconciliation }),
             residencySettlement: reconciliation?.settlement ?? Promise.resolve(undefined),
             requestedPageCount: reconciliation?.requestedCount ?? 0,
             needsFollowUp,
-            terrainPresentation: frameTerrainPresentation,
-        }) satisfies WebMercatorTerrainFrame<Presentation>
+            superseded: false,
+        }))
     }
 
     function setPresentation(nextPresentation: Presentation) {
@@ -679,7 +806,11 @@ export async function createWebMercatorTerrainRenderer<
 
         if (state.disposed) return
         state.disposed = true
+        for (const entry of feedbackByDecision.values()) {
+            settleDeferred(entry.settlement, emptyFrameSettlement())
+        }
         pendingFeedback.length = 0
+        feedbackByDecision.clear()
         feedbackRing.dispose()
         renderPatchFrontier.dispose()
         frontier.dispose()
@@ -698,7 +829,7 @@ export async function createWebMercatorTerrainRenderer<
         persistentFacts: () => persistentFactSnapshot(runtime),
         contractFacts: () => graphContractSnapshot(graph),
         virtualRasterFacts: virtualRaster.inspect,
-        state: () => stateSnapshot(state, pendingFeedback.length, feedbackRing),
+        state: () => stateSnapshot(state, feedbackByDecision.size, feedbackRing),
     })
 }
 
@@ -1170,29 +1301,12 @@ function currentReads(resources: readonly ContentResource[]) {
     return resources.map(resource => ({ resource, contentEpoch: 'current-at-step' as const }))
 }
 
-async function publishChangedResidency(graph: WebMercatorTerrainGraph, state: WebMercatorTerrainState) {
-
-    const publication = graph.virtualRaster.publish()
-    if (!publication.changed) return publication
-    const builder = graph.runtime.createSubmission({ validation: 'throw' })
-    for (const upload of publication.update.commands) builder.upload(upload)
-    const submitted = builder.submit()
-    await Promise.all([
-        observeSubmittedWork(submitted),
-        graph.virtualRaster.acknowledge(publication, submitted),
-    ])
-    state.virtualSnapshotEpoch = publication.snapshotEpoch
-    return undefined
-}
-
-async function consumeReadyFeedback(
+async function consumeFeedback(
     graph: WebMercatorTerrainGraph,
-    pending: PendingFeedback[],
+    ready: PendingFeedback,
     state: WebMercatorTerrainState
-): Promise<ConsumedFeedback | undefined> {
+): Promise<ConsumedFeedback> {
 
-    if (pending.length < 2) return undefined
-    const ready = pending.shift()!
     const [ frontierResult, renderPatchResult ] = await Promise.allSettled([
         graph.feedbackRing.feedback(ready.frame, ready.submitted),
         graph.renderPatchFrontier.feedback(ready.frame, ready.submitted),
@@ -1219,6 +1333,59 @@ async function consumeReadyFeedback(
         ...(feedback === undefined ? {} : { feedback }),
         ...(renderPatchFeedback === undefined ? {} : { renderPatchFeedback }),
     })
+}
+
+function feedbackCaptureAvailable(
+    graph: WebMercatorTerrainGraph,
+    frame: GpuTileFrontierFrame
+): boolean {
+
+    return graph.feedbackRing.facts().slots.some(slot => slot.state === 'idle') &&
+        graph.renderPatchFrontier.commandsFor(frame).feedback.state === 'idle'
+}
+
+function emptyFrameSettlement(): WebMercatorTerrainFrameSettlement {
+
+    return Object.freeze({
+        residencySettlement: Promise.resolve(undefined),
+        requestedPageCount: 0,
+        needsFollowUp: false,
+        superseded: false,
+    })
+}
+
+function deferred<Value>(): Deferred<Value> {
+
+    let resolvePromise!: (value: Value) => void
+    let rejectPromise!: (reason: unknown) => void
+    const value: Deferred<Value> = {
+        promise: new Promise<Value>((resolve, reject) => {
+            resolvePromise = resolve
+            rejectPromise = reject
+        }),
+        resolve(result) {
+            if (value.settled) return
+            value.settled = true
+            resolvePromise(result)
+        },
+        reject(reason) {
+            if (value.settled) return
+            value.settled = true
+            rejectPromise(reason)
+        },
+        settled: false,
+    }
+    return value
+}
+
+function settleDeferred<Value>(value: Deferred<Value>, result: Value): void {
+
+    value.resolve(result)
+}
+
+function rejectDeferred<Value>(value: Deferred<Value>, reason: unknown): void {
+
+    value.reject(reason)
 }
 
 function frontierDecisionKey(view: GeoViewSnapshot): string {

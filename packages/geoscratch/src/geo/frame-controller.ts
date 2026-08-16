@@ -7,12 +7,19 @@ export type GeoFrameScheduler = Readonly<{
     cancel(handle: number): void
 }>
 
+/** Work submitted for one Geo frame plus independently observed asynchronous outcomes. */
 export type GeoFrameResult<Value> = Readonly<{
     observation: PromiseLike<unknown>
+    settlement?: PromiseLike<GeoFrameSettlement>
+    needsFollowUp: boolean
+    value: Value
+}>
+
+/** Delayed feedback and residency facts that may request another bounded frame. */
+export type GeoFrameSettlement = Readonly<{
     residencySettlement?: PromiseLike<unknown>
     residencyWorkCount: number
     needsFollowUp: boolean
-    value: Value
 }>
 
 export type GeoFrameControllerFrame<Value> = GeoFrameResult<Value> & Readonly<{
@@ -43,7 +50,10 @@ export type GeoFrameControllerDescriptor<Value> = Readonly<{
 }>
 
 export type GeoFrameController = Readonly<{
+    /** Coalesces an invalidation onto the configured frame scheduler. */
     invalidate(): boolean
+    /** Starts submission from the current host callback after cancelling queued work. */
+    invalidateNow(): boolean
     stop(): boolean
     snapshot(): GeoFrameControllerSnapshot
 }>
@@ -61,7 +71,7 @@ type MutableState = {
     rendering: boolean
 }
 
-/** Coordinates invalidation, asynchronous preparation, rendering, and bounded follow-up frames. */
+/** Coordinates immediate submission, asynchronous observation, and bounded Geo follow-up frames. */
 export function createGeoFrameController<Value>(
     descriptor: GeoFrameControllerDescriptor<Value>
 ): GeoFrameController {
@@ -94,6 +104,23 @@ export function createGeoFrameController<Value>(
         return true
     }
 
+    function invalidateNow(): boolean {
+
+        if (state.state === 'stopped') return false
+        state.invalidationCount++
+        consecutiveFollowUps = 0
+        renderRequested = true
+        if (state.rendering) return true
+        if (scheduledHandle !== undefined) {
+            scheduler.cancel(scheduledHandle)
+            scheduledHandle = undefined
+            state.cancelledFrameCount++
+        }
+        state.scheduledFrameCount++
+        runScheduledFrame()
+        return true
+    }
+
     function requestFrame(): void {
 
         if (state.state === 'stopped') return
@@ -113,12 +140,24 @@ export function createGeoFrameController<Value>(
         const frameNumber = state.submittedFrameCount + 1
         const task = Promise.resolve()
             .then(() => validated.render(frameNumber))
-            .then(result => observeFrame(frameNumber, result))
-            .finally(() => {
-                state.rendering = false
-                if (renderRequested) requestFrame()
-            })
+            .then(
+                result => {
+                    const observation = observeFrame(frameNumber, result)
+                    releaseRenderSlot()
+                    return observation
+                },
+                error => {
+                    releaseRenderSlot()
+                    throw error
+                }
+            )
         observeTracked(task, `geo-frame-${frameNumber}`)
+    }
+
+    function releaseRenderSlot(): void {
+
+        state.rendering = false
+        if (renderRequested) requestFrame()
     }
 
     async function observeFrame(
@@ -134,23 +173,45 @@ export function createGeoFrameController<Value>(
         state.submittedFrameCount++
         validated.onSubmitted?.(frame)
 
-        if (result.residencyWorkCount > 0) {
-            const settlement = Promise.resolve(result.residencySettlement).then(() => {
-                if (state.state === 'stopped') return
-                consecutiveFollowUps = 0
-                requestFrame()
+        if (result.settlement !== undefined) {
+            const settlement = Promise.resolve(result.settlement).then(value => {
+                observeFrameSettlement(frameNumber, value)
             })
-            observeTracked(settlement, `geo-frame-residency-${frameNumber}`)
+            observeTracked(settlement, `geo-frame-settlement-${frameNumber}`)
         }
 
         await result.observation
         state.observedFrameCount++
         validated.onObserved?.(frame)
-        if (result.needsFollowUp && consecutiveFollowUps < maximumFollowUpFrames) {
+        requestConvergenceFollowUp(frameNumber, result.needsFollowUp)
+    }
+
+    function observeFrameSettlement(
+        frameNumber: number,
+        settlement: GeoFrameSettlement
+    ): void {
+
+        assertFrameSettlement(settlement, frameNumber)
+        if (frameNumber !== state.submittedFrameCount) return
+        if (settlement.residencyWorkCount > 0) {
+            const residency = Promise.resolve(settlement.residencySettlement).then(() => {
+                if (state.state === 'stopped') return
+                consecutiveFollowUps = 0
+                requestFrame()
+            })
+            observeTracked(residency, `geo-frame-residency-${frameNumber}`)
+        }
+        requestConvergenceFollowUp(frameNumber, settlement.needsFollowUp)
+    }
+
+    function requestConvergenceFollowUp(frameNumber: number, needed: boolean): void {
+
+        if (frameNumber !== state.submittedFrameCount) return
+        if (needed && consecutiveFollowUps < maximumFollowUpFrames) {
             consecutiveFollowUps++
             state.followUpFrameCount++
             requestFrame()
-        } else if (!result.needsFollowUp) {
+        } else if (!needed) {
             consecutiveFollowUps = 0
         }
     }
@@ -203,7 +264,7 @@ export function createGeoFrameController<Value>(
         return Object.freeze({ ...state })
     }
 
-    return Object.freeze({ invalidate, stop, snapshot })
+    return Object.freeze({ invalidate, invalidateNow, stop, snapshot })
 }
 
 function trackWork<Value, Result>(
@@ -283,10 +344,9 @@ function assertFrameResult<Value>(
 
     if (result === null || typeof result !== 'object' ||
         typeof result.observation?.then !== 'function' ||
-        !Number.isSafeInteger(result.residencyWorkCount) || result.residencyWorkCount < 0 ||
         typeof result.needsFollowUp !== 'boolean' ||
-        (result.residencyWorkCount > 0 &&
-            typeof result.residencySettlement?.then !== 'function')) {
+        (result.settlement !== undefined &&
+            typeof result.settlement?.then !== 'function')) {
         return throwGeoDiagnostic({
             code: 'GEO_FRAME_RESULT_INVALID',
             phase: 'selection',
@@ -294,11 +354,36 @@ function assertFrameResult<Value>(
             message: 'A Geo frame result requires observable work and explicit follow-up facts.',
             expected: {
                 observation: 'PromiseLike',
+                settlement: 'optional PromiseLike<GeoFrameSettlement>',
+                needsFollowUp: 'boolean',
+            },
+            actual: result,
+        })
+    }
+}
+
+function assertFrameSettlement(
+    settlement: GeoFrameSettlement,
+    frameNumber: number
+): void {
+
+    if (settlement === null || typeof settlement !== 'object' ||
+        !Number.isSafeInteger(settlement.residencyWorkCount) ||
+        settlement.residencyWorkCount < 0 ||
+        typeof settlement.needsFollowUp !== 'boolean' ||
+        (settlement.residencyWorkCount > 0 &&
+            typeof settlement.residencySettlement?.then !== 'function')) {
+        return throwGeoDiagnostic({
+            code: 'GEO_FRAME_SETTLEMENT_INVALID',
+            phase: 'selection',
+            subject: { kind: 'geo-frame-controller', frameNumber },
+            message: 'A Geo frame settlement requires explicit bounded residency and follow-up facts.',
+            expected: {
                 residencyWorkCount: 'non-negative safe integer',
                 residencySettlement: 'PromiseLike when residencyWorkCount is positive',
                 needsFollowUp: 'boolean',
             },
-            actual: result,
+            actual: settlement,
         })
     }
 }

@@ -1365,6 +1365,110 @@ describe('Geo GPU tile frontier contracts and reference oracle', () => {
         fixture.runtime.dispose()
     })
 
+    it('accepts a staged residency epoch only after its update is encoded in the same submission', async() => {
+
+        const fixture = await createGpuResourceGraphFixture({ maximumMatrixLevel: 1 })
+        const frontier = await GpuTileFrontier.create(fixture.runtime, fixture.descriptor)
+        const seed = frontier.stageSeed(fixture.publication.snapshot)
+        const child = fixture.gpuState.addressSpace.pageFromTile({
+            matrixId: '1',
+            tileRow: 0,
+            tileCol: 0,
+        })
+        const [ width, height ] = fixture.gpuState.addressSpace.pageSize
+        fixture.residency.stage(ownedVirtualRasterPagePayload({
+            page: child,
+            width,
+            height,
+            channels: 1,
+            data: new Uint8Array(width * height),
+            contentVersion: 'frontier-staged-child-v1',
+        }), { generation: 1 })
+        const publication = fixture.residency.publish()
+        const update = fixture.gpuState.stage(publication)
+        const view = frontier.writeView({
+            ...fixture.view,
+            frameEpoch: 1,
+            residencySnapshotEpoch: publication.snapshot.epoch,
+        })
+        const frame = frontier.frame(view)
+        const builder = appendSeed(
+            fixture.runtime.createSubmission({ validation: 'throw' }),
+            seed
+        )
+
+        expect(fixture.gpuState.encode(builder, update)).to.equal(builder)
+        const submitted = frontier.encode(builder, frame).submit()
+        await fixture.gpuState.acknowledge(publication, submitted)
+
+        expect(fixture.gpuState.facts()).to.deep.include({
+            snapshotEpoch: publication.snapshot.epoch,
+        })
+        view.dispose()
+        frontier.dispose()
+        fixture.gpuState.dispose()
+        fixture.residency.dispose()
+        fixture.runtime.dispose()
+    })
+
+    it('accepts later ordered frames while an encoded residency update awaits acknowledgement', async() => {
+
+        const fixture = await createGpuResourceGraphFixture({ maximumMatrixLevel: 1 })
+        const frontier = await GpuTileFrontier.create(fixture.runtime, fixture.descriptor)
+        const seed = frontier.stageSeed(fixture.publication.snapshot)
+        const child = fixture.gpuState.addressSpace.pageFromTile({
+            matrixId: '1',
+            tileRow: 0,
+            tileCol: 0,
+        })
+        const [ width, height ] = fixture.gpuState.addressSpace.pageSize
+        fixture.residency.stage(ownedVirtualRasterPagePayload({
+            page: child,
+            width,
+            height,
+            channels: 1,
+            data: new Uint8Array(width * height),
+            contentVersion: 'frontier-in-flight-child-v1',
+        }), { generation: 1 })
+        const publication = fixture.residency.publish()
+        const update = fixture.gpuState.stage(publication)
+        const firstView = frontier.writeView({
+            ...fixture.view,
+            frameEpoch: 1,
+            residencySnapshotEpoch: publication.snapshot.epoch,
+        })
+        const firstFrame = frontier.frame(firstView)
+        const firstBuilder = appendSeed(
+            fixture.runtime.createSubmission({ validation: 'throw' }),
+            seed
+        )
+        fixture.gpuState.encode(firstBuilder, update)
+        const firstSubmitted = frontier.encode(firstBuilder, firstFrame).submit()
+        const acknowledgment = fixture.gpuState.acknowledge(publication, firstSubmitted)
+
+        const secondView = frontier.writeView({
+            ...fixture.view,
+            frameEpoch: 2,
+            residencySnapshotEpoch: publication.snapshot.epoch,
+        })
+        const secondFrame = frontier.frame(secondView)
+        const secondBuilder = fixture.runtime.createSubmission({ validation: 'throw' })
+
+        expect(() => frontier.encode(secondBuilder, secondFrame)).not.to.throw()
+        const secondSubmitted = secondBuilder.submit()
+        await Promise.all([ acknowledgment, secondSubmitted.nativeOutcome ])
+
+        expect(fixture.gpuState.facts()).to.deep.include({
+            snapshotEpoch: publication.snapshot.epoch,
+        })
+        secondView.dispose()
+        firstView.dispose()
+        frontier.dispose()
+        fixture.gpuState.dispose()
+        fixture.residency.dispose()
+        fixture.runtime.dispose()
+    })
+
     it('rejects wrong runtime, stale snapshot, forged frame, unknown template, and disposed use', async() => {
 
         const fixture = await createGpuResourceGraphFixture()

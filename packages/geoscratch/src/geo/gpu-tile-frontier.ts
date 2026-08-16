@@ -41,6 +41,8 @@ import {
 } from './gpu-tile-frontier-wgsl.js'
 import {
     VirtualRasterGpuState,
+    virtualRasterGpuEncodedSnapshotEpoch,
+    virtualRasterGpuSubmittedSnapshotEpoch,
     virtualRasterResidencySubmissionStamp,
 } from './virtual-raster-gpu.js'
 import {
@@ -540,15 +542,20 @@ export class GpuTileFrontier {
         this.#assertActive()
         const record = viewTokenRecords.get(viewToken)
         const authority = this.descriptor.gpuState.facts()
+        const currentResidencyEpoch = viewToken?.residencySnapshotEpoch === authority.snapshotEpoch ||
+            viewToken?.residencySnapshotEpoch === authority.stagedSnapshotEpoch
         if (record?.owner !== this || record.disposed || record.command.isDisposed ||
             viewToken.frontierId !== this.id ||
-            viewToken.residencySnapshotEpoch !== authority.snapshotEpoch ||
+            !currentResidencyEpoch ||
             record.acknowledgementSerial !== authority.acknowledgementSerial ||
             record.viewStamp.revision !== this.#viewAuthority.revision ||
             record.sequenceStamp.revision !== this.#frontierSequenceAuthority.revision) {
             return invalidFrontier(this, 'GPU tile frontier frame requires a live owned view from current residency authority.', {
                 frontierId: this.id,
-                residencySnapshotEpoch: authority.snapshotEpoch,
+                residencySnapshotEpochs: [
+                    authority.snapshotEpoch,
+                    authority.stagedSnapshotEpoch,
+                ].filter(value => value !== undefined),
                 acknowledgementSerial: authority.acknowledgementSerial,
             }, {
                 frontierId: viewToken?.frontierId,
@@ -588,10 +595,26 @@ export class GpuTileFrontier {
         this.#assertActive()
         const record = frameRecords.get(frame)
         const authority = this.descriptor.gpuState.facts()
+        const encodedResidencyEpoch = virtualRasterGpuEncodedSnapshotEpoch(
+            this.descriptor.gpuState,
+            builder
+        )
+        const submittedResidencyEpoch = virtualRasterGpuSubmittedSnapshotEpoch(
+            this.descriptor.gpuState
+        )
+        const acknowledgedResidencyMatches =
+            record?.residencySnapshotEpoch === authority.snapshotEpoch &&
+            (encodedResidencyEpoch === undefined ||
+                encodedResidencyEpoch === record.residencySnapshotEpoch)
+        const stagedResidencyMatches =
+            record?.residencySnapshotEpoch === authority.stagedSnapshotEpoch &&
+            (encodedResidencyEpoch === authority.stagedSnapshotEpoch ||
+                submittedResidencyEpoch === authority.stagedSnapshotEpoch)
         if (builder?.runtime !== this.runtime || builder.isSubmitted ||
             encodedBuilderRecords.has(builder) || record?.owner !== this ||
             frame.frontierId !== this.id || record.view.disposed ||
             record.view.command.isDisposed ||
+            (!acknowledgedResidencyMatches && !stagedResidencyMatches) ||
             record.view.acknowledgementSerial !== authority.acknowledgementSerial ||
             record.view.viewStamp.revision !== this.#viewAuthority.revision ||
             record.view.sequenceStamp.revision !== this.#frontierSequenceAuthority.revision) {
@@ -599,12 +622,17 @@ export class GpuTileFrontier {
                 frontierId: this.id,
                 runtimeId: this.runtime.id,
                 acknowledgementSerial: authority.acknowledgementSerial,
+                residencySnapshotEpoch: record?.residencySnapshotEpoch,
                 viewRevision: this.#viewAuthority.revision,
                 sequenceRevision: this.#frontierSequenceAuthority.revision,
             }, {
                 frontierId: frame?.frontierId,
                 runtimeId: builder?.runtime?.id,
                 acknowledgementSerial: record?.view.acknowledgementSerial,
+                acknowledgedSnapshotEpoch: authority.snapshotEpoch,
+                stagedSnapshotEpoch: authority.stagedSnapshotEpoch,
+                encodedResidencyEpoch,
+                submittedResidencyEpoch,
                 viewRevision: record?.view.viewStamp.revision,
                 sequenceRevision: record?.view.sequenceStamp.revision,
                 disposed: record?.view.disposed ?? record?.view.command.isDisposed,
@@ -1673,7 +1701,9 @@ function validateView(frontier: GpuTileFrontier, view: GpuTileFrontierView): voi
     const matrix = view?.clipFromRelativeWorld
     const finite = (values: ArrayLike<number>): boolean =>
         Array.from(values).every(value => Number.isFinite(value))
-    const acknowledgedEpoch = frontier.descriptor.gpuState.facts().snapshotEpoch
+    const residency = frontier.descriptor.gpuState.facts()
+    const residencyEpochMatches = view?.residencySnapshotEpoch === residency.snapshotEpoch ||
+        view?.residencySnapshotEpoch === residency.stagedSnapshotEpoch
     if (typeof view !== 'object' || view === null ||
         view.kind !== 'geo-view-snapshot' ||
         typeof view.id !== 'string' || view.id.length === 0 ||
@@ -1690,13 +1720,16 @@ function validateView(frontier: GpuTileFrontier, view: GpuTileFrontierView): voi
         view.cameraPitchRadians < 0 || view.cameraPitchRadians > Math.PI / 2 ||
         !Number.isFinite(view.zoomHint) ||
         !u32(view.frameEpoch) || !u32(view.residencySnapshotEpoch) ||
-        view.residencySnapshotEpoch !== acknowledgedEpoch) {
+        !residencyEpochMatches) {
         return invalidFrontier(frontier, 'GPU tile frontier view facts are invalid or stale.', {
             matrixLength: 16,
             cameraTupleLength: 3,
             viewport: 'positive finite pair',
             frameEpoch: 'u32',
-            residencySnapshotEpoch: acknowledgedEpoch,
+            residencySnapshotEpochs: [
+                residency.snapshotEpoch,
+                residency.stagedSnapshotEpoch,
+            ].filter(value => value !== undefined),
         }, view)
     }
 }

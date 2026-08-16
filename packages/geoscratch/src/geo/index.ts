@@ -42,6 +42,7 @@ export type {
     GeoFrameControllerState,
     GeoFrameResult,
     GeoFrameScheduler,
+    GeoFrameSettlement,
 } from './frame-controller.js'
 export { mapLibrePlanarViewAdapter } from './maplibre-planar-view.js'
 export type {
@@ -155,6 +156,7 @@ export { createWebMercatorTerrainRenderer } from './web-mercator-terrain-rendere
 export type {
     WebMercatorTerrainContractFacts,
     WebMercatorTerrainFrame,
+    WebMercatorTerrainFrameSettlement,
     WebMercatorTerrainIdentityFacts,
     WebMercatorTerrainInitialization,
     WebMercatorTerrainPersistentFacts,

@@ -82,7 +82,7 @@ try {
     fatalError = serializeError(error)
 } finally {
     await cleanup('Chrome', async() => {
-        if (browser !== undefined) await withTimeout(browser.close(), 15_000, 'Chrome shutdown')
+        if (browser !== undefined) await closeBrowser(browser)
     })
     await cleanup('Vite', async() => {
         if (vite !== undefined) await stopProcess(vite, 'Vite')
@@ -194,6 +194,15 @@ async function runWireframeProof(activeBrowser) {
             previous = converged
         }
 
+        const cameraTracking = await runCameraTrackingProof(page, topDownCamera)
+        const tracked = await waitForStableMode(
+            page,
+            'tile-wireframe',
+            previous.observedFrames,
+            cameraTracking.finalCamera
+        )
+        previous = tracked
+
         const motionStability = []
         const pitchedCamera = Object.freeze({ ...camera, pitch: 80 })
         for (const zoom of [ 10.02, 10.04, 10.06, 13.66, 13.70, 13.84 ]) {
@@ -265,6 +274,7 @@ async function runWireframeProof(activeBrowser) {
             baseline: Object.freeze({ ...baseline, capture: shadedCapture }),
             wireframe: Object.freeze({ ...wireframe, capture: wireframeCapture }),
             canonicalTopDown: Object.freeze(canonicalTopDown),
+            cameraTracking,
             motionStability: Object.freeze(motionStability),
             pitchBudgetPriority: Object.freeze(pitchBudgetPriority),
             refinement: Object.freeze(refinement),
@@ -274,6 +284,72 @@ async function runWireframeProof(activeBrowser) {
     } finally {
         await context.close()
     }
+}
+
+async function runCameraTrackingProof(page, baseCamera) {
+
+    return await page.evaluate(async({ baseCamera, frameCount, longitudeStep }) => {
+        const proof = window.__UNDERWATER_TERRAIN_PROOF__
+        const canvas = document.querySelector('#GPUFrame')
+        if (proof === undefined || !(canvas instanceof HTMLCanvasElement)) {
+            throw new Error('Underwater Terrain tracking proof is unavailable')
+        }
+        const parseCamera = () => {
+            try { return JSON.parse(canvas.dataset.cameraView ?? 'null') } catch { return null }
+        }
+        const samples = []
+        let issuedIndex = -1
+        await new Promise(resolve => {
+            const tick = () => {
+                if (issuedIndex >= 0) {
+                    const submitted = parseCamera()
+                    const submittedIndex = submitted === null
+                        ? -1
+                        : Math.round(
+                            (submitted.center[0] - baseCamera.center[0]) / longitudeStep
+                        )
+                    samples.push({
+                        issuedIndex,
+                        submittedIndex,
+                        submissionLagFrames: issuedIndex - submittedIndex,
+                    })
+                }
+                if (issuedIndex + 1 >= frameCount) {
+                    resolve(undefined)
+                    return
+                }
+                issuedIndex++
+                proof.moveCamera({
+                    ...baseCamera,
+                    center: [
+                        baseCamera.center[0] + longitudeStep * issuedIndex,
+                        baseCamera.center[1],
+                    ],
+                })
+                requestAnimationFrame(tick)
+            }
+            requestAnimationFrame(tick)
+        })
+        const finalCamera = {
+            ...baseCamera,
+            center: [
+                baseCamera.center[0] + longitudeStep * (frameCount - 1),
+                baseCamera.center[1],
+            ],
+        }
+        return {
+            frameCount,
+            maximumSubmissionLagFrames: Math.max(
+                ...samples.map(sample => sample.submissionLagFrames)
+            ),
+            samples,
+            finalCamera,
+        }
+    }, {
+        baseCamera,
+        frameCount: 90,
+        longitudeStep: 0.00002,
+    })
 }
 
 async function runZoomMonotonicityProof(activeBrowser) {
@@ -482,10 +558,23 @@ async function inspectWireframePixels(page, png) {
         const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data
         const clusters = new Map()
         const coloredMask = new Uint8Array(canvas.width * canvas.height)
+        const quadrants = [
+            { name: 'north-west', coloredPixels: 0, totalPixels: 0 },
+            { name: 'north-east', coloredPixels: 0, totalPixels: 0 },
+            { name: 'south-west', coloredPixels: 0, totalPixels: 0 },
+            { name: 'south-east', coloredPixels: 0, totalPixels: 0 },
+        ]
         let coloredPixels = 0
         let nonDarkPixels = 0
         let transparentPixels = 0
         for (let index = 0; index < pixels.length; index += 4) {
+            const pixelIndex = index / 4
+            const x = pixelIndex % canvas.width
+            const y = Math.floor(pixelIndex / canvas.width)
+            const quadrant = quadrants[
+                (y >= canvas.height / 2 ? 2 : 0) + (x >= canvas.width / 2 ? 1 : 0)
+            ]
+            quadrant.totalPixels++
             const red = pixels[index]
             const green = pixels[index + 1]
             const blue = pixels[index + 2]
@@ -496,7 +585,8 @@ async function inspectWireframePixels(page, png) {
             if (alpha === 0) transparentPixels++
             if (maximum < 80 || maximum - minimum < 20) continue
             coloredPixels++
-            coloredMask[index / 4] = 1
+            quadrant.coloredPixels++
+            coloredMask[pixelIndex] = 1
             const scale = 5 / maximum
             const key = [ red, green, blue ]
                 .map(channel => Math.round(channel * scale))
@@ -536,6 +626,10 @@ async function inspectWireframePixels(page, png) {
             colorTransitionRatio: colorTransitions / comparableEdges,
             colorClusterCount: retainedClusters.length,
             leadingColorClusters: retainedClusters.slice(0, 12),
+            quadrants: quadrants.map(quadrant => ({
+                ...quadrant,
+                coloredRatio: quadrant.coloredPixels / quadrant.totalPixels,
+            })),
         }
     }, png.toString('base64'))
 }
@@ -548,6 +642,7 @@ function validateProof(value, processState) {
         baseline,
         wireframe,
         canonicalTopDown,
+        cameraTracking,
         motionStability,
         pitchBudgetPriority,
         refinement,
@@ -600,6 +695,34 @@ function validateProof(value, processState) {
         canonicalSignatures
     )}`)
 
+    const canonicalDensitySpreads = canonicalCuts.map(sample => {
+        const ratios = sample?.capture?.pixels?.quadrants?.map(
+            quadrant => quadrant.coloredRatio
+        ) ?? []
+        return ratios.length === 4
+            ? Math.max(...ratios) / Math.min(...ratios)
+            : Number.POSITIVE_INFINITY
+    })
+    expect(failures,
+        canonicalDensitySpreads.length === 2 &&
+        canonicalDensitySpreads.every(spread => spread <= 1.25),
+    `settled top-down render-patch density was directionally biased: ${JSON.stringify(
+        canonicalCuts.map((sample, index) => ({
+            spread: canonicalDensitySpreads[index],
+            quadrants: sample?.capture?.pixels?.quadrants,
+            feedback: sample?.renderPatchFeedback,
+        }))
+    )}`)
+
+    expect(failures,
+        cameraTracking?.frameCount === 90 &&
+        cameraTracking.samples?.length === 90 &&
+        cameraTracking.maximumSubmissionLagFrames <= 1,
+    `WebGPU camera submissions lagged the map during continuous drag: ${JSON.stringify({
+        maximumSubmissionLagFrames: cameraTracking?.maximumSubmissionLagFrames,
+        samples: cameraTracking?.samples,
+    })}`)
+
     const zoomSamples = zoomMonotonicity?.samples ?? []
     const zoomRegressions = zoomSamples.slice(1).flatMap((sample, index) => {
         const previous = zoomSamples[index]
@@ -645,7 +768,7 @@ function validateProof(value, processState) {
     const requestedDataLevels = value.events?.tileRequestLevels ?? []
     expect(failures,
         baseline.graphContract?.renderPatches?.selectionPath ===
-            'gpu-balanced-priority-filled-render-root-local-cell-projection' &&
+            'gpu-balanced-error-cohort-filled-render-root-local-cell-projection' &&
         baseline.graphContract.renderPatches.maximumCellSpanPixels === 8 &&
         baseline.graphContract.renderPatches.nominalPatchSpanPixels === 512 &&
         !Object.hasOwn(
@@ -671,6 +794,8 @@ function validateProof(value, processState) {
         baseline,
         wireframe,
         ...canonicalCuts,
+        ...(motionStability ?? []),
+        ...(pitchBudgetPriority ?? []),
         ...zoomSamples,
         ...(refinement ?? []),
         restored,
@@ -808,7 +933,7 @@ function validateProof(value, processState) {
             sample.renderPatchFeedback.basePatchCount <
                 sample.renderPatchFeedback.unbalancedPatchCount
         )),
-    'no camera exercised priority filling between the uniform base cut and balance')
+    'no camera exercised complete error-cohort filling between the uniform base cut and balance')
 
     expect(failures,
         wireframe?.renderPatchFeedback?.unbalancedPatchCount <=
@@ -1106,6 +1231,19 @@ async function withTimeout(promise, milliseconds, label) {
         ])
     } finally {
         clearTimeout(timer)
+    }
+}
+
+async function closeBrowser(activeBrowser) {
+
+    const closing = activeBrowser.close()
+    try {
+        await withTimeout(closing, 15_000, 'Chrome shutdown')
+    } catch (error) {
+        if (!activeBrowser.isConnected()) return
+        await delay(2_000)
+        if (!activeBrowser.isConnected()) return
+        throw error
     }
 }
 
