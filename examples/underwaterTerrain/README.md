@@ -10,7 +10,9 @@ virtual-raster atlas. Start the local tile service as documented in
 [`tile-server/README.md`](./tile-server/README.md), then run `npm run dev` from the
 repository root.
 
-The WebGPU overlay permits one native frame in flight. A no-draw MapLibre custom-layer driver
+The WebGPU overlay permits two native frames in flight. This bounded double-flight policy keeps
+120 Hz camera tracking from collapsing to half-rate while latest-only pending capture prevents
+an unbounded stale queue. A no-draw MapLibre custom-layer driver
 captures a `mapLibrePlanarViewSource`, and the terrain renderer consumes that capture directly
 inside the matching host frame. Size changes, frame settlement, and residency work remain inside
 the public Geo contracts rather than being translated by the example.

@@ -239,6 +239,7 @@ describe('Underwater Terrain clean cut', () => {
             'mapLibreFrameDriver({',
             'createGeoFrameController({',
         ]) expect(applicationSource).to.include(required)
+        expect(applicationSource).to.include('maximumInFlightFrames: 2')
         expect(applicationSource).not.to.match(/URLSearchParams|localStorage|tweakpane|Pane/)
         expect(`${mainSource}\n${applicationSource}`).not.to.include(
             "window.addEventListener('resize'"

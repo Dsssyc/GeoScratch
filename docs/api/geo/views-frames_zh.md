@@ -2,7 +2,7 @@
 docId: geo.views-frames.zh
 canonical: false
 translationOf: ./views-frames.md
-canonicalDigest: 8ca5e274e7d89425e644d65c35c724c52a75cd53acc3c000d583f0651bdc128b
+canonicalDigest: d5c476a923eecbfcad74584d53d0dcbc2607248c381093ec3c203e3bf68c84d5
 ---
 # 视图与帧控制
 
@@ -92,9 +92,11 @@ observation 的 submission。默认值为 3，合法范围为 1 到 8。达到�
 可以请求有界 convergence 或 residency follow-up，因此过期异步结果不能重新激活旧 decision。
 `snapshot()` 会暴露 scheduling、in-flight、capture revision 与 observation counter。
 
-该 budget 是由应用选择的 latency-throughput 权衡。与 camera 锁定的 overlay 通常应选择
-一个 in-flight frame。独立 rendering 或 compute workload 可在吞吐量比 newest-state
-latency 更重要时使用更大的有界值。
+该 budget 是由应用选择的 latency-throughput 权衡。一个 in-flight frame 是最保守的
+camera-overlay policy；但当 native observation 跨越一个以上 display interval 时，它可能把
+120 Hz host 压成半帧率。经过测量的高刷新率 overlay 可以选择两个 slot：pending
+invalidation 仍保持 latest-only，第二个 slot 则避免普通 native observation latency 抑制下一
+host frame。更大的值必须另行证明，因为已经提交的 frame 无法取消。
 
 ## MapLibre Frame Driver
 

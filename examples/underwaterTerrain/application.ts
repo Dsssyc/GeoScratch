@@ -185,7 +185,7 @@ export async function startUnderwaterTerrainApplication(
     })
     const frameController = createGeoFrameController({
         track: (work, label) => lifetime.track(work, label),
-        maximumInFlightFrames: 1,
+        maximumInFlightFrames: 2,
         driver: mapLibreFrameDriver({
             id: 'underwater-terrain-maplibre-frames',
             map,

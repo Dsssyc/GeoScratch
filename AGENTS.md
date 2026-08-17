@@ -35,6 +35,10 @@ application-owned MapLibre `move`/`render` revision state, renderer host-mode fl
 frame controller, public terrain `renderFrame`/`resize` paths, or settlement field translation.
 A driver synchronizes frame admission but never claims shared WebGL/WebGPU
 context, depth, render-pass, or presentation ownership.
+Treat `maximumInFlightFrames` as measured application policy. Underwater Terrain uses two because
+its 120 Hz proof shows one slot suppresses half of host-frame submissions; do not increase the
+bound or restore single-flight without rerunning camera-transition, stale-state, lag, and cleanup
+proofs.
 
 ## Build, Test, and Development Commands
 

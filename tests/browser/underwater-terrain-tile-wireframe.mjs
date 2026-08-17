@@ -749,7 +749,7 @@ function validateProof(value, processState) {
     expect(failures,
         cameraTracking?.frameCount === 90 &&
         cameraTracking.samples?.length === 90 &&
-        cameraTracking.submissionTransitionCount > 1 &&
+        cameraTracking.submissionTransitionCount >= 70 &&
         cameraTracking.staleSubmissionTransitionCount === 0,
     `camera submission replayed an intermediate invalidated state: ${JSON.stringify({
         maximumSubmissionLagFrames: cameraTracking?.maximumSubmissionLagFrames,
@@ -777,8 +777,9 @@ function validateProof(value, processState) {
     })}`)
 
     expect(failures,
-        cameraTracking?.maximumInFlightFrames === 1,
-    `continuous camera tracking did not preserve single-flight native observation: ${JSON.stringify({
+        cameraTracking?.maximumInFlightFrames > 0 &&
+        cameraTracking.maximumInFlightFrames <= 2,
+    `continuous camera tracking exceeded double-flight native observation: ${JSON.stringify({
         maximumInFlightFrames: cameraTracking?.maximumInFlightFrames,
     })}`)
 

@@ -102,9 +102,12 @@ latest submitted frame may request bounded convergence or residency follow-ups, 
 results cannot revive an obsolete decision. `snapshot()` exposes scheduling, in-flight,
 capture-revision, and observation counters.
 
-The budget is an application latency-throughput choice. Camera-locked overlays should normally
-select one in-flight frame. Independent rendering or compute workloads may use a larger bounded
-value when throughput matters more than newest-state latency.
+The budget is an application latency-throughput choice. One in-flight frame is the most
+conservative camera-overlay policy, but it can reduce a 120 Hz host to half-rate when native
+observation spans more than one display interval. A measured high-refresh overlay may select
+two: pending invalidations remain latest-only, while the second slot prevents ordinary native
+observation latency from suppressing the next host frame. Larger values require separate proof
+because already-submitted frames cannot be cancelled.
 
 ## MapLibre Frame Driver
 
