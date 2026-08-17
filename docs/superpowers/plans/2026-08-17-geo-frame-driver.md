@@ -98,14 +98,14 @@ git commit -m "Add Geo frame driver contract"
 - Produces: `mapLibreFrameDriver<Capture>(descriptor): MapLibreFrameDriver<Capture>`.
 - Produces: structural `MapLibreFrameMap`, descriptor, layer, and driver types.
 
-- [ ] **Step 1: Write failing MapLibre driver tests**
+- [x] **Step 1: Write failing MapLibre driver tests**
 
 Use a fake structural map to prove initial attachment, `triggerRepaint()` scheduling,
 callback execution inside custom-layer `render`, one capture per host revision, `move` and
 `resize` invalidation, style-load reattachment, duplicate-id diagnostics, queued callback
 cancellation, and idempotent stop.
 
-- [ ] **Step 2: Run the focused test and confirm RED**
+- [x] **Step 2: Run the focused test and confirm RED**
 
 Run:
 
@@ -115,7 +115,7 @@ npm --workspace geoscratch run build && npx mocha tests/maplibre-frame-driver.te
 
 Expected: module/export resolution fails because the driver does not exist.
 
-- [ ] **Step 3: Implement the structural driver**
+- [x] **Step 3: Implement the structural driver**
 
 The factory captures descriptor functions once, installs this no-draw layer shape, and
 does not inspect callback arguments:
@@ -135,7 +135,7 @@ The scheduler stores bounded callbacks by numeric handle and requests a host rep
 Host `move`/`resize` events advance a monotonic revision, clear the cached capture, and call
 the controller invalidator supplied to `start()`.
 
-- [ ] **Step 4: Export, typecheck, and run GREEN**
+- [x] **Step 4: Export, typecheck, and run GREEN**
 
 Run:
 
@@ -146,7 +146,7 @@ npm run typecheck
 
 Expected: driver/controller tests and public type coverage pass.
 
-- [ ] **Step 5: Commit the MapLibre driver slice**
+- [x] **Step 5: Commit the MapLibre driver slice**
 
 ```bash
 git add packages/geoscratch/src/geo/maplibre-frame-driver.ts packages/geoscratch/src/geo/index.ts tests/maplibre-frame-driver.test.js tests/types/public-api.ts

@@ -58,6 +58,13 @@ export type {
     MapLibrePlanarViewAdapterDescriptor,
     MapLibrePlanarViewport,
 } from './maplibre-planar-view.js'
+export { mapLibreFrameDriver } from './maplibre-frame-driver.js'
+export type {
+    MapLibreFrameDriver,
+    MapLibreFrameDriverDescriptor,
+    MapLibreFrameLayer,
+    MapLibreFrameMap,
+} from './maplibre-frame-driver.js'
 export type {
     GeoViewAdapter,
     GeoViewAdapterDescriptor,

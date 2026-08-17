@@ -501,6 +501,13 @@ const typedDrivenGeoFrameController: geoApi.GeoFrameController =
             value: frameNumber + capture.zoom,
         }),
     })
+declare const typedMapLibreFrameMap: geoApi.MapLibreFrameMap
+const typedMapLibreFrameDriver: geoApi.MapLibreFrameDriver<Readonly<{ zoom: number }>> =
+    geoApi.mapLibreFrameDriver({
+        id: 'typed-maplibre-frame-driver',
+        map: typedMapLibreFrameMap,
+        capture: () => Object.freeze({ zoom: 8 }),
+    })
 const typedGeoFrameSnapshot: geoApi.GeoFrameControllerSnapshot =
     typedGeoFrameController.snapshot()
 const typedInFlightFrameCount: number = typedGeoFrameSnapshot.inFlightFrameCount
@@ -526,6 +533,7 @@ void typedLatestCaptureRevision
 void typedImmediateInvalidation
 void typedTerrainSettlement
 void typedDrivenGeoFrameController
+void typedMapLibreFrameDriver
 declare const typedFrontierGpuState: VirtualRasterGpuState
 const typedFrontierPolicy: GpuTileFrontierPolicy = gpuTileFrontierPolicy({
     refineErrorPixels: 2,
