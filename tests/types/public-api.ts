@@ -466,6 +466,17 @@ const typedGeoFrameCapture: geoApi.GeoFrameCapture<Readonly<{ zoom: number }>> =
     revision: 1,
     snapshot: Object.freeze({ zoom: 8 }),
 }
+const typedGeoFrameDriver: geoApi.GeoFrameDriver<Readonly<{ zoom: number }>> = {
+    kind: 'geo-frame-driver',
+    id: 'typed-frame-driver',
+    scheduler: {
+        request: callback => globalThis.setTimeout(callback, 0) as unknown as number,
+        cancel: handle => globalThis.clearTimeout(handle),
+    },
+    capture: () => typedGeoFrameCapture,
+    start() {},
+    stop: () => true,
+}
 const typedGeoFrameController: geoApi.GeoFrameController =
     geoApi.createGeoFrameController({
         maximumInFlightFrames: 3,
@@ -480,6 +491,15 @@ const typedGeoFrameController: geoApi.GeoFrameController =
             const value: number = frame.value
             void value
         },
+    })
+const typedDrivenGeoFrameController: geoApi.GeoFrameController =
+    geoApi.createGeoFrameController({
+        driver: typedGeoFrameDriver,
+        render: async(frameNumber, capture) => ({
+            observation: Promise.resolve(),
+            needsFollowUp: false,
+            value: frameNumber + capture.zoom,
+        }),
     })
 const typedGeoFrameSnapshot: geoApi.GeoFrameControllerSnapshot =
     typedGeoFrameController.snapshot()
@@ -505,6 +525,7 @@ void typedDeduplicatedInvalidationCount
 void typedLatestCaptureRevision
 void typedImmediateInvalidation
 void typedTerrainSettlement
+void typedDrivenGeoFrameController
 declare const typedFrontierGpuState: VirtualRasterGpuState
 const typedFrontierPolicy: GpuTileFrontierPolicy = gpuTileFrontierPolicy({
     refineErrorPixels: 2,

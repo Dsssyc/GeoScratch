@@ -3,6 +3,104 @@ import { createGeoFrameController } from 'geoscratch/geo'
 
 describe('Geo frame controller', () => {
 
+    it('invokes frame construction synchronously when the scheduler admits work', async() => {
+
+        const scheduler = fakeFrameScheduler()
+        const events = []
+        const controller = createGeoFrameController({
+            scheduler,
+            render() {
+                events.push('render')
+                return Promise.resolve({
+                    observation: Promise.resolve(),
+                    needsFollowUp: false,
+                    value: undefined,
+                })
+            },
+        })
+
+        controller.invalidate()
+        const completion = scheduler.runNext()
+        events.push('scheduler-returned')
+
+        expect(events).to.deep.equal([ 'render', 'scheduler-returned' ])
+        await completion
+    })
+
+    it('owns one configured frame driver lifecycle', async() => {
+
+        const scheduler = fakeFrameScheduler()
+        const lifecycle = []
+        let invalidate
+        const driver = {
+            kind: 'geo-frame-driver',
+            id: 'test-driver',
+            scheduler,
+            capture: () => ({
+                revision: 0,
+                snapshot: Object.freeze({ zoom: 8 }),
+            }),
+            start(callback) {
+                lifecycle.push('start')
+                invalidate = callback
+            },
+            stop() {
+                lifecycle.push('stop')
+                return true
+            },
+        }
+        const submitted = []
+        const controller = createGeoFrameController({
+            driver,
+            render(_frameNumber, capture) {
+                submitted.push(capture.zoom)
+                return Promise.resolve({
+                    observation: Promise.resolve(),
+                    needsFollowUp: false,
+                    value: capture.zoom,
+                })
+            },
+        })
+
+        expect(lifecycle).to.deep.equal([ 'start' ])
+        expect(invalidate()).to.equal(true)
+        await scheduler.runNext()
+        expect(submitted).to.deep.equal([ 8 ])
+        expect(controller.stop()).to.equal(true)
+        expect(controller.stop()).to.equal(false)
+        expect(lifecycle).to.deep.equal([ 'start', 'stop' ])
+    })
+
+    it('rejects competing driver and descriptor-level frame authorities', () => {
+
+        const scheduler = fakeFrameScheduler()
+        const driver = {
+            kind: 'geo-frame-driver',
+            id: 'test-driver',
+            scheduler,
+            capture: () => ({ revision: 0, snapshot: undefined }),
+            start() {},
+            stop: () => true,
+        }
+        for (const competingAuthority of [
+            { capture: driver.capture },
+            { scheduler },
+        ]) {
+            expect(() => createGeoFrameController({
+                driver,
+                ...competingAuthority,
+                render: async() => ({
+                    observation: Promise.resolve(),
+                    needsFollowUp: false,
+                    value: undefined,
+                }),
+            })).to.throw().with.nested.property(
+                'diagnostic.code',
+                'GEO_FRAME_CONTROLLER_INVALID'
+            )
+        }
+    })
+
     it('bounds native frames in flight and coalesces invalidation onto the newest state', async() => {
 
         const scheduler = fakeFrameScheduler()

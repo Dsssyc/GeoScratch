@@ -33,11 +33,11 @@
 - Produces: `GeoFrameControllerDescriptor.driver?: GeoFrameDriver<Capture>`.
 - Preserves: descriptor-level `capture` plus `scheduler` for independent/manual use.
 
-- [ ] **Step 1: Write failing controller tests**
+- [x] **Step 1: Write failing controller tests**
 
 Add tests proving that `render()` is invoked before the scheduler callback returns, a driver starts once, `controller.stop()` stops it once, and mixed driver/capture or driver/scheduler descriptors fail with `GEO_FRAME_CONTROLLER_INVALID`.
 
-- [ ] **Step 2: Run the focused test and confirm RED**
+- [x] **Step 2: Run the focused test and confirm RED**
 
 Run:
 
@@ -47,7 +47,7 @@ npm --workspace geoscratch run build && npx mocha tests/geo-frame-controller.tes
 
 Expected: failures because `GeoFrameDriver` and `descriptor.driver` do not exist and render admission is deferred through a Promise microtask.
 
-- [ ] **Step 3: Implement the driver contract**
+- [x] **Step 3: Implement the driver contract**
 
 Add the public contract:
 
@@ -67,7 +67,7 @@ Validate and defensively bind it. Reject simultaneous descriptor-level `driver` 
 result for observation. Start the driver after the frozen controller object exists and stop
 it idempotently from `controller.stop()`.
 
-- [ ] **Step 4: Add public type coverage and run GREEN**
+- [x] **Step 4: Add public type coverage and run GREEN**
 
 Run:
 
@@ -78,7 +78,7 @@ npm run typecheck
 
 Expected: focused tests and public typecheck pass.
 
-- [ ] **Step 5: Commit the controller slice**
+- [x] **Step 5: Commit the controller slice**
 
 ```bash
 git add packages/geoscratch/src/geo/frame-controller.ts packages/geoscratch/src/geo/index.ts tests/geo-frame-controller.test.js tests/types/public-api.ts

@@ -41,6 +41,7 @@ export type {
     GeoFrameControllerSnapshot,
     GeoFrameControllerState,
     GeoFrameCapture,
+    GeoFrameDriver,
     GeoFrameResult,
     GeoFrameScheduler,
     GeoFrameSettlement,

@@ -7,6 +7,16 @@ export type GeoFrameScheduler = Readonly<{
     cancel(handle: number): void
 }>
 
+/** Supplies one revisioned capture, frame scheduler, and owned host lifecycle. */
+export type GeoFrameDriver<Capture> = Readonly<{
+    kind: 'geo-frame-driver'
+    id: string
+    scheduler: GeoFrameScheduler
+    capture(): GeoFrameCapture<Capture>
+    start(invalidate: () => boolean): void
+    stop(): boolean
+}>
+
 /** Immutable host state captured synchronously with a monotonically increasing revision. */
 export type GeoFrameCapture<Snapshot> = Readonly<{
     revision: number
@@ -53,6 +63,8 @@ export type GeoFrameControllerSnapshot = Readonly<{
 
 /** Host capture, frame construction, observation, and bounded convergence policy. */
 export type GeoFrameControllerDescriptor<Value, Capture = undefined> = Readonly<{
+    /** Owns external host capture, scheduling, and event lifecycle. */
+    driver?: GeoFrameDriver<Capture>
     /** Reads one immutable host snapshot synchronously before asynchronous construction. */
     capture?(): GeoFrameCapture<Capture>
     /** Constructs one frame from the frozen capture selected for this submission. */
@@ -200,8 +212,15 @@ export function createGeoFrameController<Value, Capture = undefined>(
         renderRequested = false
         if (capture !== undefined) state.submittedCaptureRevision = capture.revision
         const frameNumber = state.submittedFrameCount + 1
-        const task = Promise.resolve()
-            .then(() => validated.render(frameNumber, capture?.snapshot as Capture))
+        let construction: PromiseLike<GeoFrameResult<Value>>
+        try {
+            construction = validated.render(frameNumber, capture?.snapshot as Capture)
+        } catch (error) {
+            releaseRenderSlot()
+            stopWithError(error)
+            return
+        }
+        const task = Promise.resolve(construction)
             .then(
                 result => {
                     const observation = observeFrame(frameNumber, result)
@@ -330,6 +349,7 @@ export function createGeoFrameController<Value, Capture = undefined>(
             scheduledHandle = undefined
             state.cancelledFrameCount++
         }
+        validated.driver?.stop()
         return true
     }
 
@@ -338,7 +358,14 @@ export function createGeoFrameController<Value, Capture = undefined>(
         return Object.freeze({ ...state })
     }
 
-    return Object.freeze({ invalidate, invalidateNow, stop, snapshot })
+    const controller = Object.freeze({ invalidate, invalidateNow, stop, snapshot })
+    try {
+        validated.driver?.start(invalidate)
+    } catch (error) {
+        stop()
+        throw error
+    }
+    return controller
 }
 
 function trackWork<Value, Capture, Result>(
@@ -400,6 +427,7 @@ function validateDescriptor<Value, Capture>(
     if (descriptor === null || typeof descriptor !== 'object') {
         return invalidDescriptor(descriptor)
     }
+    const driver = descriptor.driver
     const capture = descriptor.capture
     const render = descriptor.render
     const scheduler = descriptor.scheduler
@@ -409,9 +437,21 @@ function validateDescriptor<Value, Capture>(
     const onSubmitted = descriptor.onSubmitted
     const onObserved = descriptor.onObserved
     const onError = descriptor.onError
-    const schedulerRequest = scheduler?.request
-    const schedulerCancel = scheduler?.cancel
-    if ((capture !== undefined && typeof capture !== 'function') ||
+    const driverScheduler = driver?.scheduler
+    const effectiveCapture = driver?.capture ?? capture
+    const effectiveScheduler = driverScheduler ?? scheduler
+    const schedulerRequest = effectiveScheduler?.request
+    const schedulerCancel = effectiveScheduler?.cancel
+    const driverStart = driver?.start
+    const driverStop = driver?.stop
+    if ((driver !== undefined && (
+        driver.kind !== 'geo-frame-driver' ||
+        typeof driver.id !== 'string' || driver.id.length === 0 ||
+        typeof driver.capture !== 'function' ||
+        typeof driverStart !== 'function' || typeof driverStop !== 'function' ||
+        capture !== undefined || scheduler !== undefined
+    )) ||
+        (effectiveCapture !== undefined && typeof effectiveCapture !== 'function') ||
         typeof render !== 'function' ||
         !Number.isSafeInteger(maximumInFlightFrames) ||
         maximumInFlightFrames < 1 || maximumInFlightFrames > 8 ||
@@ -420,17 +460,31 @@ function validateDescriptor<Value, Capture>(
         (onSubmitted !== undefined && typeof onSubmitted !== 'function') ||
         (onObserved !== undefined && typeof onObserved !== 'function') ||
         (onError !== undefined && typeof onError !== 'function') ||
-        (scheduler !== undefined && (typeof schedulerRequest !== 'function' ||
+        (effectiveScheduler !== undefined && (typeof schedulerRequest !== 'function' ||
             typeof schedulerCancel !== 'function'))) {
         return invalidDescriptor(descriptor)
     }
+    const validatedDriver = driver === undefined ? undefined : Object.freeze({
+        kind: 'geo-frame-driver' as const,
+        id: driver.id,
+        scheduler: Object.freeze({
+            request: schedulerRequest!.bind(driverScheduler),
+            cancel: schedulerCancel!.bind(driverScheduler),
+        }),
+        capture: driver.capture.bind(driver),
+        start: driverStart!.bind(driver),
+        stop: driverStop!.bind(driver),
+    })
     return Object.freeze({
-        ...(capture === undefined ? {} : { capture }),
+        ...(validatedDriver === undefined ? {} : { driver: validatedDriver }),
+        ...(effectiveCapture === undefined ? {} : {
+            capture: validatedDriver?.capture ?? effectiveCapture,
+        }),
         render,
         maximumInFlightFrames,
         maximumFollowUpFrames,
-        ...(scheduler === undefined ? {} : {
-            scheduler: Object.freeze({
+        ...(effectiveScheduler === undefined ? {} : {
+            scheduler: validatedDriver?.scheduler ?? Object.freeze({
                 request: schedulerRequest!.bind(scheduler),
                 cancel: schedulerCancel!.bind(scheduler),
             }),
@@ -452,6 +506,7 @@ function invalidDescriptor<Value, Capture>(
         subject: { kind: 'geo-frame-controller' },
         message: 'A Geo frame controller requires a render operation and bounded scheduling configuration.',
         expected: {
+            driver: 'optional exclusive GeoFrameDriver',
             capture: 'optional synchronous function returning GeoFrameCapture',
             render: 'function',
             maximumInFlightFrames: 'safe integer from 1 through 8',
