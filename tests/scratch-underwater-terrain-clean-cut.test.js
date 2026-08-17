@@ -577,6 +577,21 @@ describe('Underwater Terrain clean cut', () => {
         expect(allSources).not.to.match(/\b(mapAsync|ReadbackOperation|createReadback)\b/)
     })
 
+    it('delegates MapLibre frame authority through one public driver entry', () => {
+
+        const mainSource = read('examples', 'underwaterTerrain', 'main.ts')
+
+        expect(mainSource).to.include('driver: mapLibreFrameDriver({')
+        expect(mainSource).to.include("id: 'underwater-terrain-maplibre-frames'")
+        expect(mainSource).not.to.match(/\bhostViewRevision\b|\bcachedHostCapture\b/)
+        expect(mainSource).not.to.include("map.on('render'")
+        expect(mainSource).not.to.include("map.on('move'")
+        expect(mainSource).not.to.include("map.on('resize'")
+        expect(mainSource).not.to.include('frameController.invalidateNow()')
+        expect(mainSource).to.include("window.addEventListener('resize', handleResize)")
+        expect(mainSource).to.include('const handleResize = () => { map.resize() }')
+    })
+
     it('locks the finite initialization faults and required migration documentation', () => {
 
         const mainSource = read('examples', 'underwaterTerrain', 'main.ts')

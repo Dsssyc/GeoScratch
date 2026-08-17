@@ -3,6 +3,7 @@ import {
 } from 'geoscratch/geo'
 import type {
     MapLibreLngLat,
+    MapLibreFrameMap,
     MapLibreMercatorCoordinate,
     MapLibrePlanarMap,
 } from 'geoscratch/geo'
@@ -32,12 +33,11 @@ type MapStyle = {
     )[]
 }
 
-export type UnderwaterTerrainMap = MapLibrePlanarMap & Readonly<{
+export type UnderwaterTerrainMap = MapLibrePlanarMap & MapLibreFrameMap & Readonly<{
     loaded(): boolean
     once(event: 'load', listener: () => void): void
-    off(event: 'render' | 'load' | 'move' | 'resize', listener: () => void): void
+    off(event: 'load', listener: () => void): void
     resize(): void
-    on(event: 'render' | 'move' | 'resize', listener: () => void): void
     jumpTo(options: {
         center?: readonly [number, number]
         zoom?: number

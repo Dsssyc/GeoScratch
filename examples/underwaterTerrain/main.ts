@@ -5,6 +5,7 @@ import {
     createGeoFrameController,
     createWebMercatorTerrainRenderer,
     mapFieldLayer,
+    mapLibreFrameDriver,
 } from 'geoscratch/geo'
 import {
     createUnderwaterTerrainMap,
@@ -217,28 +218,22 @@ async function main(lifetime: LifetimeScope, activeProof?: UnderwaterTerrainProo
     lifetime.assertActive()
 
     const minimumTerrainElevationMeters = elevationRangeMeters[0] * TERRAIN_EXAGGERATION
-    let hostViewRevision = 0
-    let cachedHostCapture: Readonly<{
-        revision: number
-        snapshot: UnderwaterTerrainFrameCapture
-    }> | undefined
     const frameController = createGeoFrameController({
         track: (work, label) => lifetime.track(work, label),
         maximumInFlightFrames: 1,
-        capture() {
-            if (cachedHostCapture?.revision === hostViewRevision) return cachedHostCapture
-            const size = canvasPixelSize(canvas)
-            const camera = underwaterTerrainViewAdapter.camera({
-                map,
-                viewport: size,
-                minimumElevationMeters: minimumTerrainElevationMeters,
-            })
-            cachedHostCapture = Object.freeze({
-                revision: hostViewRevision,
-                snapshot: Object.freeze({ camera, size }),
-            })
-            return cachedHostCapture
-        },
+        driver: mapLibreFrameDriver({
+            id: 'underwater-terrain-maplibre-frames',
+            map,
+            capture(): UnderwaterTerrainFrameCapture {
+                const size = Object.freeze(canvasPixelSize(canvas))
+                const camera = underwaterTerrainViewAdapter.camera({
+                    map,
+                    viewport: size,
+                    minimumElevationMeters: minimumTerrainElevationMeters,
+                })
+                return Object.freeze({ camera, size })
+            },
+        }),
         async render(_frameNumber, captured) {
             if (!sameSize(graph.state().size, captured.size)) await graph.resize(captured.size)
             lifetime.assertActive()
@@ -273,7 +268,6 @@ async function main(lifetime: LifetimeScope, activeProof?: UnderwaterTerrainProo
             throw new Error('Underwater Terrain frame controller is stopped')
         }
         map.jumpTo(options)
-        frameController.invalidate()
     }
 
     applyTerrainPresentation = enabled => {
@@ -285,28 +279,8 @@ async function main(lifetime: LifetimeScope, activeProof?: UnderwaterTerrainProo
         run: () => { applyTerrainPresentation = undefined },
     })
 
-    const handleMapViewChange = () => { hostViewRevision++ }
-    const handleMapRender = () => { frameController.invalidateNow() }
-    const handleResize = () => {
-        handleMapViewChange()
-        map.resize()
-        frameController.invalidate()
-    }
-    map.on('move', handleMapViewChange)
-    map.on('resize', handleMapViewChange)
-    map.on('render', handleMapRender)
+    const handleResize = () => { map.resize() }
     window.addEventListener('resize', handleResize)
-    lifetime.deferStop({
-        label: 'map-render-listener',
-        run: () => map.off('render', handleMapRender),
-    })
-    lifetime.deferStop({
-        label: 'map-view-revision-listeners',
-        run: () => {
-            map.off('move', handleMapViewChange)
-            map.off('resize', handleMapViewChange)
-        },
-    })
     lifetime.deferStop({
         label: 'window-resize-listener',
         run: () => window.removeEventListener('resize', handleResize),
@@ -329,7 +303,6 @@ async function main(lifetime: LifetimeScope, activeProof?: UnderwaterTerrainProo
         moveCamera,
         setStatus,
     })
-    frameController.invalidate()
 }
 
 async function failPage(error: unknown) {

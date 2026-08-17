@@ -166,12 +166,12 @@ git commit -m "Add MapLibre Geo frame driver"
 - Removes: application-owned host revision cache and MapLibre render/move/resize frame listeners.
 - Preserves: window resize ownership for calling `map.resize()`.
 
-- [ ] **Step 1: Add a failing structural ownership test**
+- [x] **Step 1: Add a failing structural ownership test**
 
 Require `main.ts` to use `mapLibreFrameDriver`, reject `map.on('render')`, reject a local
 `hostViewRevision`, and retain only the window resize bridge needed to invoke `map.resize()`.
 
-- [ ] **Step 2: Run the focused test and confirm RED**
+- [x] **Step 2: Run the focused test and confirm RED**
 
 Run:
 
@@ -181,14 +181,14 @@ npx mocha tests/scratch-underwater-terrain-clean-cut.test.js
 
 Expected: structural test fails against the current event-owned example.
 
-- [ ] **Step 3: Replace local frame authority with the driver**
+- [x] **Step 3: Replace local frame authority with the driver**
 
 Nest the driver in the existing controller descriptor. Its capture callback reads and
 caches camera plus canvas size per driver revision. Remove manual MapLibre listener cleanup,
 remove `frameController.invalidate()` after `jumpTo()`, and let all presentation and
 convergence invalidations schedule through MapLibre repaint.
 
-- [ ] **Step 4: Run focused unit and type gates**
+- [x] **Step 4: Run focused unit and type gates**
 
 Run:
 
@@ -199,7 +199,7 @@ npm run typecheck
 
 Expected: all focused tests and typecheck pass.
 
-- [ ] **Step 5: Commit the example migration**
+- [x] **Step 5: Commit the example migration**
 
 ```bash
 git add examples/underwaterTerrain/main.ts examples/underwaterTerrain/map.ts tests/scratch-underwater-terrain-clean-cut.test.js tests/browser/support/underwater-terrain-proof.ts
