@@ -508,7 +508,7 @@
           "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:384"
+          "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:386"
         ],
         "summary": "Assembles a WebMercatorQuad Virtual Raster terrain renderer with GPU-driven selection, precision-aware vertex generation, mesh stitching, and explicit lifetime.",
         "declaration": "Function createWebMercatorTerrainRenderer",

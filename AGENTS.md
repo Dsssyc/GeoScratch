@@ -39,6 +39,10 @@ Treat `maximumInFlightFrames` as measured application policy. Underwater Terrain
 its 120 Hz proof shows one slot suppresses half of host-frame submissions; do not increase the
 bound or restore single-flight without rerunning camera-transition, stale-state, lag, and cleanup
 proofs.
+High-pitch terrain performance is a correctness-adjacent contract. Keep `(root, trial)` counting
+parallel, derive persistent render-patch capacity from viewport budget plus balance headroom, and
+retain uniform 2:1-balance early exit. Any change to these paths must run both pitched shaded and
+pitched wireframe 90-frame benchmarks, including construction/native-observation timing.
 
 ## Build, Test, and Development Commands
 

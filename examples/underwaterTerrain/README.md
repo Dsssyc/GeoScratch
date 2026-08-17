@@ -20,6 +20,12 @@ Capacity-blocked invalidations coalesce until that frame is observed; the next h
 the newest revision instead of replaying intermediate views. The two canvases keep independent
 WebGL and WebGPU contexts and do not claim shared depth or atomic presentation.
 
+The high-pitch benchmark runs 90 display-paced camera updates in both shaded and wireframe
+presentations. Render-root/trial traversal is parallel, persistent patch capacity follows the
+viewport budget, and 2:1 balancing exits once a complete scratch/primary pair produces no split.
+The acceptance gate requires at least 65 submitted camera transitions, zero stale transitions,
+lag P95 no greater than one frame, and native observation P95 no greater than 25 ms.
+
 `main.ts` contains only page configuration, controls, proof loading, and page lifetime.
 `application.ts` is the complete explicit map, runtime, DEM source, Virtual Raster, renderer,
 view source, frame driver, and controller assembly.

@@ -372,6 +372,8 @@ const WEB_MERCATOR_TERRAIN_STAGE_ORDER = Object.freeze([
     'terrain',
 ])
 const TERRAIN_SECTOR_SIZE = GPU_RENDER_PATCH_DEFAULT_CELLS_PER_EDGE
+const TERRAIN_MAXIMUM_PATCH_COUNT_RATIO = 3
+const TERRAIN_BALANCE_CAPACITY_HEADROOM = 4
 const BUFFER_COPY_DST = 0x08
 const BUFFER_UNIFORM = 0x40
 const BUFFER_STORAGE = 0x80
@@ -431,25 +433,32 @@ export async function createWebMercatorTerrainRenderer<
     )
     const feedbackRing = await VirtualRasterGpuFeedbackRing.create(frontier)
     const frontierViewTemplates = createFrontierViewTemplates(frontier)
+    const renderRoots = virtualRaster.safetyCoverPages.map(page => {
+        if (page.tile === undefined) {
+            throw new TypeError('Web Mercator terrain render roots require tile identities')
+        }
+        return Object.freeze({
+            matrixLevel: terrainFieldLayer.spatialProfile.matrixLevel(page.tile),
+            tileRow: page.tile.tileRow,
+            tileCol: page.tile.tileCol,
+        })
+    })
     const renderPatchFrontier = await createGpuRenderPatchFrontier(runtime, {
         viewTemplates: frontierViewTemplates.renderPatch,
-        renderRoots: virtualRaster.safetyCoverPages.map(page => {
-            if (page.tile === undefined) {
-                throw new TypeError('Web Mercator terrain render roots require tile identities')
-            }
-            return Object.freeze({
-                matrixLevel: terrainFieldLayer.spatialProfile.matrixLevel(page.tile),
-                tileRow: page.tile.tileRow,
-                tileCol: page.tile.tileCol,
-            })
+        renderRoots,
+        maximumRenderPatches: terrainRenderPatchCapacity({
+            size,
+            renderRootCount: renderRoots.length,
+            theoreticalMaximum:
+                frontier.descriptor.policy.maximumActiveTiles * 256,
         }),
-        maximumRenderPatches: frontier.descriptor.policy.maximumActiveTiles * 256,
         renderMaximumMatrixLevel: GPU_RENDER_PATCH_MAXIMUM_MATRIX_LEVEL,
         coordinateBits: virtualRaster.addressCodec.coordinateBits,
         elevationRangeMeters: exaggeratedElevationRange,
         vertexCount: geometry.vertexCount,
         cellsPerPatchEdge: TERRAIN_SECTOR_SIZE,
         maximumCellSpanPixels: GPU_RENDER_PATCH_DEFAULT_MAXIMUM_CELL_SPAN_PIXELS,
+        maximumPatchCountRatio: TERRAIN_MAXIMUM_PATCH_COUNT_RATIO,
     })
     const renderTemplates = createRenderTemplates(renderPatchFrontier)
     const uniforms = await createUniformResources(
@@ -1795,6 +1804,32 @@ function assertSize(value: SurfaceSize) {
 function sameSize(left: SurfaceSize, right: SurfaceSize): boolean {
 
     return left.width === right.width && left.height === right.height
+}
+
+function terrainRenderPatchCapacity({
+    size,
+    renderRootCount,
+    theoreticalMaximum,
+}: Readonly<{
+    size: SurfaceSize
+    renderRootCount: number
+    theoreticalMaximum: number
+}>): number {
+
+    const nominalPatchSpan = TERRAIN_SECTOR_SIZE *
+        GPU_RENDER_PATCH_DEFAULT_MAXIMUM_CELL_SPAN_PIXELS
+    const viewportColumns = Math.ceil(size.width / nominalPatchSpan) + 1
+    const viewportRows = Math.ceil(size.height / nominalPatchSpan) + 1
+    const maximumFrameBudget = Math.ceil(
+        viewportColumns * viewportRows * TERRAIN_MAXIMUM_PATCH_COUNT_RATIO
+    )
+    const required = Math.max(
+        renderRootCount,
+        maximumFrameBudget * TERRAIN_BALANCE_CAPACITY_HEADROOM
+    )
+    let capacity = 1
+    while (capacity < required) capacity *= 2
+    return Math.min(theoreticalMaximum, capacity)
 }
 
 function assertVirtualRaster(value: WebMercatorTerrainVirtualRaster) {

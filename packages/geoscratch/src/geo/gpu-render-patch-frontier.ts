@@ -1094,7 +1094,11 @@ export async function createGpuRenderPatchFrontier(
                 bindSets: [ { set: countSet } ],
                 count: {
                     workgroups: [
-                        Math.ceil(descriptor.renderRoots.length / WORKGROUP_SIZE),
+                        Math.ceil(
+                            descriptor.renderRoots.length *
+                            GPU_RENDER_PATCH_BIAS_STEP_COUNT /
+                            WORKGROUP_SIZE
+                        ),
                         1,
                         1,
                     ],

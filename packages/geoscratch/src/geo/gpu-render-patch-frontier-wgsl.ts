@@ -59,6 +59,7 @@ struct GpuRenderPatchClipPolygon {
 @group(0) @binding(8) var<storage, read_write> balancePatches: array<GpuRenderPatch>;
 @group(0) @binding(9) var<storage, read_write> balancePatchLookup:
     array<GpuRenderPatchAtomicLookupEntry>;
+var<workgroup> balanceIterationSplitCount: atomic<u32>;
 
 const WEB_MERCATOR_WORLD_WIDTH_METERS: f32 = 40075016.0f;
 
@@ -574,50 +575,50 @@ fn resetRenderPatches() {
 
 @compute @workgroup_size(64)
 fn countRenderPatchTrials(@builtin(global_invocation_id) globalId: vec3u) {
-    let rootIndex = globalId.x;
-    if (rootIndex >= renderPatchPolicy.renderRootCount) { return; }
+    let trialIndex = globalId.x % renderPatchPolicy.biasStepCount;
+    let rootIndex = globalId.x / renderPatchPolicy.biasStepCount;
+    if (rootIndex >= renderPatchPolicy.renderRootCount ||
+        trialIndex >= renderPatchPolicy.biasStepCount) { return; }
     let root = renderRoots[rootIndex];
     let finalStep = renderPatchPolicy.biasStepCount - 1u;
-    for (var step = 0u; step < 17u; step += 1u) {
-        let nominalThreshold = trialCellSpanThreshold(step);
-        var stack: array<GpuRenderPatch, 64>;
-        var stackSize = 1u;
-        stack[0] = root;
-        loop {
-            if (stackSize == 0u) { break; }
-            stackSize -= 1u;
-            let candidate = stack[stackSize];
-            let bounds = patchBounds(
-                candidate.matrixLevel,
-                candidate.tileRow,
-                candidate.tileCol,
+    let nominalThreshold = trialCellSpanThreshold(trialIndex);
+    var stack: array<GpuRenderPatch, 64>;
+    var stackSize = 1u;
+    stack[0] = root;
+    loop {
+        if (stackSize == 0u) { break; }
+        stackSize -= 1u;
+        let candidate = stack[stackSize];
+        let bounds = patchBounds(
+            candidate.matrixLevel,
+            candidate.tileRow,
+            candidate.tileCol,
+        );
+        if (!patchVisible(bounds)) { continue; }
+        let cellSpanPixels = projectedCellSpanPixels(bounds);
+        let refine = trialIndex < finalStep &&
+            candidate.matrixLevel < renderPatchPolicy.renderMaximumMatrixLevel &&
+            cellSpanPixels > nominalThreshold;
+        if (!refine) {
+            let previousTrialCount = atomicAdd(
+                &renderPatchState.trialCounts[trialIndex],
+                1u,
             );
-            if (!patchVisible(bounds)) { continue; }
-            let cellSpanPixels = projectedCellSpanPixels(bounds);
-            let refine = step < finalStep &&
-                candidate.matrixLevel < renderPatchPolicy.renderMaximumMatrixLevel &&
-                cellSpanPixels > nominalThreshold;
-            if (!refine) {
-                let previousTrialCount = atomicAdd(
-                    &renderPatchState.trialCounts[step],
-                    1u,
-                );
-                if (previousTrialCount >= renderPatchPolicy.maximumRenderPatches) {
-                    break;
-                }
-                continue;
+            if (previousTrialCount >= renderPatchPolicy.maximumRenderPatches) {
+                break;
             }
-            let childLevel = candidate.matrixLevel + 1u;
-            let firstRow = candidate.tileRow * 2u;
-            let firstCol = candidate.tileCol * 2u;
-            for (var child = 0u; child < 4u; child += 1u) {
-                stack[stackSize] = GpuRenderPatch(
-                    childLevel,
-                    firstRow + (child >> 1u),
-                    firstCol + (child & 1u),
-                );
-                stackSize += 1u;
-            }
+            continue;
+        }
+        let childLevel = candidate.matrixLevel + 1u;
+        let firstRow = candidate.tileRow * 2u;
+        let firstCol = candidate.tileCol * 2u;
+        for (var child = 0u; child < 4u; child += 1u) {
+            stack[stackSize] = GpuRenderPatch(
+                childLevel,
+                firstRow + (child >> 1u),
+                firstCol + (child & 1u),
+            );
+            stackSize += 1u;
         }
     }
 }
@@ -857,6 +858,10 @@ fn balanceRenderPatches(@builtin(local_invocation_index) lane: u32) {
     storageBarrier();
 
     for (var iteration = 0u; iteration < 14u; iteration += 1u) {
+        if (lane == 0u) {
+            atomicStore(&balanceIterationSplitCount, 0u);
+        }
+        workgroupBarrier();
         let fromScratch = (iteration & 1u) != 0u;
         let toScratch = !fromScratch;
         let inputCount = select(
@@ -896,12 +901,18 @@ fn balanceRenderPatches(@builtin(local_invocation_index) lane: u32) {
                 maximumFinerNeighborDelta(fromScratch, candidate) > 1u;
             if (mustSplit) {
                 atomicAdd(&renderPatchState.balanceSplitCount, 1u);
+                atomicAdd(&balanceIterationSplitCount, 1u);
                 writeBalancedChildren(toScratch, candidate);
             } else {
                 writeBalancedPatch(toScratch, candidate);
             }
         }
         storageBarrier();
+        let iterationSplitCount = workgroupUniformLoad(&balanceIterationSplitCount);
+        if ((iteration & 1u) == 1u &&
+            iterationSplitCount == 0u) {
+            break;
+        }
     }
 }
 

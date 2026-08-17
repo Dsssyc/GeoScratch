@@ -257,6 +257,10 @@ describe('Underwater Terrain clean cut', () => {
         const renderPatchShader = read(
             'packages', 'geoscratch', 'src', 'geo', 'gpu-render-patch-frontier-wgsl.ts'
         )
+        const countTrialsShader = renderPatchShader.slice(
+            renderPatchShader.indexOf('fn countRenderPatchTrials'),
+            renderPatchShader.indexOf('fn selectRenderPatchBudget')
+        )
         const terrainModule = read(
             'packages', 'geoscratch', 'src', 'geo', 'web-mercator-terrain-wgsl.ts'
         )
@@ -265,6 +269,10 @@ describe('Underwater Terrain clean cut', () => {
         )
 
         expect(layerSource).to.include('createGpuRenderPatchFrontier(')
+        expect(layerSource).to.include('terrainRenderPatchCapacity(')
+        expect(layerSource).not.to.match(
+            /maximumRenderPatches:\s*frontier\.descriptor\.policy\.maximumActiveTiles/
+        )
         expect(layerSource).to.include('renderPatchFrontier.encode(builder, frame)')
         expect(layerSource).to.include('renderPatchFrontier.capture(builder, frame)')
         expect(layerSource).to.include("'render-patch-compute'")
@@ -300,9 +308,21 @@ describe('Underwater Terrain clean cut', () => {
         expect(renderPatchShader).to.include('var stack: array<GpuRenderPatch, 64>')
         expect(renderPatchShader).to.include('let nominalPatchSpan = max(')
         expect(renderPatchShader).to.include('countRenderPatchTrials')
+        expect(renderPatchShader).to.include(
+            'let trialIndex = globalId.x % renderPatchPolicy.biasStepCount'
+        )
+        expect(renderPatchShader).to.include(
+            'let rootIndex = globalId.x / renderPatchPolicy.biasStepCount'
+        )
+        expect(countTrialsShader).not.to.include(
+            'for (var step = 0u; step < 17u; step += 1u)'
+        )
+        expect(renderPatchSource).to.match(
+            /descriptor\.renderRoots\.length\s*\*\s*GPU_RENDER_PATCH_BIAS_STEP_COUNT/
+        )
         expect(renderPatchShader).to.include('selectRenderPatchBudget')
         expect(renderPatchShader).to.include('trialCounts')
-        expect(renderPatchShader).to.include('step < finalStep &&')
+        expect(renderPatchShader).to.include('trialIndex < finalStep &&')
         expect(renderPatchShader).to.include(
             'previousTrialCount >= renderPatchPolicy.maximumRenderPatches'
         )
@@ -314,6 +334,10 @@ describe('Underwater Terrain clean cut', () => {
         expect(renderPatchShader).not.to.include('geometricErrorMeters')
         expect(renderPatchShader).to.include('insertRenderPatchLookup')
         expect(renderPatchShader).to.include('balanceRenderPatches')
+        expect(renderPatchShader).to.include('balanceIterationSplitCount')
+        expect(renderPatchShader).to.include(
+            'workgroupUniformLoad(&balanceIterationSplitCount)'
+        )
         expect(renderPatchShader).to.include('storageBarrier()')
         expect(renderPatchShader).to.include('maximumFinerNeighborDelta')
         expect(renderPatchShader).to.include('validateFinalRenderPatchCut')
@@ -905,6 +929,8 @@ describe('Underwater Terrain clean cut', () => {
             balancePassCount: 14,
             balanceWorkgroupSize: 256,
             budgetFillWorkgroupSize: 1,
+            maximumRenderPatches: 64,
+            renderPatchLookupCapacity: 128,
             nominalPatchSpanPixels: 512,
             cellsPerPatchEdge: 64,
         })

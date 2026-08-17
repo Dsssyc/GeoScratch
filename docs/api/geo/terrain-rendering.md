@@ -45,6 +45,14 @@ metric is local and does not shrink merely because viewport clipping leaves a sm
 visible sliver during zoom-in.
 
 The GPU counts 17 complete uniform-bias cuts and chooses a stateless in-budget base.
+Each `(render root, bias trial)` is counted by an independent GPU invocation rather than
+serializing all 17 tree traversals in one invocation. At renderer creation, persistent
+render-patch capacity is derived from viewport patch budget with explicit 2:1-balance headroom, rounded to a power of
+two, and bounded by the theoretical data-frontier maximum. It is not multiplied blindly from
+resident data-tile capacity. The balance kernel retains the maximum 14-pass correctness bound
+but stops after an even scratch/primary pair reports no additional split, using
+`workgroupUniformLoad` so every lane exits in uniform control flow.
+
 It then repeatedly identifies the greatest above-threshold Q8-quantized local span.
 Every terminal patch with that exact error belongs to one indivisible cohort: the GPU
 splits the complete cohort only when all of its visible children fit the residual frame

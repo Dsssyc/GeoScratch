@@ -191,12 +191,16 @@ export async function startUnderwaterTerrainApplication(
             map,
             capture: viewSource.capture,
         }),
-        render(_frameNumber, captured) {
+        render(frameNumber, captured) {
             lifetime.assertActive()
-            return graph.render(captured)
+            if (proof === undefined) return graph.render(captured)
+            const startedAt = performance.now()
+            const result = graph.render(captured)
+            proof.frameConstructed(frameNumber, performance.now() - startedAt)
+            return result
         },
-        onSubmitted({ value }) {
-            proof?.frameSubmitted(value.frame.provenance, value.view)
+        onSubmitted({ frameNumber, value }) {
+            proof?.frameSubmitted(value.frame.provenance, value.view, frameNumber)
         },
         onObserved({ frameNumber }) {
             proof?.frameObserved(frameNumber)

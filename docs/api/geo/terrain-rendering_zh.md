@@ -2,7 +2,7 @@
 docId: geo.terrain-rendering.zh
 canonical: false
 translationOf: ./terrain-rendering.md
-canonicalDigest: ee0c88a2c60338e44145e8710bdbf2970e38019d5cbe1d5e0799dd527db60410
+canonicalDigest: c8fc44a55db3d936c35e3ae643f8d9ffdf35991a1c6a1ae84389697bcb9b151f
 ---
 # 地形渲染
 
@@ -36,6 +36,13 @@ physical atlas 耦合；mesh stitching 消除 T-junction crack。
 GPU 在这些位置沿两个水平轴对称投影一个 cell 的位移，并以其局部 Jacobian 的面积等效
 像素跨度作为 refinement metric。该 metric 是局部量，不会因为 zoom-in 时 viewport
 裁剪留下更小的可见窄片而缩小。
+
+每个 `(render root, bias trial)` 会由独立 GPU invocation 计数，不再由单个 invocation
+串行执行全部 17 次树遍历。Renderer 创建时，persistent render-patch capacity 根据 viewport patch budget 与
+显式 2:1-balance headroom 推导，向上取二次幂，并受 data-frontier 理论上限约束；它不再从
+resident data-tile capacity 盲目倍增。Balance kernel 保留最多 14 pass 的正确性上限，但当
+一个完整 scratch/primary 偶数轮对没有产生新 split 时会提前结束；它使用
+`workgroupUniformLoad`，确保所有 lane 在 uniform control flow 中退出。
 
 GPU 会计算 17 个完整的统一 bias cut，并以无历史状态的方式选择预算内 base cut。随后
 它反复找出超过阈值且 Q8 量化局部 span 最大的一组 patch。所有具有完全相同 error 的

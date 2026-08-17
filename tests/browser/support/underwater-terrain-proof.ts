@@ -48,6 +48,11 @@ type CleanupProof = Readonly<{
     virtualRaster?: ReturnType<typeof demVirtualRasterProofFacts>
 }>
 type FailureProof = NonNullable<ReturnType<typeof finalizeFailureProof>>
+type FrameTimingFacts = Readonly<{
+    construction: ReturnType<typeof summarizeDurations>
+    observation: ReturnType<typeof summarizeDurations>
+    pendingObservationCount: number
+}>
 
 type ProofConfiguration = Readonly<{
     canvas: HTMLCanvasElement
@@ -81,6 +86,8 @@ declare global {
             dispose(): Promise<unknown>
             facts(): Readonly<DOMStringMap>
             moveCamera(options: CameraMoveOptions): void
+            resetFrameTiming(): void
+            frameTiming(): FrameTimingFacts
         }>
         __UNDERWATER_TERRAIN_INIT_FAILURE_PROOF__: FailureProof
         __UNDERWATER_TERRAIN_CLEANUP_PROOF__: CleanupProof
@@ -88,6 +95,7 @@ declare global {
 }
 
 const FAILURE_RUNTIME_EVIDENCE_MAX_BYTES = 512 * 1024
+const FRAME_TIMING_CAPACITY = 512
 const FAILURE_CAPTURE_BOUNDS = Object.freeze({
     maxOperations: 1,
     maxDurationMs: 2_000,
@@ -115,6 +123,9 @@ export function createUnderwaterTerrainProof(configuration: ProofConfiguration) 
     let rasterAcquiredCount = 0
     let submittedFrames = 0
     let observedFrames = 0
+    const submittedAt = new Map<number, number>()
+    let constructionDurations: number[] = []
+    let observationDurations: number[] = []
     let latestProvenance: readonly WebMercatorTerrainProvenanceFact[] = []
     let latestCamera: MapLibrePlanarCameraState | undefined
 
@@ -172,6 +183,18 @@ export function createUnderwaterTerrainProof(configuration: ProofConfiguration) 
             dispose: binding.dispose,
             facts,
             moveCamera: binding.moveCamera,
+            resetFrameTiming() {
+                submittedAt.clear()
+                constructionDurations = []
+                observationDurations = []
+            },
+            frameTiming() {
+                return Object.freeze({
+                    construction: summarizeDurations(constructionDurations),
+                    observation: summarizeDurations(observationDurations),
+                    pendingObservationCount: submittedAt.size,
+                })
+            },
         })
     }
 
@@ -269,18 +292,48 @@ export function createUnderwaterTerrainProof(configuration: ProofConfiguration) 
         rasterAcquired: () => { rasterAcquiredCount++ },
         frameSubmitted(
             provenance: readonly WebMercatorTerrainProvenanceFact[],
-            camera: MapLibrePlanarCameraState
+            camera: MapLibrePlanarCameraState,
+            frameNumber: number
         ) {
             submittedFrames++
+            submittedAt.set(frameNumber, performance.now())
             latestProvenance = provenance
             latestCamera = camera
             publish()
         },
         frameObserved(frameNumber: number) {
+            const startedAt = submittedAt.get(frameNumber)
+            if (startedAt !== undefined) {
+                submittedAt.delete(frameNumber)
+                appendFrameTiming(observationDurations, performance.now() - startedAt)
+            }
             observedFrames = Math.max(observedFrames, frameNumber)
             publish()
         },
+        frameConstructed(_frameNumber: number, durationMs: number) {
+            appendFrameTiming(constructionDurations, durationMs)
+        },
     })
+}
+
+function summarizeDurations(values: readonly number[]) {
+
+    const sorted = [ ...values ].sort((left, right) => left - right)
+    const percentile = (fraction: number) => sorted[
+        Math.max(0, Math.ceil(sorted.length * fraction) - 1)
+    ] ?? 0
+    return Object.freeze({
+        count: sorted.length,
+        p50Ms: percentile(0.5),
+        p95Ms: percentile(0.95),
+        maximumMs: sorted.at(-1) ?? 0,
+    })
+}
+
+function appendFrameTiming(target: number[], durationMs: number): void {
+
+    if (target.length === FRAME_TIMING_CAPACITY) target.shift()
+    target.push(durationMs)
 }
 
 function publishGraphFacts(

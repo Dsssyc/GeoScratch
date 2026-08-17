@@ -147,11 +147,26 @@ async function runWireframeProof(activeBrowser) {
         const baseline = await waitForStableMode(page, 'shaded', loaded.observedFrames)
         const shadedCapture = await captureState(page, 'shaded')
 
+        const pitchedShadedCameraTracking = await runCameraTrackingProof(page, camera)
+        const pitchedShadedTracked = await waitForStableMode(
+            page,
+            'shaded',
+            baseline.observedFrames,
+            pitchedShadedCameraTracking.finalCamera
+        )
+        await page.evaluate(value => window.__UNDERWATER_TERRAIN_PROOF__.moveCamera(value), camera)
+        const restoredShadedCamera = await waitForStableMode(
+            page,
+            'shaded',
+            pitchedShadedTracked.observedFrames,
+            camera
+        )
+
         await page.locator('[data-underwater-terrain-control="tile-wireframe"] .tp-ckbv_w').click()
         const wireframe = await waitForStableMode(
             page,
             'tile-wireframe',
-            baseline.observedFrames,
+            restoredShadedCamera.observedFrames,
             camera
         )
         const wireframeCapture = await captureState(page, 'tile-wireframe')
@@ -202,6 +217,31 @@ async function runWireframeProof(activeBrowser) {
             cameraTracking.finalCamera
         )
         previous = tracked
+
+        const pitchedTrackingCamera = Object.freeze({
+            ...camera,
+            zoom: 10.25,
+            pitch: 70,
+            bearing: 90,
+        })
+        await page.evaluate(
+            value => window.__UNDERWATER_TERRAIN_PROOF__.moveCamera(value),
+            pitchedTrackingCamera
+        )
+        const pitchedTrackingStart = await waitForStableMode(
+            page,
+            'tile-wireframe',
+            previous.observedFrames,
+            pitchedTrackingCamera
+        )
+        const pitchedCameraTracking = await runCameraTrackingProof(page, pitchedTrackingCamera)
+        const pitchedTracked = await waitForStableMode(
+            page,
+            'tile-wireframe',
+            pitchedTrackingStart.observedFrames,
+            pitchedCameraTracking.finalCamera
+        )
+        previous = pitchedTracked
 
         const motionStability = []
         const pitchedCamera = Object.freeze({ ...camera, pitch: 80 })
@@ -272,9 +312,11 @@ async function runWireframeProof(activeBrowser) {
         return Object.freeze({
             url: page.url(),
             baseline: Object.freeze({ ...baseline, capture: shadedCapture }),
+            pitchedShadedCameraTracking,
             wireframe: Object.freeze({ ...wireframe, capture: wireframeCapture }),
             canonicalTopDown: Object.freeze(canonicalTopDown),
             cameraTracking,
+            pitchedCameraTracking,
             motionStability: Object.freeze(motionStability),
             pitchBudgetPriority: Object.freeze(pitchBudgetPriority),
             refinement: Object.freeze(refinement),
@@ -299,6 +341,7 @@ async function runCameraTrackingProof(page, baseCamera) {
         }
         const samples = []
         const frameIntervals = []
+        proof.resetFrameTiming()
         let issuedIndex = -1
         let previousTimestamp
         await new Promise(resolve => {
@@ -321,6 +364,16 @@ async function runCameraTrackingProof(page, baseCamera) {
                         inFlightFrames:
                             Number(canvas.dataset.frames) -
                             Number(canvas.dataset.observedFrames),
+                        renderPatchCount: Number(canvas.dataset.renderPatchCount),
+                        frontierCount: Number(canvas.dataset.frontierCount),
+                        visibleNodeCount: Number(canvas.dataset.visibleNodeCount),
+                        readbackInFlightCount: Number(canvas.dataset.readbackInFlightCount),
+                        pendingNativeObservations: Number(
+                            canvas.dataset.currentPendingNativeObservations
+                        ),
+                        effectfulSubmittedWork: Number(
+                            canvas.dataset.currentEffectfulSubmittedWork
+                        ),
                     })
                 }
                 if (issuedIndex + 1 >= frameCount) {
@@ -355,6 +408,16 @@ async function runCameraTrackingProof(page, baseCamera) {
                 Math.max(0, Math.ceil(sorted.length * fraction) - 1)
             ] ?? 0
         }
+        const summarizeMetric = key => {
+            const values = samples.map(sample => sample[key]).filter(Number.isFinite)
+            return {
+                minimum: Math.min(...values),
+                p50: percentile(values, 0.5),
+                p95: percentile(values, 0.95),
+                maximum: Math.max(...values),
+                mean: values.reduce((sum, value) => sum + value, 0) / values.length,
+            }
+        }
         return {
             frameCount,
             frameIntervalP50Ms: percentile(frameIntervals, 0.5),
@@ -374,6 +437,13 @@ async function runCameraTrackingProof(page, baseCamera) {
             staleSubmissionTransitionCount: submissionTransitions.filter(
                 sample => sample.submittedIndex !== sample.issuedIndex
             ).length,
+            renderPatchCount: summarizeMetric('renderPatchCount'),
+            frontierCount: summarizeMetric('frontierCount'),
+            visibleNodeCount: summarizeMetric('visibleNodeCount'),
+            readbackInFlightCount: summarizeMetric('readbackInFlightCount'),
+            pendingNativeObservations: summarizeMetric('pendingNativeObservations'),
+            effectfulSubmittedWork: summarizeMetric('effectfulSubmittedWork'),
+            frameTiming: proof.frameTiming(),
             samples,
             finalCamera,
         }
@@ -672,9 +742,11 @@ function validateProof(value, processState) {
     if (value === undefined) return [ 'DEM tile wireframe proof was not produced' ]
     const {
         baseline,
+        pitchedShadedCameraTracking,
         wireframe,
         canonicalTopDown,
         cameraTracking,
+        pitchedCameraTracking,
         motionStability,
         pitchBudgetPriority,
         refinement,
@@ -781,6 +853,52 @@ function validateProof(value, processState) {
         cameraTracking.maximumInFlightFrames <= 2,
     `continuous camera tracking exceeded double-flight native observation: ${JSON.stringify({
         maximumInFlightFrames: cameraTracking?.maximumInFlightFrames,
+    })}`)
+
+    expect(failures,
+        pitchedCameraTracking?.frameCount === 90 &&
+        pitchedCameraTracking.samples?.length === 90 &&
+        pitchedCameraTracking.submissionTransitionCount >= 65 &&
+        pitchedCameraTracking.staleSubmissionTransitionCount === 0 &&
+        pitchedCameraTracking.frameIntervalP95Ms <= 20 &&
+        pitchedCameraTracking.submissionLagP95Frames <= 1 &&
+        pitchedCameraTracking.maximumSubmissionLagFrames <= 2 &&
+        pitchedCameraTracking.frameTiming?.construction?.p95Ms <= 4 &&
+        pitchedCameraTracking.frameTiming?.observation?.p95Ms <= 25 &&
+        pitchedCameraTracking.maximumInFlightFrames > 0 &&
+        pitchedCameraTracking.maximumInFlightFrames <= 2,
+    `pitched camera tracking benchmark was incomplete or stale: ${JSON.stringify({
+        frameIntervalP50Ms: pitchedCameraTracking?.frameIntervalP50Ms,
+        frameIntervalP95Ms: pitchedCameraTracking?.frameIntervalP95Ms,
+        submissionLagP95Frames: pitchedCameraTracking?.submissionLagP95Frames,
+        maximumSubmissionLagFrames: pitchedCameraTracking?.maximumSubmissionLagFrames,
+        maximumInFlightFrames: pitchedCameraTracking?.maximumInFlightFrames,
+        submissionTransitionCount: pitchedCameraTracking?.submissionTransitionCount,
+        staleSubmissionTransitionCount: pitchedCameraTracking?.staleSubmissionTransitionCount,
+        frameTiming: pitchedCameraTracking?.frameTiming,
+    })}`)
+
+    expect(failures,
+        pitchedShadedCameraTracking?.frameCount === 90 &&
+        pitchedShadedCameraTracking.samples?.length === 90 &&
+        pitchedShadedCameraTracking.submissionTransitionCount >= 65 &&
+        pitchedShadedCameraTracking.staleSubmissionTransitionCount === 0 &&
+        pitchedShadedCameraTracking.frameIntervalP95Ms <= 20 &&
+        pitchedShadedCameraTracking.submissionLagP95Frames <= 1 &&
+        pitchedShadedCameraTracking.maximumSubmissionLagFrames <= 2 &&
+        pitchedShadedCameraTracking.frameTiming?.construction?.p95Ms <= 4 &&
+        pitchedShadedCameraTracking.frameTiming?.observation?.p95Ms <= 25 &&
+        pitchedShadedCameraTracking.maximumInFlightFrames > 0 &&
+        pitchedShadedCameraTracking.maximumInFlightFrames <= 2,
+    `pitched shaded camera benchmark was incomplete or stale: ${JSON.stringify({
+        frameIntervalP50Ms: pitchedShadedCameraTracking?.frameIntervalP50Ms,
+        frameIntervalP95Ms: pitchedShadedCameraTracking?.frameIntervalP95Ms,
+        submissionLagP95Frames: pitchedShadedCameraTracking?.submissionLagP95Frames,
+        maximumSubmissionLagFrames: pitchedShadedCameraTracking?.maximumSubmissionLagFrames,
+        submissionTransitionCount: pitchedShadedCameraTracking?.submissionTransitionCount,
+        staleSubmissionTransitionCount:
+            pitchedShadedCameraTracking?.staleSubmissionTransitionCount,
+        frameTiming: pitchedShadedCameraTracking?.frameTiming,
     })}`)
 
     const zoomSamples = zoomMonotonicity?.samples ?? []
