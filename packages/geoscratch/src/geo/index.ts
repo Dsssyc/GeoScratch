@@ -31,6 +31,7 @@ export type {
 } from './tile-spatial-profile.js'
 export {
     createGeoViewAdapter,
+    createGeoViewSource,
     createGeoViewSnapshot,
 } from './geo-view.js'
 export { createGeoFrameController } from './frame-controller.js'
@@ -47,6 +48,7 @@ export type {
     GeoFrameSettlement,
 } from './frame-controller.js'
 export { mapLibrePlanarViewAdapter } from './maplibre-planar-view.js'
+export { mapLibrePlanarViewSource } from './maplibre-planar-view.js'
 export type {
     MapLibreLngLat,
     MapLibreMercatorCoordinate,
@@ -56,6 +58,8 @@ export type {
     MapLibrePlanarTransform,
     MapLibrePlanarViewAdapter,
     MapLibrePlanarViewAdapterDescriptor,
+    MapLibrePlanarViewSource,
+    MapLibrePlanarViewSourceDescriptor,
     MapLibrePlanarViewport,
 } from './maplibre-planar-view.js'
 export { mapLibreFrameDriver } from './maplibre-frame-driver.js'
@@ -69,6 +73,9 @@ export type {
     GeoViewAdapter,
     GeoViewAdapterDescriptor,
     GeoViewReadContext,
+    GeoViewSource,
+    GeoViewSourceCapture,
+    GeoViewSourceDescriptor,
     GeoViewSnapshot,
     GeoViewSnapshotDescriptor,
 } from './geo-view.js'

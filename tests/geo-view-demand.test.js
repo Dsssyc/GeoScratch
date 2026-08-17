@@ -4,6 +4,7 @@ import {
     ViewDemandProducer,
     WebMercatorQuad,
     createGeoViewAdapter,
+    createGeoViewSource,
     createGeoViewSnapshot,
     tileMatrixCoverage,
     virtualRasterDemandSetFromViewDemands,
@@ -50,6 +51,45 @@ function pages() {
 }
 
 describe('Geo view snapshots and demand', () => {
+
+    it('captures one immutable view and surface size from a frozen source descriptor', () => {
+
+        const size = { width: 640, height: 360 }
+        const viewState = Object.freeze({ camera: 'primary' })
+        const descriptor = {
+            id: 'primary-view-source',
+            capture: () => ({ view: viewState, size }),
+        }
+        const source = createGeoViewSource(descriptor)
+        descriptor.capture = () => ({
+            view: Object.freeze({ camera: 'mutated' }),
+            size: { width: 1, height: 1 },
+        })
+
+        const captured = source.capture()
+        size.width = 1
+
+        expect(source).to.deep.include({
+            kind: 'geo-view-source',
+            id: 'primary-view-source',
+        })
+        expect(captured.view).to.equal(viewState)
+        expect(captured.size).to.deep.equal({ width: 640, height: 360 })
+        expect(Object.isFrozen(captured)).to.equal(true)
+        expect(Object.isFrozen(captured.size)).to.equal(true)
+    })
+
+    it('rejects invalid source ids, captures, and surface sizes diagnostically', () => {
+
+        expect(() => createGeoViewSource({
+            id: '',
+            capture: () => ({ view: undefined, size: { width: 1, height: 1 } }),
+        })).to.throw(GeoDiagnosticError)
+        expect(() => createGeoViewSource({
+            id: 'invalid-size',
+            capture: () => ({ view: undefined, size: { width: 10.5, height: 0 } }),
+        }).capture()).to.throw(GeoDiagnosticError)
+    })
 
     it('defensively snapshots mutable camera facts', () => {
 

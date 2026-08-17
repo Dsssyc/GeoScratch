@@ -33,11 +33,11 @@
 - Produces: `GeoViewSourceCapture<View>`, `GeoViewSource<View>`, and `createGeoViewSource()`.
 - Produces: `mapLibrePlanarViewSource()` returning one source of camera plus `SurfaceSize`.
 
-- [ ] Write failing tests for immutable size capture, descriptor snapshotting, invalid sizes, and MapLibre camera equivalence.
-- [ ] Run focused tests and record RED.
-- [ ] Implement and export the minimal source contracts and MapLibre composition.
-- [ ] Run package build, focused tests, and raw TypeScript gates to GREEN.
-- [ ] Commit with `Add Geo view sources`.
+- [x] Write failing tests for immutable size capture, descriptor snapshotting, invalid sizes, and MapLibre camera equivalence.
+- [x] Run focused tests and record RED.
+- [x] Implement and export the minimal source contracts and MapLibre composition.
+- [x] Run package build, focused tests, and raw TypeScript gates to GREEN.
+- [x] Commit with `Add Geo view sources`.
 
 ### Task 2: Make Terrain Rendering A Native Geo Frame Result
 

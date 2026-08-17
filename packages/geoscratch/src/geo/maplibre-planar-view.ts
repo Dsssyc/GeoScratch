@@ -2,10 +2,12 @@ import { mat4 } from 'wgpu-matrix'
 import { throwGeoDiagnostic } from './diagnostics.js'
 import {
     createGeoViewAdapter,
+    createGeoViewSource,
     createGeoViewSnapshot,
 } from './geo-view.js'
 import type {
     GeoViewAdapter,
+    GeoViewSource,
     GeoViewSnapshotDescriptor,
 } from './geo-view.js'
 import {
@@ -105,6 +107,54 @@ export type MapLibrePlanarViewAdapter = GeoViewAdapter<MapLibrePlanarCameraState
     viewId: string
     camera(input: MapLibrePlanarCameraInput): MapLibrePlanarCameraState
 }>
+
+export type MapLibrePlanarViewSourceDescriptor = Readonly<{
+    id: string
+    adapter: MapLibrePlanarViewAdapter
+    map: MapLibrePlanarMap
+    viewport(): MapLibrePlanarViewport
+    minimumElevationMeters: number
+}>
+
+/** Captures one MapLibre planar camera and viewport without owning host lifecycle. */
+export type MapLibrePlanarViewSource = GeoViewSource<MapLibrePlanarCameraState>
+
+/** Composes a MapLibre host and planar adapter into one immutable Geo view source. */
+export function mapLibrePlanarViewSource(
+    descriptor: MapLibrePlanarViewSourceDescriptor
+): MapLibrePlanarViewSource {
+
+    const { id, adapter, map, minimumElevationMeters } = descriptor ?? {}
+    const readViewport = descriptor?.viewport
+    if (typeof id !== 'string' || id.length === 0 ||
+        adapter?.kind !== 'geo-view-adapter' || typeof adapter.camera !== 'function' ||
+        map?.transform === undefined || typeof readViewport !== 'function' ||
+        !Number.isFinite(minimumElevationMeters)) {
+        return invalidMapLibreView(
+            'A MapLibre planar view source requires an adapter, map, viewport reader, and elevation.',
+            {
+                id: 'non-empty string',
+                adapter: 'MapLibrePlanarViewAdapter',
+                map: 'MapLibre-compatible planar map',
+                viewport: 'function',
+                minimumElevationMeters: 'finite number',
+            },
+            descriptor,
+            id
+        )
+    }
+    return createGeoViewSource({
+        id,
+        capture() {
+
+            const viewport = readViewport()
+            return {
+                view: adapter.camera({ map, viewport, minimumElevationMeters }),
+                size: viewport,
+            }
+        },
+    })
+}
 
 /** Adapts MapLibre-compatible camera state into precision-preserving planar Geo snapshots. */
 export function mapLibrePlanarViewAdapter(

@@ -1,4 +1,22 @@
 import { throwGeoDiagnostic } from './diagnostics.js'
+import type { SurfaceSize } from '../scratch/index.js'
+
+export type GeoViewSourceCapture<View> = Readonly<{
+    view: View
+    size: Readonly<SurfaceSize>
+}>
+
+export type GeoViewSourceDescriptor<View> = Readonly<{
+    id: string
+    capture(): GeoViewSourceCapture<View>
+}>
+
+/** Synchronously captures one immutable view and presentation size. */
+export type GeoViewSource<View> = Readonly<{
+    kind: 'geo-view-source'
+    id: string
+    capture(): GeoViewSourceCapture<View>
+}>
 
 export type GeoViewSnapshotDescriptor = Readonly<{
     id: string
@@ -47,6 +65,47 @@ export type GeoViewAdapter<Input = unknown> = Readonly<{
 
 const U32_MAX = 0xffff_ffff
 const geoViewSnapshots = new WeakSet<object>()
+
+/** Wraps an external view reader behind one validated immutable capture contract. */
+export function createGeoViewSource<View>(
+    descriptor: GeoViewSourceDescriptor<View>
+): GeoViewSource<View> {
+
+    if (typeof descriptor?.id !== 'string' || descriptor.id.length === 0 ||
+        typeof descriptor.capture !== 'function') {
+        return invalidView(
+            'A Geo view source requires a stable id and capture function.',
+            { id: 'non-empty string', capture: 'function' },
+            descriptor
+        )
+    }
+    const read = descriptor.capture
+    return Object.freeze({
+        kind: 'geo-view-source' as const,
+        id: descriptor.id,
+        capture() {
+
+            const captured = read()
+            const size = captured?.size
+            if (captured === null || typeof captured !== 'object' ||
+                !Object.prototype.hasOwnProperty.call(captured, 'view') ||
+                !positiveInteger(size?.width) || !positiveInteger(size?.height)) {
+                return invalidView(
+                    'A Geo view source capture requires a view and positive integer size.',
+                    {
+                        view: 'present',
+                        size: 'positive integer width and height',
+                    },
+                    captured
+                )
+            }
+            return Object.freeze({
+                view: captured.view,
+                size: Object.freeze({ width: size.width, height: size.height }),
+            })
+        },
+    })
+}
 
 /** Freezes one revisioned camera and viewport observation in a relative-world frame. */
 export function createGeoViewSnapshot(
@@ -170,6 +229,11 @@ export function createGeoViewAdapter<Input>(
 function u32(value: number): boolean {
 
     return Number.isSafeInteger(value) && value >= 0 && value <= U32_MAX
+}
+
+function positiveInteger(value: number | undefined): value is number {
+
+    return Number.isSafeInteger(value) && value! > 0
 }
 
 function invalidView(message: string, expected: unknown, actual: unknown): never {

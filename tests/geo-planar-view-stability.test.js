@@ -2,6 +2,7 @@ import { expect } from 'chai'
 import {
     WebMercatorQuad,
     mapLibrePlanarViewAdapter,
+    mapLibrePlanarViewSource,
 } from 'geoscratch/geo'
 
 const EARTH_RADIUS_METERS = 6_371_008.8
@@ -102,6 +103,33 @@ describe('Geo planar view stability', () => {
         expect(view.clipFromRelativeWorld).to.deep.equal(camera.clipFromRelativeWorld)
         expect(view.clipFromRelativeWorld).not.to.equal(camera.clipFromRelativeWorld)
         expect(Object.isFrozen(view)).to.equal(true)
+    })
+
+    it('captures the same camera and viewport through one MapLibre view source', () => {
+
+        const map = fakeMap(CENTER)
+        const viewport = { ...VIEWPORT }
+        const direct = viewAdapter.camera({
+            map,
+            viewport,
+            minimumElevationMeters: -100,
+        })
+        const descriptor = {
+            id: 'camera-stability-source',
+            adapter: viewAdapter,
+            map,
+            viewport: () => viewport,
+            minimumElevationMeters: -100,
+        }
+        const source = mapLibrePlanarViewSource(descriptor)
+        descriptor.viewport = () => ({ width: 1, height: 1 })
+        const captured = source.capture()
+        viewport.width = 1
+
+        expect(captured.view).to.deep.equal(direct)
+        expect(captured.size).to.deep.equal(VIEWPORT)
+        expect(Object.isFrozen(captured.view)).to.equal(true)
+        expect(Object.isFrozen(captured.size)).to.equal(true)
     })
 })
 

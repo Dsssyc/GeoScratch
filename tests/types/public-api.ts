@@ -18,12 +18,14 @@ import {
     cellLocalF32Codec,
     coordinateDomain,
     createGeoViewAdapter,
+    createGeoViewSource,
     createGeoViewSnapshot,
     geoField,
     gpuTileFrontierPolicy,
     gpuTileFrontierRenderWgslModule,
     localVector,
     mapLibrePlanarViewAdapter,
+    mapLibrePlanarViewSource,
     mapFieldLayer,
     ownedVirtualRasterPagePayload,
     surfaceDomain,
@@ -43,6 +45,8 @@ import {
     type CoordinateDomain,
     type GeoField,
     type GeoViewAdapter,
+    type GeoViewSource,
+    type GeoViewSourceCapture,
     type GeoViewSnapshot,
     type GpuTileFrontierDescriptor,
     type GpuTileFrontierDemand,
@@ -64,6 +68,7 @@ import {
     type MapFieldLayer,
     type MapLibrePlanarCameraInput,
     type MapLibrePlanarViewAdapter,
+    type MapLibrePlanarViewSource,
     type PositionPrecisionFacts,
     type TileSpatialProfile,
     type TiledFieldRepresentation,
@@ -374,6 +379,15 @@ const typedViewSnapshot: GeoViewSnapshot = typedViewAdapter.read(
     { frameEpoch: 1 },
     { frameEpoch: 1, residencySnapshotEpoch: 0 }
 )
+const typedViewSource: GeoViewSource<{ frameEpoch: number }> = createGeoViewSource({
+    id: 'typed-view-source',
+    capture: () => ({
+        view: { frameEpoch: 1 },
+        size: typedSurfaceSize,
+    }),
+})
+const typedViewSourceCapture: GeoViewSourceCapture<{ frameEpoch: number }> =
+    typedViewSource.capture()
 declare const typedMapLibreCameraInput: MapLibrePlanarCameraInput
 const typedMapLibreViewAdapter: MapLibrePlanarViewAdapter = mapLibrePlanarViewAdapter({
     id: 'typed-maplibre-view-adapter',
@@ -384,6 +398,13 @@ const typedMapLibreView: GeoViewSnapshot = typedMapLibreViewAdapter.read(
     typedMapLibreCamera,
     { frameEpoch: 1, residencySnapshotEpoch: 1 }
 )
+const typedMapLibreViewSource: MapLibrePlanarViewSource = mapLibrePlanarViewSource({
+    id: 'typed-maplibre-view-source',
+    adapter: typedMapLibreViewAdapter,
+    map: typedMapLibreCameraInput.map,
+    viewport: () => typedMapLibreCameraInput.viewport,
+    minimumElevationMeters: typedMapLibreCameraInput.minimumElevationMeters,
+})
 const typedViewDemandProducer = new ViewDemandProducer({
     id: 'typed-view-demand',
     maxDemands: 8,
@@ -525,6 +546,8 @@ typedMapField.scheduler
 typedMapField.runtime
 void typedViewDemands
 void typedMapLibreView
+void typedViewSourceCapture
+void typedMapLibreViewSource
 void typedTerrainRendererCreation
 void typedGeoFrameSnapshot
 void typedInFlightFrameCount
