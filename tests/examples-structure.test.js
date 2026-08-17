@@ -274,7 +274,7 @@ describe('examples structure', () => {
     })
 
     it('keeps the Underwater Terrain example focused on terrain only', () => {
-        const source = read('examples', 'underwaterTerrain', 'main.ts')
+        const source = read('examples', 'underwaterTerrain', 'application.ts')
         const renderer = read(
             'packages', 'geoscratch', 'src', 'geo', 'web-mercator-terrain-renderer.ts'
         )

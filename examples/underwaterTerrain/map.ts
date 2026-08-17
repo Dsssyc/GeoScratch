@@ -37,7 +37,6 @@ export type UnderwaterTerrainMap = MapLibrePlanarMap & MapLibreFrameMap & Readon
     loaded(): boolean
     once(event: 'load', listener: () => void): void
     off(event: 'load', listener: () => void): void
-    resize(): void
     jumpTo(options: {
         center?: readonly [number, number]
         zoom?: number

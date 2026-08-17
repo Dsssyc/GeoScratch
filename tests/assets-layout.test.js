@@ -103,14 +103,14 @@ describe('asset layout', () => {
         expect(exists('examples', 'underwaterTerrain', 'assets', 'dem.png')).to.equal(true)
         expect(exists('packages', 'geoscratch', 'src', 'applications', 'terrain')).to.equal(false)
 
-        const main = read('examples', 'underwaterTerrain', 'main.ts')
+        const application = read('examples', 'underwaterTerrain', 'application.ts')
         const backend = read(
             'examples', 'underwaterTerrain', 'tile-server', 'src', 'geoscratch_dem_tiles', 'build.py'
         )
         expect(backend).to.include('"assets" / "dem.png"')
-        expect(main).not.to.include('./assets/dem.png')
-        expect(main).to.include('fetchDemTileSource')
-        expect(main).to.not.match(/border|palette/i)
+        expect(application).not.to.include('./assets/dem.png')
+        expect(application).to.include('fetchDemTileSource')
+        expect(application).to.not.match(/border|palette/i)
     })
 
     it('keeps example-owned postprocess shaders with Hello GAW after legacy removal', () => {

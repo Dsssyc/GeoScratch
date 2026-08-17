@@ -207,6 +207,44 @@ function createTestTerrainRenderer({
 
 describe('Underwater Terrain clean cut', () => {
 
+    it('keeps page bootstrap and explicit terrain application assembly context-bounded', () => {
+
+        const applicationPath = path.join(
+            root,
+            'examples',
+            'underwaterTerrain',
+            'application.ts'
+        )
+        expect(fs.existsSync(applicationPath)).to.equal(true)
+        const mainSource = read('examples', 'underwaterTerrain', 'main.ts')
+        const applicationSource = fs.readFileSync(applicationPath, 'utf8')
+
+        expect(mainSource.split('\n')).to.have.length.at.most(181)
+        for (const forbidden of [
+            'GPURuntime',
+            'WorkerModuleCatalog',
+            'createUnderwaterTerrainMap',
+            'createDemVirtualRaster',
+            'createWebMercatorTerrainRenderer',
+            'createGeoFrameController',
+            'mapLibreFrameDriver',
+            'mapLibrePlanarViewSource',
+        ]) expect(mainSource).not.to.include(forbidden)
+        for (const required of [
+            'GPURuntime.create(',
+            'createUnderwaterTerrainMap(',
+            'createDemVirtualRaster({',
+            'createWebMercatorTerrainRenderer({',
+            'mapLibrePlanarViewSource({',
+            'mapLibreFrameDriver({',
+            'createGeoFrameController({',
+        ]) expect(applicationSource).to.include(required)
+        expect(applicationSource).not.to.match(/URLSearchParams|localStorage|tweakpane|Pane/)
+        expect(`${mainSource}\n${applicationSource}`).not.to.include(
+            "window.addEventListener('resize'"
+        )
+    })
+
     it('traverses Geo-owned render roots independently of the data frontier', () => {
 
         const layerSource = read(
@@ -535,6 +573,7 @@ describe('Underwater Terrain clean cut', () => {
             'packages', 'geoscratch', 'src', 'geo', 'web-mercator-terrain-renderer.ts'
         )
         const mainSource = read('examples', 'underwaterTerrain', 'main.ts')
+        const applicationSource = read('examples', 'underwaterTerrain', 'application.ts')
         const frameSource = layerSource.slice(
             layerSource.indexOf('async function submitFrame(input: ViewInput)'),
             layerSource.indexOf('async function resize(nextSize: SurfaceSize)')
@@ -543,6 +582,7 @@ describe('Underwater Terrain clean cut', () => {
         const allSources = [
             layerSource,
             mainSource,
+            applicationSource,
             read('examples', 'underwaterTerrain', 'map.ts'),
         ].join('\n')
 
@@ -580,19 +620,21 @@ describe('Underwater Terrain clean cut', () => {
     it('delegates MapLibre frame authority through one public driver entry', () => {
 
         const mainSource = read('examples', 'underwaterTerrain', 'main.ts')
+        const applicationSource = read('examples', 'underwaterTerrain', 'application.ts')
 
-        expect(mainSource).to.include('driver: mapLibreFrameDriver({')
-        expect(mainSource).to.include("id: 'underwater-terrain-maplibre-frames'")
-        expect(mainSource).not.to.match(/\bhostViewRevision\b|\bcachedHostCapture\b/)
-        expect(mainSource).not.to.include("map.on('render'")
-        expect(mainSource).not.to.include("map.on('move'")
-        expect(mainSource).not.to.include("map.on('resize'")
-        expect(mainSource).not.to.include('frameController.invalidateNow()')
-        expect(mainSource).to.include('mapLibrePlanarViewSource({')
-        expect(mainSource).to.include('return await graph.render(captured)')
-        expect(mainSource).not.to.include('graph.renderFrame(')
-        expect(mainSource).not.to.include('graph.resize(')
-        expect(mainSource).not.to.include('requestedPageCount')
+        expect(applicationSource).to.include('driver: mapLibreFrameDriver({')
+        expect(applicationSource).to.include("id: 'underwater-terrain-maplibre-frames'")
+        expect(applicationSource).to.include('mapLibrePlanarViewSource({')
+        expect(applicationSource).to.include('return graph.render(captured)')
+        const combined = `${mainSource}\n${applicationSource}`
+        expect(combined).not.to.match(/\bhostViewRevision\b|\bcachedHostCapture\b/)
+        expect(combined).not.to.include("map.on('render'")
+        expect(combined).not.to.include("map.on('move'")
+        expect(combined).not.to.include("map.on('resize'")
+        expect(combined).not.to.include('frameController.invalidateNow()')
+        expect(combined).not.to.include('graph.renderFrame(')
+        expect(combined).not.to.include('graph.resize(')
+        expect(combined).not.to.include('requestedPageCount')
     })
 
     it('locks the finite initialization faults and required migration documentation', () => {
@@ -603,8 +645,9 @@ describe('Underwater Terrain clean cut', () => {
         )
         const pageHideRegistration = mainSource.indexOf("window.addEventListener('pagehide'")
         const initializationStart = mainSource.indexOf(
-            'loadProof().then(loadedProof => {'
+            "pageLifetime.track(initializePage(), 'underwater-terrain-page-initialization')"
         )
+        const applicationSource = read('examples', 'underwaterTerrain', 'application.ts')
         const proofAdapter = read('tests', 'browser', 'support', 'underwater-terrain-proof.ts')
         const frameController = read(
             'packages', 'geoscratch', 'src', 'geo', 'frame-controller.ts'
@@ -621,12 +664,12 @@ describe('Underwater Terrain clean cut', () => {
         expect(initializationStart).to.be.greaterThan(pageHideRegistration)
         expect(proofAdapter).to.include('FAILURE_CAPTURE_BOUNDS')
         expect(proofAdapter).to.include('retainsWgslSource')
-        expect(mainSource).to.include("activeProof?.reach('after-map-acquisition')")
-        expect(mainSource).to.include('activeProof?.beforeTerrainShaderModule(runtime)')
+        expect(applicationSource).to.include("proof?.reach('after-map-acquisition')")
+        expect(applicationSource).to.include('proof?.beforeTerrainShaderModule(runtime)')
         expect(mainSource).to.include("'underwater-terrain-page-initialization'")
-        expect(mainSource).to.include('const frameController = createGeoFrameController({')
-        expect(mainSource).to.include('track: (work, label) => lifetime.track(work, label)')
-        expect(mainSource).not.to.include('requestAnimationFrame(')
+        expect(applicationSource).to.include('const frameController = createGeoFrameController({')
+        expect(applicationSource).to.include('track: (work, label) => lifetime.track(work, label)')
+        expect(`${mainSource}\n${applicationSource}`).not.to.include('requestAnimationFrame(')
         expect(frameController).to.include('`geo-frame-${frameNumber}`')
 
         for (const documentation of [

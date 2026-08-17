@@ -1,34 +1,17 @@
-import { GPURuntime, LifetimeScope, WorkerModuleCatalog } from 'geoscratch/scratch'
+import { LifetimeScope } from 'geoscratch/scratch'
 import {
-    WEB_MERCATOR_TERRAIN_TILE_WIREFRAME_FRAGMENT_ENTRY_POINT,
-    createGeoFrameController,
-    createWebMercatorTerrainRenderer,
-    mapFieldLayer,
-    mapLibreFrameDriver,
-    mapLibrePlanarViewSource,
-} from 'geoscratch/geo'
-import {
-    createUnderwaterTerrainMap,
-    underwaterTerrainViewAdapter,
-    waitForUnderwaterTerrainMap,
-} from './map.ts'
-import type { UnderwaterTerrainMap } from './map.ts'
-import {
-    createDemVirtualRaster,
-    fetchDemTileSource,
-} from './dem-source.ts'
+    startUnderwaterTerrainApplication,
+} from './application.ts'
+import type { UnderwaterTerrainApplication } from './application.ts'
 import { readUnderwaterTerrainCachePolicy } from './cache-policy.ts'
 import { prepareUnderwaterTerrainControlPanel } from './control-panel.ts'
-import terrainPresentationShader from './shaders/terrain-presentation.wgsl?raw'
 
 type UnderwaterTerrainProofModule = typeof import(
     '../../tests/browser/support/underwater-terrain-proof.ts'
 )
 type UnderwaterTerrainProof = ReturnType<UnderwaterTerrainProofModule['createUnderwaterTerrainProof']>
-type PageSettlement = Promise<unknown>
-type CameraMoveOptions = Parameters<UnderwaterTerrainMap['jumpTo']>[0]
 type FailureDetails = Error & { diagnostic?: unknown }
-const TERRAIN_EXAGGERATION = 50
+
 const canvas = document.getElementById('GPUFrame') as HTMLCanvasElement
 const controlPanelContainer = document.getElementById('UnderwaterTerrainControlPanel') as HTMLElement
 const pageLifetime = new LifetimeScope({ label: 'underwater-terrain-page' })
@@ -38,16 +21,12 @@ const preparedControlPanel = prepareUnderwaterTerrainControlPanel({
 const parameters = preparedControlPanel.parameters
 const proofMode = parameters.get('proof') === '1'
 const tileServerUrl = parameters.get('tileServer') ?? 'http://127.0.0.1:8787'
-const workerModuleManifestUrl = new URL(
-    '../scratch-workers/manifest.json',
-    window.location.href
-)
 const cachePolicy = readUnderwaterTerrainCachePolicy(parameters)
 const maxPhysicalPages = boundedIntegerParameter(parameters.get('atlasPages'), 64, 2, 64)
 let tileWireframeEnabled = preparedControlPanel.renderingPreference.tileWireframe
-let applyTerrainPresentation: ((enabled: boolean) => void) | undefined
+let application: UnderwaterTerrainApplication | undefined
 let proof: UnderwaterTerrainProof | undefined
-let pageSettlement: PageSettlement | undefined
+let pageSettlement: Promise<unknown> | undefined
 
 const controlPanel = preparedControlPanel.mount({
     container: controlPanelContainer,
@@ -55,7 +34,7 @@ const controlPanel = preparedControlPanel.mount({
     compact: window.matchMedia('(max-width: 640px)').matches,
     onTileWireframeChange(enabled) {
         tileWireframeEnabled = enabled
-        applyTerrainPresentation?.(enabled)
+        application?.setTileWireframe(enabled)
     },
 })
 const handlePageHide = () => { void disposePage() }
@@ -67,19 +46,34 @@ pageLifetime.deferStop({
 })
 
 setStatus('loading')
-const pageInitialization = pageLifetime.track(
-    loadProof().then(loadedProof => {
-        proof = loadedProof
-        return main(pageLifetime, loadedProof)
-    }),
-    'underwater-terrain-page-initialization'
-)
+const pageInitialization = pageLifetime.track(initializePage(), 'underwater-terrain-page-initialization')
 void pageInitialization.catch(error => {
     if (pageLifetime.isStopError(error)) return
     void failPage(error)
 })
 
+async function initializePage() {
+
+    proof = await loadProof()
+    application = await startUnderwaterTerrainApplication({
+        lifetime: pageLifetime,
+        canvas,
+        proofMode,
+        tileServerUrl,
+        workerModuleManifestUrl: new URL('../scratch-workers/manifest.json', window.location.href),
+        cachePolicy,
+        maxPhysicalPages,
+        tileWireframeEnabled,
+        ...(proof === undefined ? {} : { proof }),
+        fail: error => { void failPage(error) },
+        dispose: disposePage,
+        setStatus,
+    })
+    application.setTileWireframe(tileWireframeEnabled)
+}
+
 async function loadProof(): Promise<UnderwaterTerrainProof | undefined> {
+
     if (!import.meta.env.DEV || !proofMode) return undefined
     const { createUnderwaterTerrainProof } = await import(
         '../../tests/browser/support/underwater-terrain-proof.ts'
@@ -92,199 +86,6 @@ async function loadProof(): Promise<UnderwaterTerrainProof | undefined> {
         cachePolicy,
         maxPhysicalPages,
         controlPanel: preparedControlPanel,
-    })
-}
-
-async function main(lifetime: LifetimeScope, activeProof?: UnderwaterTerrainProof) {
-
-    activeProof?.assertConfiguration()
-    const map = lifetime.own(createUnderwaterTerrainMap(canvas, { proof: proofMode }), {
-        label: 'maplibre-map',
-        release: value => value.remove(),
-    })
-    activeProof?.mapAcquired()
-    activeProof?.reach('after-map-acquisition')
-
-    const [ runtime, , source, workerModules ] = await Promise.all([
-        lifetime.acquire(GPURuntime.create({
-            label: 'Underwater Terrain runtime',
-            powerPreference: 'high-performance',
-            diagnostics: {
-                operationCapacity: 192,
-                incidentCapacity: 32,
-                evidenceByteCapacity: 256 * 1024,
-                submissionScopes: 'summary',
-                maxPendingNativeObservations: 8,
-            },
-        }), {
-            label: 'scratch-runtime',
-            release: value => value.dispose(),
-        }),
-        waitForUnderwaterTerrainMap(map, lifetime.signal),
-        lifetime.track(
-            fetchDemTileSource(tileServerUrl, lifetime.signal),
-            'dem-tile-source'
-        ),
-        lifetime.track(
-            WorkerModuleCatalog.load(workerModuleManifestUrl, { signal: lifetime.signal }),
-            'worker-module-catalog'
-        ),
-    ])
-    activeProof?.observeRuntime(runtime)
-    lifetime.assertActive()
-
-    const initialSize = canvasPixelSize(canvas)
-    const surface = runtime.createSurface(canvas, {
-        label: 'Underwater Terrain surface',
-        format: 'preferred',
-        alphaMode: 'premultiplied',
-        size: initialSize,
-    })
-    const virtualRaster = await lifetime.acquire(
-        createDemVirtualRaster({
-            runtime,
-            source,
-            cachePolicy,
-            workerModules,
-            workerCount: 3,
-            maxNetworkRequests: 2,
-            maxDecodeTasks: 1,
-            maxPhysicalPages,
-        }), {
-            label: 'dem-virtual-raster-streaming',
-            release: value => value.dispose(),
-        }
-    )
-    activeProof?.rasterAcquired()
-    lifetime.deferStop({
-        label: 'dem-virtual-raster-demand',
-        run: virtualRaster.stopDemand,
-    })
-
-    const elevationRangeMeters = [
-        source.manifest.offset,
-        source.manifest.offset + source.manifest.scale * 255,
-    ].sort((left, right) => left - right) as [number, number]
-    activeProof?.beforeTerrainShaderModule(runtime)
-    const graph = await lifetime.acquire(
-        createWebMercatorTerrainRenderer({
-            runtime,
-            surface,
-            fieldLayer: mapFieldLayer({
-                id: 'underwater-terrain-height-field',
-                field: virtualRaster.field,
-                representation: virtualRaster.representation,
-                spatialProfile: virtualRaster.spatialProfile,
-                viewAdapter: underwaterTerrainViewAdapter,
-                demandProducer: virtualRaster.viewDemandProducer,
-            }),
-            virtualRaster,
-            size: initialSize,
-            presentationShader: activeProof?.terrainShader(terrainPresentationShader) ??
-                terrainPresentationShader,
-            fieldSampling: {
-                namespace: 'DemHeight',
-                addressNamespace: 'DemAddress',
-                transitionTexels: 16,
-            },
-            elevationRangeMeters,
-            exaggeration: TERRAIN_EXAGGERATION,
-            presentations: [
-                {
-                    id: 'shaded',
-                    fragmentEntryPoint: 'fMain',
-                    label: 'Underwater Terrain pipeline',
-                },
-                {
-                    id: 'tile-wireframe',
-                    fragmentEntryPoint:
-                        WEB_MERCATOR_TERRAIN_TILE_WIREFRAME_FRAGMENT_ENTRY_POINT,
-                    label: 'Underwater Terrain tile wireframe pipeline',
-                },
-            ],
-            initialPresentation: tileWireframeEnabled ? 'tile-wireframe' : 'shaded',
-        }), {
-            label: 'underwater-terrain-gpu-frontier',
-            release: value => value.dispose(),
-        }
-    )
-    const initialized = await graph.initialize()
-    await lifetime.track(initialized.observation, 'underwater-terrain-initial-submission')
-    lifetime.assertActive()
-
-    const minimumTerrainElevationMeters = elevationRangeMeters[0] * TERRAIN_EXAGGERATION
-    const viewSource = mapLibrePlanarViewSource({
-        id: 'underwater-terrain-maplibre-view-source',
-        adapter: underwaterTerrainViewAdapter,
-        map,
-        viewport: () => canvasPixelSize(canvas),
-        minimumElevationMeters: minimumTerrainElevationMeters,
-    })
-    const frameController = createGeoFrameController({
-        track: (work, label) => lifetime.track(work, label),
-        maximumInFlightFrames: 1,
-        driver: mapLibreFrameDriver({
-            id: 'underwater-terrain-maplibre-frames',
-            map,
-            capture: viewSource.capture,
-        }),
-        async render(_frameNumber, captured) {
-            lifetime.assertActive()
-            return await graph.render(captured)
-        },
-        onSubmitted({ value }) {
-            activeProof?.frameSubmitted(value.frame.provenance, value.view)
-        },
-        onObserved({ frameNumber }) {
-            activeProof?.frameObserved(frameNumber)
-            if (frameController.snapshot().state === 'running') setStatus('ready')
-        },
-        onError(error) {
-            if (lifetime.isStopError(error)) return
-            void failPage(error)
-        },
-    })
-
-    function moveCamera(options: CameraMoveOptions) {
-
-        if (frameController.snapshot().state === 'stopped') {
-            throw new Error('Underwater Terrain frame controller is stopped')
-        }
-        map.jumpTo(options)
-    }
-
-    applyTerrainPresentation = enabled => {
-        graph.setPresentation(enabled ? 'tile-wireframe' : 'shaded')
-        frameController.invalidate()
-    }
-    lifetime.deferStop({
-        label: 'underwater-terrain-presentation-control',
-        run: () => { applyTerrainPresentation = undefined },
-    })
-
-    const handleResize = () => { map.resize() }
-    window.addEventListener('resize', handleResize)
-    lifetime.deferStop({
-        label: 'window-resize-listener',
-        run: () => window.removeEventListener('resize', handleResize),
-    })
-    lifetime.deferStop({
-        label: 'underwater-terrain-frame-scheduler',
-        run: frameController.stop,
-    })
-    activeProof?.bindGraph({
-        runtime,
-        graph,
-        lifetime,
-        frameController,
-        virtualRasterFacts: () => Object.freeze({
-            runtime: virtualRaster.inspect(),
-            source: source.facts,
-            worker: virtualRaster.workerFacts(),
-        }),
-        dispose: disposePage,
-        moveCamera,
-        setStatus,
     })
 }
 
@@ -310,15 +111,6 @@ async function disposePage() {
         return cleanupProof ?? report
     })
     return pageSettlement
-}
-
-function canvasPixelSize(target: HTMLElement) {
-
-    const ratio = window.devicePixelRatio || 1
-    return {
-        width: Math.max(1, Math.floor(target.clientWidth * ratio)),
-        height: Math.max(1, Math.floor(target.clientHeight * ratio)),
-    }
 }
 
 function boundedIntegerParameter(

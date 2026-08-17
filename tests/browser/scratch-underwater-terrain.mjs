@@ -1125,7 +1125,6 @@ function validateNormalProof(proof, failures) {
     } else {
         validateCleanup(proof.cleanupPair.reports[0], [
             'underwater-terrain-frame-scheduler',
-            'window-resize-listener',
             'underwater-terrain-presentation-control',
             'dem-virtual-raster-demand',
             'pagehide-listener',

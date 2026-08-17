@@ -74,12 +74,12 @@
 - Produces: `startUnderwaterTerrainApplication(options)` and a narrow returned presentation command.
 - Removes: manual window resize, frame settlement adaptation, renderer size comparison, and runtime assembly from `main.ts`.
 
-- [ ] Add failing structural tests for the 180-line main limit and forbidden responsibilities.
-- [ ] Run the structural tests and record RED.
-- [ ] Move explicit application assembly without introducing a broad facade or hidden owner.
-- [ ] Replace the frame capture path with `mapLibrePlanarViewSource` and renderer `render`.
-- [ ] Run focused, type, and clean-cut tests to GREEN.
-- [ ] Commit with `Thin the terrain example entry`.
+- [x] Add failing structural tests for the 180-line main limit and forbidden responsibilities.
+- [x] Run the structural tests and record RED.
+- [x] Move explicit application assembly without introducing a broad facade or hidden owner.
+- [x] Replace the frame capture path with `mapLibrePlanarViewSource` and renderer `render`.
+- [x] Run focused, type, and clean-cut tests to GREEN.
+- [x] Commit with `Thin the terrain example entry`.
 
 ### Task 4: Document And Verify The Clean Cut
 
