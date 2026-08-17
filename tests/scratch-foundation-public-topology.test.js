@@ -143,6 +143,7 @@ const geoValues = [
     'isGeoDiagnosticError',
     'localVector',
     'mapFieldLayer',
+    'mapLibreFrameDriver',
     'mapLibrePlanarViewAdapter',
     'ownedVirtualRasterPagePayload',
     'planarTileSpatialProfile',

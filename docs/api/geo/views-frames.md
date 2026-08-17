@@ -4,6 +4,7 @@ canonical: true
 apiSources:
   - packages/geoscratch/src/geo/frame-controller.ts
   - packages/geoscratch/src/geo/geo-view.ts
+  - packages/geoscratch/src/geo/maplibre-frame-driver.ts
   - packages/geoscratch/src/geo/maplibre-planar-view.ts
 ---
 # Views And Frame Control
@@ -12,50 +13,99 @@ apiSources:
 
 `GeoViewAdapter` reads an external camera or map and produces immutable
 `GeoViewSnapshot` values containing viewport, matrices, camera position, zoom,
-orientation, and a monotonic revision. The MapLibre planar adapter translates
-MapLibre-compatible state without making MapLibre the owner of Geo resources.
+orientation, and monotonic frame and residency revisions. The MapLibre planar adapter
+translates MapLibre-compatible state without making MapLibre the owner of Geo resources.
 
 Snapshots are observations, not global camera state. Screen-based demand may consume
 them for visualization, while simulations, prefetch, editing, or offline processes may
 produce independent demand. This distinction prevents camera locality from becoming a
 universal resource policy.
 
-`GeoFrameController` coordinates host-state capture, resize, prepare, render, feedback,
-and invalidation for one assembled field. It owns frame-loop authority only when the
-descriptor gives it that responsibility. It does not own the external map, GPU runtime,
-or field resources unless those are explicitly registered for cleanup.
+`GeoFrameController` coordinates host-state capture, render construction, native
+observation, delayed feedback, and invalidation for one assembled field. Every renderer
+consumes the same frozen capture contract; host-driven and independent applications do
+not select renderer modes.
+
+## Two Entry Patterns
+
+An independent application uses the controller directly. The default scheduler is browser
+`requestAnimationFrame`; tests, simulations, or manual loops can provide one
+`GeoFrameScheduler` instead:
+
+```ts
+const frames = createGeoFrameController({
+    capture: readIndependentCamera,
+    render,
+})
+```
+
+A MapLibre-hosted overlay adds exactly one nested driver:
+
+```ts
+const frames = createGeoFrameController({
+    driver: mapLibreFrameDriver({
+        id: 'terrain-frames',
+        map,
+        capture: readMapCameraAndViewport,
+    }),
+    render,
+})
+```
+
+`driver` is mutually exclusive with descriptor-level `capture` and `scheduler`. The
+controller owns a supplied driver: construction starts it after controller callbacks exist,
+and `stop()` cancels queued controller work before stopping the driver. The external map,
+GPU runtime, field resources, and input controls remain caller-owned.
+
+## Capture And Admission
 
 An optional synchronous `capture()` returns a `GeoFrameCapture` containing a non-negative,
 monotonically increasing revision and an immutable host snapshot. `invalidateNow()` calls
-`capture()` inside the already-running host render callback, before any Promise or asynchronous
-frame construction. A new revision replaces the pending capture in a latest-only mailbox;
-an identical revision increments `deduplicatedInvalidationCount`, returns `false`, and does
-not schedule another submission. A revision lower than the latest accepted capture stops the
-controller with `GEO_FRAME_CAPTURE_STALE`. The asynchronous `render()` callback receives the
-frozen snapshot selected for that submission, so later host mutation cannot change an already
-admitted frame.
+`capture()` inside an already-running host render callback. A new revision replaces the
+pending capture in a latest-only mailbox; an identical revision increments
+`deduplicatedInvalidationCount`, returns `false`, and does not schedule another submission.
+A revision lower than the latest accepted capture stops the controller with
+`GEO_FRAME_CAPTURE_STALE`. `render()` receives the frozen snapshot selected for that
+submission, so later host mutation cannot change an admitted frame.
 
 `invalidate()` remains a forceful application or convergence invalidation. It coalesces work
 onto the configured frame scheduler and still renders when the host capture revision is
-unchanged. This distinction lets camera-locked overlays reject unrelated host style or source
-repaints without suppressing presentation changes, residency completion, or GPU convergence.
-When no `capture()` is configured, both invalidation methods preserve the uncaptured scheduling
-behavior.
+unchanged. This preserves presentation changes, residency completion, and GPU convergence.
+When no `capture()` is configured, both invalidation methods preserve uncaptured scheduling.
 
-`invalidateNow()` also cancels a queued callback and admits the captured state from the current
-host render callback. Only construction of one submitted frame is mutually exclusive. The
-construction slot is released before native observation and delayed settlement complete, while
-a separate `maximumInFlightFrames` budget bounds submissions awaiting native observation. Its default
-is three and its accepted range is one through eight. At capacity, repeated invalidations
-collapse into one newest-state request; the next completed observation releases that request
-without replaying intermediate camera states. This keeps map tracking asynchronous without
-building an unbounded GPU queue. Only the latest submitted frame may request bounded
-convergence or residency follow-ups, so stale async results cannot revive an obsolete camera
-decision. `snapshot()` exposes the configured budget, current in-flight count, deduplicated
-invalidations, and latest accepted and submitted capture revisions.
+A scheduler callback invokes `render()` synchronously, then observes its Promise-like result
+asynchronously. An async render function therefore runs through its first `await` before the
+host callback returns. This lets a prepared renderer submit WebGPU work in the same host
+callback without making asynchronous observation block that callback.
 
-The budget is an application latency-throughput choice, not a universal quality setting.
-Camera-locked overlays should normally select one in-flight frame so an external map cannot
-build a throughput-oriented queue of obsolete camera presentations. Capacity-blocked
-invalidations still coalesce to the newest camera. Independent rendering or compute workloads
-may use a larger bounded value when throughput matters more than newest-state latency.
+Only construction of one submitted frame is mutually exclusive. The construction slot is
+released before native observation and delayed settlement complete, while a separate
+`maximumInFlightFrames` budget bounds submissions awaiting native observation. Its default is
+three and its accepted range is one through eight. At capacity, repeated invalidations
+collapse into one newest-state request without replaying intermediate camera states. Only the
+latest submitted frame may request bounded convergence or residency follow-ups, so stale async
+results cannot revive an obsolete decision. `snapshot()` exposes scheduling, in-flight,
+capture-revision, and observation counters.
+
+The budget is an application latency-throughput choice. Camera-locked overlays should normally
+select one in-flight frame. Independent rendering or compute workloads may use a larger bounded
+value when throughput matters more than newest-state latency.
+
+## MapLibre Frame Driver
+
+`mapLibreFrameDriver()` has no MapLibre package dependency. It validates a small structural
+map contract, installs one `renderingMode: '2d'` custom layer, and performs no WebGL work.
+`move` and `resize` advance one monotonic host revision. Controller requests call
+`map.triggerRepaint()`, and the pending callback executes inside the custom-layer `render`
+callback. Multiple changes before that callback retain only the newest revision; application
+capture is cached once per revision. A `style.load` event reattaches the layer when absent.
+Driver stop removes only its own layer, listeners, captures, and callbacks.
+
+The shape is compatible with the example's pinned MapLibre GL JS 4.7.1 callback
+`render(gl, matrix, options)` because the no-draw layer intentionally ignores all callback
+arguments. See the [4.7.1 custom-layer source](https://github.com/maplibre/maplibre-gl-js/blob/v4.7.1/src/style/style_layer/custom_style_layer.ts)
+and [current CustomLayerInterface documentation](https://maplibre.org/maplibre-gl-js/docs/API/interfaces/CustomLayerInterface/).
+
+The driver synchronizes frame authority; it does not merge rendering contexts. A separate
+WebGPU canvas still does not share MapLibre's WebGL context, render pass, depth buffer, or
+atomic presentation.

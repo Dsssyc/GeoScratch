@@ -221,13 +221,13 @@ git commit -m "Drive terrain frames from MapLibre"
 - Documents: independent controller mode, driver-owned host mode, ownership, lifecycle,
   synchronous admission, and the two-context limitation.
 
-- [ ] **Step 1: Write the ADR and bilingual current API documentation**
+- [x] **Step 1: Write the ADR and bilingual current API documentation**
 
 State present-tense behavior only. Cite the MapLibre 4.7.1 custom-layer source and current
 official interface documentation. Update the example README from post-render events to the
 custom-layer frame driver.
 
-- [ ] **Step 2: Regenerate and validate documentation**
+- [x] **Step 2: Regenerate and validate documentation**
 
 Run:
 
@@ -239,7 +239,7 @@ npm run docs:check
 
 Expected: generated references, coverage, links, and translation digests pass.
 
-- [ ] **Step 3: Run full static and unit gates**
+- [x] **Step 3: Run full static and unit gates**
 
 Run:
 
@@ -251,14 +251,14 @@ npm run build
 
 Expected: zero failures; only previously accepted build-size warnings may remain.
 
-- [ ] **Step 4: Run the real WebGPU browser proof**
+- [x] **Step 4: Run the real WebGPU browser proof**
 
 Start or reuse isolated development servers, then run the repository's Underwater Terrain
 browser proof and performance gate. Verify camera motion, vertical/pitched LoD scenarios,
 A-to-B-to-A revision stability, capture-to-submission lag, one in-flight frame, zero stale
 transitions, zero console/page errors, and complete disposal.
 
-- [ ] **Step 5: Review the final diff and commit**
+- [x] **Step 5: Review the final diff and commit**
 
 ```bash
 git diff --check

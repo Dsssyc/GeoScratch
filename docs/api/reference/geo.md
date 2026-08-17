@@ -2,7 +2,7 @@
 
 # geoscratch/geo API Reference
 
-Public symbols: 303.
+Public symbols: 309.
 
 ## `packages/geoscratch/src/geo/coordinate-domain.ts`
 
@@ -245,7 +245,7 @@ Kind: `Type Alias`.
 Host capture, frame construction, observation, and bounded convergence policy.
 
 ```ts
-type GeoFrameControllerDescriptor<Value, Capture = undefined> = Readonly<{ maximumFollowUpFrames?: number; maximumInFlightFrames?: number; scheduler?: GeoFrameScheduler; capture?: any; onError?: any; onObserved?: any; onSubmitted?: any; render: any; track?: any }>
+type GeoFrameControllerDescriptor<Value, Capture = undefined> = Readonly<{ driver?: GeoFrameDriver<Capture>; maximumFollowUpFrames?: number; maximumInFlightFrames?: number; scheduler?: GeoFrameScheduler; capture?: any; onError?: any; onObserved?: any; onSubmitted?: any; render: any; track?: any }>
 ```
 
 ### `GeoFrameControllerFrame`
@@ -272,6 +272,16 @@ Kind: `Type Alias`.
 
 ```ts
 type GeoFrameControllerState = "running" | "stopped"
+```
+
+### `GeoFrameDriver`
+
+Kind: `Type Alias`.
+
+Supplies one revisioned capture, frame scheduler, and owned host lifecycle.
+
+```ts
+type GeoFrameDriver<Capture> = Readonly<{ id: string; kind: "geo-frame-driver"; scheduler: GeoFrameScheduler; capture: any; start: any; stop: any }>
 ```
 
 ### `GeoFrameResult`
@@ -917,6 +927,62 @@ Kind: `Type Alias`.
 
 ```ts
 type MapFieldLayerDescriptor<Input = unknown> = Readonly<{ demandProducer: ViewDemandProducer; field: GeoField; id: string; representation: TiledFieldRepresentation; spatialProfile: TileSpatialProfile; viewAdapter: GeoViewAdapter<Input> }>
+```
+
+## `packages/geoscratch/src/geo/maplibre-frame-driver.ts`
+
+### `mapLibreFrameDriver`
+
+Kind: `Function`.
+
+Creates a no-draw MapLibre custom-layer driver with revisioned host capture.
+
+```ts
+Function mapLibreFrameDriver
+```
+
+```ts
+mapLibreFrameDriver<Capture>(descriptor: MapLibreFrameDriverDescriptor<Capture>): MapLibreFrameDriver<Capture>
+```
+
+### `MapLibreFrameDriver`
+
+Kind: `Type Alias`.
+
+Geo frame driver synchronized to a MapLibre-compatible custom-layer callback.
+
+```ts
+type MapLibreFrameDriver<Capture> = GeoFrameDriver<Capture>
+```
+
+### `MapLibreFrameDriverDescriptor`
+
+Kind: `Type Alias`.
+
+Map host, stable layer id, and application capture read by a MapLibre driver.
+
+```ts
+type MapLibreFrameDriverDescriptor<Capture> = Readonly<{ id: string; map: MapLibreFrameMap; capture: any }>
+```
+
+### `MapLibreFrameLayer`
+
+Kind: `Type Alias`.
+
+No-draw custom-layer shape used only to enter a MapLibre render frame.
+
+```ts
+type MapLibreFrameLayer = Readonly<{ id: string; renderingMode: "2d"; type: "custom"; render: any }>
+```
+
+### `MapLibreFrameMap`
+
+Kind: `Type Alias`.
+
+MapLibre-compatible host methods required by the frame driver.
+
+```ts
+type MapLibreFrameMap = Readonly<{ addLayer: any; getLayer: any; off: any; on: any; removeLayer: any; triggerRepaint: any }>
 ```
 
 ## `packages/geoscratch/src/geo/maplibre-planar-view.ts`

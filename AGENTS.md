@@ -26,6 +26,13 @@ Reserve `DEM` names inside the example for facts that specifically describe the 
 raster, tile payload, source protocol, or cache identity. Historical `m_demLayer` references
 may remain only when they identify the removed legacy source.
 
+Keep Geo view and frame authority orthogonal to renderers. Independent applications use
+`createGeoFrameController()` directly; MapLibre-hosted overlays compose
+`createGeoFrameController({ driver: mapLibreFrameDriver(...) })`. Do not reintroduce
+application-owned MapLibre `move`/`render` revision state, renderer host-mode flags, or a second
+frame controller. A driver synchronizes frame admission but never claims shared WebGL/WebGPU
+context, depth, render-pass, or presentation ownership.
+
 ## Build, Test, and Development Commands
 
 - `npm install`: install dependencies from `package-lock.json`.

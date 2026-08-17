@@ -25,6 +25,7 @@ export type MapLibreFrameMap = Readonly<{
     triggerRepaint(): void
 }>
 
+/** Map host, stable layer id, and application capture read by a MapLibre driver. */
 export type MapLibreFrameDriverDescriptor<Capture> = Readonly<{
     id: string
     map: MapLibreFrameMap

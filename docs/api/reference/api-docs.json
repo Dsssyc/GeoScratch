@@ -18061,7 +18061,7 @@
             "packages/geoscratch/src/geo/frame-controller.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/frame-controller.ts:98"
+            "packages/geoscratch/src/geo/frame-controller.ts:110"
           ],
           "summary": "Coordinates immediate submission, bounded native frames in flight, and Geo follow-up work.",
           "declaration": "Function createGeoFrameController",
@@ -18471,7 +18471,7 @@
             "packages/geoscratch/src/geo/frame-controller.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/frame-controller.ts:11"
+            "packages/geoscratch/src/geo/frame-controller.ts:21"
           ],
           "summary": "Immutable host state captured synchronously with a monotonically increasing revision.",
           "declaration": "type GeoFrameCapture<Snapshot> = Readonly<{ revision: number; snapshot: Snapshot }>"
@@ -18485,7 +18485,7 @@
             "packages/geoscratch/src/geo/frame-controller.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/frame-controller.ts:70"
+            "packages/geoscratch/src/geo/frame-controller.ts:82"
           ],
           "summary": "Latest-only Geo frame authority with optional host-revision capture.",
           "declaration": "type GeoFrameController = Readonly<{ invalidate: any; invalidateNow: any; snapshot: any; stop: any }>"
@@ -18499,10 +18499,10 @@
             "packages/geoscratch/src/geo/frame-controller.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/frame-controller.ts:55"
+            "packages/geoscratch/src/geo/frame-controller.ts:65"
           ],
           "summary": "Host capture, frame construction, observation, and bounded convergence policy.",
-          "declaration": "type GeoFrameControllerDescriptor<Value, Capture = undefined> = Readonly<{ maximumFollowUpFrames?: number; maximumInFlightFrames?: number; scheduler?: GeoFrameScheduler; capture?: any; onError?: any; onObserved?: any; onSubmitted?: any; render: any; track?: any }>"
+          "declaration": "type GeoFrameControllerDescriptor<Value, Capture = undefined> = Readonly<{ driver?: GeoFrameDriver<Capture>; maximumFollowUpFrames?: number; maximumInFlightFrames?: number; scheduler?: GeoFrameScheduler; capture?: any; onError?: any; onObserved?: any; onSubmitted?: any; render: any; track?: any }>"
         },
         {
           "id": "geoscratch/geo#GeoFrameControllerFrame",
@@ -18513,7 +18513,7 @@
             "packages/geoscratch/src/geo/frame-controller.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/frame-controller.ts:31"
+            "packages/geoscratch/src/geo/frame-controller.ts:41"
           ],
           "summary": "",
           "declaration": "type GeoFrameControllerFrame<Value> = GeoFrameResult<Value> & Readonly<{ frameNumber: number }>"
@@ -18527,7 +18527,7 @@
             "packages/geoscratch/src/geo/frame-controller.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/frame-controller.ts:36"
+            "packages/geoscratch/src/geo/frame-controller.ts:46"
           ],
           "summary": "Immutable scheduling, capture, submission, and convergence counters.",
           "declaration": "type GeoFrameControllerSnapshot = Readonly<{ cancelledFrameCount: number; completedFrameCount: number; deduplicatedInvalidationCount: number; followUpFrameCount: number; inFlightFrameCount: number; invalidationCount: number; latestCaptureRevision?: number; maximumInFlightFrames: number; observedFrameCount: number; pendingTaskCount: number; rendering: boolean; scheduledFrameCount: number; state: GeoFrameControllerState; submittedCaptureRevision?: number; submittedFrameCount: number }>"
@@ -18547,6 +18547,20 @@
           "declaration": "type GeoFrameControllerState = \"running\" | \"stopped\""
         },
         {
+          "id": "geoscratch/geo#GeoFrameDriver",
+          "name": "GeoFrameDriver",
+          "kind": "Type Alias",
+          "source": "packages/geoscratch/src/geo/frame-controller.ts",
+          "sources": [
+            "packages/geoscratch/src/geo/frame-controller.ts"
+          ],
+          "locations": [
+            "packages/geoscratch/src/geo/frame-controller.ts:11"
+          ],
+          "summary": "Supplies one revisioned capture, frame scheduler, and owned host lifecycle.",
+          "declaration": "type GeoFrameDriver<Capture> = Readonly<{ id: string; kind: \"geo-frame-driver\"; scheduler: GeoFrameScheduler; capture: any; start: any; stop: any }>"
+        },
+        {
           "id": "geoscratch/geo#GeoFrameResult",
           "name": "GeoFrameResult",
           "kind": "Type Alias",
@@ -18555,7 +18569,7 @@
             "packages/geoscratch/src/geo/frame-controller.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/frame-controller.ts:17"
+            "packages/geoscratch/src/geo/frame-controller.ts:27"
           ],
           "summary": "Work submitted for one Geo frame plus independently observed asynchronous outcomes.",
           "declaration": "type GeoFrameResult<Value> = Readonly<{ needsFollowUp: boolean; observation: PromiseLike<unknown>; settlement?: PromiseLike<GeoFrameSettlement>; value: Value }>"
@@ -18583,7 +18597,7 @@
             "packages/geoscratch/src/geo/frame-controller.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/frame-controller.ts:25"
+            "packages/geoscratch/src/geo/frame-controller.ts:35"
           ],
           "summary": "Delayed feedback and residency facts that may request another bounded frame.",
           "declaration": "type GeoFrameSettlement = Readonly<{ needsFollowUp: boolean; residencySettlement?: PromiseLike<unknown>; residencyWorkCount: number }>"
@@ -19564,6 +19578,79 @@
           ],
           "summary": "",
           "declaration": "type MapFieldLayerDescriptor<Input = unknown> = Readonly<{ demandProducer: ViewDemandProducer; field: GeoField; id: string; representation: TiledFieldRepresentation; spatialProfile: TileSpatialProfile; viewAdapter: GeoViewAdapter<Input> }>"
+        },
+        {
+          "id": "geoscratch/geo#mapLibreFrameDriver",
+          "name": "mapLibreFrameDriver",
+          "kind": "Function",
+          "source": "packages/geoscratch/src/geo/maplibre-frame-driver.ts",
+          "sources": [
+            "packages/geoscratch/src/geo/maplibre-frame-driver.ts"
+          ],
+          "locations": [
+            "packages/geoscratch/src/geo/maplibre-frame-driver.ts:41"
+          ],
+          "summary": "Creates a no-draw MapLibre custom-layer driver with revisioned host capture.",
+          "declaration": "Function mapLibreFrameDriver",
+          "signatures": [
+            "mapLibreFrameDriver<Capture>(descriptor: MapLibreFrameDriverDescriptor<Capture>): MapLibreFrameDriver<Capture>"
+          ]
+        },
+        {
+          "id": "geoscratch/geo#MapLibreFrameDriver",
+          "name": "MapLibreFrameDriver",
+          "kind": "Type Alias",
+          "source": "packages/geoscratch/src/geo/maplibre-frame-driver.ts",
+          "sources": [
+            "packages/geoscratch/src/geo/maplibre-frame-driver.ts"
+          ],
+          "locations": [
+            "packages/geoscratch/src/geo/maplibre-frame-driver.ts:36"
+          ],
+          "summary": "Geo frame driver synchronized to a MapLibre-compatible custom-layer callback.",
+          "declaration": "type MapLibreFrameDriver<Capture> = GeoFrameDriver<Capture>"
+        },
+        {
+          "id": "geoscratch/geo#MapLibreFrameDriverDescriptor",
+          "name": "MapLibreFrameDriverDescriptor",
+          "kind": "Type Alias",
+          "source": "packages/geoscratch/src/geo/maplibre-frame-driver.ts",
+          "sources": [
+            "packages/geoscratch/src/geo/maplibre-frame-driver.ts"
+          ],
+          "locations": [
+            "packages/geoscratch/src/geo/maplibre-frame-driver.ts:29"
+          ],
+          "summary": "Map host, stable layer id, and application capture read by a MapLibre driver.",
+          "declaration": "type MapLibreFrameDriverDescriptor<Capture> = Readonly<{ id: string; map: MapLibreFrameMap; capture: any }>"
+        },
+        {
+          "id": "geoscratch/geo#MapLibreFrameLayer",
+          "name": "MapLibreFrameLayer",
+          "kind": "Type Alias",
+          "source": "packages/geoscratch/src/geo/maplibre-frame-driver.ts",
+          "sources": [
+            "packages/geoscratch/src/geo/maplibre-frame-driver.ts"
+          ],
+          "locations": [
+            "packages/geoscratch/src/geo/maplibre-frame-driver.ts:11"
+          ],
+          "summary": "No-draw custom-layer shape used only to enter a MapLibre render frame.",
+          "declaration": "type MapLibreFrameLayer = Readonly<{ id: string; renderingMode: \"2d\"; type: \"custom\"; render: any }>"
+        },
+        {
+          "id": "geoscratch/geo#MapLibreFrameMap",
+          "name": "MapLibreFrameMap",
+          "kind": "Type Alias",
+          "source": "packages/geoscratch/src/geo/maplibre-frame-driver.ts",
+          "sources": [
+            "packages/geoscratch/src/geo/maplibre-frame-driver.ts"
+          ],
+          "locations": [
+            "packages/geoscratch/src/geo/maplibre-frame-driver.ts:19"
+          ],
+          "summary": "MapLibre-compatible host methods required by the frame driver.",
+          "declaration": "type MapLibreFrameMap = Readonly<{ addLayer: any; getLayer: any; off: any; on: any; removeLayer: any; triggerRepaint: any }>"
         },
         {
           "id": "geoscratch/geo#MapLibreLngLat",

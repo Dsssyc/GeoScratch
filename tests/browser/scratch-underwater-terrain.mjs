@@ -1126,8 +1126,6 @@ function validateNormalProof(proof, failures) {
         validateCleanup(proof.cleanupPair.reports[0], [
             'underwater-terrain-frame-scheduler',
             'window-resize-listener',
-            'map-view-revision-listeners',
-            'map-render-listener',
             'underwater-terrain-presentation-control',
             'dem-virtual-raster-demand',
             'pagehide-listener',
