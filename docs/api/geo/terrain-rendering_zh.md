@@ -2,7 +2,7 @@
 docId: geo.terrain-rendering.zh
 canonical: false
 translationOf: ./terrain-rendering.md
-canonicalDigest: 19f7712e6c4a23feb55dc435a2ea89a86b953a9caf152bb45d21705b7d6d0c26
+canonicalDigest: ee0c88a2c60338e44145e8710bdbf2970e38019d5cbe1d5e0799dd527db60410
 ---
 # 地形渲染
 
@@ -10,7 +10,7 @@ canonicalDigest: 19f7712e6c4a23feb55dc435a2ea89a86b953a9caf152bb45d21705b7d6d0c2
 
 `createWebMercatorTerrainRenderer` 是 Geo 完整的 OGC `WebMercatorQuad` 地形编排器。
 它把 `MapFieldLayer`、Web Mercator Virtual Raster runtime、GPU data frontier、GPU
-render-patch frontier、生成式 terrain WGSL、indirect draw、feedback、resize 与 dispose
+render-patch frontier、生成式 terrain WGSL、indirect draw、feedback、capture-sized resize 与 dispose
 组合为一个显式 renderer。这个名称有意限定投影。不存在通用
 `TerrainFieldRenderer` 别名：globe 或其他 tiling topology 需要具备不同空间与选择语义
 的 renderer。
@@ -47,8 +47,15 @@ balance。局部选择不会读取 data-frontier topology、上一 parity topolo
 延迟 render-patch feedback 会暴露 base、fill、budget-limited、unbalanced 与 balance
 fact，但不会控制后续 render cut。
 
-`renderFrame()` 在当前 work 提交后立即返回。Native observation、延迟 GPU feedback、
-feedback 驱动的 residency 与 convergence 分别由独立 promise 表达；它们都不会持有
+`render(capture)` 消费一个 `GeoViewSourceCapture<ViewInput>`。只有 `capture.size` 变化时，
+它才执行 Surface 与 depth-target resize；随后从 `capture.view` 提交，并返回一个
+`GeoFrameResult<WebMercatorTerrainFrameValue>`。Result value 包含即时 submitted frame
+identity/provenance 与精确 view。`WebMercatorTerrainFrameSettlement` 直接满足
+`GeoFrameSettlement`；`residencyWorkCount` 是唯一 page-work count。不存在公开 renderer
+`renderFrame()` 或 `resize()` compatibility path。
+
+`render()` 在当前 work 提交后立即返回。Native observation、延迟 GPU feedback、
+feedback 驱动的 residency 与 convergence 继续由独立 promise 表达；它们都不会持有
 frame submission authority。旧 camera 的 feedback 会被标记为 superseded，不能协调
 residency 或覆盖当前 facts。只有 frontier 已 converged 且没有请求额外 page 时，一个
 decision 才会被标记为 settled。当 camera 或 residency decision key 变化时，renderer
@@ -61,7 +68,8 @@ binding 与 layout dependency 提供有界 visible-instance lookup、covering-pa
 neighbor resolution 和 edge-coordinate snapping。生成模块不会读取 CPU 选择的 tile
 列表，也不会让 draw count 往返 CPU。
 
-Renderer 不拥有 map host、camera controller、source manifest、network transport、
+Renderer 不拥有 map host、camera controller、view source、source manifest、network transport、
 decoder、Worker system 或应用 cache policy；这些都是显式组合输入。因此 Underwater
 Terrain example 只拥有 source-specific loading/decoding、map/UI 装配、cache 总预算选择
-和自己的 fragment presentation。
+和自己的 fragment presentation。它的 `main.ts` 只拥有 page bootstrap 与 proof loading；
+`application.ts` 则让显式 map/runtime/raster/renderer/source/driver/controller 装配可以独立阅读。

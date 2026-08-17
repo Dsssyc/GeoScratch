@@ -11,10 +11,16 @@ virtual-raster atlas. Start the local tile service as documented in
 repository root.
 
 The WebGPU overlay permits one native frame in flight. A no-draw MapLibre custom-layer driver
-captures the newest camera and admits prepared WebGPU submission inside the matching host frame.
+captures a `mapLibrePlanarViewSource`, and the terrain renderer consumes that capture directly
+inside the matching host frame. Size changes, frame settlement, and residency work remain inside
+the public Geo contracts rather than being translated by the example.
 Capacity-blocked invalidations coalesce until that frame is observed; the next host repaint uses
 the newest revision instead of replaying intermediate views. The two canvases keep independent
 WebGL and WebGPU contexts and do not claim shared depth or atomic presentation.
+
+`main.ts` contains only page configuration, controls, proof loading, and page lifetime.
+`application.ts` is the complete explicit map, runtime, DEM source, Virtual Raster, renderer,
+view source, frame driver, and controller assembly.
 
 The root `npm run dev` and `npm run build` commands first run the generic
 `geoscratch-worker` build declared by [`../worker-modules.ts`](../worker-modules.ts).

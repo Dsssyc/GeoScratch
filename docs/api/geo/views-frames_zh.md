@@ -2,7 +2,7 @@
 docId: geo.views-frames.zh
 canonical: false
 translationOf: ./views-frames.md
-canonicalDigest: 0fb793c951268714124c266cc81356b2c5008fa11a3ee891194b42298edf9001
+canonicalDigest: 8ca5e274e7d89425e644d65c35c724c52a75cd53acc3c000d583f0651bdc128b
 ---
 # 视图与帧控制
 
@@ -17,18 +17,25 @@ Snapshot 是观测，不是全局 camera state。Screen-based demand 可以在�
 simulation、prefetch、editing 或 offline process 可以产生独立 demand。这一区分避免
 camera locality 成为普遍资源策略。
 
+`GeoViewSource<View>` 捕获一个不可变 `{ view, size }`。它不拥有 frame clock、revision、
+renderer 或外部 camera。`createGeoViewSource()` 会验证并复制正整数 presentation size，
+同时保留 caller 提供的 immutable view。`mapLibrePlanarViewSource()` 把 planar adapter、
+structural MapLibre map、viewport reader 与 minimum elevation 组合成同一种 source contract。
+未来独立相机可以实现同一契约，而无需修改 renderer。
+
 `GeoFrameController` 为一个装配后的 field 协调 host-state capture、render construction、
 native observation、delayed feedback 与 invalidation。所有 renderer 都消费同一个已冻结的
 capture contract；host-driven 与 independent application 不会选择不同的 renderer mode。
 
 ## 两种入口形式
 
-独立应用直接使用 controller。默认 scheduler 是浏览器 `requestAnimationFrame`；test、
+独立应用使用一个 source，并直接使用 controller。默认 scheduler 是浏览器 `requestAnimationFrame`；test、
 simulation 或 manual loop 也可以提供一个 `GeoFrameScheduler`：
 
 ```ts
+const view = createGeoViewSource({ id: 'view', capture: readIndependentView })
 const frames = createGeoFrameController({
-    capture: readIndependentCamera,
+    capture: () => ({ revision: cameraRevision, snapshot: view.capture() }),
     render,
 })
 ```
@@ -36,13 +43,20 @@ const frames = createGeoFrameController({
 MapLibre-hosted overlay 只增加一个嵌套 driver：
 
 ```ts
+const view = mapLibrePlanarViewSource({
+    id: 'map-view',
+    adapter,
+    map,
+    viewport: readViewport,
+    minimumElevationMeters,
+})
 const frames = createGeoFrameController({
     driver: mapLibreFrameDriver({
         id: 'terrain-frames',
         map,
-        capture: readMapCameraAndViewport,
+        capture: view.capture,
     }),
-    render,
+    render: (_frameNumber, capture) => renderer.render(capture),
 })
 ```
 

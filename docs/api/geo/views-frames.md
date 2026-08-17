@@ -21,6 +21,13 @@ them for visualization, while simulations, prefetch, editing, or offline process
 produce independent demand. This distinction prevents camera locality from becoming a
 universal resource policy.
 
+`GeoViewSource<View>` captures one immutable `{ view, size }` pair. It owns no frame
+clock, revision, renderer, or external camera. `createGeoViewSource()` validates and
+copies the positive integer presentation size while retaining the caller's immutable
+view value. `mapLibrePlanarViewSource()` composes a planar adapter, structural MapLibre
+map, viewport reader, and minimum elevation into that same source contract. A future
+standalone camera can implement the same contract without changing a renderer.
+
 `GeoFrameController` coordinates host-state capture, render construction, native
 observation, delayed feedback, and invalidation for one assembled field. Every renderer
 consumes the same frozen capture contract; host-driven and independent applications do
@@ -28,13 +35,14 @@ not select renderer modes.
 
 ## Two Entry Patterns
 
-An independent application uses the controller directly. The default scheduler is browser
+An independent application uses one source and the controller directly. The default scheduler is browser
 `requestAnimationFrame`; tests, simulations, or manual loops can provide one
 `GeoFrameScheduler` instead:
 
 ```ts
+const view = createGeoViewSource({ id: 'view', capture: readIndependentView })
 const frames = createGeoFrameController({
-    capture: readIndependentCamera,
+    capture: () => ({ revision: cameraRevision, snapshot: view.capture() }),
     render,
 })
 ```
@@ -42,13 +50,20 @@ const frames = createGeoFrameController({
 A MapLibre-hosted overlay adds exactly one nested driver:
 
 ```ts
+const view = mapLibrePlanarViewSource({
+    id: 'map-view',
+    adapter,
+    map,
+    viewport: readViewport,
+    minimumElevationMeters,
+})
 const frames = createGeoFrameController({
     driver: mapLibreFrameDriver({
         id: 'terrain-frames',
         map,
-        capture: readMapCameraAndViewport,
+        capture: view.capture,
     }),
-    render,
+    render: (_frameNumber, capture) => renderer.render(capture),
 })
 ```
 

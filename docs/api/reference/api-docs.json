@@ -18078,7 +18078,7 @@
             "packages/geoscratch/src/geo/geo-view.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/geo-view.ts:122"
+            "packages/geoscratch/src/geo/geo-view.ts:181"
           ],
           "summary": "Wraps an external camera reader as a stable Geo view-snapshot producer.",
           "declaration": "Function createGeoViewAdapter",
@@ -18095,12 +18095,29 @@
             "packages/geoscratch/src/geo/geo-view.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/geo-view.ts:52"
+            "packages/geoscratch/src/geo/geo-view.ts:111"
           ],
           "summary": "Freezes one revisioned camera and viewport observation in a relative-world frame.",
           "declaration": "Function createGeoViewSnapshot",
           "signatures": [
             "createGeoViewSnapshot(descriptor: GeoViewSnapshotDescriptor): GeoViewSnapshot"
+          ]
+        },
+        {
+          "id": "geoscratch/geo#createGeoViewSource",
+          "name": "createGeoViewSource",
+          "kind": "Function",
+          "source": "packages/geoscratch/src/geo/geo-view.ts",
+          "sources": [
+            "packages/geoscratch/src/geo/geo-view.ts"
+          ],
+          "locations": [
+            "packages/geoscratch/src/geo/geo-view.ts:70"
+          ],
+          "summary": "Wraps an external view reader behind one validated immutable capture contract.",
+          "declaration": "Function createGeoViewSource",
+          "signatures": [
+            "createGeoViewSource<View>(descriptor: GeoViewSourceDescriptor<View>): GeoViewSource<View>"
           ]
         },
         {
@@ -18197,12 +18214,12 @@
             "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:371"
+            "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:384"
           ],
           "summary": "Assembles a WebMercatorQuad Virtual Raster terrain renderer with GPU-driven selection, precision-aware vertex generation, mesh stitching, and explicit lifetime.",
           "declaration": "Function createWebMercatorTerrainRenderer",
           "signatures": [
-            "createWebMercatorTerrainRenderer<ViewInput, Presentation extends string>(__namedParameters: WebMercatorTerrainRendererDescriptor<ViewInput, Presentation>): Promise<Readonly<{ stableIdentities: readonly string[]; stableIdentityFacts: WebMercatorTerrainIdentityFacts; stableIdentityHash: string; contractFacts: any; currentIdentityFacts: any; dispose: any; initialize: any; persistentFacts: any; renderFrame: any; resize: any; setPresentation: any; state: any; virtualRasterFacts: any }>>"
+            "createWebMercatorTerrainRenderer<ViewInput, Presentation extends string>(__namedParameters: WebMercatorTerrainRendererDescriptor<ViewInput, Presentation>): Promise<Readonly<{ stableIdentities: readonly string[]; stableIdentityFacts: WebMercatorTerrainIdentityFacts; stableIdentityHash: string; contractFacts: any; currentIdentityFacts: any; dispose: any; initialize: any; persistentFacts: any; render: any; setPresentation: any; state: any; virtualRasterFacts: any }>>"
           ]
         },
         {
@@ -18625,7 +18642,7 @@
             "packages/geoscratch/src/geo/geo-view.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/geo-view.ts:42"
+            "packages/geoscratch/src/geo/geo-view.ts:60"
           ],
           "summary": "",
           "declaration": "type GeoViewAdapter<Input = unknown> = Readonly<{ id: string; kind: \"geo-view-adapter\"; read: any }>"
@@ -18639,7 +18656,7 @@
             "packages/geoscratch/src/geo/geo-view.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/geo-view.ts:37"
+            "packages/geoscratch/src/geo/geo-view.ts:55"
           ],
           "summary": "",
           "declaration": "type GeoViewAdapterDescriptor<Input> = Readonly<{ id: string; read: any }>"
@@ -18653,7 +18670,7 @@
             "packages/geoscratch/src/geo/geo-view.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/geo-view.ts:32"
+            "packages/geoscratch/src/geo/geo-view.ts:50"
           ],
           "summary": "",
           "declaration": "type GeoViewReadContext = Readonly<{ frameEpoch: number; residencySnapshotEpoch: number }>"
@@ -18667,7 +18684,7 @@
             "packages/geoscratch/src/geo/geo-view.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/geo-view.ts:17"
+            "packages/geoscratch/src/geo/geo-view.ts:35"
           ],
           "summary": "",
           "declaration": "type GeoViewSnapshot = Readonly<{ cameraHigh: readonly [number, number, number]; cameraLatitudeRadians: number; cameraLow: readonly [number, number, number]; cameraPitchRadians: number; clipFromRelativeWorld: readonly number[]; frameEpoch: number; id: string; kind: \"geo-view-snapshot\"; residencySnapshotEpoch: number; verticalFovRadians: number; viewport: readonly [number, number]; zoomHint: number }>"
@@ -18681,10 +18698,52 @@
             "packages/geoscratch/src/geo/geo-view.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/geo-view.ts:3"
+            "packages/geoscratch/src/geo/geo-view.ts:21"
           ],
           "summary": "",
           "declaration": "type GeoViewSnapshotDescriptor = Readonly<{ cameraHigh: readonly [number, number, number]; cameraLatitudeRadians: number; cameraLow: readonly [number, number, number]; cameraPitchRadians: number; clipFromRelativeWorld: ArrayLike<number>; frameEpoch: number; id: string; residencySnapshotEpoch: number; verticalFovRadians: number; viewport: readonly [number, number]; zoomHint: number }>"
+        },
+        {
+          "id": "geoscratch/geo#GeoViewSource",
+          "name": "GeoViewSource",
+          "kind": "Type Alias",
+          "source": "packages/geoscratch/src/geo/geo-view.ts",
+          "sources": [
+            "packages/geoscratch/src/geo/geo-view.ts"
+          ],
+          "locations": [
+            "packages/geoscratch/src/geo/geo-view.ts:15"
+          ],
+          "summary": "Synchronously captures one immutable view and presentation size.",
+          "declaration": "type GeoViewSource<View> = Readonly<{ id: string; kind: \"geo-view-source\"; capture: any }>"
+        },
+        {
+          "id": "geoscratch/geo#GeoViewSourceCapture",
+          "name": "GeoViewSourceCapture",
+          "kind": "Type Alias",
+          "source": "packages/geoscratch/src/geo/geo-view.ts",
+          "sources": [
+            "packages/geoscratch/src/geo/geo-view.ts"
+          ],
+          "locations": [
+            "packages/geoscratch/src/geo/geo-view.ts:4"
+          ],
+          "summary": "",
+          "declaration": "type GeoViewSourceCapture<View> = Readonly<{ size: Readonly<SurfaceSize>; view: View }>"
+        },
+        {
+          "id": "geoscratch/geo#GeoViewSourceDescriptor",
+          "name": "GeoViewSourceDescriptor",
+          "kind": "Type Alias",
+          "source": "packages/geoscratch/src/geo/geo-view.ts",
+          "sources": [
+            "packages/geoscratch/src/geo/geo-view.ts"
+          ],
+          "locations": [
+            "packages/geoscratch/src/geo/geo-view.ts:9"
+          ],
+          "summary": "",
+          "declaration": "type GeoViewSourceDescriptor<View> = Readonly<{ id: string; capture: any }>"
         },
         {
           "id": "geoscratch/geo#GPU_RENDER_PATCH_BALANCE_PASS_COUNT",
@@ -19661,7 +19720,7 @@
             "packages/geoscratch/src/geo/maplibre-planar-view.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/maplibre-planar-view.ts:18"
+            "packages/geoscratch/src/geo/maplibre-planar-view.ts:20"
           ],
           "summary": "",
           "declaration": "type MapLibreLngLat = Readonly<{ lat: number; lng: number }>"
@@ -19675,7 +19734,7 @@
             "packages/geoscratch/src/geo/maplibre-planar-view.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/maplibre-planar-view.ts:23"
+            "packages/geoscratch/src/geo/maplibre-planar-view.ts:25"
           ],
           "summary": "",
           "declaration": "type MapLibreMercatorCoordinate = Readonly<{ x: number; y: number; z: number }>"
@@ -19689,7 +19748,7 @@
             "packages/geoscratch/src/geo/maplibre-planar-view.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/maplibre-planar-view.ts:78"
+            "packages/geoscratch/src/geo/maplibre-planar-view.ts:80"
           ],
           "summary": "",
           "declaration": "type MapLibrePlanarCameraInput = Readonly<{ map: MapLibrePlanarMap; minimumElevationMeters: number; viewport: MapLibrePlanarViewport }>"
@@ -19703,7 +19762,7 @@
             "packages/geoscratch/src/geo/maplibre-planar-view.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/maplibre-planar-view.ts:84"
+            "packages/geoscratch/src/geo/maplibre-planar-view.ts:86"
           ],
           "summary": "",
           "declaration": "type MapLibrePlanarCameraState = Omit<GeoViewSnapshotDescriptor, \"id\" | \"frameEpoch\" | \"residencySnapshotEpoch\"> & Readonly<{ bearingDegrees: number; center: readonly [number, number]; far: number; near: number; pitchDegrees: number }>"
@@ -19717,7 +19776,7 @@
             "packages/geoscratch/src/geo/maplibre-planar-view.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/maplibre-planar-view.ts:65"
+            "packages/geoscratch/src/geo/maplibre-planar-view.ts:67"
           ],
           "summary": "",
           "declaration": "type MapLibrePlanarMap = Readonly<{ transform: MapLibrePlanarTransform; getBearing: any; getCenter: any; getPitch: any; getZoom: any }>"
@@ -19731,7 +19790,7 @@
             "packages/geoscratch/src/geo/maplibre-planar-view.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/maplibre-planar-view.ts:39"
+            "packages/geoscratch/src/geo/maplibre-planar-view.ts:41"
           ],
           "summary": "",
           "declaration": "type MapLibrePlanarTransform = Readonly<{ _elevation?: number; _fov?: number; _pitch?: number; _pixelPerMeter?: number; angle: number; bearing: number; cameraToCenterDistance?: number; center: Readonly<{ lat: number }>; centerOffset?: MapLibrePoint | null; elevation?: number; farZ: number; fov: number; height: number; mercatorMatrix?: ArrayLike<number> | null; minElevationForCurrentTile?: number; nearZ: number; pitch: number; pixelsPerMeter?: number; point: MapLibrePoint; width: number; worldSize: number; getCameraPosition: any; getHorizon?: any }>"
@@ -19745,7 +19804,7 @@
             "packages/geoscratch/src/geo/maplibre-planar-view.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/maplibre-planar-view.ts:110"
+            "packages/geoscratch/src/geo/maplibre-planar-view.ts:160"
           ],
           "summary": "Adapts MapLibre-compatible camera state into precision-preserving planar Geo snapshots.",
           "declaration": "Function mapLibrePlanarViewAdapter",
@@ -19762,7 +19821,7 @@
             "packages/geoscratch/src/geo/maplibre-planar-view.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/maplibre-planar-view.ts:104"
+            "packages/geoscratch/src/geo/maplibre-planar-view.ts:106"
           ],
           "summary": "",
           "declaration": "type MapLibrePlanarViewAdapter = GeoViewAdapter<MapLibrePlanarCameraState> & Readonly<{ viewId: string; camera: any }>"
@@ -19776,7 +19835,7 @@
             "packages/geoscratch/src/geo/maplibre-planar-view.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/maplibre-planar-view.ts:95"
+            "packages/geoscratch/src/geo/maplibre-planar-view.ts:97"
           ],
           "summary": "",
           "declaration": "type MapLibrePlanarViewAdapterDescriptor = Readonly<{ id: string; viewId?: string; mercatorCoordinateFromLngLat: any }>"
@@ -19790,10 +19849,55 @@
             "packages/geoscratch/src/geo/maplibre-planar-view.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/maplibre-planar-view.ts:73"
+            "packages/geoscratch/src/geo/maplibre-planar-view.ts:75"
           ],
           "summary": "",
           "declaration": "type MapLibrePlanarViewport = Readonly<{ height: number; width: number }>"
+        },
+        {
+          "id": "geoscratch/geo#mapLibrePlanarViewSource",
+          "name": "mapLibrePlanarViewSource",
+          "kind": "Function",
+          "source": "packages/geoscratch/src/geo/maplibre-planar-view.ts",
+          "sources": [
+            "packages/geoscratch/src/geo/maplibre-planar-view.ts"
+          ],
+          "locations": [
+            "packages/geoscratch/src/geo/maplibre-planar-view.ts:123"
+          ],
+          "summary": "Composes a MapLibre host and planar adapter into one immutable Geo view source.",
+          "declaration": "Function mapLibrePlanarViewSource",
+          "signatures": [
+            "mapLibrePlanarViewSource(descriptor: MapLibrePlanarViewSourceDescriptor): MapLibrePlanarViewSource"
+          ]
+        },
+        {
+          "id": "geoscratch/geo#MapLibrePlanarViewSource",
+          "name": "MapLibrePlanarViewSource",
+          "kind": "Type Alias",
+          "source": "packages/geoscratch/src/geo/maplibre-planar-view.ts",
+          "sources": [
+            "packages/geoscratch/src/geo/maplibre-planar-view.ts"
+          ],
+          "locations": [
+            "packages/geoscratch/src/geo/maplibre-planar-view.ts:120"
+          ],
+          "summary": "Captures one MapLibre planar camera and viewport without owning host lifecycle.",
+          "declaration": "type MapLibrePlanarViewSource = GeoViewSource<MapLibrePlanarCameraState>"
+        },
+        {
+          "id": "geoscratch/geo#MapLibrePlanarViewSourceDescriptor",
+          "name": "MapLibrePlanarViewSourceDescriptor",
+          "kind": "Type Alias",
+          "source": "packages/geoscratch/src/geo/maplibre-planar-view.ts",
+          "sources": [
+            "packages/geoscratch/src/geo/maplibre-planar-view.ts"
+          ],
+          "locations": [
+            "packages/geoscratch/src/geo/maplibre-planar-view.ts:111"
+          ],
+          "summary": "",
+          "declaration": "type MapLibrePlanarViewSourceDescriptor = Readonly<{ adapter: MapLibrePlanarViewAdapter; id: string; map: MapLibrePlanarMap; minimumElevationMeters: number; viewport: any }>"
         },
         {
           "id": "geoscratch/geo#MercatorCoordinate",
@@ -23518,7 +23622,7 @@
             "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:138"
+            "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:150"
           ],
           "summary": "",
           "declaration": "type WebMercatorTerrainContractFacts = Readonly<{ commandIds: Readonly<{ drawTerrain: Readonly<Record<string, readonly string[]>>; renderPatches: readonly (readonly string[])[] }>; countPath: \"gpu-produced-indirect-arguments\"; dataMaximumMatrixLevel: number; feedback: VirtualRasterGpuFeedbackRingFacts; fieldLayer: Readonly<{ demandProducerId: string; fieldId: string; id: string; representationId: string; spatialProfileId: string; viewAdapterId: string }>; frontier: ReturnType<GpuTileFrontier[\"facts\"]>; passIds: Readonly<{ renderPatches: string; terrain: string }>; persistentIdentityCount: number; renderMaximumMatrixLevel: number; renderPatches: GpuRenderPatchFrontierFacts; selectionPath: \"gpu-resident-active-frontier\"; stageOrder: readonly string[]; terrainVertexCount: number; virtualRaster: Readonly<{ completeImageUpload: false; coordinateEncoding: WebMercatorVirtualRasterField[\"addressCodec\"][\"positionCodec\"][\"facts\"][\"encoding\"]; crossPageFiltering: \"logical-bilinear\"; levelCount: number; maxPhysicalPages: number; pageSize: readonly number[]; sourceRevision: string }> }>"
@@ -23532,10 +23636,10 @@
             "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:108"
+            "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:114"
           ],
-          "summary": "Submitted terrain work whose native observation and delayed settlement are independent.",
-          "declaration": "type WebMercatorTerrainFrame<Presentation extends string = string> = Readonly<{ needsFollowUp: boolean; observation: Promise<WebMercatorTerrainSubmissionObservation>; provenance: readonly WebMercatorTerrainProvenanceFact[]; settlement: Promise<WebMercatorTerrainFrameSettlement>; submitted: SubmittedWork; terrainPresentation: Presentation }>"
+          "summary": "Immediate identity and provenance facts for one submitted terrain frame.",
+          "declaration": "type WebMercatorTerrainFrame<Presentation extends string = string> = Readonly<{ provenance: readonly WebMercatorTerrainProvenanceFact[]; submitted: SubmittedWork; terrainPresentation: Presentation }>"
         },
         {
           "id": "geoscratch/geo#WebMercatorTerrainFrameSettlement",
@@ -23546,10 +23650,24 @@
             "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:97"
+            "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:104"
           ],
           "summary": "Delayed frontier feedback, residency work, and convergence state for one terrain frame.",
-          "declaration": "type WebMercatorTerrainFrameSettlement = Readonly<{ feedback?: VirtualRasterGpuFeedbackBatch; needsFollowUp: boolean; reconciliation?: VirtualRasterFeedbackReconciliation; renderPatchFeedback?: GpuRenderPatchFeedback; requestedPageCount: number; residencySettlement: Promise<unknown>; superseded: boolean }>"
+          "declaration": "type WebMercatorTerrainFrameSettlement = GeoFrameSettlement & Readonly<{ feedback?: VirtualRasterGpuFeedbackBatch; reconciliation?: VirtualRasterFeedbackReconciliation; renderPatchFeedback?: GpuRenderPatchFeedback; residencySettlement: Promise<unknown>; residencyWorkCount: number; superseded: boolean }>"
+        },
+        {
+          "id": "geoscratch/geo#WebMercatorTerrainFrameValue",
+          "name": "WebMercatorTerrainFrameValue",
+          "kind": "Type Alias",
+          "source": "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts",
+          "sources": [
+            "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts"
+          ],
+          "locations": [
+            "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:121"
+          ],
+          "summary": "Terrain frame value paired with the exact view used for submission.",
+          "declaration": "type WebMercatorTerrainFrameValue<ViewInput, Presentation extends string = string> = Readonly<{ frame: WebMercatorTerrainFrame<Presentation>; view: ViewInput }>"
         },
         {
           "id": "geoscratch/geo#WebMercatorTerrainIdentityFacts",
@@ -23560,7 +23678,7 @@
             "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:117"
+            "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:129"
           ],
           "summary": "",
           "declaration": "type WebMercatorTerrainIdentityFacts = Readonly<{ bindLayouts: number; bindSets: number; commands: number; count: number; hash: string; passes: number; pipelines: number; programs: number; resources: number; uploads: number }>"
@@ -23574,7 +23692,7 @@
             "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:91"
+            "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:98"
           ],
           "summary": "",
           "declaration": "type WebMercatorTerrainInitialization = Readonly<{ observation: Promise<WebMercatorTerrainSubmissionObservation>; submitted: SubmittedWork }>"
@@ -23588,7 +23706,7 @@
             "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:130"
+            "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:142"
           ],
           "summary": "",
           "declaration": "type WebMercatorTerrainPersistentFacts = Readonly<{ bindLayouts: number; bindSets: number; logicalFootprintBytes: number; pipelines: number; resources: number }>"
@@ -23602,7 +23720,7 @@
             "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:56"
+            "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:63"
           ],
           "summary": "",
           "declaration": "type WebMercatorTerrainPresentationDescriptor<Presentation extends string = string> = Readonly<{ fragmentEntryPoint: string; id: Presentation; label?: string }>"
@@ -23616,7 +23734,7 @@
             "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:69"
+            "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:76"
           ],
           "summary": "",
           "declaration": "type WebMercatorTerrainProvenanceFact = Readonly<{ consumerStepIndex: number; declaredContentEpoch: \"current-at-step\"; name: string; producerContentEpoch: number; producerStepIndex: number; readContentEpoch: number; resourceId: string }>"
@@ -23630,10 +23748,10 @@
             "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:215"
+            "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:227"
           ],
           "summary": "",
-          "declaration": "type WebMercatorTerrainRenderer<ViewInput, Presentation extends string = string> = Readonly<{ stableIdentities: readonly string[]; stableIdentityFacts: WebMercatorTerrainIdentityFacts; stableIdentityHash: string; contractFacts: any; currentIdentityFacts: any; dispose: any; initialize: any; persistentFacts: any; renderFrame: any; resize: any; setPresentation: any; state: any; virtualRasterFacts: any }>"
+          "declaration": "type WebMercatorTerrainRenderer<ViewInput, Presentation extends string = string> = Readonly<{ stableIdentities: readonly string[]; stableIdentityFacts: WebMercatorTerrainIdentityFacts; stableIdentityHash: string; contractFacts: any; currentIdentityFacts: any; dispose: any; initialize: any; persistentFacts: any; render: any; setPresentation: any; state: any; virtualRasterFacts: any }>"
         },
         {
           "id": "geoscratch/geo#WebMercatorTerrainRendererDescriptor",
@@ -23644,7 +23762,7 @@
             "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:234"
+            "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:247"
           ],
           "summary": "",
           "declaration": "type WebMercatorTerrainRendererDescriptor<ViewInput, Presentation extends string = string> = Readonly<{ elevationRangeMeters: readonly [number, number]; exaggeration?: number; fieldLayer: MapFieldLayer<ViewInput>; fieldSampling: WebMercatorTerrainSamplingWgslOptions; initialPresentation: Presentation; observeProvenance?: (facts: readonly WebMercatorTerrainProvenanceFact[]) => void; presentations: readonly WebMercatorTerrainPresentationDescriptor<Presentation>[]; presentationShader: string; runtime: GPURuntime; size: SurfaceSize; surface: Surface; virtualRaster: VirtualRasterRuntime<WebMercatorVirtualRasterField> }>"
@@ -23658,7 +23776,7 @@
             "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:173"
+            "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:185"
           ],
           "summary": "",
           "declaration": "type WebMercatorTerrainRendererState<Presentation extends string = string> = Readonly<{ budgetLimitedCount: number; convergenceState: GpuTileFrontierFacts[\"convergenceState\"]; demandCount: number; disposed: boolean; fallbackCount: number; feedback: VirtualRasterGpuFeedbackRingFacts; frame: number; frontierCount: number; frontierFacts?: GpuTileFrontierFacts; initialized: boolean; lastResizeFacts?: WebMercatorTerrainResizeFacts; latestFeedbackDiagnostics: readonly unknown[]; levelRange: readonly [number | undefined, number | undefined]; maximumObservedSse: number; readbackInFlightCount: number; renderPatchBaselineBudget: number; renderPatchBudgetLimitedByMinimumTrial: boolean; renderPatchCellSpanRange: readonly [number | undefined, number | undefined]; renderPatchCount: number; renderPatchDescriptorOverflowCount: number; renderPatchFeedback?: GpuRenderPatchFeedback; renderPatchFrameBudget: number; renderPatchFrameEpoch?: number; renderPatchLevelRange: readonly [number | undefined, number | undefined]; renderPatchLookupOverflowCount: number; renderPatchMinimumTrialCount: number; renderPatchRenderRootCount: number; renderPatchRequestedCount: number; renderPatchSelectedBiasLevels: number; resizeGeneration: number; size: SurfaceSize; staleBindSetPreparationCount: number; staleFeedbackCount: number; staleGenerationCount: number; supersededFeedbackCount: number; terrainPresentation: Presentation; virtualRequestedPageCount: number; virtualSnapshotEpoch: number; visibleNodeCount: number }>"
@@ -23672,7 +23790,7 @@
             "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:79"
+            "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:86"
           ],
           "summary": "",
           "declaration": "type WebMercatorTerrainResizeFacts = Readonly<{ depthAllocationVersion: number; preparedBindSetCount: number; resizeGeneration: number; staleBindSetCount: number }>"
@@ -23686,7 +23804,7 @@
             "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:63"
+            "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:70"
           ],
           "summary": "",
           "declaration": "type WebMercatorTerrainSamplingWgslOptions = Readonly<{ addressNamespace: string; namespace: string; transitionTexels?: number }>"
@@ -23700,7 +23818,7 @@
             "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:86"
+            "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:93"
           ],
           "summary": "",
           "declaration": "type WebMercatorTerrainSubmissionObservation = Readonly<{ nativeStatus: \"observed-succeeded\"; submissionId: string }>"

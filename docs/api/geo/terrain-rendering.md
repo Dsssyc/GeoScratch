@@ -13,7 +13,7 @@ apiSources:
 `createWebMercatorTerrainRenderer` is Geo's complete OGC `WebMercatorQuad` terrain
 orchestrator. It composes a `MapFieldLayer`, Web Mercator Virtual Raster runtime, GPU
 data frontier, GPU render-patch frontier, generated terrain WGSL, indirect draw,
-feedback, resize, and disposal into one explicit renderer. The name is intentionally
+feedback, capture-sized resize, and disposal into one explicit renderer. The name is intentionally
 projection-specific. There is no generic `TerrainFieldRenderer` alias: a globe or
 another tiling topology requires a renderer with different spatial and selection
 semantics.
@@ -56,8 +56,15 @@ previous-parity topology, or a previous bias. Delayed render-patch feedback expo
 base, fill, budget-limited, unbalanced, and balance facts, but never controls a later
 render cut.
 
-`renderFrame()` returns as soon as the current work is submitted. Native observation,
-delayed GPU feedback, feedback-driven residency, and convergence are separate promises;
+`render(capture)` consumes one `GeoViewSourceCapture<ViewInput>`. It performs Surface and
+depth-target resize only when `capture.size` changed, submits from `capture.view`, and returns
+one `GeoFrameResult<WebMercatorTerrainFrameValue>`. The result value contains the immediate
+submitted frame identity/provenance and exact view. `WebMercatorTerrainFrameSettlement`
+directly satisfies `GeoFrameSettlement`; `residencyWorkCount` is the only page-work count.
+There is no public renderer `renderFrame()` or `resize()` compatibility path.
+
+`render()` returns as soon as the current work is submitted. Native observation,
+delayed GPU feedback, feedback-driven residency, and convergence remain separate promises;
 none retains frame-submission authority. Feedback for an older camera is reported as
 superseded and cannot reconcile residency or overwrite current facts. A decision is
 settled only after its frontier is converged and it requests no additional pages. When
@@ -71,8 +78,9 @@ bounded visible-instance lookup, covering-patch lookup, neighbor resolution, and
 coordinate snapping with explicit storage bindings and layout dependencies. Generated
 modules never read a CPU-selected tile list or round-trip draw counts through the CPU.
 
-The renderer does not own a map host, camera controller, source manifest, network
+The renderer does not own a map host, camera controller, view source, source manifest, network
 transport, decoder, Worker system, or application cache policy. Those remain explicit
 composition inputs. The Underwater Terrain example therefore owns source-specific
-loading and decoding, map/UI assembly, cache-budget choice, and its fragment
-presentation only.
+loading and decoding, map/UI assembly, cache-budget choice, and its fragment presentation only.
+Its `main.ts` owns page bootstrap and proof loading, while `application.ts` keeps the explicit
+map/runtime/raster/renderer/source/driver/controller assembly readable in isolation.

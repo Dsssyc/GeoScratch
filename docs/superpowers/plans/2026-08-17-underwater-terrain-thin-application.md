@@ -97,9 +97,9 @@
 **Interfaces:**
 - Documents: source/adapter/driver/controller/renderer ownership and the thin example path.
 
-- [ ] Write ADR-080 and bilingual current API documentation.
-- [ ] Run docs generation, translation acknowledgement, and docs check.
-- [ ] Run `npm run typecheck`, `npm test`, and `npm run build`.
-- [ ] Run full Underwater Terrain WebGPU scenario and wireframe/performance proofs headlessly.
-- [ ] Verify `main.ts <= 180`, clean worktree diff, exact commits, and no retained processes.
-- [ ] Commit with `Document thin terrain composition`.
+- [x] Write ADR-080 and bilingual current API documentation.
+- [x] Run docs generation, translation acknowledgement, and docs check.
+- [x] Run `npm run typecheck`, `npm test`, and `npm run build`.
+- [x] Run full Underwater Terrain WebGPU scenario and wireframe/performance proofs headlessly.
+- [x] Verify `main.ts <= 180`, clean worktree diff, exact commits, and no retained processes.
+- [x] Commit with `Document thin terrain composition`.

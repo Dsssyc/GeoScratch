@@ -2,7 +2,7 @@
 
 # geoscratch/geo API Reference
 
-Public symbols: 309.
+Public symbols: 317.
 
 ## `packages/geoscratch/src/geo/coordinate-domain.ts`
 
@@ -412,6 +412,20 @@ Function createGeoViewSnapshot
 createGeoViewSnapshot(descriptor: GeoViewSnapshotDescriptor): GeoViewSnapshot
 ```
 
+### `createGeoViewSource`
+
+Kind: `Function`.
+
+Wraps an external view reader behind one validated immutable capture contract.
+
+```ts
+Function createGeoViewSource
+```
+
+```ts
+createGeoViewSource<View>(descriptor: GeoViewSourceDescriptor<View>): GeoViewSource<View>
+```
+
 ### `GeoViewAdapter`
 
 Kind: `Type Alias`.
@@ -450,6 +464,32 @@ Kind: `Type Alias`.
 
 ```ts
 type GeoViewSnapshotDescriptor = Readonly<{ cameraHigh: readonly [number, number, number]; cameraLatitudeRadians: number; cameraLow: readonly [number, number, number]; cameraPitchRadians: number; clipFromRelativeWorld: ArrayLike<number>; frameEpoch: number; id: string; residencySnapshotEpoch: number; verticalFovRadians: number; viewport: readonly [number, number]; zoomHint: number }>
+```
+
+### `GeoViewSource`
+
+Kind: `Type Alias`.
+
+Synchronously captures one immutable view and presentation size.
+
+```ts
+type GeoViewSource<View> = Readonly<{ id: string; kind: "geo-view-source"; capture: any }>
+```
+
+### `GeoViewSourceCapture`
+
+Kind: `Type Alias`.
+
+```ts
+type GeoViewSourceCapture<View> = Readonly<{ size: Readonly<SurfaceSize>; view: View }>
+```
+
+### `GeoViewSourceDescriptor`
+
+Kind: `Type Alias`.
+
+```ts
+type GeoViewSourceDescriptor<View> = Readonly<{ id: string; capture: any }>
 ```
 
 ## `packages/geoscratch/src/geo/gpu-render-patch-frontier.ts`
@@ -1071,6 +1111,38 @@ Kind: `Type Alias`.
 
 ```ts
 type MapLibrePlanarViewport = Readonly<{ height: number; width: number }>
+```
+
+### `mapLibrePlanarViewSource`
+
+Kind: `Function`.
+
+Composes a MapLibre host and planar adapter into one immutable Geo view source.
+
+```ts
+Function mapLibrePlanarViewSource
+```
+
+```ts
+mapLibrePlanarViewSource(descriptor: MapLibrePlanarViewSourceDescriptor): MapLibrePlanarViewSource
+```
+
+### `MapLibrePlanarViewSource`
+
+Kind: `Type Alias`.
+
+Captures one MapLibre planar camera and viewport without owning host lifecycle.
+
+```ts
+type MapLibrePlanarViewSource = GeoViewSource<MapLibrePlanarCameraState>
+```
+
+### `MapLibrePlanarViewSourceDescriptor`
+
+Kind: `Type Alias`.
+
+```ts
+type MapLibrePlanarViewSourceDescriptor = Readonly<{ adapter: MapLibrePlanarViewAdapter; id: string; map: MapLibrePlanarMap; minimumElevationMeters: number; viewport: any }>
 ```
 
 ## `packages/geoscratch/src/geo/mercatorCoordinate.ts`
@@ -3056,7 +3128,7 @@ Function createWebMercatorTerrainRenderer
 ```
 
 ```ts
-createWebMercatorTerrainRenderer<ViewInput, Presentation extends string>(__namedParameters: WebMercatorTerrainRendererDescriptor<ViewInput, Presentation>): Promise<Readonly<{ stableIdentities: readonly string[]; stableIdentityFacts: WebMercatorTerrainIdentityFacts; stableIdentityHash: string; contractFacts: any; currentIdentityFacts: any; dispose: any; initialize: any; persistentFacts: any; renderFrame: any; resize: any; setPresentation: any; state: any; virtualRasterFacts: any }>>
+createWebMercatorTerrainRenderer<ViewInput, Presentation extends string>(__namedParameters: WebMercatorTerrainRendererDescriptor<ViewInput, Presentation>): Promise<Readonly<{ stableIdentities: readonly string[]; stableIdentityFacts: WebMercatorTerrainIdentityFacts; stableIdentityHash: string; contractFacts: any; currentIdentityFacts: any; dispose: any; initialize: any; persistentFacts: any; render: any; setPresentation: any; state: any; virtualRasterFacts: any }>>
 ```
 
 ### `WebMercatorTerrainContractFacts`
@@ -3071,10 +3143,10 @@ type WebMercatorTerrainContractFacts = Readonly<{ commandIds: Readonly<{ drawTer
 
 Kind: `Type Alias`.
 
-Submitted terrain work whose native observation and delayed settlement are independent.
+Immediate identity and provenance facts for one submitted terrain frame.
 
 ```ts
-type WebMercatorTerrainFrame<Presentation extends string = string> = Readonly<{ needsFollowUp: boolean; observation: Promise<WebMercatorTerrainSubmissionObservation>; provenance: readonly WebMercatorTerrainProvenanceFact[]; settlement: Promise<WebMercatorTerrainFrameSettlement>; submitted: SubmittedWork; terrainPresentation: Presentation }>
+type WebMercatorTerrainFrame<Presentation extends string = string> = Readonly<{ provenance: readonly WebMercatorTerrainProvenanceFact[]; submitted: SubmittedWork; terrainPresentation: Presentation }>
 ```
 
 ### `WebMercatorTerrainFrameSettlement`
@@ -3084,7 +3156,17 @@ Kind: `Type Alias`.
 Delayed frontier feedback, residency work, and convergence state for one terrain frame.
 
 ```ts
-type WebMercatorTerrainFrameSettlement = Readonly<{ feedback?: VirtualRasterGpuFeedbackBatch; needsFollowUp: boolean; reconciliation?: VirtualRasterFeedbackReconciliation; renderPatchFeedback?: GpuRenderPatchFeedback; requestedPageCount: number; residencySettlement: Promise<unknown>; superseded: boolean }>
+type WebMercatorTerrainFrameSettlement = GeoFrameSettlement & Readonly<{ feedback?: VirtualRasterGpuFeedbackBatch; reconciliation?: VirtualRasterFeedbackReconciliation; renderPatchFeedback?: GpuRenderPatchFeedback; residencySettlement: Promise<unknown>; residencyWorkCount: number; superseded: boolean }>
+```
+
+### `WebMercatorTerrainFrameValue`
+
+Kind: `Type Alias`.
+
+Terrain frame value paired with the exact view used for submission.
+
+```ts
+type WebMercatorTerrainFrameValue<ViewInput, Presentation extends string = string> = Readonly<{ frame: WebMercatorTerrainFrame<Presentation>; view: ViewInput }>
 ```
 
 ### `WebMercatorTerrainIdentityFacts`
@@ -3132,7 +3214,7 @@ type WebMercatorTerrainProvenanceFact = Readonly<{ consumerStepIndex: number; de
 Kind: `Type Alias`.
 
 ```ts
-type WebMercatorTerrainRenderer<ViewInput, Presentation extends string = string> = Readonly<{ stableIdentities: readonly string[]; stableIdentityFacts: WebMercatorTerrainIdentityFacts; stableIdentityHash: string; contractFacts: any; currentIdentityFacts: any; dispose: any; initialize: any; persistentFacts: any; renderFrame: any; resize: any; setPresentation: any; state: any; virtualRasterFacts: any }>
+type WebMercatorTerrainRenderer<ViewInput, Presentation extends string = string> = Readonly<{ stableIdentities: readonly string[]; stableIdentityFacts: WebMercatorTerrainIdentityFacts; stableIdentityHash: string; contractFacts: any; currentIdentityFacts: any; dispose: any; initialize: any; persistentFacts: any; render: any; setPresentation: any; state: any; virtualRasterFacts: any }>
 ```
 
 ### `WebMercatorTerrainRendererDescriptor`

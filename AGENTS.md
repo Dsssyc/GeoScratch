@@ -28,9 +28,12 @@ may remain only when they identify the removed legacy source.
 
 Keep Geo view and frame authority orthogonal to renderers. Independent applications use
 `createGeoFrameController()` directly; MapLibre-hosted overlays compose
-`createGeoFrameController({ driver: mapLibreFrameDriver(...) })`. Do not reintroduce
+`mapLibrePlanarViewSource()`, `mapLibreFrameDriver()`, and `createGeoFrameController()`.
+`WebMercatorTerrainRenderer.render(capture)` directly returns a `GeoFrameResult` and owns
+capture-sized resize plus terrain settlement lowering. Do not reintroduce
 application-owned MapLibre `move`/`render` revision state, renderer host-mode flags, or a second
-frame controller. A driver synchronizes frame admission but never claims shared WebGL/WebGPU
+frame controller, public terrain `renderFrame`/`resize` paths, or settlement field translation.
+A driver synchronizes frame admission but never claims shared WebGL/WebGPU
 context, depth, render-pass, or presentation ownership.
 
 ## Build, Test, and Development Commands
