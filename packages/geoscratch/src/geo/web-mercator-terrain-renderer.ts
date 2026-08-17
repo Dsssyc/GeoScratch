@@ -28,7 +28,14 @@ import { GpuTileFrontier } from './gpu-tile-frontier.js'
 import type { GpuTileFrontierFrame } from './gpu-tile-frontier.js'
 import { gpuTileFrontierPolicy } from './gpu-tile-frontier-layout.js'
 import type { GpuTileFrontierFacts } from './gpu-tile-frontier-layout.js'
-import type { GeoViewSnapshot } from './geo-view.js'
+import type {
+    GeoViewSnapshot,
+    GeoViewSourceCapture,
+} from './geo-view.js'
+import type {
+    GeoFrameResult,
+    GeoFrameSettlement,
+} from './frame-controller.js'
 import type { MapFieldLayer } from './map-field-layer.js'
 import {
     WEB_MERCATOR_QUAD_HALF_WORLD,
@@ -94,24 +101,29 @@ export type WebMercatorTerrainInitialization = Readonly<{
 }>
 
 /** Delayed frontier feedback, residency work, and convergence state for one terrain frame. */
-export type WebMercatorTerrainFrameSettlement = Readonly<{
+export type WebMercatorTerrainFrameSettlement = GeoFrameSettlement & Readonly<{
     feedback?: VirtualRasterGpuFeedbackBatch
     renderPatchFeedback?: GpuRenderPatchFeedback
     reconciliation?: VirtualRasterFeedbackReconciliation
     residencySettlement: Promise<unknown>
-    requestedPageCount: number
-    needsFollowUp: boolean
+    residencyWorkCount: number
     superseded: boolean
 }>
 
-/** Submitted terrain work whose native observation and delayed settlement are independent. */
+/** Immediate identity and provenance facts for one submitted terrain frame. */
 export type WebMercatorTerrainFrame<Presentation extends string = string> = Readonly<{
     submitted: SubmittedWork
-    observation: Promise<WebMercatorTerrainSubmissionObservation>
-    settlement: Promise<WebMercatorTerrainFrameSettlement>
     provenance: readonly WebMercatorTerrainProvenanceFact[]
-    needsFollowUp: boolean
     terrainPresentation: Presentation
+}>
+
+/** Terrain frame value paired with the exact view used for submission. */
+export type WebMercatorTerrainFrameValue<
+    ViewInput,
+    Presentation extends string = string,
+> = Readonly<{
+    frame: WebMercatorTerrainFrame<Presentation>
+    view: ViewInput
 }>
 
 export type WebMercatorTerrainIdentityFacts = Readonly<{
@@ -217,9 +229,10 @@ export type WebMercatorTerrainRenderer<
     Presentation extends string = string,
 > = Readonly<{
     initialize(): Promise<WebMercatorTerrainInitialization>
-    renderFrame(input: ViewInput): Promise<WebMercatorTerrainFrame<Presentation>>
+    render(capture: GeoViewSourceCapture<ViewInput>): Promise<GeoFrameResult<
+        WebMercatorTerrainFrameValue<ViewInput, Presentation>
+    >>
     setPresentation(presentation: Presentation): Presentation
-    resize(size: SurfaceSize): Promise<WebMercatorTerrainResizeFacts>
     dispose(): void
     stableIdentities: readonly string[]
     stableIdentityHash: string
@@ -559,7 +572,27 @@ export async function createWebMercatorTerrainRenderer<
         return Object.freeze({ submitted, observation })
     }
 
-    async function renderFrame(input: ViewInput) {
+    async function render(capture: GeoViewSourceCapture<ViewInput>) {
+
+        assertSize(capture?.size)
+        if (!sameSize(state.size, capture.size)) await resize(capture.size)
+        const submitted = await submitFrame(capture.view)
+        const frame = Object.freeze({
+            submitted: submitted.submitted,
+            provenance: submitted.provenance,
+            terrainPresentation: submitted.terrainPresentation,
+        }) satisfies WebMercatorTerrainFrame<Presentation>
+        return Object.freeze({
+            observation: submitted.observation,
+            settlement: submitted.settlement,
+            needsFollowUp: submitted.needsFollowUp,
+            value: Object.freeze({ frame, view: capture.view }),
+        }) satisfies GeoFrameResult<
+            WebMercatorTerrainFrameValue<ViewInput, Presentation>
+        >
+    }
+
+    async function submitFrame(input: ViewInput) {
 
         if (!state.initialized) throw new Error('Web Mercator terrain graph must be initialized before rendering')
         if (state.disposed) throw new Error('Web Mercator terrain graph is disposed')
@@ -732,7 +765,7 @@ export async function createWebMercatorTerrainRenderer<
                     ? {}
                     : { renderPatchFeedback: consumed.renderPatchFeedback }),
                 residencySettlement: Promise.resolve(undefined),
-                requestedPageCount: 0,
+                residencyWorkCount: 0,
                 needsFollowUp: false,
                 superseded: true,
             }))
@@ -767,7 +800,7 @@ export async function createWebMercatorTerrainRenderer<
                 : { renderPatchFeedback: consumed.renderPatchFeedback }),
             ...(reconciliation === undefined ? {} : { reconciliation }),
             residencySettlement: reconciliation?.settlement ?? Promise.resolve(undefined),
-            requestedPageCount: reconciliation?.requestedCount ?? 0,
+            residencyWorkCount: reconciliation?.requestedCount ?? 0,
             needsFollowUp,
             superseded: false,
         }))
@@ -829,9 +862,8 @@ export async function createWebMercatorTerrainRenderer<
 
     return Object.freeze({
         initialize,
-        renderFrame,
+        render,
         setPresentation,
-        resize,
         dispose,
         stableIdentities,
         stableIdentityHash,
@@ -1359,7 +1391,7 @@ function emptyFrameSettlement(): WebMercatorTerrainFrameSettlement {
 
     return Object.freeze({
         residencySettlement: Promise.resolve(undefined),
-        requestedPageCount: 0,
+        residencyWorkCount: 0,
         needsFollowUp: false,
         superseded: false,
     })
@@ -1758,6 +1790,11 @@ function assertSize(value: SurfaceSize) {
         !Number.isInteger(value.height) || value.width <= 0 || value.height <= 0) {
         throw new TypeError('Web Mercator terrain size must contain positive integer width and height')
     }
+}
+
+function sameSize(left: SurfaceSize, right: SurfaceSize): boolean {
+
+    return left.width === right.width && left.height === right.height
 }
 
 function assertVirtualRaster(value: WebMercatorTerrainVirtualRaster) {

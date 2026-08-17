@@ -536,7 +536,7 @@ describe('Underwater Terrain clean cut', () => {
         )
         const mainSource = read('examples', 'underwaterTerrain', 'main.ts')
         const frameSource = layerSource.slice(
-            layerSource.indexOf('async function renderFrame(input: ViewInput)'),
+            layerSource.indexOf('async function submitFrame(input: ViewInput)'),
             layerSource.indexOf('async function resize(nextSize: SurfaceSize)')
         )
         const submissionSource = frameSource.slice(0, frameSource.indexOf('function startFeedbackPump'))
@@ -588,8 +588,11 @@ describe('Underwater Terrain clean cut', () => {
         expect(mainSource).not.to.include("map.on('move'")
         expect(mainSource).not.to.include("map.on('resize'")
         expect(mainSource).not.to.include('frameController.invalidateNow()')
-        expect(mainSource).to.include("window.addEventListener('resize', handleResize)")
-        expect(mainSource).to.include('const handleResize = () => { map.resize() }')
+        expect(mainSource).to.include('mapLibrePlanarViewSource({')
+        expect(mainSource).to.include('return await graph.render(captured)')
+        expect(mainSource).not.to.include('graph.renderFrame(')
+        expect(mainSource).not.to.include('graph.resize(')
+        expect(mainSource).not.to.include('requestedPageCount')
     })
 
     it('locks the finite initialization faults and required migration documentation', () => {
@@ -713,11 +716,12 @@ describe('Underwater Terrain clean cut', () => {
         const initialized = await graph.initialize()
         await initialized.observation
 
-        const frame = await graph.renderFrame(cameraState(9, [ 320, 180 ]))
+        const result = await graph.render(terrainCapture(9, [ 320, 180 ]))
+        const frame = result.value.frame
         expect(frame.provenance).to.have.length(4)
         let observedFailure
         try {
-            await frame.observation
+            await result.observation
         } catch (error) {
             observedFailure = error
         }
@@ -755,20 +759,24 @@ describe('Underwater Terrain clean cut', () => {
         const initialized = await graph.initialize()
         await initialized.observation
 
-        const first = await graph.renderFrame(cameraState(9, [ 320, 180 ]))
-        await first.observation
+        const firstResult = await graph.render(terrainCapture(9, [ 320, 180 ]))
+        await firstResult.observation
+        const first = firstResult.value.frame
         const shadedPipelineLabel = latestRenderPipelineLabel(fake.calls)
         graph.setPresentation('tile-wireframe')
-        const second = await graph.renderFrame(cameraState(10, [ 320, 180 ]))
-        await second.observation
+        const secondResult = await graph.render(terrainCapture(10, [ 320, 180 ]))
+        await secondResult.observation
+        const second = secondResult.value.frame
         const wireframePipelineLabel = latestRenderPipelineLabel(fake.calls)
         graph.setPresentation('shaded')
-        const third = await graph.renderFrame(cameraState(10, [ 320, 180 ]))
-        await third.observation
+        const thirdResult = await graph.render(terrainCapture(10, [ 320, 180 ]))
+        await thirdResult.observation
         const restoredPipelineLabel = latestRenderPipelineLabel(fake.calls)
 
-        expect(second.needsFollowUp).to.equal(true)
-        expect(second.feedback).to.equal(undefined)
+        expect(secondResult.needsFollowUp).to.equal(true)
+        const secondSettlement = await secondResult.settlement
+        expect(secondSettlement.residencyWorkCount).to.be.a('number')
+        expect(secondSettlement).not.to.have.property('requestedPageCount')
         expect(shadedPipelineLabel).to.equal('Underwater Terrain pipeline')
         expect(wireframePipelineLabel).to.equal('Underwater Terrain tile wireframe pipeline')
         expect(restoredPipelineLabel).to.equal('Underwater Terrain pipeline')
@@ -807,7 +815,9 @@ describe('Underwater Terrain clean cut', () => {
         })
         expect(graph.persistentFacts()).to.deep.equal(initialPersistentFacts)
 
-        const resizeFacts = await graph.resize({ width: 640, height: 360 })
+        const resizedResult = await graph.render(terrainCapture(10, [ 640, 360 ]))
+        await resizedResult.observation
+        const resizeFacts = graph.state().lastResizeFacts
         expect(resizeFacts).to.deep.include({
             resizeGeneration: 1,
             staleBindSetCount: 0,
@@ -826,7 +836,7 @@ describe('Underwater Terrain clean cut', () => {
         expect(resizedPersistentFacts.logicalFootprintBytes)
             .to.be.greaterThan(initialPersistentFacts.logicalFootprintBytes)
         expect(graph.state()).to.deep.include({
-            frame: 3,
+            frame: 4,
             resizeGeneration: 1,
             lastResizeFacts: resizeFacts,
             terrainPresentation: 'shaded',
@@ -861,6 +871,7 @@ describe('Underwater Terrain clean cut', () => {
             mapping.size === graph.contractFacts().frontier.feedbackOutput.layout.byteLength
         ))).to.have.length(2)
         expect(fake.calls.maps.filter(mapping => mapping.size === 148)).to.have.length(2)
+        expect(graph).not.to.have.any.keys('renderFrame', 'resize')
 
         graph.dispose()
         expect(() => graph.setPresentation('tile-wireframe'))
@@ -889,6 +900,14 @@ function cameraState(zoomHint, viewport) {
         cameraLatitudeRadians: 31.684162 * Math.PI / 180,
         cameraPitchRadians: 0,
         zoomHint,
+    })
+}
+
+function terrainCapture(zoomHint, viewport) {
+
+    return Object.freeze({
+        view: cameraState(zoomHint, viewport),
+        size: Object.freeze({ width: viewport[0], height: viewport[1] }),
     })
 }
 

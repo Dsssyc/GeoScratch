@@ -1,11 +1,11 @@
 import { GPURuntime, LifetimeScope, WorkerModuleCatalog } from 'geoscratch/scratch'
-import type { SurfaceSize } from 'geoscratch/scratch'
 import {
     WEB_MERCATOR_TERRAIN_TILE_WIREFRAME_FRAGMENT_ENTRY_POINT,
     createGeoFrameController,
     createWebMercatorTerrainRenderer,
     mapFieldLayer,
     mapLibreFrameDriver,
+    mapLibrePlanarViewSource,
 } from 'geoscratch/geo'
 import {
     createUnderwaterTerrainMap,
@@ -28,11 +28,6 @@ type UnderwaterTerrainProof = ReturnType<UnderwaterTerrainProofModule['createUnd
 type PageSettlement = Promise<unknown>
 type CameraMoveOptions = Parameters<UnderwaterTerrainMap['jumpTo']>[0]
 type FailureDetails = Error & { diagnostic?: unknown }
-type UnderwaterTerrainFrameCapture = Readonly<{
-    camera: ReturnType<typeof underwaterTerrainViewAdapter.camera>
-    size: SurfaceSize
-}>
-
 const TERRAIN_EXAGGERATION = 50
 const canvas = document.getElementById('GPUFrame') as HTMLCanvasElement
 const controlPanelContainer = document.getElementById('UnderwaterTerrainControlPanel') as HTMLElement
@@ -218,39 +213,27 @@ async function main(lifetime: LifetimeScope, activeProof?: UnderwaterTerrainProo
     lifetime.assertActive()
 
     const minimumTerrainElevationMeters = elevationRangeMeters[0] * TERRAIN_EXAGGERATION
+    const viewSource = mapLibrePlanarViewSource({
+        id: 'underwater-terrain-maplibre-view-source',
+        adapter: underwaterTerrainViewAdapter,
+        map,
+        viewport: () => canvasPixelSize(canvas),
+        minimumElevationMeters: minimumTerrainElevationMeters,
+    })
     const frameController = createGeoFrameController({
         track: (work, label) => lifetime.track(work, label),
         maximumInFlightFrames: 1,
         driver: mapLibreFrameDriver({
             id: 'underwater-terrain-maplibre-frames',
             map,
-            capture(): UnderwaterTerrainFrameCapture {
-                const size = Object.freeze(canvasPixelSize(canvas))
-                const camera = underwaterTerrainViewAdapter.camera({
-                    map,
-                    viewport: size,
-                    minimumElevationMeters: minimumTerrainElevationMeters,
-                })
-                return Object.freeze({ camera, size })
-            },
+            capture: viewSource.capture,
         }),
         async render(_frameNumber, captured) {
-            if (!sameSize(graph.state().size, captured.size)) await graph.resize(captured.size)
             lifetime.assertActive()
-            const frame = await graph.renderFrame(captured.camera)
-            return {
-                observation: frame.observation,
-                settlement: frame.settlement.then(settlement => ({
-                    residencySettlement: settlement.residencySettlement,
-                    residencyWorkCount: settlement.requestedPageCount,
-                    needsFollowUp: settlement.needsFollowUp,
-                })),
-                needsFollowUp: frame.needsFollowUp,
-                value: { frame, camera: captured.camera },
-            }
+            return await graph.render(captured)
         },
         onSubmitted({ value }) {
-            activeProof?.frameSubmitted(value.frame.provenance, value.camera)
+            activeProof?.frameSubmitted(value.frame.provenance, value.view)
         },
         onObserved({ frameNumber }) {
             activeProof?.frameObserved(frameNumber)
@@ -329,18 +312,13 @@ async function disposePage() {
     return pageSettlement
 }
 
-function canvasPixelSize(target: HTMLElement): SurfaceSize {
+function canvasPixelSize(target: HTMLElement) {
 
     const ratio = window.devicePixelRatio || 1
     return {
         width: Math.max(1, Math.floor(target.clientWidth * ratio)),
         height: Math.max(1, Math.floor(target.clientHeight * ratio)),
     }
-}
-
-function sameSize(left: SurfaceSize, right: SurfaceSize) {
-
-    return left.width === right.width && left.height === right.height
 }
 
 function boundedIntegerParameter(

@@ -172,6 +172,7 @@ export { createWebMercatorTerrainRenderer } from './web-mercator-terrain-rendere
 export type {
     WebMercatorTerrainContractFacts,
     WebMercatorTerrainFrame,
+    WebMercatorTerrainFrameValue,
     WebMercatorTerrainFrameSettlement,
     WebMercatorTerrainIdentityFacts,
     WebMercatorTerrainInitialization,

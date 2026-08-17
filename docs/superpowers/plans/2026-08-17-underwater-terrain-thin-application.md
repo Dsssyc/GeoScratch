@@ -53,11 +53,11 @@
   `Promise<GeoFrameResult<WebMercatorTerrainFrameValue<ViewInput, Presentation>>>`.
 - Removes: public `renderFrame`, public `resize`, and `requestedPageCount`.
 
-- [ ] Write failing tests for same-size submission, changed-size resize plus submission, direct settlement compatibility, and removed methods.
-- [ ] Run focused tests and record RED.
-- [ ] Rename the private submit path, add the public `render()` orchestration, and align settlement fields.
-- [ ] Update public type coverage and run focused/static gates to GREEN.
-- [ ] Commit with `Align terrain rendering with Geo frames`.
+- [x] Write failing tests for same-size submission, changed-size resize plus submission, direct settlement compatibility, and removed methods.
+- [x] Run focused tests and record RED.
+- [x] Rename the private submit path, add the public `render()` orchestration, and align settlement fields.
+- [x] Update public type coverage and run focused/static gates to GREEN.
+- [x] Commit with `Align terrain rendering with Geo frames`.
 
 ### Task 3: Split Page Bootstrap From Application Assembly
 

@@ -538,8 +538,31 @@ const typedLatestCaptureRevision: number | undefined =
     typedGeoFrameSnapshot.latestCaptureRevision
 const typedImmediateInvalidation: boolean = typedGeoFrameController.invalidateNow()
 declare const typedTerrainFrame: geoApi.WebMercatorTerrainFrame<'shaded' | 'wireframe'>
-const typedTerrainSettlement: Promise<geoApi.WebMercatorTerrainFrameSettlement> =
-    typedTerrainFrame.settlement
+declare const typedTerrainFrameValue: geoApi.WebMercatorTerrainFrameValue<
+    { frameEpoch: number },
+    'shaded' | 'wireframe'
+>
+const typedTerrainValueFrame: geoApi.WebMercatorTerrainFrame<'shaded' | 'wireframe'> =
+    typedTerrainFrameValue.frame
+const typedTerrainSettlement: geoApi.WebMercatorTerrainFrameSettlement = {
+    residencySettlement: Promise.resolve(),
+    residencyWorkCount: 0,
+    needsFollowUp: false,
+    superseded: false,
+}
+const typedGeoSettlementFromTerrain: geoApi.GeoFrameSettlement = typedTerrainSettlement
+declare const typedTerrainRenderer: geoApi.WebMercatorTerrainRenderer<
+    { frameEpoch: number },
+    'shaded' | 'wireframe'
+>
+const typedTerrainRenderResult = typedTerrainRenderer.render({
+    view: { frameEpoch: 1 },
+    size: { width: 1920, height: 1080 },
+})
+// @ts-expect-error Terrain rendering is one GeoFrameResult path.
+typedTerrainRenderer.renderFrame({ frameEpoch: 1 })
+// @ts-expect-error Terrain resize is internal to render capture admission.
+typedTerrainRenderer.resize({ width: 1920, height: 1080 })
 // @ts-expect-error MapFieldLayer does not own resource scheduling.
 typedMapField.scheduler
 // @ts-expect-error MapFieldLayer does not own a GPU runtime.
@@ -555,6 +578,10 @@ void typedDeduplicatedInvalidationCount
 void typedLatestCaptureRevision
 void typedImmediateInvalidation
 void typedTerrainSettlement
+void typedTerrainFrame
+void typedTerrainValueFrame
+void typedGeoSettlementFromTerrain
+void typedTerrainRenderResult
 void typedDrivenGeoFrameController
 void typedMapLibreFrameDriver
 declare const typedFrontierGpuState: VirtualRasterGpuState
