@@ -11,6 +11,8 @@ export type ViewTileDemandIntent = 'coverage' | 'refinement' | 'prefetch'
 
 export type ViewTileDemandDescriptor = Readonly<{
     page: VirtualRasterPageIdentity
+    desiredSampleLevel: number
+    sourceLevelCeiling: number
     priority: WorkerTaskPriority
     intent: ViewTileDemandIntent
     reason: string
@@ -19,6 +21,8 @@ export type ViewTileDemandDescriptor = Readonly<{
 
 export type ViewTileDemand = Readonly<{
     page: VirtualRasterPageIdentity
+    desiredSampleLevel: number
+    sourceLevelCeiling: number
     generation: number
     priority: WorkerTaskPriority
     intent: ViewTileDemandIntent
@@ -66,10 +70,10 @@ export class ViewDemandProducer {
     constructor(descriptor: ViewDemandProducerDescriptor) {
 
         if (typeof descriptor?.id !== 'string' || descriptor.id.length === 0 ||
-            !Number.isSafeInteger(descriptor.maxDemands) || descriptor.maxDemands <= 0) {
+            !Number.isSafeInteger(descriptor.maxDemands) || descriptor.maxDemands < 0) {
             return invalidViewDemand(
-                'A view demand producer requires an id and a positive finite demand budget.',
-                { id: 'non-empty string', maxDemands: 'positive safe integer' },
+                'A view demand producer requires an id and a non-negative finite demand budget.',
+                { id: 'non-empty string', maxDemands: 'non-negative safe integer' },
                 descriptor
             )
         }
@@ -101,6 +105,8 @@ export class ViewDemandProducer {
             validateDemandDescriptor(descriptor)
             const demand = Object.freeze({
                 page: descriptor.page,
+                desiredSampleLevel: descriptor.desiredSampleLevel,
+                sourceLevelCeiling: descriptor.sourceLevelCeiling,
                 generation: input.generation,
                 priority: Object.freeze({ ...descriptor.priority }),
                 intent: descriptor.intent,
@@ -154,6 +160,8 @@ export function virtualRasterDemandSetFromViewDemands(
 function validateDemandDescriptor(descriptor: ViewTileDemandDescriptor): void {
 
     if (descriptor?.page?.kind !== 'virtual-raster-page' ||
+        !matrixLevel(descriptor.desiredSampleLevel) ||
+        !matrixLevel(descriptor.sourceLevelCeiling) ||
         !priorityClasses.has(descriptor.priority?.class) ||
         !Number.isFinite(descriptor.priority?.score) ||
         (descriptor.intent !== 'coverage' && descriptor.intent !== 'refinement' &&
@@ -165,6 +173,8 @@ function validateDemandDescriptor(descriptor: ViewTileDemandDescriptor): void {
             'Each view demand requires page, priority, intent, and reason facts.',
             {
                 page: 'VirtualRasterPageIdentity',
+                desiredSampleLevel: 'integer [0, 24]',
+                sourceLevelCeiling: 'integer [0, 24]',
                 priority: 'WorkerTaskPriority',
                 intent: [ 'coverage', 'refinement', 'prefetch' ],
                 reason: 'non-empty string',
@@ -179,9 +189,15 @@ function compareViewDemand(left: ViewTileDemand, right: ViewTileDemand): number 
     return priorityRank(right.priority.class) - priorityRank(left.priority.class) ||
         intentRank(right.intent) - intentRank(left.intent) ||
         right.priority.score - left.priority.score ||
+        right.desiredSampleLevel - left.desiredSampleLevel ||
         (left.deadlineMs ?? Number.POSITIVE_INFINITY) -
             (right.deadlineMs ?? Number.POSITIVE_INFINITY) ||
         left.page.key.localeCompare(right.page.key)
+}
+
+function matrixLevel(value: number): boolean {
+
+    return Number.isSafeInteger(value) && value >= 0 && value <= 24
 }
 
 function priorityRank(value: WorkerTaskPriorityClass): number {

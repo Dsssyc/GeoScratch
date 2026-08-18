@@ -32,9 +32,10 @@ frontier 做细分/合并，`GpuRenderPatchFrontier` 则从不可变 safety-cove
 
 ### 唯一视图覆盖 authority
 
-相机反向生成的 cover 是唯一几何 LoD authority。它从保守可见 footprint 与最近可见
-focus 出发，在标准矩阵上直接枚举嵌套 level bands，经相邻最大一级闭包后输出唯一的
-prefix-free cover。它不从世界 roots 或 atlas resident pages 开始。
+相机反向生成的 cover 是唯一几何 LoD authority。它从请求最细层级中包含相机规范位置
+的标准瓦片出发，而不是从世界 roots 或 atlas resident pages 开始。它在标准矩阵上直接
+枚举嵌套 level bands，保守剔除不可见 candidate，经相邻最大一级闭包后输出唯一的
+prefix-free cover。
 
 上一帧 topology、atlas 状态、request 状态与 render-root trial 都不能决定 settled geometry
 cut。
@@ -85,12 +86,14 @@ cache policy、URL 或 atlas ownership。
 
 ## 标准反向覆盖
 
-GPU 根据 relative view-projection facts 与配置的高程区间推导保守平面 footprint。最细层
-focus 是 footprint 中距相机最近的可见点，而不是无条件使用相机垂直投影。
+GPU 根据相机的规范 WebMercator fixed position 与请求 zoom 推导最细标准瓦片。这个
+瓦片只是层级选择锚点，不是相机局部几何格网，也不声称在倾斜视图中锚点本身必须可见。
+按 parent 对齐的窗口从该标准瓦片向外扩展，再由 relative view-projection facts 与配置的
+高程区间保守剔除视图外 candidate。
 
-嵌套 bands 只作为层级选择场。每一级都把 band/footprint 交集转换为标准 top-left-origin
-tile row/column limits 并直接枚举；细区域必须先对齐到完整 parent groups，再形成下一粗级
-band。因此最终仍是固定 WebMercatorQuad 格网，而不是游戏式移动格网。
+嵌套 bands 只作为层级选择场。每一级都把按 parent 对齐的窗口与标准 top-left-origin
+tile row/column limits 求交并直接枚举；细区域必须先对齐到完整 parent groups，再形成下一
+粗级 band。因此最终仍是固定 WebMercatorQuad 格网，而不是游戏式移动格网。
 
 实现必须证明：
 
@@ -105,6 +108,11 @@ band。因此最终仍是固定 WebMercatorQuad 格网，而不是游戏式移�
 允许对直接生成的有限 candidates 做最终保守 footprint test；这不能成为恢复世界 root
 遍历的借口。
 
+可用性变化永远不能改变 geometry topology。现有 logical cross-page filtering 继续混合空间
+LoD 边界，sample 继续显式保留 requested/resolved level。本次 selector clean cut 不声称已
+实现 temporal parent-to-child residency morph；该能力需要显式的 previous-snapshot 与
+physical-assignment lifetime authority，必须独立设计，不能隐藏在 cover selection 内。
+
 ## Demand 与可用性
 
 view/sample producer 决定 desired pages，Virtual Raster 不决定。source ceiling 已知时，
@@ -112,6 +120,14 @@ view/sample producer 决定 desired pages，Virtual Raster 不决定。source ce
 声明存在 exact page 但暂时 pending/retryable 时，继续保持 exact demand，并用 resident
 ancestor 绘制；terminal unavailable 页面保留明确状态并 fallback，不得每帧重复请求。
 requested 与 resolved identity 永远不能合并成一个字段。
+
+Cover feedback capacity 与 physical residency capacity 相互独立。Runtime composition
+先为 pinned minimum-matrix safety cover 预留 slot，再把动态 view demand 限制在剩余的
+request 与 physical-page capacity 内。在该上界内先按 desired sample precision 排序，
+同精度 page 再按到相机锚点的、考虑横向
+world wrap 的标准瓦片距离排序。选中的 exact-resident page 必须继续参与 reconcile，
+使 scheduler 可以 mark-used；若在 scheduling 前过滤它们，紧张 atlas 会在同样仍属当前的
+page 之间永久振荡。
 
 ## Clean Cut
 

@@ -2,7 +2,7 @@
 docId: geo.tiles-demand.zh
 canonical: false
 translationOf: ./tiles-demand.md
-canonicalDigest: 1eefdfb83dd61e1bb16b4f81e867bfcc13af84fa2e4013b677aea1ee0eaa06eb
+canonicalDigest: edb654eb233762b05d2b61d5aa1dcf282013df1c569283c911d93cf9fcfa1470
 ---
 # 瓦片模型与需求
 
@@ -12,11 +12,12 @@ Tile matrix set 与 finite coverage 描述 source addressability、bounds、orig
 dimension 与逐级 limit。Topology 独立描述 parent、child 与 neighbor relationship。
 Spatial profile 为特定 map 或 globe model 编码 tile bounds 与 camera-relative coordinate。
 
-`ViewDemandProducer` 根据 frustum/viewport evidence、projected error、distance 与 source
-limit，把 view snapshot 转成带优先级的 tile demand。它只是一个 demand producer，
-不是 Virtual Raster owner。其他 producer 可以请求 simulation region、prefetch corridor、
-edit neighborhood 或 analytic extent，再合并为带 generation 的 demand set。
+`ViewDemandProducer` 根据同一份不可变 view provenance 校验、去重、排序并限制调用方
+已经推导出的 tile candidate；它自身不检查 camera，也不选择 LoD。View cover、simulation、
+editor、prefetch corridor 或 analytic extent 才是语义 demand producer。
 
-Demand 是 intent，不是 residency。它携带 usage、priority、revision 与 generation，使
-陈旧异步 load 可被拒绝。Source detail level 与 render mesh detail 相互独立：raster
-source 可以停在 z10，而 terrain frontier 继续细化 geometry 以获得更平滑的投影。
+Demand 是 intent，不是 residency。`ViewTileDemand` 携带可执行 page、
+`desiredSampleLevel`、`sourceLevelCeiling`、priority、intent、reason、generation 与
+精确 view/frame/residency provenance。下落到 Virtual Raster 时会有意移除语义 level
+字段：residency 可以调度 page，但不能修改 producer 的 LoD 决策。Raster source 可以停在
+z10，而标准 geometry 继续到 z14。

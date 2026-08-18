@@ -1,4 +1,5 @@
 import { expect } from 'chai'
+import { GPURuntime } from 'geoscratch/scratch'
 import {
     WebMercatorQuad,
     createGeoViewSnapshot,
@@ -10,8 +11,14 @@ import {
     evaluateGpuWebMercatorQuadCoverReference,
 } from '../packages/geoscratch/dist/geo/gpu-web-mercator-quad-cover-reference.js'
 import {
+    GpuWebMercatorQuadCover,
+    decodeGpuWebMercatorQuadCoverFeedback,
     gpuWebMercatorQuadCoverPolicy,
 } from '../packages/geoscratch/dist/geo/gpu-web-mercator-quad-cover.js'
+import {
+    gpuWebMercatorQuadCoverReadWgslModule,
+} from '../packages/geoscratch/dist/geo/gpu-web-mercator-quad-cover-layout.js'
+import { createFakeGpu } from './scratch-test-utils.js'
 
 const HALF_WORLD = 20_037_508.3427892
 const WORLD_WIDTH = HALF_WORLD * 2
@@ -42,7 +49,6 @@ function fixture(options = {}) {
         maximumMatrixLevel,
         sourceMaximumMatrixLevel,
         maximumPatches: options.maximumPatches ?? 256,
-        maximumDemands: options.maximumDemands ?? 128,
     })
 
     function view({
@@ -169,8 +175,6 @@ describe('GPU WebMercatorQuad inverse cover reference', () => {
         expect(first.facts.selectionPath).to.equal(
             'gpu-camera-inverse-webmercatorquad-cover'
         )
-        expect(first.facts.rootTraversalCount).to.equal(0)
-        expect(first.facts.trialCount).to.equal(0)
     })
 
     it('keeps a centered top-down cover symmetric in the fixed matrix', () => {
@@ -233,6 +237,38 @@ describe('GPU WebMercatorQuad inverse cover reference', () => {
         expect(near.matrixLevel).to.be.at.least(far.matrixLevel)
     })
 
+    it('prioritizes equal-precision demand by wrapped distance to the camera tile', () => {
+
+        const setup = fixture()
+        const result = setup.evaluate({
+            currentView: setup.view({ x: 0, y: 0, zoom: 10, pitch: 0 }),
+            visibleBounds: { west: 0.46, north: 0.46, east: 0.54, south: 0.54 },
+        })
+        const desiredLevel = Math.max(...result.demands.map(demand =>
+            demand.desiredSampleLevel
+        ))
+        const equallyDetailed = result.demands.filter(demand =>
+            demand.desiredSampleLevel === desiredLevel
+        )
+        const distances = equallyDetailed.map(demand => {
+            const page = demand.requestPage
+            const size = 2 ** page.matrixLevel
+            const cameraRow = Math.floor(0.5 * size)
+            const cameraCol = Math.floor(0.5 * size)
+            const rowDistance = Math.abs(page.tileRow - cameraRow)
+            const rawColDistance = Math.abs(page.tileCol - cameraCol)
+            return rowDistance + Math.min(rawColDistance, size - rawColDistance)
+        })
+
+        expect(equallyDetailed.length).to.be.greaterThan(1)
+        expect(distances).to.deep.equal([ ...distances ].sort((left, right) => left - right))
+        expect(equallyDetailed.map(demand => demand.priority)).to.deep.equal(
+            [ ...equallyDetailed ].map(demand => demand.priority).sort((left, right) =>
+                right - left
+            )
+        )
+    })
+
     it('keeps desired sample precision separate from the executable source page', () => {
 
         const setup = fixture({ sourceMaximumMatrixLevel: 10, maximumMatrixLevel: 14 })
@@ -250,5 +286,152 @@ describe('GPU WebMercatorQuad inverse cover reference', () => {
             demand.requestPage.matrixLevel <= setup.policy.sourceMaximumMatrixLevel
         )).to.equal(true)
         expect(result.facts.sourceLevelCeiling).to.equal(10)
+    })
+})
+
+describe('GPU WebMercatorQuad inverse cover lowering', () => {
+
+    it('publishes a bounded full-identity read-side lookup and stitching module', () => {
+
+        const module = gpuWebMercatorQuadCoverReadWgslModule({
+            namespace: 'TerrainCover',
+            group: 1,
+            visibleInstancesBinding: 2,
+            lookupEntriesBinding: 3,
+        })
+
+        expect(module).to.deep.include({
+            kind: 'gpu-web-mercator-quad-cover-read-wgsl-module',
+            namespace: 'TerrainCover',
+        })
+        expect(module.code).to.include('@group(1) @binding(2)')
+        expect(module.code).to.include('@group(1) @binding(3)')
+        expect(module.code).to.include('entry.matrixLevel == matrix_level')
+        expect(module.code).to.include('entry.tileRow == tile_row')
+        expect(module.code).to.include('entry.tileCol == tile_col')
+        expect(module.code).to.include('fn TerrainCover_neighbor(')
+        expect(module.code).to.include('fn TerrainCover_snap_edge_coordinate(')
+        expect(module.code).not.to.include('matrixLevel << 28u')
+    })
+
+    it('decodes bounded cover and desired/source-level feedback facts', () => {
+
+        const state = new Uint32Array([
+            42,
+            88,
+            24,
+            2,
+            0,
+            0,
+            0,
+            8,
+            11,
+            1,
+            11,
+            10,
+            0,
+            0,
+            0,
+            0,
+        ])
+        const demandWords = new Uint32Array(4 * 8)
+        demandWords.set([ 11, 10, 10, 416, 855, 11_000_000, 42, 7 ], 0)
+        demandWords.set([ 10, 10, 10, 416, 856, 10_000_000, 42, 7 ], 8)
+
+        const decoded = decodeGpuWebMercatorQuadCoverFeedback(
+            new Uint8Array(state.buffer),
+            new Uint8Array(demandWords.buffer),
+            {
+                expectedFrameEpoch: 42,
+                maximumPatches: 64,
+                sourceLevelCeiling: 10,
+            }
+        )
+
+        expect(decoded).to.deep.equal({
+            frameEpoch: 42,
+            candidateCount: 88,
+            patchCount: 24,
+            demandCount: 2,
+            descriptorOverflowCount: 0,
+            lookupOverflowCount: 0,
+            demandOverflowCount: 0,
+            minimumMatrixLevel: 8,
+            maximumMatrixLevel: 11,
+            maximumAdjacentLevelDelta: 1,
+            finestMatrixLevel: 11,
+            sourceLevelCeiling: 10,
+            demands: [
+                {
+                    desiredSampleLevel: 11,
+                    sourceLevelCeiling: 10,
+                    requestMatrixLevel: 10,
+                    tileRow: 416,
+                    tileCol: 855,
+                    priority: 11_000_000,
+                    decisionFrameEpoch: 42,
+                    residencySnapshotEpoch: 7,
+                },
+                {
+                    desiredSampleLevel: 10,
+                    sourceLevelCeiling: 10,
+                    requestMatrixLevel: 10,
+                    tileRow: 416,
+                    tileCol: 856,
+                    priority: 10_000_000,
+                    decisionFrameEpoch: 42,
+                    residencySnapshotEpoch: 7,
+                },
+            ],
+        })
+    })
+
+    it('owns one stable double-parity compute graph without raster residency authority', async() => {
+
+        const setup = fixture({
+            minimumMatrixLevel: 0,
+            sourceMaximumMatrixLevel: 10,
+            maximumMatrixLevel: 14,
+            maximumPatches: 64,
+        })
+        const fake = createFakeGpu()
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
+        const cover = await GpuWebMercatorQuadCover.create(runtime, {
+            spatialProfile: setup.spatialProfile,
+            policy: setup.policy,
+            elevationRangeMeters: [ -120, 30 ],
+            vertexCount: 24_576,
+        })
+
+        expect(cover.facts()).to.deep.include({
+            selectionPath: 'gpu-camera-inverse-webmercatorquad-cover',
+            lookupCapacity: 128,
+            coverageLimitCount: 11,
+        })
+        expect(cover.facts().parity).to.have.length(2)
+        expect(cover.facts().parity.every(parity =>
+            parity.commandIds.length === 3
+        )).to.equal(true)
+        const templates = cover.renderTemplates()
+        expect(templates.map(template => template.coverId)).to.deep.equal([
+            cover.id,
+            cover.id,
+        ])
+        expect(templates.map(template => template.parity)).to.deep.equal([ 0, 1 ])
+
+        const view = setup.view({ zoom: 10, frameEpoch: 42 })
+        const token = cover.writeView(view)
+        const frame = cover.frame(token)
+        const builder = runtime.submission()
+        cover.initialize(builder)
+        cover.encode(builder, frame)
+        cover.capture(builder, frame)
+        const submitted = builder.submit()
+        expect(submitted.readbacks.map(link => link.commandId)).to.have.length(2)
+        expect(fake.calls.dispatchCalls).to.have.length(1)
+
+        token.dispose()
+        cover.dispose()
+        await runtime.dispose()
     })
 })

@@ -26,7 +26,7 @@ export type TileSpatialCameraEncoding = Readonly<{
     high: readonly [number, number]
 }>
 
-export type TileSpatialFrontierEncoding = Readonly<{
+export type TileSpatialFixedEncoding = Readonly<{
     coordinateBits: number
     rootColumnBits: number
     rootRowBits: number
@@ -53,7 +53,7 @@ export type TileSpatialProfile = Readonly<{
     topology: TileTopology
     coverage: TileMatrixCoverage
     coordinateBits: number
-    frontierEncoding: TileSpatialFrontierEncoding
+    fixedEncoding: TileSpatialFixedEncoding
     matrixLevel(tile: Pick<TileCoordinate, 'tileMatrixSetId' | 'matrixId'>): number
     matrixId(matrixLevel: number): string
     tileBounds(tile: TileCoordinateDescriptor): PlanarTileBounds
@@ -71,7 +71,7 @@ export type WebMercatorPlanarTileSpatialProfile = TileSpatialProfile & Readonly<
     addressCodec: WebMercatorQuadAddressCodec
 }>
 
-/** Defines planar bounds, camera encoding, and frontier encoding for one tiled topology. */
+/** Defines planar bounds, camera encoding, and fixed coordinates for one tiled topology. */
 export function planarTileSpatialProfile(
     descriptor: PlanarTileSpatialProfileDescriptor
 ): TileSpatialProfile {
@@ -91,7 +91,7 @@ export function planarTileSpatialProfile(
     const root = matrixSet.tileMatrices[0]!
     if (matrixSet.tileMatrices.some(matrix => matrix.cornerOfOrigin !== 'topLeft')) {
         return invalidProfile(
-            'The current planar frontier profile requires top-left tile matrix origins.',
+            'The current planar fixed-coordinate profile requires top-left tile matrix origins.',
             { cornerOfOrigin: 'topLeft' },
             matrixSet.tileMatrices.map(matrix => ({ id: matrix.id, corner: matrix.cornerOfOrigin }))
         )
@@ -100,7 +100,7 @@ export function planarTileSpatialProfile(
     const rootRowBits = exactPowerOfTwoExponent(root.matrixHeight)
     if (rootColumnBits === undefined || rootRowBits === undefined) {
         return invalidProfile(
-            'GPU frontier fixed addressing requires power-of-two root matrix dimensions.',
+            'GPU fixed addressing requires power-of-two root matrix dimensions.',
             { matrixWidth: 'power of two', matrixHeight: 'power of two' },
             { matrixWidth: root.matrixWidth, matrixHeight: root.matrixHeight }
         )
@@ -118,7 +118,7 @@ export function planarTileSpatialProfile(
     if (maximumMatrixLevel + rootColumnBits > coordinateBits ||
         maximumMatrixLevel + rootRowBits > coordinateBits) {
         return invalidProfile(
-            'The complete tile hierarchy must fit the fixed-coordinate frontier encoding.',
+            'The complete tile hierarchy must fit the fixed-coordinate encoding.',
             {
                 maximumColumnLevel: coordinateBits - rootColumnBits,
                 maximumRowLevel: coordinateBits - rootRowBits,
@@ -189,7 +189,7 @@ export function planarTileSpatialProfile(
         topology,
         coverage,
         coordinateBits,
-        frontierEncoding: Object.freeze({
+        fixedEncoding: Object.freeze({
             coordinateBits,
             rootColumnBits,
             rootRowBits,

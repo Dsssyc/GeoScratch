@@ -38,11 +38,12 @@ Horizontal world repetition is render-instance metadata: the canonical data key 
 
 ### One view-cover authority
 
-The camera-derived cover is the only geometry LoD authority. It starts from a
-conservative visible footprint and a nearest-visible focus, not from world roots or
-resident atlas pages. It directly enumerates standard matrix tiles in nested level
-bands, closes adjacency to a maximum level difference of one, and emits one
-prefix-free cover.
+The camera-derived cover is the only geometry LoD authority. It starts from the
+standard tile containing the canonical camera position at the requested finest
+level, not from world roots or resident atlas pages. It directly enumerates standard
+matrix tiles in nested level bands, conservatively rejects invisible candidates,
+closes adjacency to a maximum level difference of one, and emits one prefix-free
+cover.
 
 No previous-frame topology, atlas state, request state, or render-root trial may
 select a settled geometry cut.
@@ -103,17 +104,19 @@ example only supplies source and presentation policy.
 
 ## Inverse Standard Cover
 
-### Visible footprint and focus
+### Camera anchor and visibility
 
-The GPU derives a conservative planar footprint from the relative view-projection
-facts and the configured elevation interval. The finest-level focus is the nearest
-visible point in that footprint. It is not blindly the vertical projection of the
-camera, because that point may lie behind a pitched view.
+The GPU derives the finest standard tile from the camera's canonical fixed
+WebMercator position and requested zoom. This is a level-selection anchor, not a
+camera-local geometry grid and not a claim that the anchor itself must be visible in
+a pitched view. Parent-aligned windows expand from that standard tile, while the
+relative view-projection facts and configured elevation interval conservatively
+reject generated candidates outside the view.
 
 ### Matrix-aligned level bands
 
 The cover uses view-centered nested bands only as a level-selection field. For each
-participating matrix level, it converts the band/footprint intersection to standard
+participating matrix level, it intersects the parent-aligned window with standard
 top-left-origin tile row and column limits and enumerates those identities directly.
 Fine regions are snapped to complete parent groups before the next coarser band is
 formed. Consequently, the selected regions are nested in standard tile space rather
@@ -142,9 +145,12 @@ coordinate. The virtual page table may therefore resolve different parts of one
 geometry patch to exact or ancestor pages without changing its standard geometry
 identity.
 
-A newly resident finer displacement page must not create an uncontrolled vertical
-pop. Resolution transitions expose enough generation/level facts for a bounded
-parent-to-child data morph, independently of geometry-topology selection.
+Availability changes never alter geometry topology. Existing logical cross-page
+filtering continues to blend spatial LoD boundaries, and samples keep requested and
+resolved levels observable. This selector clean cut does not claim a temporal
+parent-to-child residency morph: that requires explicit previous-snapshot and physical
+assignment lifetime authority and must be designed independently rather than hidden
+inside cover selection.
 
 ## Demand and Availability
 
@@ -162,6 +168,15 @@ Source capability is handled before request execution:
 - a terminally unavailable page remains an explicit unavailable fact and resolves to
   an ancestor; it is not retried every frame;
 - requested and resolved identities are never collapsed into one field.
+
+Cover feedback capacity is independent from physical residency capacity. Runtime
+composition first reserves slots for the pinned minimum-matrix safety cover, then
+bounds dynamic view demand to the remaining request and physical-page capacity.
+Within that bound, desired sample precision sorts first and wrapped standard-tile
+distance to the camera anchor sorts equal-precision pages.
+Exact-resident selected pages remain in reconciliation so the scheduler can mark them
+used; filtering them out before scheduling would permit a tight atlas to oscillate
+between equally current pages forever.
 
 ## Clean Cut
 

@@ -28,8 +28,9 @@ therefore need explicit one-way composition rather than shared authority.
 
 ## Decision
 
-Geo will provide one GPU-driven, camera-derived WebMercatorQuad cover. It computes a
-conservative visible footprint, derives view-centered level bands, and directly
+Geo will provide one GPU-driven, camera-derived WebMercatorQuad cover. It anchors the
+finest level at the standard tile containing the canonical camera position, derives
+parent-aligned level bands, conservatively rejects invisible candidates, and directly
 enumerates standard `tileMatrix/tileRow/tileCol` identities. Bands are snapped to the
 fixed OGC matrix hierarchy; no camera-local tile grid is created. The result is
 canonical, prefix-free, complete over visible source coverage, and balanced so edge
@@ -57,6 +58,8 @@ remain separate facts throughout feedback and diagnostics.
 - A fine mesh can render immediately from a resident coarse ancestor and converge as
   finer raster pages arrive.
 - Known source ceilings suppress impossible requests without coarsening geometry.
+- Safety-cover pages reserve physical and request capacity before dynamic view demand;
+  resident selected pages remain current instead of being filtered into eviction churn.
 - `GpuTileFrontier` and `GpuRenderPatchFrontier` are removed after parity; 0.x retains
   no compatibility selector.
 - Existing performance instrumentation remains, but reports inverse-cover candidate,

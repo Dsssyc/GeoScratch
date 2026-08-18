@@ -266,15 +266,20 @@ async function runTerminalFailureProof(activeBrowser) {
         const url = `${baseUrl}/underwaterTerrain/index.html?proof=1&atlasPages=${operationalAtlasPages}` +
             `&cache=none&tileServer=${encodeURIComponent(tileBaseUrl)}`
         await page.goto(url, { waitUntil: 'domcontentloaded', timeout })
+        const initial = await waitForStableFacts(page)
+        await page.evaluate(camera => (
+            window.__UNDERWATER_TERRAIN_PROOF__.moveCamera(camera)
+        ), defaultCamera)
         const facts = await waitForStableFacts(page, current => {
             const virtualRaster = parseJson(current.virtualRaster)
-            return failedTileUrl !== undefined &&
+            return cameraMatches(current, defaultCamera) && failedTileUrl !== undefined &&
                 virtualRaster?.residency?.failedCount > 0 &&
                 virtualRaster?.scheduler?.failedRequestCount > 0
         })
         const captureFacts = await capture(page, 'terminal-child-404')
         const cleanupPair = await disposeTwice(page)
         return {
+            initial,
             facts,
             capture: captureFacts,
             failedTileUrl,
@@ -331,6 +336,10 @@ async function runCancellationProof(activeBrowser) {
         const url = `${baseUrl}/underwaterTerrain/index.html?proof=1&atlasPages=${operationalAtlasPages}` +
             `&cache=none&tileServer=${encodeURIComponent(tileBaseUrl)}`
         await page.goto(url, { waitUntil: 'domcontentloaded', timeout })
+        const initial = await waitForStableFacts(page)
+        await page.evaluate(camera => (
+            window.__UNDERWATER_TERRAIN_PROOF__.moveCamera(camera)
+        ), defaultCamera)
         const before = await waitForDemandActivity(
             page,
             () => delayedDetailedRequestCount > 0
@@ -345,6 +354,7 @@ async function runCancellationProof(activeBrowser) {
         const facts = await waitForStableFacts(page, current => cameraMatches(current, eastCamera))
         const cleanupPair = await disposeTwice(page)
         return {
+            initial,
             before,
             facts,
             cleanupPair,
@@ -513,22 +523,26 @@ function cameraMatches(facts, camera) {
         Math.abs(view?.center?.[1] - camera.center[1]) < 1e-9
 }
 
-function frontierSignature(facts) {
+function coverSignature(facts) {
 
-    const frontier = parseJson(facts.frontier)
+    const cover = parseJson(facts.coverFeedback)
     return JSON.stringify({
-        activeFrontierCount: frontier?.activeFrontierCount,
-        visibleInstanceCount: frontier?.visibleInstanceCount,
-        refineCandidateCount: frontier?.refineCandidateCount,
-        coarsenCandidateCount: frontier?.coarsenCandidateCount,
-        coarsenGracePendingCount: frontier?.coarsenGracePendingCount,
-        demandCount: frontier?.demandCount,
-        fallbackCount: frontier?.fallbackCount,
-        budgetLimitedCount: frontier?.budgetLimitedCount,
-        maximumObservedSse: frontier?.maximumObservedSse,
-        minimumSelectedMatrixLevel: frontier?.minimumSelectedMatrixLevel,
-        maximumSelectedMatrixLevel: frontier?.maximumSelectedMatrixLevel,
-        convergenceState: frontier?.convergenceState,
+        candidateCount: cover?.candidateCount,
+        patchCount: cover?.patchCount,
+        demandCount: cover?.demandCount,
+        minimumMatrixLevel: cover?.minimumMatrixLevel,
+        maximumMatrixLevel: cover?.maximumMatrixLevel,
+        maximumAdjacentLevelDelta: cover?.maximumAdjacentLevelDelta,
+        finestMatrixLevel: cover?.finestMatrixLevel,
+        sourceLevelCeiling: cover?.sourceLevelCeiling,
+        demands: cover?.demands?.map(demand => ({
+            desiredSampleLevel: demand.desiredSampleLevel,
+            sourceLevelCeiling: demand.sourceLevelCeiling,
+            requestMatrixLevel: demand.requestMatrixLevel,
+            tileRow: demand.tileRow,
+            tileCol: demand.tileCol,
+            priority: demand.priority,
+        })),
     })
 }
 
@@ -543,11 +557,12 @@ async function waitForStableFacts(page, additional = () => true) {
             throw new Error(facts.error ?? 'Underwater Terrain page failed')
         }
         const virtualRaster = parseJson(facts.virtualRaster)
-        const frontier = parseJson(facts.frontier)
-        const terminalFrontier = frontier?.convergenceState === 'converged' ||
-            frontier?.convergenceState === 'budget-limited'
+        const cover = parseJson(facts.coverFeedback)
         if (facts.status === 'ready' && Number(facts.frames) === Number(facts.observedFrames) &&
-            terminalFrontier && frontier?.demandCount === 0 &&
+            facts.coverConverged === 'true' && facts.convergenceState === 'converged' &&
+            cover?.patchCount > 0 && cover?.descriptorOverflowCount === 0 &&
+            cover?.lookupOverflowCount === 0 && cover?.demandOverflowCount === 0 &&
+            cover?.maximumAdjacentLevelDelta <= 1 &&
             virtualRaster?.residency?.stagedCount === 0 &&
             virtualRaster?.residency?.stagingBytes === 0 &&
             virtualRaster?.scheduler?.activeRequestCount === 0 &&
@@ -570,7 +585,7 @@ async function waitForStableFacts(page, additional = () => true) {
         frames: lastFacts?.frames,
         observedFrames: lastFacts?.observedFrames,
         virtualRequestedPageCount: lastFacts?.virtualRequestedPageCount,
-        frontier: parseJson(lastFacts?.frontier),
+        cover: parseJson(lastFacts?.coverFeedback),
         residency: virtualRaster?.residency,
         scheduler: virtualRaster?.scheduler,
         worker: virtualRaster?.worker,
@@ -718,17 +733,22 @@ function validateProof(value, processState) {
         const worker = virtualRaster?.worker
         const phaseBudget = worker?.phaseBudget
         const gpu = virtualRaster?.gpu
-        const frontier = parseJson(facts.frontier)
-        if (facts.selectionPath !== 'gpu-resident-active-frontier' ||
+        const cover = parseJson(facts.coverFeedback)
+        if (facts.selectionPath !== 'gpu-camera-inverse-webmercatorquad-cover' ||
             facts.countPath !== 'gpu-produced-indirect-arguments' ||
             facts.cpuSelectionUploadCount !== '0' ||
-            frontier?.demandCount !== 0 ||
-            (frontier?.convergenceState !== 'converged' &&
-                frontier?.convergenceState !== 'budget-limited') ||
-            frontier?.activeFrontierCount < 1 || frontier?.visibleInstanceCount < 1 ||
-            frontier?.staleGenerationCount !== 0 || frontier?.frontierOverflow !== false ||
-            frontier?.demandOverflow !== false || frontier?.visibleOverflow !== false) {
-            failures.push(`${name} frame violated the GPU frontier terminal contract`)
+            facts.coverConverged !== 'true' || facts.convergenceState !== 'converged' ||
+            cover?.patchCount !== Number(facts.coverPatchCount) ||
+            cover?.candidateCount < cover?.patchCount ||
+            cover?.demandCount !== Number(facts.coverDemandCount) ||
+            cover?.descriptorOverflowCount !== 0 || cover?.lookupOverflowCount !== 0 ||
+            cover?.demandOverflowCount !== 0 || cover?.maximumAdjacentLevelDelta > 1 ||
+            cover?.sourceLevelCeiling !== 10 ||
+            !Array.isArray(cover?.demands) || cover.demands.some(demand => (
+                demand.requestMatrixLevel > demand.sourceLevelCeiling ||
+                demand.desiredSampleLevel < demand.requestMatrixLevel
+            ))) {
+            failures.push(`${name} frame violated the GPU inverse-cover terminal contract`)
         }
         if (virtualRaster?.coordinateEncoding !== 'wide-fixed' ||
             virtualRaster?.coordinateBits !== 40 ||
@@ -786,19 +806,36 @@ function validateProof(value, processState) {
 
     const budgetFirst = value.budget?.first
     const budgetRepeated = value.budget?.repeated
-    const budgetFrontier = parseJson(budgetFirst?.frontier)
+    const budgetCover = parseJson(budgetFirst?.coverFeedback)
     const budgetVirtual = parseJson(budgetFirst?.virtualRaster)
+    const prioritizedDemand = [ ...(budgetCover?.demands ?? []) ].sort((left, right) =>
+        right.priority - left.priority ||
+        left.requestMatrixLevel - right.requestMatrixLevel ||
+        left.tileRow - right.tileRow ||
+        left.tileCol - right.tileCol
+    )[0]
+    const expectedPriorityPath = prioritizedDemand === undefined
+        ? undefined
+        : `/tiles/WebMercatorQuad/${prioritizedDemand.requestMatrixLevel}/` +
+            `${prioritizedDemand.tileRow}/${prioritizedDemand.tileCol}.png`
+    const budgetTilePaths = value.budget?.events?.tileRequests?.map(url =>
+        new URL(url).pathname
+    ) ?? []
+    const budgetDetailPaths = budgetTilePaths.filter(path =>
+        path !== '/tiles/WebMercatorQuad/4/6/13.png'
+    )
     if (budgetFirst?.status !== 'ready' || !cameraMatches(budgetFirst, zoomedOutCamera) ||
-        budgetFrontier?.convergenceState !== 'budget-limited' ||
-        budgetFrontier?.budgetLimitedCount < 1 || budgetFrontier?.demandCount !== 0 ||
-        budgetFrontier?.activeFrontierCount !== 1 ||
-        budgetFrontier?.visibleInstanceCount < 1 ||
-        budgetFrontier?.staleGenerationCount !== 0 ||
+        budgetFirst?.convergenceState !== 'converged' ||
+        budgetCover?.patchCount < 1 || budgetCover?.demandCount <= tightAtlasPages ||
+        budgetCover?.descriptorOverflowCount !== 0 || budgetCover?.demandOverflowCount !== 0 ||
         budgetVirtual?.residency?.maxPhysicalPages !== tightAtlasPages ||
-        budgetVirtual?.residency?.residentCount !== 1 ||
-        frontierSignature(budgetFirst) !== frontierSignature(budgetRepeated) ||
+        budgetVirtual?.residency?.residentCount < 1 ||
+        budgetVirtual?.residency?.residentCount > tightAtlasPages ||
+        budgetVirtual?.scheduler?.demandedPageCount > tightAtlasPages ||
+        budgetDetailPaths.length !== 1 || budgetDetailPaths[0] !== expectedPriorityPath ||
+        coverSignature(budgetFirst) !== coverSignature(budgetRepeated) ||
         value.budget?.captures?.first?.hash !== value.budget?.captures?.repeated?.hash) {
-        failures.push('two-page atlas did not terminate on a stable visible parent cover')
+        failures.push('two-page atlas changed or truncated the complete geometry cover')
     }
     if (!value.budget?.cleanupPair?.equivalent || value.budget?.terminalStatus !== 'disposed' ||
         unexpectedEvents(value.budget?.events).length !== 0) {
@@ -806,7 +843,7 @@ function validateProof(value, processState) {
     }
 
     const terminalFacts = value.terminalFailure?.facts
-    const terminalFrontier = parseJson(terminalFacts?.frontier)
+    const terminalCover = parseJson(terminalFacts?.coverFeedback)
     const failedVirtual = parseJson(terminalFacts?.virtualRaster)
     const terminalHistory = failedVirtual?.scheduler?.history ?? []
     const failedRequestOccurrences = value.terminalFailure?.events?.tileRequests?.filter(url => (
@@ -816,17 +853,17 @@ function validateProof(value, processState) {
         typeof value.terminalFailure?.failedTileUrl !== 'string' ||
         failedVirtual?.residency?.failedCount < 1 ||
         failedVirtual?.scheduler?.failedRequestCount !== 1 ||
-        terminalFrontier?.convergenceState !== 'converged' ||
-        terminalFrontier?.demandCount !== 0 || terminalFrontier?.fallbackCount < 1 ||
-        terminalFrontier?.visibleInstanceCount < 1 ||
-        terminalFrontier?.staleGenerationCount !== 0 || failedRequestOccurrences !== 1) {
+        terminalFacts?.convergenceState !== 'converged' ||
+        terminalCover?.patchCount < 1 || terminalCover?.descriptorOverflowCount !== 0 ||
+        terminalCover?.demandOverflowCount !== 0 ||
+        failedVirtual?.residency?.fallbackCount < 1 || failedRequestOccurrences !== 1) {
         failures.push(`terminal child 404 did not publish one failed page and retain parent cover: ${JSON.stringify({
             failedTileUrl: value.terminalFailure?.failedTileUrl,
             failedRequestOccurrences,
             residencyFailedCount: failedVirtual?.residency?.failedCount,
             schedulerFailedRequestCount: failedVirtual?.scheduler?.failedRequestCount,
             failedHistory: terminalHistory.filter(entry => entry.kind === 'failed'),
-            frontier: terminalFrontier,
+            cover: terminalCover,
         })}`)
     }
     const terminalUnexpectedEvents = unexpectedEvents(value.terminalFailure?.events, {
@@ -896,12 +933,12 @@ function validateProof(value, processState) {
         [ 'south', southCamera ],
     ]) {
         if (!cameraMatches(value.facts[name], camera)) {
-            failures.push(`${name} camera did not produce its GPU frontier view`)
+            failures.push(`${name} camera did not produce its GPU inverse-cover view`)
         }
     }
-    if (frontierSignature(value.facts.boundary) !== frontierSignature(value.facts.returned) ||
-        frontierSignature(value.facts.returned) !== frontierSignature(value.facts.repeated)) {
-        failures.push('camera roundtrip did not restore the canonical GPU frontier')
+    if (coverSignature(value.facts.boundary) !== coverSignature(value.facts.returned) ||
+        coverSignature(value.facts.returned) !== coverSignature(value.facts.repeated)) {
+        failures.push('camera roundtrip did not restore the canonical GPU inverse cover')
     }
     if (value.captures.boundary.hash !== value.captures.returned.hash ||
         value.captures.returned.hash !== value.captures.repeated.hash) {
@@ -1123,25 +1160,24 @@ function summarizeProof(value) {
     const terminal = value.cleanupPair.reports?.[0]?.virtualRaster
     const summarizeFacts = facts => {
         const virtualRaster = parseJson(facts.virtualRaster)
-        const frontier = parseJson(facts.frontier)
+        const cover = parseJson(facts.coverFeedback)
         const camera = parseJson(facts.cameraView)
         return {
             status: facts.status,
             frames: Number(facts.frames),
-            visibleNodeCount: Number(facts.visibleNodeCount),
+            coverPatchCount: Number(facts.coverPatchCount),
             camera,
-            frontier: frontier == null ? undefined : {
-                activeFrontierCount: frontier.activeFrontierCount,
-                visibleInstanceCount: frontier.visibleInstanceCount,
-                demandCount: frontier.demandCount,
-                fallbackCount: frontier.fallbackCount,
-                budgetLimitedCount: frontier.budgetLimitedCount,
-                coarsenGracePendingCount: frontier.coarsenGracePendingCount,
+            cover: cover == null ? undefined : {
+                candidateCount: cover.candidateCount,
+                patchCount: cover.patchCount,
+                demandCount: cover.demandCount,
                 levelRange: [
-                    frontier.minimumSelectedMatrixLevel,
-                    frontier.maximumSelectedMatrixLevel,
+                    cover.minimumMatrixLevel,
+                    cover.maximumMatrixLevel,
                 ],
-                convergenceState: frontier.convergenceState,
+                finestMatrixLevel: cover.finestMatrixLevel,
+                maximumAdjacentLevelDelta: cover.maximumAdjacentLevelDelta,
+                sourceLevelCeiling: cover.sourceLevelCeiling,
             },
             snapshotEpoch: virtualRaster?.residency?.snapshotEpoch,
             residentCount: virtualRaster?.residency?.residentCount,

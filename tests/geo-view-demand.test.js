@@ -157,24 +157,32 @@ describe('Geo view snapshots and demand', () => {
                     priority: { class: 'user-visible', score: 10 },
                     intent: 'refinement',
                     reason: 'initial-refine',
+                    desiredSampleLevel: 1,
+                    sourceLevelCeiling: 1,
                 },
                 {
                     page: first,
                     priority: { class: 'critical', score: 1 },
                     intent: 'coverage',
                     reason: 'cover-hole',
+                    desiredSampleLevel: 1,
+                    sourceLevelCeiling: 1,
                 },
                 {
                     page: second,
                     priority: { class: 'background', score: 100 },
                     intent: 'prefetch',
                     reason: 'guard-band',
+                    desiredSampleLevel: 1,
+                    sourceLevelCeiling: 1,
                 },
                 {
                     page: third,
                     priority: { class: 'user-visible', score: 20 },
                     intent: 'refinement',
                     reason: 'higher-sse',
+                    desiredSampleLevel: 1,
+                    sourceLevelCeiling: 1,
                 },
             ],
         })
@@ -199,6 +207,29 @@ describe('Geo view snapshots and demand', () => {
         expect(producer).not.to.have.any.keys('scheduler', 'worker', 'cache', 'runtime')
     })
 
+    it('allows a zero dynamic budget when safety pages consume all physical slots', () => {
+
+        const [ page ] = pages()
+        const producer = new ViewDemandProducer({
+            id: 'safety-only-demand',
+            maxDemands: 0,
+        })
+        const demandSet = producer.produce({
+            view: view(),
+            generation: 14,
+            demands: [ {
+                page,
+                priority: { class: 'user-visible', score: 1 },
+                intent: 'refinement',
+                reason: 'no-free-physical-slot',
+                desiredSampleLevel: 1,
+                sourceLevelCeiling: 1,
+            } ],
+        })
+
+        expect(demandSet.demands).to.deep.equal([])
+    })
+
     it('lowers view intent to Virtual Raster usage explicitly', () => {
 
         const [ required, prefetched ] = pages()
@@ -212,12 +243,16 @@ describe('Geo view snapshots and demand', () => {
                     priority: { class: 'critical', score: 1 },
                     intent: 'coverage',
                     reason: 'visible-cover',
+                    desiredSampleLevel: 14,
+                    sourceLevelCeiling: 10,
                 },
                 {
                     page: prefetched,
                     priority: { class: 'background', score: 1 },
                     intent: 'prefetch',
                     reason: 'view-guard-band',
+                    desiredSampleLevel: 10,
+                    sourceLevelCeiling: 10,
                 },
             ],
         })
@@ -232,5 +267,13 @@ describe('Geo view snapshots and demand', () => {
             'visible-cover',
             'view-guard-band',
         ])
+        expect(viewDemands.demands[0]).to.deep.include({
+            desiredSampleLevel: 14,
+            sourceLevelCeiling: 10,
+        })
+        expect(lowered.demands[0]).not.to.have.any.keys(
+            'desiredSampleLevel',
+            'sourceLevelCeiling'
+        )
     })
 })

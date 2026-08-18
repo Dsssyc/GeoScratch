@@ -5,7 +5,7 @@ import * as geoApi from 'geoscratch/geo'
 import {
     CellLocalF32Codec,
     GeoDiagnosticError,
-    GpuTileFrontier,
+    GpuWebMercatorQuadCover,
     MercatorCoordinate,
     TileMatrixCoverage,
     ViewDemandProducer,
@@ -13,7 +13,6 @@ import {
     WebMercatorQuadAddressCodec,
     WideFixedCodec,
     VirtualRasterGpuState,
-    VirtualRasterGpuFeedbackRing,
     VirtualRasterResidency,
     cellLocalF32Codec,
     coordinateDomain,
@@ -21,8 +20,8 @@ import {
     createGeoViewSource,
     createGeoViewSnapshot,
     geoField,
-    gpuTileFrontierPolicy,
-    gpuTileFrontierRenderWgslModule,
+    gpuWebMercatorQuadCoverPolicy,
+    gpuWebMercatorQuadCoverReadWgslModule,
     localVector,
     mapLibrePlanarViewAdapter,
     mapLibrePlanarViewSource,
@@ -48,29 +47,21 @@ import {
     type GeoViewSource,
     type GeoViewSourceCapture,
     type GeoViewSnapshot,
-    type GpuTileFrontierDescriptor,
-    type GpuTileFrontierDemand,
-    type GpuTileFrontierCoreFacts,
-    type GpuTileFrontierDrawArgument,
-    type GpuTileFrontierDrawTemplate,
-    type GpuTileFrontierFeedbackLayout,
-    type GpuTileFrontierFeedbackOutput,
-    type GpuTileFrontierFeedbackSection,
-    type GpuTileFrontierFrame,
-    type GpuTileFrontierLevelMetric,
-    type GpuTileFrontierPolicy,
-    type GpuTileFrontierRenderTemplate,
-    type GpuTileFrontierRenderWgslModule,
-    type GpuTileFrontierSeed,
-    type GpuTileFrontierView,
-    type GpuTileFrontierViewToken,
-    type GpuTileFrontierRetirement,
+    type GpuWebMercatorQuadCoverDemand,
+    type GpuWebMercatorQuadCoverDescriptor,
+    type GpuWebMercatorQuadCoverFacts,
+    type GpuWebMercatorQuadCoverFeedback,
+    type GpuWebMercatorQuadCoverFrame,
+    type GpuWebMercatorQuadCoverPolicy,
+    type GpuWebMercatorQuadCoverReadWgslModule,
+    type GpuWebMercatorQuadCoverRenderTemplate,
+    type GpuWebMercatorQuadCoverSelectionFacts,
+    type GpuWebMercatorQuadCoverViewToken,
     type MapFieldLayer,
     type MapLibrePlanarCameraInput,
     type MapLibrePlanarViewAdapter,
     type MapLibrePlanarViewSource,
     type PositionPrecisionFacts,
-    type TileSpatialProfile,
     type TiledFieldRepresentation,
     type WideFixedPosition,
     type WebMercatorQuadPosition,
@@ -78,10 +69,6 @@ import {
     type WebMercatorVirtualRasterFieldDescriptor,
     type WebMercatorVirtualRasterWgslModule,
     type VirtualRasterPageIdentity,
-    type VirtualRasterGpuFeedbackBatch,
-    type VirtualRasterGpuFeedbackCounters,
-    type VirtualRasterGpuFeedbackRingFacts,
-    type VirtualRasterGpuFeedbackSlotFacts,
     type VirtualRasterSample,
     type ViewTileDemandSet,
 } from 'geoscratch/geo'
@@ -333,7 +320,7 @@ const typedFrontierAddressSpace = virtualRasterTileAddressSpace({
     id: 'typed-frontier-raster',
     coverage: typedTileCoverage,
 })
-const typedFrontierSpatialProfile: TileSpatialProfile =
+const typedFrontierSpatialProfile: geoApi.WebMercatorPlanarTileSpatialProfile =
     webMercatorPlanarTileSpatialProfile({ addressCodec: typedWebMercatorCodec })
 const typedFrontierPlane = virtualRasterPlane({
     id: 'typed-frontier-height-plane',
@@ -417,6 +404,8 @@ const typedViewDemands: ViewTileDemandSet = typedViewDemandProducer.produce({
         priority: { class: 'user-visible', score: 1 },
         intent: 'coverage',
         reason: 'typed-view-coverage',
+        desiredSampleLevel: 1,
+        sourceLevelCeiling: 1,
     } ],
 })
 const typedMapField: MapFieldLayer<{ frameEpoch: number }> = mapFieldLayer({
@@ -584,39 +573,38 @@ void typedGeoSettlementFromTerrain
 void typedTerrainRenderResult
 void typedDrivenGeoFrameController
 void typedMapLibreFrameDriver
-declare const typedFrontierGpuState: VirtualRasterGpuState
-const typedFrontierPolicy: GpuTileFrontierPolicy = gpuTileFrontierPolicy({
-    refineErrorPixels: 2,
-    coarsenErrorPixels: 1,
-    minimumMatrixLevel: 0,
-    maximumMatrixLevel: 0,
-    maximumActiveTiles: 16,
-    maximumDemands: 8,
-    transitionReservePages: 4,
-    invisibleGraceFrames: 2,
-})
-const typedFrontierLevelMetrics: readonly GpuTileFrontierLevelMetric[] = [ {
-    matrixLevel: 0,
-    minimumElevationMeters: -100,
-    maximumElevationMeters: 8_000,
-    geometricErrorMeters: 1_000,
-} ]
-const typedFrontierDrawTemplates: readonly GpuTileFrontierDrawTemplate[] = [ {
-    id: 'terrain',
-    vertexCount: 24_576,
-    firstVertex: 0,
-    firstInstance: 0,
-} ]
-const typedFrontierDescriptor: GpuTileFrontierDescriptor = {
-    gpuState: typedFrontierGpuState,
+const typedCoverPolicy: GpuWebMercatorQuadCoverPolicy =
+    gpuWebMercatorQuadCoverPolicy({
+        minimumMatrixLevel: 0,
+        maximumMatrixLevel: 14,
+        sourceMaximumMatrixLevel: 0,
+        maximumPatches: 256,
+    })
+const typedCoverDescriptor: GpuWebMercatorQuadCoverDescriptor = {
     spatialProfile: typedFrontierSpatialProfile,
-    policy: typedFrontierPolicy,
-    levelMetrics: typedFrontierLevelMetrics,
-    roots: [ typedFrontierAddressSpace.rootPage() ],
-    drawTemplates: typedFrontierDrawTemplates,
+    policy: typedCoverPolicy,
+    elevationRangeMeters: [ -100, 8_000 ],
+    vertexCount: 24_576,
 }
-const typedFrontierView: GpuTileFrontierView = createGeoViewSnapshot({
-    id: 'typed-frontier-view',
+declare const typedCoverRuntime: scr.GPURuntime
+declare const typedGpuCover: GpuWebMercatorQuadCover
+declare const typedCoverSubmittedWork: scr.SubmittedWork
+const typedSubmissionAuthority: scr.SubmissionAuthority =
+    typedCoverRuntime.createSubmissionAuthority({ label: 'typed authority' })
+const typedSubmissionStamp: scr.SubmissionAuthorityStamp = typedSubmissionAuthority.stamp()
+const typedRequiredSubmission: scr.SubmissionBuilder = typedCoverRuntime
+    .createSubmission()
+    .require(typedSubmissionStamp)
+const typedConsumedSubmission: scr.SubmissionBuilder = typedCoverRuntime
+    .createSubmission()
+    .consume(typedSubmissionStamp)
+const typedCoverCreation: Promise<GpuWebMercatorQuadCover> =
+    GpuWebMercatorQuadCover.create(
+        typedCoverRuntime,
+        typedCoverDescriptor,
+    )
+const typedCoverView: GeoViewSnapshot = createGeoViewSnapshot({
+    id: 'typed-cover-view',
     clipFromRelativeWorld: new Float32Array(16),
     cameraHigh: [ 0, 0, 0 ],
     cameraLow: [ 0, 0, 0 ],
@@ -628,166 +616,63 @@ const typedFrontierView: GpuTileFrontierView = createGeoViewSnapshot({
     frameEpoch: 1,
     residencySnapshotEpoch: 1,
 })
-declare const typedFrontierRuntime: scr.GPURuntime
-declare const typedGpuFrontier: GpuTileFrontier
-declare const typedFeedbackRing: VirtualRasterGpuFeedbackRing
-declare const typedFrontierSubmittedWork: scr.SubmittedWork
-const typedSubmissionAuthority: scr.SubmissionAuthority =
-    typedFrontierRuntime.createSubmissionAuthority({ label: 'typed authority' })
-const typedSubmissionStamp: scr.SubmissionAuthorityStamp = typedSubmissionAuthority.stamp()
-const typedRequiredSubmission: scr.SubmissionBuilder = typedFrontierRuntime
-    .createSubmission()
-    .require(typedSubmissionStamp)
-const typedConsumedSubmission: scr.SubmissionBuilder = typedFrontierRuntime
-    .createSubmission()
-    .consume(typedSubmissionStamp)
-const typedFrontierCreation: Promise<GpuTileFrontier> = GpuTileFrontier.create(
-    typedFrontierRuntime,
-    typedFrontierDescriptor,
+const typedCoverUpload: GpuWebMercatorQuadCoverViewToken = typedGpuCover.writeView(
+    typedCoverView,
 )
-const typedFrontierSeed: GpuTileFrontierSeed = typedGpuFrontier.stageSeed(
-    typedRasterResidency.currentSnapshot,
-)
-const typedFrontierUpload: GpuTileFrontierViewToken = typedGpuFrontier.writeView(
-    typedFrontierView,
-)
-const typedFrontierFrame: GpuTileFrontierFrame = typedGpuFrontier.frame(typedFrontierUpload)
-const typedEncodedFrontierSubmission: scr.SubmissionBuilder = typedGpuFrontier.encode(
+const typedCoverFrame: GpuWebMercatorQuadCoverFrame = typedGpuCover.frame(typedCoverUpload)
+const typedEncodedCoverSubmission: scr.SubmissionBuilder = typedGpuCover.encode(
     typedRequiredSubmission,
-    typedFrontierFrame,
+    typedCoverFrame,
 )
-const typedFeedbackRingCreation: Promise<VirtualRasterGpuFeedbackRing> =
-    VirtualRasterGpuFeedbackRing.create(typedGpuFrontier)
-const typedFeedbackEncodedSubmission: scr.SubmissionBuilder = typedFeedbackRing.encode(
-    typedEncodedFrontierSubmission,
-    typedFrontierFrame,
+const typedCapturedCoverSubmission: scr.SubmissionBuilder = typedGpuCover.capture(
+    typedEncodedCoverSubmission,
+    typedCoverFrame,
 )
-const typedOpaqueSubmissionStep = typedFeedbackEncodedSubmission.steps.find(
-    step => step.kind === 'opaque'
+const typedCoverFeedback: Promise<GpuWebMercatorQuadCoverFeedback> = typedGpuCover.feedback(
+    typedCoverFrame,
+    typedCoverSubmittedWork,
 )
-if (typedOpaqueSubmissionStep?.kind === 'opaque') {
-    const typedOpaqueSubmissionLabel: string = typedOpaqueSubmissionStep.label
-    void typedOpaqueSubmissionLabel
-    // @ts-expect-error Opaque package-owned steps never expose their command.
-    typedOpaqueSubmissionStep.command
-}
 // @ts-expect-error Package-owned opaque-step composition is not a public Scratch export.
 scr.appendSubmissionBuilderOpaqueSteps
-const typedFeedbackResult: Promise<VirtualRasterGpuFeedbackBatch> = typedFeedbackRing.feedback(
-    typedFrontierFrame,
-    typedFrontierSubmittedWork,
-)
-declare const typedFeedbackBatch: VirtualRasterGpuFeedbackBatch
-const typedFeedbackDemand: GpuTileFrontierDemand | undefined = typedFeedbackBatch.demands[0]
-const typedFeedbackRetirement: GpuTileFrontierRetirement | undefined =
-    typedFeedbackBatch.retirements[0]
-const typedFeedbackCounters: VirtualRasterGpuFeedbackCounters = typedFeedbackBatch.counters
-const typedFeedbackRingFacts: VirtualRasterGpuFeedbackRingFacts = typedFeedbackRing.facts()
-const typedFeedbackSlotFacts: VirtualRasterGpuFeedbackSlotFacts | undefined =
-    typedFeedbackRingFacts.slots[0]
-const typedFrontierDraw: GpuTileFrontierDrawArgument = typedGpuFrontier.drawArgument(
-    typedFrontierFrame,
-    'terrain',
-)
-const typedFrontierRenderTemplates: readonly GpuTileFrontierRenderTemplate[] =
-    typedGpuFrontier.renderTemplates('terrain')
-const typedRenderPatchViewTemplates = typedGpuFrontier.renderTemplates('terrain')
-const typedRenderPatchDescriptor: geoApi.GpuRenderPatchFrontierDescriptor = {
-    viewTemplates: typedRenderPatchViewTemplates,
-    renderRoots: [ { matrixLevel: 4, tileRow: 6, tileCol: 13 } ],
-    maximumRenderPatches: 4_096,
-    renderMaximumMatrixLevel: 14,
-    coordinateBits: 32,
-    elevationRangeMeters: [ -100, 8_000 ],
-    vertexCount: 24_576,
-    cellsPerPatchEdge: 64,
-    maximumCellSpanPixels: 8,
-}
-const typedRenderPatchCreation: Promise<geoApi.GpuRenderPatchFrontier> =
-    geoApi.createGpuRenderPatchFrontier(typedFrontierRuntime, typedRenderPatchDescriptor)
-declare const typedRenderPatchFrontier: geoApi.GpuRenderPatchFrontier
-const typedRenderPatchTemplates: readonly [
-    geoApi.GpuRenderPatchRenderTemplate,
-    geoApi.GpuRenderPatchRenderTemplate,
-] = typedRenderPatchFrontier.renderTemplates()
-const typedRenderPatchWgsl = geoApi.gpuRenderPatchWgslModule()
-const typedRenderPatchFacts: geoApi.GpuRenderPatchFrontierFacts =
-    typedRenderPatchFrontier.facts()
-const typedDecodedRenderPatch: geoApi.GpuRenderPatchSelectionFacts =
-    geoApi.decodeGpuRenderPatchState(new Uint8Array(148), {
-        maximumRenderPatches: 12_544,
+const typedCoverTemplates: readonly [
+    GpuWebMercatorQuadCoverRenderTemplate,
+    GpuWebMercatorQuadCoverRenderTemplate,
+] = typedGpuCover.renderTemplates()
+const typedCoverReadWgsl: GpuWebMercatorQuadCoverReadWgslModule =
+    gpuWebMercatorQuadCoverReadWgslModule({
+        namespace: 'TypedCover',
+        group: 1,
+        visibleInstancesBinding: 2,
+        lookupEntriesBinding: 3,
     })
-const typedFrontierRenderWgsl: GpuTileFrontierRenderWgslModule =
-    gpuTileFrontierRenderWgslModule({ namespace: 'TypedFrontierVisible' })
-const typedFrontierVisibleBuffer: scr.BufferResource =
-    typedFrontierRenderTemplates[0]!.visibleInstances
-const typedFrontierMapMetaBuffer: scr.BufferResource =
-    typedFrontierRenderTemplates[0]!.mapMeta
-const typedFrontierIndirectRegion: scr.BufferRegion =
-    typedFrontierRenderTemplates[0]!.drawArgument.region
-void typedFrontierRenderWgsl
-void typedRenderPatchCreation
-void typedRenderPatchTemplates
-void typedRenderPatchWgsl
-void typedRenderPatchFacts
-void typedDecodedRenderPatch
-void typedFrontierVisibleBuffer
-void typedFrontierMapMetaBuffer
-void typedFrontierIndirectRegion
-const typedFrontierFacts: GpuTileFrontierCoreFacts = typedGpuFrontier.facts()
-const typedFrontierFeedback: GpuTileFrontierFeedbackOutput = typedFrontierFrame.feedbackOutput
-const typedFrontierFeedbackBufferId: string = typedFrontierFeedback.bufferId
-const typedFrontierFeedbackLayout: GpuTileFrontierFeedbackLayout = typedFrontierFeedback.layout
-const typedFrontierDemandSection: GpuTileFrontierFeedbackSection =
-    typedFrontierFeedbackLayout.demands
-// @ts-expect-error Mutable frontier resources are not public facts
-typedFrontierFacts.resources
-// @ts-expect-error Packed feedback does not expose its write-capable BufferRegion
-typedFrontierFeedback.region
-// @ts-expect-error View upload command/data remain private to frontier.encode()
-typedFrontierUpload.command
-// @ts-expect-error Persistent compute commands remain private to frontier.encode()
-typedFrontierFrame.commands
-// @ts-expect-error Persistent frontier buffers are not public frame capabilities
-typedFrontierFrame.nextFrontier
-// @ts-expect-error Bounded feedback belongs to VirtualRasterGpuFeedbackRing
-typedGpuFrontier.feedback(typedFrontierFrame)
-// @ts-expect-error Task 3C owns bounded capture integration
-typedGpuFrontier.capture(typedFrontierFrame)
-// @ts-expect-error Feedback commands remain private bounded ring slots
-typedFeedbackRing.commands
-// @ts-expect-error Feedback batches never expose mapped or copied bytes
-typedFeedbackBatch.bytes
-// @ts-expect-error Feedback requires exact SubmittedWork provenance
-typedFeedbackRing.feedback(typedFrontierFrame)
-// @ts-expect-error Feedback rings are created asynchronously against an owned frontier
-new VirtualRasterGpuFeedbackRing(typedGpuFrontier)
-// @ts-expect-error Frontier descriptors require an explicit WebMercatorQuad address codec
-const typedFrontierWithoutProjection: GpuTileFrontierDescriptor = {
-    gpuState: typedFrontierGpuState,
-    policy: typedFrontierPolicy,
-    levelMetrics: typedFrontierLevelMetrics,
-    roots: [ typedFrontierAddressSpace.rootPage() ],
-    drawTemplates: typedFrontierDrawTemplates,
-}
-const typedFrontierInvalidTuple: GpuTileFrontierView = {
-    ...typedFrontierView,
-    // @ts-expect-error Camera high/low values are exact three-component tuples
-    cameraHigh: [ 0, 0 ],
-}
-const typedFrontierInvalidDraw: GpuTileFrontierDrawTemplate = {
-    id: 'invalid',
-    // @ts-expect-error Draw vertex counts are numeric values
-    vertexCount: '6',
-}
-// @ts-expect-error The CPU reference evaluator is package-internal
-geoApi.evaluateGpuTileFrontierReference
-// @ts-expect-error Descriptor value validation is package-internal
-geoApi.validateGpuTileFrontierDescriptor
-// @ts-expect-error Mutable feedback resource access is package-internal
-geoApi.gpuTileFrontierFeedbackAccess
-// @ts-expect-error Frontier builder provenance is package-internal
-geoApi.gpuTileFrontierFeedbackEncodingMatches
+const typedCoverFacts: GpuWebMercatorQuadCoverFacts = typedGpuCover.facts()
+declare const typedCoverFeedbackValue: GpuWebMercatorQuadCoverFeedback
+const typedCoverDemand: GpuWebMercatorQuadCoverDemand | undefined =
+    typedCoverFeedbackValue.demands[0]
+const typedCoverSelection: GpuWebMercatorQuadCoverSelectionFacts =
+    typedCoverFeedbackValue
+const typedCoverVisibleBuffer: scr.BufferResource =
+    typedCoverTemplates[0].visibleInstances
+const typedCoverMapMetaBuffer: scr.BufferResource = typedCoverTemplates[0].mapMeta
+const typedCoverIndirectRegion: scr.BufferRegion =
+    typedCoverTemplates[0].drawArgument.region
+// @ts-expect-error View upload commands remain private to cover.encode().
+typedCoverUpload.command
+// @ts-expect-error Persistent compute commands remain private to cover.encode().
+typedCoverFrame.commands
+// @ts-expect-error The CPU reference evaluator is package-internal.
+geoApi.evaluateGpuWebMercatorQuadCoverReference
+void typedConsumedSubmission
+void typedCoverCreation
+void typedCapturedCoverSubmission
+void typedCoverFeedback
+void typedCoverReadWgsl
+void typedCoverFacts
+void typedCoverDemand
+void typedCoverSelection
+void typedCoverVisibleBuffer
+void typedCoverMapMetaBuffer
+void typedCoverIndirectRegion
 // @ts-expect-error Current acknowledged snapshot identity is package-internal
 geoApi.virtualRasterGpuAcknowledgedSnapshot
 // @ts-expect-error Coordinate dimensions are limited to one, two, or three
@@ -805,28 +690,6 @@ void typedRasterGpuState
 void typedWebMercatorAddress
 void typedWebMercatorField
 void typedWebMercatorFieldWgsl
-void typedFrontierDescriptor
-void typedFrontierView
-void typedFrontierCreation
-void typedFrontierSeed
-void typedFrontierUpload
-void typedFrontierFrame
-void typedFrontierDraw
-void typedFrontierFacts
-void typedFrontierFeedback
-void typedFrontierFeedbackBufferId
-void typedFrontierFeedbackLayout
-void typedFrontierDemandSection
-void typedFeedbackRingCreation
-void typedFeedbackEncodedSubmission
-void typedFeedbackResult
-void typedFeedbackDemand
-void typedFeedbackRetirement
-void typedFeedbackCounters
-void typedFeedbackSlotFacts
-void typedFrontierWithoutProjection
-void typedFrontierInvalidTuple
-void typedFrontierInvalidDraw
 const planeGeometry = plane(2)
 const sphereGeometry = sphere(1, 8, 4)
 

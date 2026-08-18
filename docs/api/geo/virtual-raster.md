@@ -4,7 +4,6 @@ canonical: true
 apiSources:
   - packages/geoscratch/src/geo/virtual-raster-cache-address.ts
   - packages/geoscratch/src/geo/virtual-raster-demand.ts
-  - packages/geoscratch/src/geo/virtual-raster-gpu-feedback.ts
   - packages/geoscratch/src/geo/virtual-raster-gpu.ts
   - packages/geoscratch/src/geo/virtual-raster-residency.ts
   - packages/geoscratch/src/geo/virtual-raster-runtime.ts
@@ -49,17 +48,23 @@ releasing it exactly once. Independent shutdown failures are retained together r
 than allowing one failure to skip another authority. Runtime facts report the declared
 executor ownership without fabricating executor business state.
 Transfer helpers make `ArrayBuffer` ownership explicit. Residency stages pages and
-publishes coherent snapshots; leases prevent physical slots from being recycled while
-a submission may still sample them. GPU feedback rings bound asynchronous readback and
-reject stale slots. Feedback lowering carries a missing in-flight page for exactly one
-subsequent feedback generation. This bounded continuity absorbs alternating GPU
-frontier transactions without turning a single omission into cancellation; absence
-from two consecutive batches still cancels obsolete work. Demand-controller facts
-report the fixed grace and current deferred count. Deferred work is lowered as
-background prefetch, so current refinement and the safety cover always win a bounded
-request budget.
-The reported deferred count includes only pages admitted to that bounded scheduling
-set, not grace candidates dropped by the budget.
+publishes coherent snapshots; optional leases remain available to consumers that must
+hold physical assignments across asynchronous work. The runtime itself consumes
+explicit `ViewTileDemandSet` values through `reconcileViewDemands()`. It does not
+inspect camera, zoom, projected error, adjacency, or geometry topology.
+
+Demand producers retain `desiredSampleLevel` and `sourceLevelCeiling`; lowering to
+`VirtualRasterDemandSet` passes only the executable page, priority, usage, generation,
+and reason. Known source ceilings therefore suppress impossible requests without
+rewriting desired precision. Runtime construction reserves request and physical-page
+capacity for every pinned safety-cover page; `ViewDemandProducer.maxDemands` is the
+remaining `min(maxPhysicalPages, maxRequests) - safetyCoverPageCount` capacity and may
+therefore be zero. Reconciliation sends both exact-resident and missing selected pages
+from that runtime-owned producer to the scheduler; foreign or over-capacity sets fail
+instead of being silently reordered or truncated. The scheduler marks resident pages
+used and requests only missing pages, so a tight atlas cannot repeatedly evict two
+current detail pages through one free slot. Complete cover feedback remains independent
+from this residency budget.
 
 `VirtualRasterGpuState.encode()` records exact update ownership and appends a staged
 publication before dependent commands in one open submission. After that submission

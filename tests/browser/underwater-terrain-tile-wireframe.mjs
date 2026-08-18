@@ -21,15 +21,20 @@ const timeout = positiveInteger(
     process.env.UNDERWATER_TERRAIN_TILE_WIREFRAME_TIMEOUT_MS,
     120_000
 )
-const headless = process.env.UNDERWATER_TERRAIN_HEADLESS === '1'
+const headless = process.env.UNDERWATER_TERRAIN_HEADLESS !== '0'
 const outputDirectory = resolve(
     process.env.UNDERWATER_TERRAIN_TILE_WIREFRAME_OUTPUT ??
-        '/tmp/geoscratch-underwater-terrain-tile-wireframe'
+        '/tmp/geoscratch-underwater-terrain-inverse-cover'
 )
-const renderingStorageKey = 'geoscratch.examples.underwaterTerrain.rendering.v1'
 const camera = Object.freeze({
     center: Object.freeze([ 120.980697, 31.684162 ]),
     zoom: 10,
+    pitch: 0,
+    bearing: 0,
+})
+const pitchedCamera = Object.freeze({
+    ...camera,
+    zoom: 10.25,
     pitch: 70,
     bearing: 90,
 })
@@ -40,23 +45,23 @@ const baseUrl = `http://127.0.0.1:${vitePort}`
 const tileBaseUrl = `http://127.0.0.1:${tilePort}`
 
 await mkdir(outputDirectory, { recursive: true })
-let build
 let tileServer
 let vite
 let browser
-let browserVersion
 let proof
+let browserVersion
 let fatalError
 const cleanupFailures = []
 
 try {
+    await runCommand('npm', [ '--workspace', 'geoscratch', 'run', 'build' ], repositoryRoot)
     await runCommand(process.execPath, [
         workerBuildEntry,
         'build',
         '--config',
         './worker-modules.ts',
     ], examplesRoot)
-    build = await runCommand(tileBuildEntry, [], tileServerRoot)
+    await runCommand(tileBuildEntry, [], tileServerRoot)
     tileServer = startProcess(tileServeEntry, [ '--port', String(tilePort) ], tileServerRoot)
     await waitForHttpProcess(tileServer, `${tileBaseUrl}/health`, 'DEM tile server')
     vite = startProcess(process.execPath, [
@@ -74,15 +79,12 @@ try {
         args: [ '--enable-unsafe-webgpu' ],
     })
     browserVersion = await browser.version()
-    proof = Object.freeze({
-        ...await runWireframeProof(browser),
-        zoomMonotonicity: await runZoomMonotonicityProof(browser),
-    })
+    proof = await runProof(browser)
 } catch (error) {
     fatalError = serializeError(error)
 } finally {
     await cleanup('Chrome', async() => {
-        if (browser !== undefined) await closeBrowser(browser)
+        if (browser !== undefined) await browser.close()
     })
     await cleanup('Vite', async() => {
         if (vite !== undefined) await stopProcess(vite, 'Vite')
@@ -101,15 +103,13 @@ const failures = validateProof(proof, processFacts)
 if (fatalError !== undefined) failures.unshift(`browser proof failed: ${fatalError}`)
 failures.push(...cleanupFailures)
 const result = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     status: failures.length === 0 ? 'passed' : 'failed',
     headed: !headless,
     browserVersion,
     baseUrl,
     tileBaseUrl,
     outputDirectory,
-    sourceHash: parseBuildHash(build?.stdout),
-    camera,
     proof,
     processFacts,
     fatalError,
@@ -123,7 +123,7 @@ const result = {
 process.stdout.write(`${JSON.stringify(result, null, 2)}\n`)
 if (failures.length > 0) process.exitCode = 1
 
-async function runWireframeProof(activeBrowser) {
+async function runProof(activeBrowser) {
 
     const context = await activeBrowser.newContext({
         viewport: { width: 1280, height: 800 },
@@ -132,194 +132,102 @@ async function runWireframeProof(activeBrowser) {
     const page = await context.newPage()
     const events = observePage(page)
     try {
-        const parameters = new URLSearchParams({
-            proof: '1',
-            cache: 'none',
-            tileServer: tileBaseUrl,
-        })
-        await page.goto(`${baseUrl}/underwaterTerrain/?${parameters}`, {
-            waitUntil: 'domcontentloaded',
-            timeout,
-        })
+        await page.goto(
+            `${baseUrl}/underwaterTerrain/?proof=1&cache=none&tileServer=${encodeURIComponent(
+                tileBaseUrl
+            )}`,
+            { waitUntil: 'domcontentloaded', timeout }
+        )
         await page.locator('#GPUFrame[data-status="ready"]').waitFor({ timeout })
-        const loaded = await readFacts(page)
-        await page.evaluate(value => window.__UNDERWATER_TERRAIN_PROOF__.moveCamera(value), camera)
-        const baseline = await waitForStableMode(page, 'shaded', loaded.observedFrames)
-        const shadedCapture = await captureState(page, 'shaded')
+        let previous = await readFacts(page)
 
-        const pitchedShadedCameraTracking = await runCameraTrackingProof(page, camera)
-        const pitchedShadedTracked = await waitForStableMode(
+        const baseline = await settle(page, 'shaded', previous.observedFrames, camera)
+        const shadedCapture = await capture(page, 'shaded')
+        previous = baseline
+
+        const pitchedShaded = await settle(
             page,
             'shaded',
-            baseline.observedFrames,
-            pitchedShadedCameraTracking.finalCamera
+            previous.observedFrames,
+            pitchedCamera
         )
-        await page.evaluate(value => window.__UNDERWATER_TERRAIN_PROOF__.moveCamera(value), camera)
-        const restoredShadedCamera = await waitForStableMode(
+        const shadedTracking = await cameraTracking(page, pitchedCamera)
+        previous = await settle(
             page,
             'shaded',
-            pitchedShadedTracked.observedFrames,
+            pitchedShaded.observedFrames,
+            shadedTracking.finalCamera
+        )
+
+        await page.locator(
+            '[data-underwater-terrain-control="tile-wireframe"] .tp-ckbv_w'
+        ).click()
+        const wireframe = await settle(
+            page,
+            'tile-wireframe',
+            previous.observedFrames,
+            pitchedCamera
+        )
+        const wireframeCapture = await capture(page, 'wireframe')
+        const wireframeTracking = await cameraTracking(page, pitchedCamera)
+        previous = await settle(
+            page,
+            'tile-wireframe',
+            wireframe.observedFrames,
+            wireframeTracking.finalCamera
+        )
+
+        const canonical = []
+        for (const approachZoom of [ 9.5, 11 ]) {
+            const approach = Object.freeze({ ...camera, zoom: approachZoom })
+            previous = await settle(
+                page,
+                'tile-wireframe',
+                previous.observedFrames,
+                approach
+            )
+            const target = Object.freeze({ ...camera, zoom: 10.25 })
+            previous = await settle(
+                page,
+                'tile-wireframe',
+                previous.observedFrames,
+                target
+            )
+            canonical.push(Object.freeze({
+                ...previous,
+                capture: await capture(page, `canonical-${approachZoom}`),
+            }))
+        }
+
+        const zoomSamples = []
+        for (const zoom of [ 10, 11, 12, 13, 14 ]) {
+            previous = await settle(
+                page,
+                'tile-wireframe',
+                previous.observedFrames,
+                Object.freeze({ ...camera, zoom })
+            )
+            zoomSamples.push(previous)
+        }
+
+        await page.locator(
+            '[data-underwater-terrain-control="tile-wireframe"] .tp-ckbv_w'
+        ).click()
+        const restored = await settle(
+            page,
+            'shaded',
+            previous.observedFrames,
             camera
         )
-
-        await page.locator('[data-underwater-terrain-control="tile-wireframe"] .tp-ckbv_w').click()
-        const wireframe = await waitForStableMode(
-            page,
-            'tile-wireframe',
-            restoredShadedCamera.observedFrames,
-            camera
-        )
-        const wireframeCapture = await captureState(page, 'tile-wireframe')
-
-        const topDownCamera = Object.freeze({
-            ...camera,
-            zoom: 10.25,
-            pitch: 0,
-            bearing: 0,
-        })
-        const canonicalTopDown = []
-        let previous = wireframe
-        for (const [ name, zoom ] of [
-            [ 'from-coarse', topDownCamera.zoom - 0.6 ],
-            [ 'from-fine', topDownCamera.zoom + 0.6 ],
-        ]) {
-            const approachCamera = Object.freeze({ ...topDownCamera, zoom })
-            await page.evaluate(
-                value => window.__UNDERWATER_TERRAIN_PROOF__.moveCamera(value),
-                approachCamera
-            )
-            const approached = await waitForStableMode(
-                page,
-                'tile-wireframe',
-                previous.observedFrames,
-                approachCamera
-            )
-            await page.evaluate(
-                value => window.__UNDERWATER_TERRAIN_PROOF__.moveCamera(value),
-                topDownCamera
-            )
-            const converged = await waitForStableMode(
-                page,
-                'tile-wireframe',
-                approached.observedFrames,
-                topDownCamera
-            )
-            const capture = await captureState(page, `canonical-top-down-${name}`)
-            canonicalTopDown.push(Object.freeze({ ...converged, capture }))
-            previous = converged
-        }
-
-        const cameraTracking = await runCameraTrackingProof(page, topDownCamera)
-        const tracked = await waitForStableMode(
-            page,
-            'tile-wireframe',
-            previous.observedFrames,
-            cameraTracking.finalCamera
-        )
-        previous = tracked
-
-        const pitchedTrackingCamera = Object.freeze({
-            ...camera,
-            zoom: 10.25,
-            pitch: 70,
-            bearing: 90,
-        })
-        await page.evaluate(
-            value => window.__UNDERWATER_TERRAIN_PROOF__.moveCamera(value),
-            pitchedTrackingCamera
-        )
-        const pitchedTrackingStart = await waitForStableMode(
-            page,
-            'tile-wireframe',
-            previous.observedFrames,
-            pitchedTrackingCamera
-        )
-        const pitchedCameraTracking = await runCameraTrackingProof(page, pitchedTrackingCamera)
-        const pitchedTracked = await waitForStableMode(
-            page,
-            'tile-wireframe',
-            pitchedTrackingStart.observedFrames,
-            pitchedCameraTracking.finalCamera
-        )
-        previous = pitchedTracked
-
-        const motionStability = []
-        const pitchedCamera = Object.freeze({ ...camera, pitch: 80 })
-        for (const zoom of [ 10.02, 10.04, 10.06, 13.66, 13.70, 13.84 ]) {
-            const motionCamera = Object.freeze({ ...pitchedCamera, zoom })
-            await page.evaluate(
-                value => window.__UNDERWATER_TERRAIN_PROOF__.moveCamera(value),
-                motionCamera
-            )
-            const facts = await waitForStableMode(
-                page,
-                'tile-wireframe',
-                previous.observedFrames,
-                motionCamera
-            )
-            motionStability.push(facts)
-            previous = facts
-        }
-
-        const pitchBudgetPriority = []
-        for (const pitch of [ 55, 58, 61 ]) {
-            const pitchCamera = Object.freeze({
-                ...camera,
-                zoom: 10,
-                pitch,
-                bearing: 90,
-            })
-            await page.evaluate(
-                value => window.__UNDERWATER_TERRAIN_PROOF__.moveCamera(value),
-                pitchCamera
-            )
-            const facts = await waitForStableMode(
-                page,
-                'tile-wireframe',
-                previous.observedFrames,
-                pitchCamera
-            )
-            pitchBudgetPriority.push(facts)
-            previous = facts
-        }
-
-        const refinement = []
-        for (const zoom of [ 11, 12, 14 ]) {
-            const refinementCamera = Object.freeze({ ...camera, zoom })
-            await page.evaluate(
-                value => window.__UNDERWATER_TERRAIN_PROOF__.moveCamera(value),
-                refinementCamera
-            )
-            const facts = await waitForStableMode(
-                page,
-                'tile-wireframe',
-                previous.observedFrames,
-                refinementCamera
-            )
-            const capture = await captureState(page, `tile-wireframe-z${zoom}`)
-            refinement.push(Object.freeze({ ...facts, capture }))
-            previous = facts
-        }
-
-        await page.locator('[data-underwater-terrain-control="tile-wireframe"] .tp-ckbv_w').click()
-        const restored = await waitForStableMode(
-            page,
-            'shaded',
-            previous.observedFrames,
-            Object.freeze({ ...camera, zoom: 14 })
-        )
-        const restoredCapture = await captureState(page, 'restored-shaded')
+        const restoredCapture = await capture(page, 'restored')
         return Object.freeze({
-            url: page.url(),
             baseline: Object.freeze({ ...baseline, capture: shadedCapture }),
-            pitchedShadedCameraTracking,
+            pitchedShaded,
             wireframe: Object.freeze({ ...wireframe, capture: wireframeCapture }),
-            canonicalTopDown: Object.freeze(canonicalTopDown),
-            cameraTracking,
-            pitchedCameraTracking,
-            motionStability: Object.freeze(motionStability),
-            pitchBudgetPriority: Object.freeze(pitchBudgetPriority),
-            refinement: Object.freeze(refinement),
+            canonical: Object.freeze(canonical),
+            zoomSamples: Object.freeze(zoomSamples),
+            shadedTracking,
+            wireframeTracking,
             restored: Object.freeze({ ...restored, capture: restoredCapture }),
             events,
         })
@@ -328,22 +236,122 @@ async function runWireframeProof(activeBrowser) {
     }
 }
 
-async function runCameraTrackingProof(page, baseCamera) {
+async function settle(page, presentation, afterObservedFrames, nextCamera) {
 
-    return await page.evaluate(async({ baseCamera, frameCount, longitudeStep }) => {
+    await page.evaluate(
+        value => window.__UNDERWATER_TERRAIN_PROOF__.moveCamera(value),
+        nextCamera
+    )
+    await page.waitForFunction(({ presentation, afterObservedFrames, nextCamera }) => {
+        const canvas = document.querySelector('#GPUFrame')
+        if (!(canvas instanceof HTMLCanvasElement)) return false
+        const data = canvas.dataset
+        const parse = value => {
+            try { return JSON.parse(value ?? 'null') } catch { return null }
+        }
+        const cover = parse(data.coverFeedback)
+        const raster = parse(data.virtualRaster)
+        const observedCamera = parse(data.cameraView)
+        const cameraMatches = observedCamera !== null &&
+            Math.abs(observedCamera.zoom - nextCamera.zoom) < 1e-6 &&
+            Math.abs(observedCamera.pitch - nextCamera.pitch) < 1e-6 &&
+            Math.abs(observedCamera.bearing - nextCamera.bearing) < 1e-6
+        const rasterIdle = raster?.residency?.stagedCount === 0 &&
+            raster?.scheduler?.activeRequestCount === 0 &&
+            raster?.scheduler?.queuedRequestCount === 0 &&
+            raster?.worker?.pendingCandidateCount === 0 &&
+            raster?.worker?.system?.activeTaskCount === 0 &&
+            raster?.worker?.system?.queuedTaskCount === 0
+        return data.status === 'ready' &&
+            data.terrainPresentation === presentation &&
+            Number(data.observedFrames) > afterObservedFrames &&
+            Number(data.frames) === Number(data.observedFrames) &&
+            Number(data.currentPendingNativeObservations) === 0 &&
+            data.coverConverged === 'true' &&
+            cover?.patchCount > 0 &&
+            cover?.descriptorOverflowCount === 0 &&
+            cover?.lookupOverflowCount === 0 &&
+            cover?.demandOverflowCount === 0 &&
+            cover?.maximumAdjacentLevelDelta <= 1 &&
+            data.uncapturedErrors === '0' &&
+            data.deviceLosses === '0' &&
+            cameraMatches && rasterIdle
+    }, { presentation, afterObservedFrames, nextCamera }, { timeout })
+    return readFacts(page)
+}
+
+async function readFacts(page) {
+
+    return page.evaluate(() => {
+        const canvas = document.querySelector('#GPUFrame')
+        if (!(canvas instanceof HTMLCanvasElement)) {
+            throw new Error('Underwater Terrain canvas is missing')
+        }
+        const parse = value => {
+            try { return JSON.parse(value ?? 'null') } catch { return null }
+        }
+        const data = canvas.dataset
+        const virtualRaster = parse(data.virtualRaster)
+        const checkbox = document.querySelector(
+            '[data-underwater-terrain-control="tile-wireframe"] input'
+        )
+        return {
+            terrainPresentation: data.terrainPresentation,
+            tileWireframeChecked: checkbox instanceof HTMLInputElement
+                ? checkbox.checked
+                : undefined,
+            frames: Number(data.frames),
+            observedFrames: Number(data.observedFrames),
+            stableIdentityHash: data.currentStableIdentityHash,
+            identityFacts: parse(data.currentIdentityFacts),
+            persistentFacts: parse(data.persistentFacts),
+            graphContract: parse(data.graphContract),
+            coverFeedback: parse(data.coverFeedback),
+            coverLevelRange: parse(data.coverLevelRange),
+            coverPatchCount: Number(data.coverPatchCount),
+            convergenceState: data.convergenceState,
+            cameraView: parse(data.cameraView),
+            virtualRaster: virtualRaster === null ? null : {
+                residency: {
+                    residentCount: virtualRaster.residency?.residentCount,
+                    stagedCount: virtualRaster.residency?.stagedCount,
+                    fallbackCount: virtualRaster.residency?.fallbackCount,
+                },
+                scheduler: {
+                    activeRequestCount: virtualRaster.scheduler?.activeRequestCount,
+                    queuedRequestCount: virtualRaster.scheduler?.queuedRequestCount,
+                    completedRequestCount: virtualRaster.scheduler?.completedRequestCount,
+                    cancellationCount: virtualRaster.scheduler?.cancellationCount,
+                },
+                worker: {
+                    networkRequestCount: virtualRaster.worker?.networkRequestCount,
+                    decodedPageCount: virtualRaster.worker?.decodedPageCount,
+                    pendingCandidateCount: virtualRaster.worker?.pendingCandidateCount,
+                },
+            },
+            diagnostics: {
+                uncapturedErrors: Number(data.uncapturedErrors),
+                deviceLosses: Number(data.deviceLosses),
+                incidents: Number(data.diagnosticIncidents),
+                bounded: data.diagnosticsBounded === 'true',
+            },
+        }
+    })
+}
+
+async function cameraTracking(page, baseCamera) {
+
+    return page.evaluate(async({ baseCamera, frameCount, longitudeStep }) => {
         const proof = window.__UNDERWATER_TERRAIN_PROOF__
         const canvas = document.querySelector('#GPUFrame')
         if (proof === undefined || !(canvas instanceof HTMLCanvasElement)) {
             throw new Error('Underwater Terrain tracking proof is unavailable')
         }
-        const parseCamera = () => {
-            try { return JSON.parse(canvas.dataset.cameraView ?? 'null') } catch { return null }
-        }
+        proof.resetFrameTiming()
         const samples = []
         const frameIntervals = []
-        proof.resetFrameTiming()
-        let issuedIndex = -1
         let previousTimestamp
+        let issuedIndex = -1
         await new Promise(resolve => {
             const tick = timestamp => {
                 if (previousTimestamp !== undefined) {
@@ -351,29 +359,21 @@ async function runCameraTrackingProof(page, baseCamera) {
                 }
                 previousTimestamp = timestamp
                 if (issuedIndex >= 0) {
-                    const submitted = parseCamera()
-                    const submittedIndex = submitted === null
+                    const cameraView = JSON.parse(canvas.dataset.cameraView ?? 'null')
+                    const submittedIndex = cameraView === null
                         ? -1
                         : Math.round(
-                            (submitted.center[0] - baseCamera.center[0]) / longitudeStep
+                            (cameraView.center[0] - baseCamera.center[0]) / longitudeStep
                         )
                     samples.push({
                         issuedIndex,
                         submittedIndex,
-                        submissionLagFrames: issuedIndex - submittedIndex,
-                        inFlightFrames:
-                            Number(canvas.dataset.frames) -
+                        lag: issuedIndex - submittedIndex,
+                        inFlight: Number(canvas.dataset.frames) -
                             Number(canvas.dataset.observedFrames),
-                        renderPatchCount: Number(canvas.dataset.renderPatchCount),
-                        frontierCount: Number(canvas.dataset.frontierCount),
-                        visibleNodeCount: Number(canvas.dataset.visibleNodeCount),
-                        readbackInFlightCount: Number(canvas.dataset.readbackInFlightCount),
-                        pendingNativeObservations: Number(
-                            canvas.dataset.currentPendingNativeObservations
-                        ),
-                        effectfulSubmittedWork: Number(
-                            canvas.dataset.currentEffectfulSubmittedWork
-                        ),
+                        patchCount: Number(canvas.dataset.coverPatchCount),
+                        candidateCount: Number(canvas.dataset.coverCandidateCount),
+                        pendingNative: Number(canvas.dataset.currentPendingNativeObservations),
                     })
                 }
                 if (issuedIndex + 1 >= frameCount) {
@@ -399,53 +399,27 @@ async function runCameraTrackingProof(page, baseCamera) {
                 baseCamera.center[1],
             ],
         }
-        const submissionTransitions = samples.filter((sample, index) =>
+        const transitions = samples.filter((sample, index) =>
             index === 0 || sample.submittedIndex !== samples[index - 1].submittedIndex
         )
         const percentile = (values, fraction) => {
             const sorted = [ ...values ].sort((left, right) => left - right)
-            return sorted[
-                Math.max(0, Math.ceil(sorted.length * fraction) - 1)
-            ] ?? 0
-        }
-        const summarizeMetric = key => {
-            const values = samples.map(sample => sample[key]).filter(Number.isFinite)
-            return {
-                minimum: Math.min(...values),
-                p50: percentile(values, 0.5),
-                p95: percentile(values, 0.95),
-                maximum: Math.max(...values),
-                mean: values.reduce((sum, value) => sum + value, 0) / values.length,
-            }
+            return sorted[Math.max(0, Math.ceil(sorted.length * fraction) - 1)] ?? 0
         }
         return {
             frameCount,
+            sampleCount: samples.length,
+            finalCamera,
             frameIntervalP50Ms: percentile(frameIntervals, 0.5),
             frameIntervalP95Ms: percentile(frameIntervals, 0.95),
-            frameIntervalOver20MsCount: frameIntervals.filter(value => value > 20).length,
-            submissionLagP95Frames: percentile(
-                samples.map(sample => sample.submissionLagFrames),
-                0.95
-            ),
-            maximumSubmissionLagFrames: Math.max(
-                ...samples.map(sample => sample.submissionLagFrames)
-            ),
-            maximumInFlightFrames: Math.max(
-                ...samples.map(sample => sample.inFlightFrames)
-            ),
-            submissionTransitionCount: submissionTransitions.length,
-            staleSubmissionTransitionCount: submissionTransitions.filter(
+            lagP95: percentile(samples.map(sample => sample.lag), 0.95),
+            maximumLag: Math.max(...samples.map(sample => sample.lag)),
+            maximumInFlight: Math.max(...samples.map(sample => sample.inFlight)),
+            submissionTransitionCount: transitions.length,
+            staleTransitionCount: transitions.filter(
                 sample => sample.submittedIndex !== sample.issuedIndex
             ).length,
-            renderPatchCount: summarizeMetric('renderPatchCount'),
-            frontierCount: summarizeMetric('frontierCount'),
-            visibleNodeCount: summarizeMetric('visibleNodeCount'),
-            readbackInFlightCount: summarizeMetric('readbackInFlightCount'),
-            pendingNativeObservations: summarizeMetric('pendingNativeObservations'),
-            effectfulSubmittedWork: summarizeMetric('effectfulSubmittedWork'),
             frameTiming: proof.frameTiming(),
-            samples,
-            finalCamera,
         }
     }, {
         baseCamera,
@@ -454,175 +428,9 @@ async function runCameraTrackingProof(page, baseCamera) {
     })
 }
 
-async function runZoomMonotonicityProof(activeBrowser) {
+async function capture(page, name) {
 
-    const context = await activeBrowser.newContext({
-        viewport: { width: 1512, height: 860 },
-        deviceScaleFactor: 2,
-    })
-    const page = await context.newPage()
-    const events = observePage(page)
-    try {
-        const parameters = new URLSearchParams({
-            proof: '1',
-            cache: 'none',
-            tileServer: tileBaseUrl,
-        })
-        await page.goto(`${baseUrl}/underwaterTerrain/?${parameters}`, {
-            waitUntil: 'domcontentloaded',
-            timeout,
-        })
-        await page.locator('#GPUFrame[data-status="ready"]').waitFor({ timeout })
-        let previous = await readFacts(page)
-        const samples = []
-        for (const zoom of [ 12, 12.25, 12.5, 12.75, 13, 13.25, 13.5, 13.75, 14 ]) {
-            const view = Object.freeze({
-                ...camera,
-                zoom,
-                pitch: 0,
-                bearing: 0,
-            })
-            await page.evaluate(
-                value => window.__UNDERWATER_TERRAIN_PROOF__.moveCamera(value),
-                view
-            )
-            const facts = await waitForStableMode(
-                page,
-                'shaded',
-                previous.observedFrames,
-                view
-            )
-            samples.push(facts)
-            previous = facts
-        }
-        return Object.freeze({
-            viewport: Object.freeze({ width: 1512, height: 860, deviceScaleFactor: 2 }),
-            samples: Object.freeze(samples),
-            events,
-        })
-    } finally {
-        await context.close()
-    }
-}
-
-async function waitForStableMode(
-    page,
-    presentation,
-    afterObservedFrames,
-    expectedCamera = camera
-) {
-
-    await page.waitForFunction(({ expectedPresentation, afterFrames, expectedCamera }) => {
-        const canvas = document.querySelector('#GPUFrame')
-        if (!(canvas instanceof HTMLCanvasElement)) return false
-        const facts = canvas.dataset
-        const parse = value => {
-            try { return JSON.parse(value ?? 'null') } catch { return null }
-        }
-        const frontier = parse(facts.frontier)
-        const renderPatches = parse(facts.renderPatchFeedback)
-        const virtualRaster = parse(facts.virtualRaster)
-        const cameraView = parse(facts.cameraView)
-        const cameraMatches = cameraView !== null &&
-            Math.abs(cameraView.zoom - expectedCamera.zoom) < 1e-6 &&
-            Math.abs(cameraView.pitch - expectedCamera.pitch) < 1e-6 &&
-            Math.abs(cameraView.bearing - expectedCamera.bearing) < 1e-6
-        const virtualRasterIdle = virtualRaster?.residency?.stagedCount === 0 &&
-            virtualRaster?.residency?.stagingBytes === 0 &&
-            virtualRaster?.scheduler?.activeRequestCount === 0 &&
-            virtualRaster?.scheduler?.queuedRequestCount === 0 &&
-            virtualRaster?.worker?.pendingCandidateCount === 0 &&
-            virtualRaster?.worker?.system?.activeTaskCount === 0 &&
-            virtualRaster?.worker?.system?.queuedTaskCount === 0 &&
-            virtualRaster?.gpu?.stagedSnapshotEpoch === undefined
-        return facts.status === 'ready' &&
-            facts.terrainPresentation === expectedPresentation &&
-            Number(facts.observedFrames) > afterFrames &&
-            Number(facts.frames) === Number(facts.observedFrames) &&
-            Number(facts.currentPendingNativeObservations) === 0 &&
-            facts.frontierConverged === 'true' &&
-            frontier?.convergenceState === 'converged' &&
-            frontier?.demandCount === 0 &&
-            frontier?.staleGenerationCount === 0 &&
-            renderPatches?.selectedPatchCount > 0 &&
-            renderPatches?.descriptorOverflowCount === 0 &&
-            renderPatches?.lookupOverflowCount === 0 &&
-            facts.uncapturedErrors === '0' &&
-            facts.deviceLosses === '0' &&
-            cameraMatches && virtualRasterIdle
-    }, {
-        expectedPresentation: presentation,
-        afterFrames: afterObservedFrames,
-        expectedCamera,
-    }, { timeout })
-    return await readFacts(page)
-}
-
-async function readFacts(page) {
-
-    return await page.evaluate(key => {
-        const canvas = document.querySelector('#GPUFrame')
-        if (!(canvas instanceof HTMLCanvasElement)) throw new Error('DEM canvas is missing')
-        const parse = value => {
-            try { return JSON.parse(value ?? 'null') } catch { return null }
-        }
-        const checkbox = document.querySelector('[data-underwater-terrain-control="tile-wireframe"] input')
-        const graphContract = parse(canvas.dataset.graphContract)
-        const frontier = parse(canvas.dataset.frontier)
-        const renderPatchFeedback = parse(canvas.dataset.renderPatchFeedback)
-        return {
-            terrainPresentation: canvas.dataset.terrainPresentation,
-            frames: Number(canvas.dataset.frames),
-            observedFrames: Number(canvas.dataset.observedFrames),
-            stableIdentityHash: canvas.dataset.currentStableIdentityHash,
-            identityFacts: parse(canvas.dataset.currentIdentityFacts),
-            persistentFacts: parse(canvas.dataset.persistentFacts),
-            graphContract: graphContract === null ? null : {
-                dataMaximumMatrixLevel: graphContract.dataMaximumMatrixLevel,
-                renderMaximumMatrixLevel: graphContract.renderMaximumMatrixLevel,
-                terrainVertexCount: graphContract.terrainVertexCount,
-                countPath: graphContract.countPath,
-                selectionPath: graphContract.selectionPath,
-                renderPatches: graphContract.renderPatches,
-                commandIds: graphContract.commandIds,
-            },
-            frontier: frontier === null ? null : {
-                visibleInstanceCount: frontier.visibleInstanceCount,
-                levels: frontier.levels,
-                convergenceState: frontier.convergenceState,
-                demandCount: frontier.demandCount,
-                staleGenerationCount: frontier.staleGenerationCount,
-            },
-            cameraView: parse(canvas.dataset.cameraView),
-            dataLevelRange: parse(canvas.dataset.levelRange),
-            renderPatchCount: Number(canvas.dataset.renderPatchCount),
-            renderPatchLevelRange: parse(canvas.dataset.renderPatchLevelRange),
-            renderPatchCellSpanRange: parse(canvas.dataset.renderPatchCellSpanRange),
-            renderPatchDescriptorOverflowCount: Number(
-                canvas.dataset.renderPatchDescriptorOverflowCount
-            ),
-            renderPatchLookupOverflowCount: Number(
-                canvas.dataset.renderPatchLookupOverflowCount
-            ),
-            renderPatchFrameEpoch: Number(canvas.dataset.renderPatchFrameEpoch),
-            renderPatchFeedback,
-            tileWireframeChecked: checkbox instanceof HTMLInputElement
-                ? checkbox.checked
-                : undefined,
-            renderingStorage: parse(window.localStorage.getItem(key)),
-            diagnostics: {
-                uncapturedErrors: Number(canvas.dataset.uncapturedErrors),
-                deviceLosses: Number(canvas.dataset.deviceLosses),
-                incidents: Number(canvas.dataset.diagnosticIncidents),
-                bounded: canvas.dataset.diagnosticsBounded === 'true',
-            },
-        }
-    }, renderingStorageKey)
-}
-
-async function captureState(page, name) {
-
-    await page.waitForTimeout(250)
+    await page.waitForTimeout(200)
     const pagePath = resolve(outputDirectory, `${name}.png`)
     const canvasPath = resolve(outputDirectory, `${name}-canvas.png`)
     const pagePng = await page.screenshot({ path: pagePath })
@@ -630,108 +438,54 @@ async function captureState(page, name) {
         path: canvasPath,
         style: '#UnderwaterTerrainControlPanel { visibility: hidden !important; }',
     })
+    const pixels = await analyzePng(page, canvasPng)
     return Object.freeze({
-        page: Object.freeze({
-            path: pagePath,
-            sha256: sha256(pagePng),
-            byteLength: pagePng.byteLength,
-        }),
-        canvas: Object.freeze({
+        page: { path: pagePath, sha256: sha256(pagePng), byteLength: pagePng.byteLength },
+        canvas: {
             path: canvasPath,
             sha256: sha256(canvasPng),
             byteLength: canvasPng.byteLength,
-        }),
-        pixels: await inspectWireframePixels(page, canvasPng),
+        },
+        pixels,
     })
 }
 
-async function inspectWireframePixels(page, png) {
+async function analyzePng(page, png) {
 
-    return await page.evaluate(async(encoded) => {
+    return page.evaluate(async base64 => {
         const image = new Image()
-        image.src = `data:image/png;base64,${encoded}`
+        image.src = `data:image/png;base64,${base64}`
         await image.decode()
         const canvas = document.createElement('canvas')
-        canvas.width = image.naturalWidth
-        canvas.height = image.naturalHeight
+        canvas.width = image.width
+        canvas.height = image.height
         const context = canvas.getContext('2d', { willReadFrequently: true })
-        if (context === null) throw new Error('Pixel inspection context is unavailable')
         context.drawImage(image, 0, 0)
-        const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data
-        const clusters = new Map()
-        const coloredMask = new Uint8Array(canvas.width * canvas.height)
-        const quadrants = [
-            { name: 'north-west', coloredPixels: 0, totalPixels: 0 },
-            { name: 'north-east', coloredPixels: 0, totalPixels: 0 },
-            { name: 'south-west', coloredPixels: 0, totalPixels: 0 },
-            { name: 'south-east', coloredPixels: 0, totalPixels: 0 },
-        ]
-        let coloredPixels = 0
-        let nonDarkPixels = 0
-        let transparentPixels = 0
-        for (let index = 0; index < pixels.length; index += 4) {
-            const pixelIndex = index / 4
-            const x = pixelIndex % canvas.width
-            const y = Math.floor(pixelIndex / canvas.width)
-            const quadrant = quadrants[
-                (y >= canvas.height / 2 ? 2 : 0) + (x >= canvas.width / 2 ? 1 : 0)
-            ]
-            quadrant.totalPixels++
-            const red = pixels[index]
-            const green = pixels[index + 1]
-            const blue = pixels[index + 2]
-            const alpha = pixels[index + 3]
+        const bytes = context.getImageData(0, 0, image.width, image.height).data
+        let nonDark = 0
+        let colored = 0
+        const clusters = new Set()
+        for (let index = 0; index < bytes.length; index += 4) {
+            const red = bytes[index]
+            const green = bytes[index + 1]
+            const blue = bytes[index + 2]
             const maximum = Math.max(red, green, blue)
             const minimum = Math.min(red, green, blue)
-            if (maximum > 20) nonDarkPixels++
-            if (alpha === 0) transparentPixels++
-            if (maximum < 80 || maximum - minimum < 20) continue
-            coloredPixels++
-            quadrant.coloredPixels++
-            coloredMask[pixelIndex] = 1
-            const scale = 5 / maximum
-            const key = [ red, green, blue ]
-                .map(channel => Math.round(channel * scale))
-                .join(':')
-            clusters.set(key, (clusters.get(key) ?? 0) + 1)
-        }
-        const minimumClusterPixels = Math.max(12, Math.floor(coloredPixels * 0.0005))
-        const retainedClusters = [ ...clusters.entries() ]
-            .filter(([, count ]) => count >= minimumClusterPixels)
-            .sort((left, right) => right[1] - left[1])
-        const totalPixels = canvas.width * canvas.height
-        let colorTransitions = 0
-        let comparableEdges = 0
-        for (let y = 0; y < canvas.height; y++) {
-            for (let x = 0; x < canvas.width; x++) {
-                const index = y * canvas.width + x
-                if (x > 0) {
-                    comparableEdges++
-                    if (coloredMask[index] !== coloredMask[index - 1]) colorTransitions++
-                }
-                if (y > 0) {
-                    comparableEdges++
-                    if (coloredMask[index] !== coloredMask[index - canvas.width]) {
-                        colorTransitions++
-                    }
-                }
+            if (maximum > 24) nonDark++
+            if (maximum > 70 && maximum - minimum > 24) {
+                colored++
+                clusters.add(
+                    `${Math.floor(red / 32)}/${Math.floor(green / 32)}/${Math.floor(blue / 32)}`
+                )
             }
         }
         return {
-            width: canvas.width,
-            height: canvas.height,
-            coloredPixels,
-            coloredRatio: coloredPixels / totalPixels,
-            nonDarkPixels,
-            transparentPixels,
-            colorTransitions,
-            colorTransitionRatio: colorTransitions / comparableEdges,
-            colorClusterCount: retainedClusters.length,
-            leadingColorClusters: retainedClusters.slice(0, 12),
-            quadrants: quadrants.map(quadrant => ({
-                ...quadrant,
-                coloredRatio: quadrant.coloredPixels / quadrant.totalPixels,
-            })),
+            width: image.width,
+            height: image.height,
+            nonDarkPixels: nonDark,
+            coloredPixels: colored,
+            coloredRatio: colored / (image.width * image.height),
+            colorClusterCount: clusters.size,
         }
     }, png.toString('base64'))
 }
@@ -739,435 +493,133 @@ async function inspectWireframePixels(page, png) {
 function validateProof(value, processState) {
 
     const failures = []
-    if (value === undefined) return [ 'DEM tile wireframe proof was not produced' ]
+    if (value === undefined) return [ 'Underwater Terrain inverse-cover proof was not produced' ]
     const {
         baseline,
-        pitchedShadedCameraTracking,
+        pitchedShaded,
         wireframe,
-        canonicalTopDown,
-        cameraTracking,
-        pitchedCameraTracking,
-        motionStability,
-        pitchBudgetPriority,
-        refinement,
+        canonical = [],
+        zoomSamples = [],
+        shadedTracking,
+        wireframeTracking,
         restored,
-        zoomMonotonicity,
+        events,
     } = value
     expect(failures,
         baseline?.terrainPresentation === 'shaded' &&
-        baseline.tileWireframeChecked === false &&
         wireframe?.terrainPresentation === 'tile-wireframe' &&
-        wireframe.tileWireframeChecked === true &&
         restored?.terrainPresentation === 'shaded' &&
+        wireframe.tileWireframeChecked === true &&
         restored.tileWireframeChecked === false,
-    'checkbox and submitted terrain presentation did not complete both live switches')
-
+    'presentation switching did not settle')
     expect(failures,
-        baseline?.stableIdentityHash !== undefined &&
-        baseline.stableIdentityHash === wireframe?.stableIdentityHash &&
-        wireframe.stableIdentityHash === restored?.stableIdentityHash &&
-        JSON.stringify(baseline.identityFacts) === JSON.stringify(wireframe.identityFacts) &&
-        JSON.stringify(wireframe.identityFacts) === JSON.stringify(restored.identityFacts) &&
-        baseline.identityFacts?.programs === 11 &&
-        baseline.identityFacts?.pipelines === 11 &&
-        baseline.identityFacts?.commands === 36,
-    'live presentation switching rebuilt or replaced the persistent Underwater Terrain graph')
-
+        baseline?.stableIdentityHash === wireframe?.stableIdentityHash &&
+        wireframe?.stableIdentityHash === restored?.stableIdentityHash,
+    'presentation switching changed persistent graph identity')
     expect(failures,
-        baseline?.persistentFacts?.pipelines === wireframe?.persistentFacts?.pipelines &&
-        wireframe.persistentFacts?.pipelines === restored?.persistentFacts?.pipelines &&
-        baseline.persistentFacts?.resources === wireframe.persistentFacts?.resources &&
-        wireframe.persistentFacts?.resources === restored.persistentFacts?.resources,
-    'live presentation switching changed runtime persistent resource counts')
+        baseline?.graphContract?.selectionPath ===
+            'gpu-camera-inverse-webmercatorquad-cover' &&
+        baseline.graphContract.sourceMaximumMatrixLevel === 10 &&
+        baseline.graphContract.coverMaximumMatrixLevel === 14 &&
+        baseline.graphContract.commandIds?.cover?.length === 2 &&
+        baseline.graphContract.commandIds.cover.every(ids => ids.length === 3),
+    'graph contract does not expose the inverse-cover authority')
 
-    const canonicalCuts = canonicalTopDown ?? []
-    const canonicalSignatures = canonicalCuts.map(sample => ({
-        selectedPatchCount: sample?.renderPatchFeedback?.selectedPatchCount,
-        minimumMatrixLevel: sample?.renderPatchFeedback?.minimumMatrixLevel,
-        maximumMatrixLevel: sample?.renderPatchFeedback?.maximumMatrixLevel,
-        selectedBiasStep: sample?.renderPatchFeedback?.selectedBiasStep,
-        unbalancedPatchCount: sample?.renderPatchFeedback?.unbalancedPatchCount,
-        balanceSplitCount: sample?.renderPatchFeedback?.balanceSplitCount,
-        sourceLevels: sample?.frontier?.levels,
-        sourceVisibleCount: sample?.frontier?.visibleInstanceCount,
-        canvasHash: sample?.capture?.canvas?.sha256,
-    }))
-    expect(failures,
-        canonicalSignatures.length === 2 &&
-        JSON.stringify(canonicalSignatures[0]) === JSON.stringify(canonicalSignatures[1]),
-    `the same settled top-down camera retained a history-dependent render cut: ${JSON.stringify(
-        canonicalSignatures
-    )}`)
-
-    const canonicalDensitySpreads = canonicalCuts.map(sample => {
-        const ratios = sample?.capture?.pixels?.quadrants?.map(
-            quadrant => quadrant.coloredRatio
-        ) ?? []
-        return ratios.length === 4
-            ? Math.max(...ratios) / Math.min(...ratios)
-            : Number.POSITIVE_INFINITY
-    })
-    expect(failures,
-        canonicalDensitySpreads.length === 2 &&
-        canonicalDensitySpreads.every(spread => spread <= 1.25),
-    `settled top-down render-patch density was directionally biased: ${JSON.stringify(
-        canonicalCuts.map((sample, index) => ({
-            spread: canonicalDensitySpreads[index],
-            quadrants: sample?.capture?.pixels?.quadrants,
-            feedback: sample?.renderPatchFeedback,
-        }))
-    )}`)
-
-    expect(failures,
-        cameraTracking?.frameCount === 90 &&
-        cameraTracking.samples?.length === 90 &&
-        cameraTracking.submissionTransitionCount >= 70 &&
-        cameraTracking.staleSubmissionTransitionCount === 0,
-    `camera submission replayed an intermediate invalidated state: ${JSON.stringify({
-        maximumSubmissionLagFrames: cameraTracking?.maximumSubmissionLagFrames,
-        frameIntervalP50Ms: cameraTracking?.frameIntervalP50Ms,
-        frameIntervalP95Ms: cameraTracking?.frameIntervalP95Ms,
-        frameIntervalOver20MsCount: cameraTracking?.frameIntervalOver20MsCount,
-        submissionTransitionCount: cameraTracking?.submissionTransitionCount,
-        staleSubmissionTransitionCount: cameraTracking?.staleSubmissionTransitionCount,
-        samples: cameraTracking?.samples,
-    })}`)
-
-    expect(failures,
-        Number.isFinite(cameraTracking?.frameIntervalP50Ms) &&
-        cameraTracking.frameIntervalP50Ms > 0 &&
-        Number.isFinite(cameraTracking?.frameIntervalP95Ms) &&
-        cameraTracking.frameIntervalP95Ms <= 20 &&
-        cameraTracking.submissionLagP95Frames <= 1 &&
-        cameraTracking.maximumSubmissionLagFrames <= 3,
-    `continuous camera tracking exceeded its display-paced latency budget: ${JSON.stringify({
-        frameIntervalP50Ms: cameraTracking?.frameIntervalP50Ms,
-        frameIntervalP95Ms: cameraTracking?.frameIntervalP95Ms,
-        frameIntervalOver20MsCount: cameraTracking?.frameIntervalOver20MsCount,
-        submissionLagP95Frames: cameraTracking?.submissionLagP95Frames,
-        maximumSubmissionLagFrames: cameraTracking?.maximumSubmissionLagFrames,
-    })}`)
-
-    expect(failures,
-        cameraTracking?.maximumInFlightFrames > 0 &&
-        cameraTracking.maximumInFlightFrames <= 2,
-    `continuous camera tracking exceeded double-flight native observation: ${JSON.stringify({
-        maximumInFlightFrames: cameraTracking?.maximumInFlightFrames,
-    })}`)
-
-    expect(failures,
-        pitchedCameraTracking?.frameCount === 90 &&
-        pitchedCameraTracking.samples?.length === 90 &&
-        pitchedCameraTracking.submissionTransitionCount >= 65 &&
-        pitchedCameraTracking.staleSubmissionTransitionCount === 0 &&
-        pitchedCameraTracking.frameIntervalP95Ms <= 20 &&
-        pitchedCameraTracking.submissionLagP95Frames <= 1 &&
-        pitchedCameraTracking.maximumSubmissionLagFrames <= 2 &&
-        pitchedCameraTracking.frameTiming?.construction?.p95Ms <= 4 &&
-        pitchedCameraTracking.frameTiming?.observation?.p95Ms <= 25 &&
-        pitchedCameraTracking.maximumInFlightFrames > 0 &&
-        pitchedCameraTracking.maximumInFlightFrames <= 2,
-    `pitched camera tracking benchmark was incomplete or stale: ${JSON.stringify({
-        frameIntervalP50Ms: pitchedCameraTracking?.frameIntervalP50Ms,
-        frameIntervalP95Ms: pitchedCameraTracking?.frameIntervalP95Ms,
-        submissionLagP95Frames: pitchedCameraTracking?.submissionLagP95Frames,
-        maximumSubmissionLagFrames: pitchedCameraTracking?.maximumSubmissionLagFrames,
-        maximumInFlightFrames: pitchedCameraTracking?.maximumInFlightFrames,
-        submissionTransitionCount: pitchedCameraTracking?.submissionTransitionCount,
-        staleSubmissionTransitionCount: pitchedCameraTracking?.staleSubmissionTransitionCount,
-        frameTiming: pitchedCameraTracking?.frameTiming,
-    })}`)
-
-    expect(failures,
-        pitchedShadedCameraTracking?.frameCount === 90 &&
-        pitchedShadedCameraTracking.samples?.length === 90 &&
-        pitchedShadedCameraTracking.submissionTransitionCount >= 65 &&
-        pitchedShadedCameraTracking.staleSubmissionTransitionCount === 0 &&
-        pitchedShadedCameraTracking.frameIntervalP95Ms <= 20 &&
-        pitchedShadedCameraTracking.submissionLagP95Frames <= 1 &&
-        pitchedShadedCameraTracking.maximumSubmissionLagFrames <= 2 &&
-        pitchedShadedCameraTracking.frameTiming?.construction?.p95Ms <= 4 &&
-        pitchedShadedCameraTracking.frameTiming?.observation?.p95Ms <= 25 &&
-        pitchedShadedCameraTracking.maximumInFlightFrames > 0 &&
-        pitchedShadedCameraTracking.maximumInFlightFrames <= 2,
-    `pitched shaded camera benchmark was incomplete or stale: ${JSON.stringify({
-        frameIntervalP50Ms: pitchedShadedCameraTracking?.frameIntervalP50Ms,
-        frameIntervalP95Ms: pitchedShadedCameraTracking?.frameIntervalP95Ms,
-        submissionLagP95Frames: pitchedShadedCameraTracking?.submissionLagP95Frames,
-        maximumSubmissionLagFrames: pitchedShadedCameraTracking?.maximumSubmissionLagFrames,
-        submissionTransitionCount: pitchedShadedCameraTracking?.submissionTransitionCount,
-        staleSubmissionTransitionCount:
-            pitchedShadedCameraTracking?.staleSubmissionTransitionCount,
-        frameTiming: pitchedShadedCameraTracking?.frameTiming,
-    })}`)
-
-    const zoomSamples = zoomMonotonicity?.samples ?? []
-    const zoomRegressions = zoomSamples.slice(1).flatMap((sample, index) => {
-        const previous = zoomSamples[index]
-        const previousRange = previous?.renderPatchLevelRange
-        const currentRange = sample?.renderPatchLevelRange
-        if (!Array.isArray(previousRange) || !Array.isArray(currentRange) ||
-            currentRange[0] < previousRange[0] || currentRange[1] < previousRange[1]) {
-            return [ {
-                from: previous?.cameraView?.zoom,
-                to: sample?.cameraView?.zoom,
-                previousRange,
-                currentRange,
-                previousBias: previous?.renderPatchFeedback?.selectedBiasStep,
-                currentBias: sample?.renderPatchFeedback?.selectedBiasStep,
-                previousSourceLevels: previous?.frontier?.levels,
-                currentSourceLevels: sample?.frontier?.levels,
-            } ]
-        }
-        return []
-    })
-    expect(failures,
-        zoomSamples.length === 9 && zoomRegressions.length === 0,
-    `settled top-down zoom-in reintroduced coarser render patches: ${JSON.stringify(
-        zoomRegressions
-    )}`)
-
-    expect(failures,
-        baseline?.graphContract?.commandIds?.drawTerrain?.shaded?.length === 2 &&
-        baseline.graphContract.commandIds.drawTerrain['tile-wireframe']?.length === 2 &&
-        baseline.graphContract.commandIds.renderPatches?.length === 2 &&
-        baseline.graphContract.commandIds.renderPatches.every(ids => ids.length === 11) &&
-        baseline.graphContract.dataMaximumMatrixLevel === 10 &&
-        baseline.graphContract.renderMaximumMatrixLevel === 14 &&
-        baseline.graphContract.renderPatches?.renderRootCount >= 1,
-    'graph contract does not expose both persistent parity command sets')
-
-    const refinementDataLevels = [ wireframe, ...(refinement ?? []) ].map(sample => (
-        sample?.dataLevelRange?.[1]
-    ))
-    const refinementHashes = [ wireframe, ...(refinement ?? []) ].map(sample => (
-        sample?.capture?.canvas?.sha256
-    ))
-    const requestedDataLevels = value.events?.tileRequestLevels ?? []
-    expect(failures,
-        baseline.graphContract?.renderPatches?.selectionPath ===
-            'gpu-balanced-error-cohort-filled-render-root-local-cell-projection' &&
-        baseline.graphContract.renderPatches.maximumCellSpanPixels === 8 &&
-        baseline.graphContract.renderPatches.nominalPatchSpanPixels === 512 &&
-        !Object.hasOwn(
-            baseline.graphContract.renderPatches,
-            'refinementHysteresisLevels'
-        ) &&
-        baseline.graphContract.renderPatches.balancePassCount === 14 &&
-        baseline.graphContract.renderPatches.balanceWorkgroupSize === 256 &&
-        baseline.graphContract.renderPatches.budgetFillWorkgroupSize === 1 &&
-        baseline.graphContract.renderPatches.renderPatchLookupCapacity >
-            baseline.graphContract.renderPatches.maximumRenderPatches &&
-        refinementDataLevels.every(level => Number.isInteger(level) && level <= 10) &&
-        new Set(refinementHashes).size === 4 &&
-        requestedDataLevels.length > 0 &&
-        requestedDataLevels.every(level => Number.isInteger(level) && level <= 10),
-    `render-patch LoD did not refine independently: ${JSON.stringify({
-        refinementDataLevels,
-        refinementHashes,
-        requestedDataLevels,
-    })}`)
-
-    const patchSamples = [
+    const samples = [
         baseline,
+        pitchedShaded,
         wireframe,
-        ...canonicalCuts,
-        ...(motionStability ?? []),
-        ...(pitchBudgetPriority ?? []),
+        ...canonical,
         ...zoomSamples,
-        ...(refinement ?? []),
         restored,
     ]
-    expect(failures,
-        patchSamples.every(sample => (
-            Number.isSafeInteger(sample?.renderPatchCount) &&
-            sample.renderPatchCount > 0 &&
-            sample.renderPatchCount <=
-                baseline.graphContract.renderPatches.maximumRenderPatches &&
-            sample.renderPatchFeedback?.selectedPatchCount === sample.renderPatchCount &&
-            sample.renderPatchFeedback?.requestedPatchCount >=
-                sample.renderPatchFeedback?.unbalancedPatchCount &&
-            sample.renderPatchFeedback?.basePatchCount <=
-                sample.renderPatchFeedback?.unbalancedPatchCount &&
-            sample.renderPatchFeedback?.budgetFillSplitCount >= 0 &&
-            sample.renderPatchFeedback?.budgetLimitedRefinementCount >= 0 &&
-            sample.renderPatchFeedback?.budgetLimitedRefinementCount <=
-                sample.renderPatchFeedback?.unbalancedPatchCount &&
-            (sample.renderPatchFeedback?.budgetFillSplitCount > 0 ||
-                sample.renderPatchFeedback?.basePatchCount ===
-                    sample.renderPatchFeedback?.unbalancedPatchCount) &&
-            sample.renderPatchCount ===
-                sample.renderPatchFeedback?.unbalancedPatchCount +
-                    sample.renderPatchFeedback?.balanceSplitCount * 3 &&
-            sample.renderPatchFeedback?.balanceOverheadPatchCount ===
-                sample.renderPatchFeedback?.balanceSplitCount * 3 &&
-            sample.renderPatchFeedback?.maximumAdjacentLevelDelta <= 1 &&
-            sample.renderPatchFeedback?.balancePassCount === 14 &&
-            sample.renderPatchFeedback?.baselinePatchBudget >= 1 &&
-            sample.renderPatchFeedback?.framePatchBudget >=
-                sample.renderPatchFeedback?.baselinePatchBudget &&
-            (sample.renderPatchFeedback?.budgetLimitedByMinimumTrial === true ||
-                sample.renderPatchFeedback?.unbalancedPatchCount <=
-                    sample.renderPatchFeedback?.framePatchBudget) &&
-            sample.renderPatchDescriptorOverflowCount === 0 &&
-            sample.renderPatchLookupOverflowCount === 0 &&
-            sample.renderPatchFeedback?.frameEpoch === sample.renderPatchFrameEpoch &&
-            Array.isArray(sample.renderPatchLevelRange) &&
-            sample.renderPatchLevelRange[0] >= 4 &&
-            sample.renderPatchLevelRange[1] <= 14 &&
-            Array.isArray(sample.renderPatchCellSpanRange) &&
-            sample.renderPatchCellSpanRange[0] >= 0 &&
-            sample.renderPatchCellSpanRange[1] <= 65_535
-        )),
-    `render-patch feedback was missing, stale, or overflowed: ${JSON.stringify(
-        patchSamples.map(sample => ({
-            count: sample?.renderPatchCount,
-            levels: sample?.renderPatchLevelRange,
-            cellSpans: sample?.renderPatchCellSpanRange,
-            descriptorOverflow: sample?.renderPatchDescriptorOverflowCount,
-            lookupOverflow: sample?.renderPatchLookupOverflowCount,
-            frameEpoch: sample?.renderPatchFrameEpoch,
-        }))
-    )}`)
-
-    expect(failures,
-        patchSamples.some(sample => (
-            sample?.renderPatchFeedback?.balanceSplitCount > 0 &&
-            sample.renderPatchFeedback.balanceOverheadPatchCount > 0 &&
-            sample.renderPatchFeedback.maximumAdjacentLevelDelta === 1
-        )),
-    'no mixed-LoD camera exercised final render-patch balancing')
-
-    const transientSamples = motionStability?.slice(0, 3) ?? []
-    const transientFrontiers = transientSamples.map(sample => ({
-        visibleInstanceCount: sample?.frontier?.visibleInstanceCount,
-        levels: sample?.frontier?.levels,
-        demandCount: sample?.frontier?.demandCount,
-        convergenceState: sample?.frontier?.convergenceState,
-    }))
-    const transientCounts = transientSamples.map(sample => sample?.renderPatchCount)
-    const transientMaximumLevels = transientSamples.map(
-        sample => sample?.renderPatchLevelRange?.[1]
-    )
-    expect(failures,
-        transientSamples.length === 3 &&
-        new Set(transientFrontiers.map(JSON.stringify)).size === 1 &&
-        transientFrontiers.every(frontier => (
-            frontier.demandCount === 0 && frontier.convergenceState === 'converged'
-        )) &&
-        transientCounts[1] <= Math.max(transientCounts[0], transientCounts[2]) &&
-        transientMaximumLevels[1] <= Math.max(
-            transientMaximumLevels[0],
-            transientMaximumLevels[2]
-        ),
-    `stable source frontier produced a transient render-patch refinement: ${JSON.stringify({
-        frontiers: transientFrontiers,
-        counts: transientCounts,
-        maximumLevels: transientMaximumLevels,
-    })}`)
-
-    const nearPlaneSamples = motionStability?.slice(3) ?? []
-    expect(failures,
-        nearPlaneSamples.length === 3 &&
-        nearPlaneSamples.every(sample => sample?.renderPatchCellSpanRange?.[1] < 65_535),
-    `near-plane motion produced a projected-cell-span sentinel: ${JSON.stringify(
-        nearPlaneSamples.map(sample => ({
-            zoom: sample?.cameraView?.zoom,
-            levels: sample?.renderPatchLevelRange,
-            cellSpans: sample?.renderPatchCellSpanRange,
-        }))
-    )}`)
-
-    const pitchPrioritySamples = pitchBudgetPriority ?? []
-    const pitchPriorityMaximumLevels = pitchPrioritySamples.map(
-        sample => sample?.renderPatchLevelRange?.[1]
-    )
-    expect(failures,
-        pitchPrioritySamples.length === 3 &&
-        pitchPriorityMaximumLevels.slice(1).every((level, index) => (
-            level >= pitchPriorityMaximumLevels[index]
-        )) &&
-        pitchPrioritySamples.every(sample => (
-            sample?.renderPatchFeedback?.basePatchCount <=
-                sample?.renderPatchFeedback?.unbalancedPatchCount &&
-            sample?.renderPatchFeedback?.budgetFillSplitCount >= 0 &&
-            sample?.renderPatchFeedback?.budgetLimitedRefinementCount >= 0
-        )),
-    `pitch growth discarded high-priority detail while leaving render budget unused: ${JSON.stringify(
-        pitchPrioritySamples.map(sample => ({
-            pitch: sample?.cameraView?.pitch,
-            levels: sample?.renderPatchLevelRange,
-            frameBudget: sample?.renderPatchFeedback?.framePatchBudget,
-            unbalancedPatchCount: sample?.renderPatchFeedback?.unbalancedPatchCount,
-            budgetFillSplitCount: sample?.renderPatchFeedback?.budgetFillSplitCount,
-            budgetLimitedRefinementCount:
-                sample?.renderPatchFeedback?.budgetLimitedRefinementCount,
-        }))
-    )}`)
-
-    expect(failures,
-        patchSamples.some(sample => (
-            sample?.renderPatchFeedback?.budgetFillSplitCount > 0 &&
-            sample.renderPatchFeedback.basePatchCount <
-                sample.renderPatchFeedback.unbalancedPatchCount
-        )),
-    'no camera exercised complete error-cohort filling between the uniform base cut and balance')
-
-    expect(failures,
-        wireframe?.renderPatchFeedback?.unbalancedPatchCount <=
-            wireframe?.renderPatchFeedback?.framePatchBudget &&
-        wireframe.renderPatchCount <= wireframe.renderPatchFeedback.framePatchBudget +
-            wireframe.renderPatchFeedback.balanceOverheadPatchCount &&
-        wireframe.renderPatchLevelRange?.[0] >
-            baseline.graphContract.renderPatches.minimumRootMatrixLevel &&
-        wireframe.renderPatchLevelRange?.[1] <= 11 &&
-        wireframe.renderPatchCellSpanRange?.[1] <= 8 * 2 **
-            wireframe.renderPatchFeedback.selectedBiasLevels,
-    `zoom-10 pitched geometry remained over-dense: ${JSON.stringify({
-        count: wireframe?.renderPatchCount,
-        levels: wireframe?.renderPatchLevelRange,
-        cellSpans: wireframe?.renderPatchCellSpanRange,
-    })}`)
-
-    const pixels = wireframe?.capture?.pixels
-    expect(failures,
-        pixels?.coloredPixels > 2_000 &&
-        pixels.colorClusterCount >= 4 &&
-        pixels.coloredRatio > 0.002 &&
-        pixels.coloredRatio < 0.75 &&
-        pixels.colorTransitionRatio > 0.04 &&
-        pixels.nonDarkPixels > 10_000,
-    `wireframe pixels did not prove sparse multicolor tile edges: ${JSON.stringify(pixels)}`)
-
-    expect(failures,
-        baseline?.capture?.page?.byteLength > 20_000 &&
-        wireframe?.capture?.page?.byteLength > 20_000 &&
-        restored?.capture?.page?.byteLength > 20_000 &&
-        baseline.capture.canvas.sha256 !== wireframe.capture.canvas.sha256 &&
-        wireframe.capture.canvas.sha256 !== restored.capture.canvas.sha256,
-    'shaded, wireframe, and restored captures were blank or visually indistinguishable')
-
-    expect(failures,
-        wireframe?.renderingStorage?.version === 1 &&
-        wireframe.renderingStorage.tileWireframe === true &&
-        restored?.renderingStorage?.version === 1 &&
-        restored.renderingStorage.tileWireframe === false,
-    'live rendering preference was not persisted independently across both switches')
-
-    for (const [ name, state ] of Object.entries({ baseline, wireframe, restored })) {
+    for (const [ index, sample ] of samples.entries()) {
+        const feedback = sample?.coverFeedback
         expect(failures,
-            state?.diagnostics?.uncapturedErrors === 0 &&
-            state.diagnostics.deviceLosses === 0 &&
-            state.diagnostics.incidents === 0 &&
-            state.diagnostics.bounded,
-        `${name} retained a WebGPU diagnostic failure`)
+            feedback?.patchCount > 0 &&
+            feedback.patchCount === sample.coverPatchCount &&
+            feedback.descriptorOverflowCount === 0 &&
+            feedback.lookupOverflowCount === 0 &&
+            feedback.demandOverflowCount === 0 &&
+            feedback.maximumAdjacentLevelDelta <= 1 &&
+            feedback.sourceLevelCeiling === 10 &&
+            feedback.demands.every(demand =>
+                demand.requestMatrixLevel <= demand.sourceLevelCeiling
+            ),
+        `cover sample ${index} violated bounded standard-cover facts`)
+        expect(failures,
+            sample?.diagnostics?.uncapturedErrors === 0 &&
+            sample?.diagnostics?.deviceLosses === 0 &&
+            sample?.diagnostics?.incidents === 0 &&
+            sample?.diagnostics?.bounded,
+        `cover sample ${index} retained a WebGPU diagnostic failure`)
     }
-    expect(failures, unexpectedEvents(value.events).length === 0,
-        `browser emitted failures: ${JSON.stringify(unexpectedEvents(value.events))}`)
-    expect(failures, unexpectedEvents(zoomMonotonicity?.events).length === 0,
-        `zoom proof emitted failures: ${JSON.stringify(
-            unexpectedEvents(zoomMonotonicity?.events)
-        )}`)
+
+    const signatures = canonical.map(sample => JSON.stringify({
+        patchCount: sample.coverFeedback?.patchCount,
+        candidateCount: sample.coverFeedback?.candidateCount,
+        minimumMatrixLevel: sample.coverFeedback?.minimumMatrixLevel,
+        maximumMatrixLevel: sample.coverFeedback?.maximumMatrixLevel,
+        finestMatrixLevel: sample.coverFeedback?.finestMatrixLevel,
+        maximumAdjacentLevelDelta: sample.coverFeedback?.maximumAdjacentLevelDelta,
+        canvasHash: sample.capture?.canvas?.sha256,
+    }))
+    expect(failures,
+        signatures.length === 2 && signatures[0] === signatures[1],
+    `identical settled cameras produced different covers: ${JSON.stringify(signatures)}`)
+
+    const zoomRegressions = zoomSamples.slice(1).flatMap((sample, index) => {
+        const previous = zoomSamples[index]?.coverLevelRange
+        const current = sample?.coverLevelRange
+        return Array.isArray(previous) && Array.isArray(current) &&
+            current[0] >= previous[0] && current[1] >= previous[1]
+            ? []
+            : [ { previous, current } ]
+    })
+    expect(failures,
+        zoomSamples.length === 5 && zoomRegressions.length === 0,
+    `zoom-in coarsened the inverse cover: ${JSON.stringify(zoomRegressions)}`)
+    expect(failures,
+        pitchedShaded?.coverPatchCount <= 96 &&
+        wireframe?.coverPatchCount <= 96,
+    'pitched inverse cover exceeded its density gate')
+
+    for (const [ name, tracking ] of [
+        [ 'shaded', shadedTracking ],
+        [ 'wireframe', wireframeTracking ],
+    ]) {
+        expect(failures,
+            tracking?.frameCount === 90 &&
+            tracking.sampleCount === 90 &&
+            tracking.submissionTransitionCount >= 65 &&
+            tracking.staleTransitionCount === 0 &&
+            tracking.frameIntervalP95Ms <= 20 &&
+            tracking.lagP95 <= 1 &&
+            tracking.maximumLag <= 2 &&
+            tracking.maximumInFlight <= 2 &&
+            tracking.frameTiming?.construction?.p95Ms <= 4 &&
+            tracking.frameTiming?.observation?.p95Ms <= 25,
+        `${name} camera tracking exceeded latency gates: ${JSON.stringify(tracking)}`)
+    }
+
+    expect(failures,
+        wireframe?.capture?.pixels?.coloredPixels > 2_000 &&
+        wireframe.capture.pixels.colorClusterCount >= 4 &&
+        wireframe.capture.pixels.coloredRatio > 0.002,
+    `wireframe pixels did not prove multicolor standard tiles: ${JSON.stringify(
+        wireframe?.capture?.pixels
+    )}`)
+    expect(failures,
+        baseline?.capture?.pixels?.nonDarkPixels > 10_000 &&
+        restored?.capture?.pixels?.nonDarkPixels > 10_000,
+    'shaded terrain canvas was blank')
+    expect(failures,
+        events.tileRequestLevels.length > 0 &&
+        events.tileRequestLevels.every(level => level <= 10),
+    `source requests exceeded z10: ${JSON.stringify(events.tileRequestLevels)}`)
+    expect(failures,
+        unexpectedEvents(events).length === 0,
+    `browser emitted failures: ${JSON.stringify(unexpectedEvents(events))}`)
     expect(failures,
         processState.browserClosed && processState.viteClosed && processState.tileServerClosed,
     'managed Chrome, Vite, or tile server remained reachable')
@@ -1184,128 +636,118 @@ function observePage(page) {
     const events = {
         consoleFailures: [],
         pageErrors: [],
-        httpFailures: [],
-        tileRequests: [],
+        requestFailures: [],
+        cancelledTileRequests: [],
         tileRequestLevels: [],
-        tileRequestCount: 0,
     }
     page.on('console', message => {
-        if (message.type() === 'error') pushBounded(events.consoleFailures, message.text())
+        if (message.type() === 'error') events.consoleFailures.push(message.text())
     })
-    page.on('pageerror', error => pushBounded(events.pageErrors, serializeError(error)))
+    page.on('pageerror', error => events.pageErrors.push(serializeError(error)))
+    page.on('requestfailed', request => {
+        const failure = {
+            url: request.url(),
+            errorText: request.failure()?.errorText,
+        }
+        const path = new URL(request.url()).pathname
+        if (path.startsWith('/tiles/WebMercatorQuad/') &&
+            /abort|cancel/i.test(failure.errorText ?? '')) {
+            events.cancelledTileRequests.push(failure)
+            return
+        }
+        events.requestFailures.push(failure)
+    })
     page.on('response', response => {
-        const url = new URL(response.url())
-        const tileMatch = /^\/tiles\/WebMercatorQuad\/(\d+)\/\d+\/\d+\.png$/.exec(
-            url.pathname
+        const match = new URL(response.url()).pathname.match(
+            /\/tiles\/WebMercatorQuad\/(\d+)\//
         )
-        if (url.origin === tileBaseUrl && tileMatch !== null) {
-            pushBounded(events.tileRequests, response.url())
-            events.tileRequestCount++
-            const matrixLevel = Number(tileMatch[1])
-            if (!events.tileRequestLevels.includes(matrixLevel)) {
-                events.tileRequestLevels.push(matrixLevel)
-                events.tileRequestLevels.sort((left, right) => left - right)
-            }
-        }
-        if (response.status() >= 400) {
-            pushBounded(events.httpFailures, `${response.status()} ${response.url()}`)
-        }
+        if (match !== null) events.tileRequestLevels.push(Number(match[1]))
     })
     return events
 }
 
 function unexpectedEvents(events) {
 
-    if (events === undefined) return [ 'missing browser event ledger' ]
-    return [ ...events.consoleFailures, ...events.pageErrors, ...events.httpFailures ]
+    return [
+        ...(events?.consoleFailures ?? []),
+        ...(events?.pageErrors ?? []),
+        ...(events?.requestFailures ?? []),
+    ]
 }
 
-function startProcess(command, arguments_, cwd) {
+function sha256(value) {
 
-    const child = spawn(command, arguments_, {
+    return createHash('sha256').update(value).digest('hex')
+}
+
+function runCommand(command, args, cwd) {
+
+    return new Promise((resolvePromise, rejectPromise) => {
+        const child = spawn(command, args, {
+            cwd,
+            env: process.env,
+            stdio: [ 'ignore', 'pipe', 'pipe' ],
+        })
+        let stdout = ''
+        let stderr = ''
+        child.stdout.on('data', chunk => { stdout += chunk })
+        child.stderr.on('data', chunk => { stderr += chunk })
+        child.on('error', rejectPromise)
+        child.on('exit', code => {
+            if (code === 0) resolvePromise({ stdout, stderr })
+            else rejectPromise(new Error(
+                `${command} ${args.join(' ')} exited ${code}: ${stderr || stdout}`
+            ))
+        })
+    })
+}
+
+function startProcess(command, args, cwd) {
+
+    const child = spawn(command, args, {
         cwd,
-        env: { ...process.env, FORCE_COLOR: '0' },
+        env: process.env,
         stdio: [ 'ignore', 'pipe', 'pipe' ],
     })
-    const state = { child, stdout: '', stderr: '', spawnError: undefined }
-    child.stdout.setEncoding('utf8')
-    child.stderr.setEncoding('utf8')
-    child.stdout.on('data', chunk => { state.stdout = appendBounded(state.stdout, chunk) })
-    child.stderr.on('data', chunk => { state.stderr = appendBounded(state.stderr, chunk) })
-    child.on('error', error => { state.spawnError = error })
+    const state = { child, stdout: '', stderr: '' }
+    child.stdout.on('data', chunk => { state.stdout += chunk })
+    child.stderr.on('data', chunk => { state.stderr += chunk })
     return state
-}
-
-async function runCommand(command, arguments_, cwd) {
-
-    const state = startProcess(command, arguments_, cwd)
-    await waitForExit(state.child, timeout)
-    if (state.spawnError !== undefined) throw state.spawnError
-    if (state.child.exitCode !== 0) {
-        throw new Error(`${command} failed:\n${state.stderr}\n${state.stdout}`)
-    }
-    return { exitCode: state.child.exitCode, stdout: state.stdout, stderr: state.stderr }
 }
 
 async function waitForHttpProcess(state, url, label) {
 
-    const deadline = Date.now() + timeout
-    while (Date.now() < deadline) {
-        if (state.spawnError !== undefined) throw state.spawnError
-        if (state.child.exitCode !== null) {
-            throw new Error(`${label} exited before readiness with code ${state.child.exitCode}`)
+    const startedAt = Date.now()
+    while (Date.now() - startedAt < timeout) {
+        if (state.child.exitCode !== null || state.child.signalCode !== null) {
+            throw new Error(`${label} exited early: ${state.stderr || state.stdout}`)
         }
         try {
-            const response = await fetch(url, { signal: AbortSignal.timeout(1_000) })
-            const ready = response.ok
-            await response.body?.cancel()
-            if (ready) return
+            const response = await fetch(url)
+            if (response.ok) return
         } catch {
-            // Managed service is still starting.
+            // Startup polling continues until the bounded timeout.
         }
         await delay(100)
     }
-    throw new Error(`Timed out waiting for ${label} at ${url}`)
+    throw new Error(`${label} did not become ready at ${url}`)
 }
 
 async function stopProcess(state, label) {
 
     if (state.child.exitCode !== null || state.child.signalCode !== null) return
     state.child.kill('SIGTERM')
-    try {
-        await waitForExit(state.child, 5_000)
-    } catch {
-        state.child.kill('SIGKILL')
-        try {
-            await waitForExit(state.child, 5_000)
-        } catch {
-            throw new Error(`${label} process ${state.child.pid} did not stop`)
-        }
+    await Promise.race([
+        new Promise(resolvePromise => state.child.once('exit', resolvePromise)),
+        delay(5_000).then(() => {
+            if (state.child.exitCode === null && state.child.signalCode === null) {
+                state.child.kill('SIGKILL')
+            }
+        }),
+    ])
+    if (state.child.exitCode === null && state.child.signalCode === null) {
+        throw new Error(`${label} did not stop`)
     }
-}
-
-async function waitForExit(child, milliseconds) {
-
-    if (child.exitCode !== null || child.signalCode !== null) return
-    await new Promise((resolvePromise, rejectPromise) => {
-        const timer = setTimeout(() => {
-            child.off('exit', onExit)
-            child.off('error', onError)
-            rejectPromise(new Error(`Process ${child.pid} did not exit within ${milliseconds} ms`))
-        }, milliseconds)
-        const onExit = () => {
-            clearTimeout(timer)
-            child.off('error', onError)
-            resolvePromise()
-        }
-        const onError = () => {
-            clearTimeout(timer)
-            child.off('exit', onExit)
-            resolvePromise()
-        }
-        child.once('exit', onExit)
-        child.once('error', onError)
-    })
 }
 
 async function cleanup(label, action) {
@@ -1317,115 +759,65 @@ async function cleanup(label, action) {
     }
 }
 
-async function findAvailablePort() {
-
-    const server = createServer()
-    await new Promise((resolvePromise, rejectPromise) => {
-        server.once('error', rejectPromise)
-        server.listen(0, '127.0.0.1', resolvePromise)
-    })
-    const address = server.address()
-    if (address === null || typeof address === 'string') throw new Error('Port selection failed')
-    await new Promise((resolvePromise, rejectPromise) => {
-        server.close(error => error === undefined ? resolvePromise() : rejectPromise(error))
-    })
-    return address.port
-}
-
-async function canConnect(port) {
-
-    return await new Promise(resolvePromise => {
-        const socket = createConnection({ host: '127.0.0.1', port })
-        const settle = connected => {
-            socket.removeAllListeners()
-            socket.destroy()
-            resolvePromise(connected)
-        }
-        socket.setTimeout(500, () => settle(false))
-        socket.once('connect', () => settle(true))
-        socket.once('error', () => settle(false))
-    })
-}
-
-function parseBuildHash(output) {
-
-    try { return JSON.parse(output).sourceHash } catch { return undefined }
-}
-
 function processOutput(state) {
 
-    if (state === undefined) return undefined
-    return {
-        pid: state.child.pid,
+    return state === undefined ? undefined : {
+        stdout: state.stdout.slice(-8_000),
+        stderr: state.stderr.slice(-8_000),
         exitCode: state.child.exitCode,
-        signalCode: state.child.signalCode,
-        stdout: state.stdout,
-        stderr: state.stderr,
-    }
-}
-
-function positiveInteger(value, fallback) {
-
-    if (value === undefined) return fallback
-    const parsed = Number(value)
-    if (!Number.isSafeInteger(parsed) || parsed <= 0) {
-        throw new TypeError(`Expected a positive integer, received ${value}`)
-    }
-    return parsed
-}
-
-function appendBounded(current, chunk) {
-
-    return `${current}${chunk}`.slice(-16_384)
-}
-
-function pushBounded(target, value) {
-
-    if (target.length < 32) target.push(value)
-}
-
-function sha256(value) {
-
-    return createHash('sha256').update(value).digest('hex')
-}
-
-function serializeError(error) {
-
-    return error instanceof Error ? error.stack ?? error.message : String(error)
-}
-
-async function withTimeout(promise, milliseconds, label) {
-
-    let timer
-    try {
-        return await Promise.race([
-            promise,
-            new Promise((resolvePromise, rejectPromise) => {
-                timer = setTimeout(
-                    () => rejectPromise(new Error(`${label} exceeded ${milliseconds} ms`)),
-                    milliseconds
-                )
-            }),
-        ])
-    } finally {
-        clearTimeout(timer)
-    }
-}
-
-async function closeBrowser(activeBrowser) {
-
-    const closing = activeBrowser.close()
-    try {
-        await withTimeout(closing, 15_000, 'Chrome shutdown')
-    } catch (error) {
-        if (!activeBrowser.isConnected()) return
-        await delay(2_000)
-        if (!activeBrowser.isConnected()) return
-        throw error
     }
 }
 
 function delay(milliseconds) {
 
     return new Promise(resolvePromise => setTimeout(resolvePromise, milliseconds))
+}
+
+function positiveInteger(value, fallback) {
+
+    const parsed = Number(value)
+    return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback
+}
+
+function serializeError(error) {
+
+    return error instanceof Error
+        ? `${error.name}: ${error.message}\n${error.stack ?? ''}`
+        : String(error)
+}
+
+function findAvailablePort() {
+
+    return new Promise((resolvePromise, rejectPromise) => {
+        const server = createServer()
+        server.unref()
+        server.on('error', rejectPromise)
+        server.listen(0, '127.0.0.1', () => {
+            const address = server.address()
+            const port = typeof address === 'object' && address !== null
+                ? address.port
+                : undefined
+            server.close(error => {
+                if (error !== undefined) rejectPromise(error)
+                else if (port === undefined) rejectPromise(new Error('No available port'))
+                else resolvePromise(port)
+            })
+        })
+    })
+}
+
+function canConnect(port) {
+
+    return new Promise(resolvePromise => {
+        const socket = createConnection({ host: '127.0.0.1', port })
+        socket.once('connect', () => {
+            socket.destroy()
+            resolvePromise(true)
+        })
+        socket.once('error', () => resolvePromise(false))
+        socket.setTimeout(300, () => {
+            socket.destroy()
+            resolvePromise(false)
+        })
+    })
 }

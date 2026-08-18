@@ -14,20 +14,12 @@ import {
     type TextureResource,
 } from '../scratch/index.js'
 import {
-    GPU_RENDER_PATCH_DEFAULT_CELLS_PER_EDGE,
-    GPU_RENDER_PATCH_DEFAULT_MAXIMUM_CELL_SPAN_PIXELS,
-    GPU_RENDER_PATCH_MAXIMUM_MATRIX_LEVEL,
-    GpuRenderPatchFeedbackStaleError,
-    createGpuRenderPatchFrontier,
-    type GpuRenderPatchFeedback,
-    type GpuRenderPatchFrontier,
-    type GpuRenderPatchFrontierFacts,
-} from './gpu-render-patch-frontier.js'
-import { GeoDiagnosticError } from './diagnostics.js'
-import { GpuTileFrontier } from './gpu-tile-frontier.js'
-import type { GpuTileFrontierFrame } from './gpu-tile-frontier.js'
-import { gpuTileFrontierPolicy } from './gpu-tile-frontier-layout.js'
-import type { GpuTileFrontierFacts } from './gpu-tile-frontier-layout.js'
+    GpuWebMercatorQuadCover,
+    gpuWebMercatorQuadCoverPolicy,
+    type GpuWebMercatorQuadCoverFeedback,
+    type GpuWebMercatorQuadCoverFrame,
+    type GpuWebMercatorQuadCoverSelectionFacts,
+} from './gpu-web-mercator-quad-cover.js'
 import type {
     GeoViewSnapshot,
     GeoViewSourceCapture,
@@ -48,11 +40,6 @@ import {
     webMercatorTerrainConfigCodec,
     webMercatorTerrainWgslModule,
 } from './web-mercator-terrain-wgsl.js'
-import { VirtualRasterGpuFeedbackRing } from './virtual-raster-gpu-feedback.js'
-import type {
-    VirtualRasterGpuFeedbackBatch,
-    VirtualRasterGpuFeedbackRingFacts,
-} from './virtual-raster-gpu-feedback.js'
 import type {
     VirtualRasterFeedbackReconciliation,
     VirtualRasterRuntime,
@@ -100,10 +87,9 @@ export type WebMercatorTerrainInitialization = Readonly<{
     observation: Promise<WebMercatorTerrainSubmissionObservation>
 }>
 
-/** Delayed frontier feedback, residency work, and convergence state for one terrain frame. */
+/** Delayed inverse-cover feedback, residency work, and convergence state for one terrain frame. */
 export type WebMercatorTerrainFrameSettlement = GeoFrameSettlement & Readonly<{
-    feedback?: VirtualRasterGpuFeedbackBatch
-    renderPatchFeedback?: GpuRenderPatchFeedback
+    coverFeedback?: GpuWebMercatorQuadCoverFeedback
     reconciliation?: VirtualRasterFeedbackReconciliation
     residencySettlement: Promise<unknown>
     residencyWorkCount: number
@@ -150,9 +136,9 @@ export type WebMercatorTerrainPersistentFacts = Readonly<{
 export type WebMercatorTerrainContractFacts = Readonly<{
     stageOrder: readonly string[]
     countPath: 'gpu-produced-indirect-arguments'
-    selectionPath: 'gpu-resident-active-frontier'
-    dataMaximumMatrixLevel: number
-    renderMaximumMatrixLevel: number
+    selectionPath: 'gpu-camera-inverse-webmercatorquad-cover'
+    sourceMaximumMatrixLevel: number
+    coverMaximumMatrixLevel: number
     fieldLayer: Readonly<{
         id: string
         fieldId: string
@@ -162,9 +148,7 @@ export type WebMercatorTerrainContractFacts = Readonly<{
         demandProducerId: string
     }>
     terrainVertexCount: number
-    frontier: ReturnType<GpuTileFrontier['facts']>
-    renderPatches: GpuRenderPatchFrontierFacts
-    feedback: VirtualRasterGpuFeedbackRingFacts
+    cover: ReturnType<GpuWebMercatorQuadCover['facts']>
     virtualRaster: Readonly<{
         sourceRevision: string
         pageSize: readonly number[]
@@ -175,9 +159,9 @@ export type WebMercatorTerrainContractFacts = Readonly<{
         coordinateEncoding: WebMercatorVirtualRasterField['addressCodec']['positionCodec']['facts']['encoding']
     }>
     persistentIdentityCount: number
-    passIds: Readonly<{ renderPatches: string, terrain: string }>
+    passIds: Readonly<{ cover: string, terrain: string }>
     commandIds: Readonly<{
-        renderPatches: readonly (readonly string[])[]
+        cover: readonly (readonly string[])[]
         drawTerrain: Readonly<Record<string, readonly string[]>>
     }>
 }>
@@ -195,33 +179,20 @@ export type WebMercatorTerrainRendererState<Presentation extends string = string
     readbackInFlightCount: number
     staleFeedbackCount: number
     supersededFeedbackCount: number
-    frontierCount: number
-    visibleNodeCount: number
-    demandCount: number
-    fallbackCount: number
-    staleGenerationCount: number
-    budgetLimitedCount: number
-    levelRange: readonly [number | undefined, number | undefined]
-    maximumObservedSse: number
-    renderPatchCount: number
-    renderPatchLevelRange: readonly [number | undefined, number | undefined]
-    renderPatchCellSpanRange: readonly [number | undefined, number | undefined]
-    renderPatchDescriptorOverflowCount: number
-    renderPatchLookupOverflowCount: number
-    renderPatchFrameEpoch?: number
-    renderPatchBaselineBudget: number
-    renderPatchFrameBudget: number
-    renderPatchRequestedCount: number
-    renderPatchMinimumTrialCount: number
-    renderPatchRenderRootCount: number
-    renderPatchSelectedBiasLevels: number
-    renderPatchBudgetLimitedByMinimumTrial: boolean
-    renderPatchFeedback?: GpuRenderPatchFeedback
-    convergenceState: GpuTileFrontierFacts['convergenceState']
-    frontierFacts?: GpuTileFrontierFacts
-    latestFeedbackDiagnostics: readonly unknown[]
+    coverCandidateCount: number
+    coverPatchCount: number
+    coverDemandCount: number
+    coverLevelRange: readonly [number | undefined, number | undefined]
+    coverDescriptorOverflowCount: number
+    coverLookupOverflowCount: number
+    coverDemandOverflowCount: number
+    coverMaximumAdjacentLevelDelta: number
+    coverFinestMatrixLevel?: number
+    sourceLevelCeiling?: number
+    coverFrameEpoch?: number
+    coverFeedback?: GpuWebMercatorQuadCoverFeedback
+    convergenceState: 'converged' | 'transitioning'
     terrainPresentation: Presentation
-    feedback: VirtualRasterGpuFeedbackRingFacts
 }>
 
 export type WebMercatorTerrainRenderer<
@@ -275,9 +246,6 @@ type TerrainGeometry = ReturnType<typeof createTerrainGeometry>
 type Uniforms = Awaited<ReturnType<typeof createUniformResources>>
 type Buffers = Awaited<ReturnType<typeof createBufferResources>>
 type Textures = Awaited<ReturnType<typeof createTextures>>
-type Frontier = Awaited<ReturnType<typeof createFrontier>>
-type FrontierViewTemplates = ReturnType<typeof createFrontierViewTemplates>
-type RenderPatchFrontier = GpuRenderPatchFrontier
 type RenderTemplates = ReturnType<typeof createRenderTemplates>
 type Layouts = Awaited<ReturnType<typeof createBindLayouts>>
 type BindSets = Awaited<ReturnType<typeof createBindSets>>
@@ -298,10 +266,7 @@ type WebMercatorTerrainGraph = {
     uniforms: Uniforms
     buffers: Buffers
     textures: Textures
-    frontier: Frontier
-    frontierViewTemplates: FrontierViewTemplates
-    renderPatchFrontier: RenderPatchFrontier
-    feedbackRing: VirtualRasterGpuFeedbackRing
+    cover: GpuWebMercatorQuadCover
     renderTemplates: RenderTemplates
     layouts: Layouts
     bindSets: BindSets
@@ -314,7 +279,7 @@ type WebMercatorTerrainGraph = {
 type ProvenanceVerifier = (
     submitted: SubmittedWork,
     graph: WebMercatorTerrainGraph,
-    frame: GpuTileFrontierFrame,
+    frame: GpuWebMercatorQuadCoverFrame,
     terrainPresentation: string
 ) => readonly WebMercatorTerrainProvenanceFact[]
 
@@ -330,16 +295,14 @@ type WebMercatorTerrainState<Presentation extends string = string> = {
     virtualRequestedPageCount: number
     staleFeedbackCount: number
     supersededFeedbackCount: number
-    latestFrontierFacts?: GpuTileFrontierFacts
-    latestRenderPatchFeedback?: GpuRenderPatchFeedback
-    latestFeedbackDiagnostics: readonly unknown[]
+    latestCoverFeedback?: GpuWebMercatorQuadCoverFeedback
     terrainPresentation: Presentation
 }
 
 type PersistentFacts = WebMercatorTerrainPersistentFacts
 
 type PendingFeedback = Readonly<{
-    frame: GpuTileFrontierFrame
+    frame: GpuWebMercatorQuadCoverFrame
     view: GeoViewSnapshot
     submitted: SubmittedWork
     decisionKey: string
@@ -350,8 +313,7 @@ type PendingFeedback = Readonly<{
 type ConsumedFeedback = Readonly<{
     decisionKey: string
     view: GeoViewSnapshot
-    feedback?: VirtualRasterGpuFeedbackBatch
-    renderPatchFeedback?: GpuRenderPatchFeedback
+    coverFeedback?: GpuWebMercatorQuadCoverFeedback
 }>
 
 type Deferred<Value> = {
@@ -367,13 +329,11 @@ type ActivePublication = Readonly<{
 }>
 
 const WEB_MERCATOR_TERRAIN_STAGE_ORDER = Object.freeze([
-    'frontier-compute',
-    'render-patch-compute',
+    'inverse-cover-compute',
     'terrain',
 ])
-const TERRAIN_SECTOR_SIZE = GPU_RENDER_PATCH_DEFAULT_CELLS_PER_EDGE
-const TERRAIN_MAXIMUM_PATCH_COUNT_RATIO = 3
-const TERRAIN_BALANCE_CAPACITY_HEADROOM = 4
+const TERRAIN_SECTOR_SIZE = 64
+const TERRAIN_COVER_MAXIMUM_MATRIX_LEVEL = 14
 const BUFFER_COPY_DST = 0x08
 const BUFFER_UNIFORM = 0x40
 const BUFFER_STORAGE = 0x80
@@ -425,46 +385,28 @@ export async function createWebMercatorTerrainRenderer<
         elevationRangeMeters,
         exaggeration
     )
-    const frontier = await createFrontier(
-        runtime,
-        virtualRaster,
-        terrainFieldLayer,
-        exaggeratedElevationRange
+    const sourceMatrixLevels = virtualRaster.coverage.limits.map(limit =>
+        Number(limit.matrixId)
     )
-    const feedbackRing = await VirtualRasterGpuFeedbackRing.create(frontier)
-    const frontierViewTemplates = createFrontierViewTemplates(frontier)
-    const renderRoots = virtualRaster.safetyCoverPages.map(page => {
-        if (page.tile === undefined) {
-            throw new TypeError('Web Mercator terrain render roots require tile identities')
-        }
-        return Object.freeze({
-            matrixLevel: terrainFieldLayer.spatialProfile.matrixLevel(page.tile),
-            tileRow: page.tile.tileRow,
-            tileCol: page.tile.tileCol,
-        })
-    })
-    const renderPatchFrontier = await createGpuRenderPatchFrontier(runtime, {
-        viewTemplates: frontierViewTemplates.renderPatch,
-        renderRoots,
-        maximumRenderPatches: terrainRenderPatchCapacity({
-            size,
-            renderRootCount: renderRoots.length,
-            theoreticalMaximum:
-                frontier.descriptor.policy.maximumActiveTiles * 256,
+    const sourceMinimumMatrixLevel = sourceMatrixLevels[0]!
+    const sourceMaximumMatrixLevel = sourceMatrixLevels.at(-1)!
+    const coverCapacity = terrainCoverCapacity(size)
+    const cover = await GpuWebMercatorQuadCover.create(runtime, {
+        spatialProfile: terrainFieldLayer.spatialProfile,
+        policy: gpuWebMercatorQuadCoverPolicy({
+            minimumMatrixLevel: sourceMinimumMatrixLevel,
+            maximumMatrixLevel: TERRAIN_COVER_MAXIMUM_MATRIX_LEVEL,
+            sourceMaximumMatrixLevel,
+            maximumPatches: coverCapacity,
         }),
-        renderMaximumMatrixLevel: GPU_RENDER_PATCH_MAXIMUM_MATRIX_LEVEL,
-        coordinateBits: virtualRaster.addressCodec.coordinateBits,
         elevationRangeMeters: exaggeratedElevationRange,
         vertexCount: geometry.vertexCount,
-        cellsPerPatchEdge: TERRAIN_SECTOR_SIZE,
-        maximumCellSpanPixels: GPU_RENDER_PATCH_DEFAULT_MAXIMUM_CELL_SPAN_PIXELS,
-        maximumPatchCountRatio: TERRAIN_MAXIMUM_PATCH_COUNT_RATIO,
     })
-    const renderTemplates = createRenderTemplates(renderPatchFrontier)
+    const renderTemplates = createRenderTemplates(cover)
     const uniforms = await createUniformResources(
         runtime,
         virtualRaster,
-        renderPatchFrontier.facts().renderPatchLookupCapacity,
+        cover.facts().lookupCapacity,
         elevationRangeMeters,
         exaggeration
     )
@@ -514,10 +456,7 @@ export async function createWebMercatorTerrainRenderer<
         uniforms,
         buffers,
         textures,
-        frontier,
-        frontierViewTemplates,
-        renderPatchFrontier,
-        feedbackRing,
+        cover,
         renderTemplates,
         layouts,
         bindSets,
@@ -554,26 +493,17 @@ export async function createWebMercatorTerrainRenderer<
     async function initializeOnce() {
 
         const publication = await virtualRaster.initialize()
-        const uploadBuilder = runtime.createSubmission({ validation: 'throw' })
+        const builder = runtime.createSubmission({ validation: 'throw' })
             .upload(uniforms.config.upload)
             .upload(buffers.positions.upload)
             .upload(buffers.indices.upload)
-        renderPatchFrontier.initialize(uploadBuilder)
-        for (const upload of publication.update.commands) uploadBuilder.upload(upload)
-        const residencySubmitted = uploadBuilder.submit()
-        await Promise.all([
-            observeSubmittedWork(residencySubmitted),
-            virtualRaster.acknowledge(publication, residencySubmitted),
-        ])
-
-        const seed = frontier.stageSeed(publication.publication.snapshot)
-        const seedBuilder = runtime.createSubmission({ validation: 'throw' })
-        for (const command of seed.commands) {
-            if (command.commandKind === 'clear') seedBuilder.clear(command)
-            else seedBuilder.upload(command)
-        }
-        const submitted = seedBuilder.submit()
-        const observation = observeSubmittedWork(submitted).then(result => {
+        cover.initialize(builder)
+        for (const upload of publication.update.commands) builder.upload(upload)
+        const submitted = builder.submit()
+        const observation = Promise.all([
+            observeSubmittedWork(submitted),
+            virtualRaster.acknowledge(publication, submitted),
+        ]).then(([ result ]) => {
             state.initialized = true
             state.virtualSnapshotEpoch = publication.snapshotEpoch
             return result
@@ -619,7 +549,7 @@ export async function createWebMercatorTerrainRenderer<
             frameEpoch: state.frame + 1,
             residencySnapshotEpoch,
         })
-        const decisionKey = frontierDecisionKey(view)
+        const decisionKey = coverDecisionKey(view)
         if (latestDecisionKey !== decisionKey) {
             latestDecisionSerial++
             if (latestDecisionKey !== undefined) {
@@ -629,25 +559,23 @@ export async function createWebMercatorTerrainRenderer<
         }
         latestDecisionKey = decisionKey
         const decisionSerial = latestDecisionSerial
-        const viewToken = frontier.writeView(view)
-        let frame: GpuTileFrontierFrame
+        const viewToken = cover.writeView(view)
+        let frame: GpuWebMercatorQuadCoverFrame
         let submitted: SubmittedWork
         let capturedFeedback = false
         let feedbackEntry = feedbackByDecision.get(decisionSerial)
         try {
-            frame = frontier.frame(viewToken)
+            frame = cover.frame(viewToken)
             const builder = runtime.createSubmission({ validation: 'throw' })
             if (publication !== undefined) virtualRaster.gpu.encode(builder, publication.update)
-            frontier.encode(builder, frame)
-            renderPatchFrontier.encode(builder, frame)
+            cover.encode(builder, frame)
             builder.render(passes.terrain, [
                 commands.terrain[frameTerrainPresentation][frame.parity]!,
             ])
             capturedFeedback = latestSettledDecisionKey !== decisionKey &&
                 feedbackEntry === undefined && feedbackCaptureAvailable(graph, frame)
             if (capturedFeedback) {
-                renderPatchFrontier.capture(builder, frame)
-                feedbackRing.encode(builder, frame)
+                cover.capture(builder, frame)
             }
             submitted = builder.submit()
         } finally {
@@ -765,14 +693,13 @@ export async function createWebMercatorTerrainRenderer<
     ): void {
 
         if (ready.decisionSerial !== latestDecisionSerial) {
-            if (consumed.feedback !== undefined || consumed.renderPatchFeedback !== undefined) {
+            if (consumed.coverFeedback !== undefined) {
                 state.supersededFeedbackCount++
             }
             settleDeferred(ready.settlement, Object.freeze({
-                ...(consumed.feedback === undefined ? {} : { feedback: consumed.feedback }),
-                ...(consumed.renderPatchFeedback === undefined
+                ...(consumed.coverFeedback === undefined
                     ? {}
-                    : { renderPatchFeedback: consumed.renderPatchFeedback }),
+                    : { coverFeedback: consumed.coverFeedback }),
                 residencySettlement: Promise.resolve(undefined),
                 residencyWorkCount: 0,
                 needsFollowUp: false,
@@ -781,32 +708,28 @@ export async function createWebMercatorTerrainRenderer<
             return
         }
 
-        if (consumed.renderPatchFeedback !== undefined) {
-            state.latestRenderPatchFeedback = consumed.renderPatchFeedback
-        }
-        const feedback = consumed.feedback
-        if (feedback === undefined) {
-            delete state.latestFrontierFacts
-            state.latestFeedbackDiagnostics = Object.freeze([])
-        } else {
-            state.latestFrontierFacts = feedback.facts
-            state.latestFeedbackDiagnostics = feedback.diagnostics
-        }
+        const feedback = consumed.coverFeedback
+        if (feedback === undefined) delete state.latestCoverFeedback
+        else state.latestCoverFeedback = feedback
         const reconciliation = feedback === undefined
             ? undefined
-            : virtualRaster.reconcileFeedback(feedback, consumed.view)
+            : virtualRaster.reconcileViewDemands(coverViewDemands(
+                virtualRaster,
+                terrainFieldLayer,
+                feedback,
+                consumed.view
+            ))
         if (reconciliation !== undefined) {
             state.virtualRequestedPageCount += reconciliation.requestedCount
         }
+        const scheduler = virtualRaster.scheduler.inspect()
         const needsFollowUp = feedback === undefined ||
-            feedback.facts.convergenceState === 'transitioning' ||
-            (reconciliation?.requestedCount ?? 0) > 0
+            (reconciliation?.requestedCount ?? 0) > 0 ||
+            scheduler.activeRequestCount > 0 ||
+            scheduler.queuedRequestCount > 0
         if (!needsFollowUp) latestSettledDecisionKey = ready.decisionKey
         settleDeferred(ready.settlement, Object.freeze({
-            ...(feedback === undefined ? {} : { feedback }),
-            ...(consumed.renderPatchFeedback === undefined
-                ? {}
-                : { renderPatchFeedback: consumed.renderPatchFeedback }),
+            ...(feedback === undefined ? {} : { coverFeedback: feedback }),
             ...(reconciliation === undefined ? {} : { reconciliation }),
             residencySettlement: reconciliation?.settlement ?? Promise.resolve(undefined),
             residencyWorkCount: reconciliation?.requestedCount ?? 0,
@@ -864,9 +787,7 @@ export async function createWebMercatorTerrainRenderer<
         }
         pendingFeedback.length = 0
         feedbackByDecision.clear()
-        feedbackRing.dispose()
-        renderPatchFrontier.dispose()
-        frontier.dispose()
+        cover.dispose()
     }
 
     return Object.freeze({
@@ -881,14 +802,14 @@ export async function createWebMercatorTerrainRenderer<
         persistentFacts: () => persistentFactSnapshot(runtime),
         contractFacts: () => graphContractSnapshot(graph),
         virtualRasterFacts: virtualRaster.inspect,
-        state: () => stateSnapshot(state, feedbackByDecision.size, feedbackRing),
+        state: () => stateSnapshot(state, feedbackByDecision.size),
     })
 }
 
 async function createUniformResources(
     runtime: GPURuntime,
     virtualRaster: WebMercatorTerrainVirtualRaster,
-    renderPatchLookupCapacity: number,
+    coverLookupCapacity: number,
     elevationRangeMeters: readonly [number, number],
     exaggeration: number
 ) {
@@ -913,8 +834,8 @@ async function createUniformResources(
                 elevationRange: elevationRangeMeters,
                 coordinateBits: virtualRaster.addressCodec.coordinateBits,
                 exaggeration,
-                renderMaximumMatrixLevel: GPU_RENDER_PATCH_MAXIMUM_MATRIX_LEVEL,
-                renderPatchLookupCapacity,
+                coverMaximumMatrixLevel: TERRAIN_COVER_MAXIMUM_MATRIX_LEVEL,
+                coverLookupCapacity,
             }
         ),
     }
@@ -1006,59 +927,6 @@ async function createTextures(runtime: GPURuntime, size: SurfaceSize) {
     }
 }
 
-async function createFrontier(
-    runtime: GPURuntime,
-    virtualRaster: WebMercatorTerrainVirtualRaster,
-    fieldLayer: WebMercatorTerrainMapField,
-    elevationRangeMeters: readonly [number, number]
-) {
-
-    const matrixIds = virtualRaster.coverage.limits.map(limit => limit.matrixId)
-    const minimumMatrixLevel = Number(matrixIds[0])
-    const maximumMatrixLevel = Number(matrixIds.at(-1))
-    const rootCount = virtualRaster.safetyCoverPages.length
-    const maxPhysicalPages = virtualRaster.gpu.maxPhysicalPages
-    if (maxPhysicalPages <= rootCount) {
-        throw new Error('Web Mercator terrain GPU frontier requires transition capacity beyond its safety cover')
-    }
-    const transitionReservePages = Math.min(5, maxPhysicalPages - rootCount)
-    const maximumActiveTiles = Math.max(rootCount, Math.min(
-        virtualRaster.coverage.entryCount,
-        maxPhysicalPages - transitionReservePages
-    ))
-    const maximumDemands = Math.max(1, Math.min(
-        maximumActiveTiles * 4,
-        virtualRaster.scheduler.maxRequests
-    ))
-    return GpuTileFrontier.create(runtime, {
-        gpuState: virtualRaster.gpu,
-        spatialProfile: fieldLayer.spatialProfile,
-        policy: gpuTileFrontierPolicy({
-            refineErrorPixels: 2,
-            coarsenErrorPixels: 1,
-            minimumMatrixLevel,
-            maximumMatrixLevel,
-            maximumActiveTiles,
-            maximumDemands,
-            transitionReservePages,
-            invisibleGraceFrames: 2,
-        }),
-        levelMetrics: matrixIds.map(matrixId => {
-            const matrix = WebMercatorQuad.matrix(matrixId)
-            return Object.freeze({
-                matrixLevel: Number(matrixId),
-                minimumElevationMeters: elevationRangeMeters[0],
-                maximumElevationMeters: elevationRangeMeters[1],
-                geometricErrorMeters: matrix.cellSize,
-            })
-        }),
-        roots: virtualRaster.safetyCoverPages,
-        drawTemplates: [
-            { id: 'render-patch-view', vertexCount: 1 },
-        ],
-    })
-}
-
 function scaleElevationRange(
     range: readonly [number, number],
     exaggeration: number
@@ -1069,17 +937,10 @@ function scaleElevationRange(
         .sort((left, right) => left - right) as [number, number])
 }
 
-function createFrontierViewTemplates(frontier: GpuTileFrontier) {
+function createRenderTemplates(cover: GpuWebMercatorQuadCover) {
 
     return Object.freeze({
-        renderPatch: frontier.renderTemplates('render-patch-view'),
-    })
-}
-
-function createRenderTemplates(frontier: GpuRenderPatchFrontier) {
-
-    return Object.freeze({
-        terrain: frontier.renderTemplates(),
+        terrain: cover.renderTemplates(),
     })
 }
 
@@ -1106,7 +967,7 @@ async function createBindLayouts(runtime: GPURuntime, mapMetaBytes: number) {
 
     return {
         scene: await runtime.createBindLayout({
-            label: 'Web Mercator terrain frontier scene layout',
+            label: 'Web Mercator terrain cover scene layout',
             group: 0,
             entries: [
                 uniform(0, 'mapMeta', mapMetaBytes, [ 'vertex' ]),
@@ -1119,13 +980,13 @@ async function createBindLayouts(runtime: GPURuntime, mapMetaBytes: number) {
             ],
         }),
         terrainData: await runtime.createBindLayout({
-            label: 'Web Mercator terrain frontier data layout',
+            label: 'Web Mercator terrain cover data layout',
             group: 1,
             entries: [
                 readStorage(0, 'indices'),
                 readStorage(1, 'gridPositions'),
                 readStorage(2, 'visibleInstances'),
-                readStorage(3, 'renderPatchLookupEntries'),
+                readStorage(3, 'coverLookupEntries'),
             ],
         }),
         terrainTextures: await runtime.createBindLayout({
@@ -1161,15 +1022,20 @@ async function createBindSets(
             indices: buffers.indices.region,
             gridPositions: buffers.positions.region,
             visibleInstances: template.visibleInstances.region(),
-            renderPatchLookupEntries: template.renderPatchLookup.region(),
-        }, { label: `Web Mercator terrain frontier data ${parity}` }))
+            coverLookupEntries: template.coverLookup.region(),
+        }, { label: `Web Mercator terrain cover data ${parity}` }))
+    }
+
+    const scene = []
+    for (const [ parity, template ] of templates.terrain.entries()) {
+        scene.push(await runtime.createBindSet(layouts.scene, {
+            mapMeta: template.mapMeta.region(),
+            terrainConfig: uniforms.config.region,
+        }, { label: `Web Mercator terrain cover scene ${parity}` }))
     }
 
     return {
-        scene: await runtime.createBindSet(layouts.scene, {
-            mapMeta: templates.terrain[0].mapMeta.region(),
-            terrainConfig: uniforms.config.region,
-        }, { label: 'Web Mercator terrain frontier scene' }),
+        scene,
         terrainData,
         terrainTextures: await runtime.createBindSet(layouts.terrainTextures, {
             fieldPageTable: virtualRaster.gpu.pageTable.region(),
@@ -1316,7 +1182,7 @@ function createCommands(
         label: `${label} ${parity}`,
         pipeline,
         bindSets: [
-            { set: bindSets.scene },
+            { set: bindSets.scene[parity]! },
             { set: bindSets.terrainData[parity]! },
             { set: bindSets.terrainTextures },
         ],
@@ -1328,7 +1194,7 @@ function createCommands(
                 buffers.indices.buffer,
                 buffers.positions.buffer,
                 template.visibleInstances,
-                template.renderPatchLookup,
+                template.coverLookup,
                 virtualRaster.gpu.pageTable,
                 virtualRaster.gpu.atlas,
                 template.drawArgument.resource,
@@ -1359,41 +1225,50 @@ async function consumeFeedback(
     state: WebMercatorTerrainState
 ): Promise<ConsumedFeedback> {
 
-    const [ frontierResult, renderPatchResult ] = await Promise.allSettled([
-        graph.feedbackRing.feedback(ready.frame, ready.submitted),
-        graph.renderPatchFrontier.feedback(ready.frame, ready.submitted),
-    ])
-    let feedback: VirtualRasterGpuFeedbackBatch | undefined
-    if (frontierResult.status === 'fulfilled') {
-        feedback = frontierResult.value
-    } else {
-        const code = frontierResult.reason instanceof GeoDiagnosticError
-            ? frontierResult.reason.diagnostic.code
-            : undefined
-        if (code !== 'GEO_GPU_TILE_FEEDBACK_STALE') throw frontierResult.reason
-        state.staleFeedbackCount++
-    }
-    let renderPatchFeedback: GpuRenderPatchFeedback | undefined
-    if (renderPatchResult.status === 'fulfilled') {
-        renderPatchFeedback = renderPatchResult.value
-    } else if (!(renderPatchResult.reason instanceof GpuRenderPatchFeedbackStaleError)) {
-        throw renderPatchResult.reason
-    }
+    const coverFeedback = await graph.cover.feedback(ready.frame, ready.submitted)
     return Object.freeze({
         decisionKey: ready.decisionKey,
         view: ready.view,
-        ...(feedback === undefined ? {} : { feedback }),
-        ...(renderPatchFeedback === undefined ? {} : { renderPatchFeedback }),
+        coverFeedback,
     })
 }
 
 function feedbackCaptureAvailable(
     graph: WebMercatorTerrainGraph,
-    frame: GpuTileFrontierFrame
+    frame: GpuWebMercatorQuadCoverFrame
 ): boolean {
 
-    return graph.feedbackRing.facts().slots.some(slot => slot.state === 'idle') &&
-        graph.renderPatchFrontier.commandsFor(frame).feedback.state === 'idle'
+    const commands = graph.cover.commandsFor(frame)
+    return commands.stateFeedback.state === 'idle' &&
+        commands.demandFeedback.state === 'idle'
+}
+
+function coverViewDemands(
+    virtualRaster: WebMercatorTerrainVirtualRaster,
+    fieldLayer: WebMercatorTerrainMapField,
+    feedback: GpuWebMercatorQuadCoverFeedback,
+    view: GeoViewSnapshot
+) {
+
+    return fieldLayer.demandProducer.produce({
+        view,
+        generation: feedback.frameEpoch,
+        demands: feedback.demands.map(demand => ({
+            page: virtualRaster.addressSpace.pageFromTile({
+                matrixId: String(demand.requestMatrixLevel),
+                tileRow: demand.tileRow,
+                tileCol: demand.tileCol,
+            }),
+            desiredSampleLevel: demand.desiredSampleLevel,
+            sourceLevelCeiling: demand.sourceLevelCeiling,
+            priority: Object.freeze({
+                class: 'user-visible' as const,
+                score: demand.priority,
+            }),
+            intent: 'refinement' as const,
+            reason: `gpu-cover:${feedback.frameEpoch}:desired-z${demand.desiredSampleLevel}`,
+        })),
+    })
 }
 
 function emptyFrameSettlement(): WebMercatorTerrainFrameSettlement {
@@ -1440,7 +1315,7 @@ function rejectDeferred<Value>(value: Deferred<Value>, reason: unknown): void {
     value.reject(reason)
 }
 
-function frontierDecisionKey(view: GeoViewSnapshot): string {
+function coverDecisionKey(view: GeoViewSnapshot): string {
 
     return JSON.stringify([
         view.clipFromRelativeWorld,
@@ -1458,32 +1333,31 @@ function frontierDecisionKey(view: GeoViewSnapshot): string {
 function verifyFrameProvenance(
     submitted: SubmittedWork,
     graph: WebMercatorTerrainGraph,
-    frame: GpuTileFrontierFrame,
+    frame: GpuWebMercatorQuadCoverFrame,
     terrainPresentation: string
 ) {
 
     const terrainCommand = graph.commands.terrain[terrainPresentation]![frame.parity]!
-    const renderPatchCommands = graph.renderPatchFrontier.commandsFor(frame)
-    const viewTemplate = graph.frontierViewTemplates.renderPatch[frame.parity]
+    const coverCommands = graph.cover.commandsFor(frame)
     const terrainTemplate = graph.renderTemplates.terrain[frame.parity]
     const pairs = [
         {
-            name: 'frontier-map-meta-to-render-patch',
-            resource: viewTemplate.mapMeta,
-            consumerCommandId: renderPatchCommands.expand.id,
+            name: 'cover-map-meta-to-cover-compute',
+            resource: terrainTemplate.mapMeta,
+            consumerCommandId: coverCommands.generate.id,
         },
         {
-            name: 'render-patch-visible-to-terrain-draw',
+            name: 'cover-visible-to-terrain-draw',
             resource: terrainTemplate.visibleInstances,
             consumerCommandId: terrainCommand.id,
         },
         {
-            name: 'render-patch-lookup-to-terrain-draw',
-            resource: terrainTemplate.renderPatchLookup,
+            name: 'cover-lookup-to-terrain-draw',
+            resource: terrainTemplate.coverLookup,
             consumerCommandId: terrainCommand.id,
         },
         {
-            name: 'render-patch-indirect-to-terrain-draw',
+            name: 'cover-indirect-to-terrain-draw',
             resource: terrainTemplate.drawArgument.resource,
             consumerCommandId: terrainCommand.id,
         },
@@ -1541,14 +1415,11 @@ function identityFactSnapshot(graph: WebMercatorTerrainGraph) {
 
 function identityObjectsByKind(graph: WebMercatorTerrainGraph) {
 
-    const renderPatchIdentity = graph.renderPatchFrontier.identityObjects()
-    const templateResources = [
-        ...graph.frontierViewTemplates.renderPatch,
-        ...graph.renderTemplates.terrain,
-    ].flatMap(template => [
+    const coverIdentity = graph.cover.identityObjects()
+    const templateResources = graph.renderTemplates.terrain.flatMap(template => [
         template.mapMeta,
         template.visibleInstances,
-        ...('renderPatchLookup' in template ? [ template.renderPatchLookup ] : []),
+        template.coverLookup,
         template.drawArgument.resource,
     ])
     return {
@@ -1561,21 +1432,21 @@ function identityObjectsByKind(graph: WebMercatorTerrainGraph) {
             graph.virtualRaster.gpu.slotTable,
             graph.textures.depth,
             ...templateResources,
-            ...renderPatchIdentity.resources,
+            ...coverIdentity.resources,
         ]),
         uploads: [
             graph.uniforms.config.upload,
             graph.buffers.positions.upload,
             graph.buffers.indices.upload,
-            ...renderPatchIdentity.uploads,
+            ...coverIdentity.uploads,
         ],
-        bindLayouts: [ ...Object.values(graph.layouts), ...renderPatchIdentity.bindLayouts ],
-        bindSets: [ ...allBindSets(graph.bindSets), ...renderPatchIdentity.bindSets ],
-        programs: [ ...Object.values(graph.programs), ...renderPatchIdentity.programs ],
-        pipelines: [ ...Object.values(graph.pipelines), ...renderPatchIdentity.pipelines ],
-        passes: [ ...Object.values(graph.passes), ...renderPatchIdentity.passes ],
+        bindLayouts: [ ...Object.values(graph.layouts), ...coverIdentity.bindLayouts ],
+        bindSets: [ ...allBindSets(graph.bindSets), ...coverIdentity.bindSets ],
+        programs: [ ...Object.values(graph.programs), ...coverIdentity.programs ],
+        pipelines: [ ...Object.values(graph.pipelines), ...coverIdentity.pipelines ],
+        passes: [ ...Object.values(graph.passes), ...coverIdentity.passes ],
         commands: [
-            ...renderPatchIdentity.commands,
+            ...coverIdentity.commands,
             ...Object.values(graph.commands.terrain).flat(),
         ],
     }
@@ -1584,7 +1455,7 @@ function identityObjectsByKind(graph: WebMercatorTerrainGraph) {
 function allBindSets(bindSets: BindSets) {
 
     return [
-        bindSets.scene,
+        ...bindSets.scene,
         ...bindSets.terrainData,
         bindSets.terrainTextures,
     ]
@@ -1609,13 +1480,12 @@ function persistentFactSnapshot(runtime: GPURuntime): PersistentFacts {
 
 function graphContractSnapshot(graph: WebMercatorTerrainGraph): WebMercatorTerrainContractFacts {
 
-    const dataMaximumMatrixLevel = graph.frontier.descriptor.policy.maximumMatrixLevel
     return Object.freeze({
         stageOrder: WEB_MERCATOR_TERRAIN_STAGE_ORDER,
         countPath: 'gpu-produced-indirect-arguments',
-        selectionPath: 'gpu-resident-active-frontier',
-        dataMaximumMatrixLevel,
-        renderMaximumMatrixLevel: GPU_RENDER_PATCH_MAXIMUM_MATRIX_LEVEL,
+        selectionPath: 'gpu-camera-inverse-webmercatorquad-cover',
+        sourceMaximumMatrixLevel: graph.cover.descriptor.policy.sourceMaximumMatrixLevel,
+        coverMaximumMatrixLevel: graph.cover.descriptor.policy.maximumMatrixLevel,
         fieldLayer: Object.freeze({
             id: graph.fieldLayer.id,
             fieldId: graph.fieldLayer.field.id,
@@ -1625,9 +1495,7 @@ function graphContractSnapshot(graph: WebMercatorTerrainGraph): WebMercatorTerra
             demandProducerId: graph.fieldLayer.demandProducer.id,
         }),
         terrainVertexCount: graph.geometry.vertexCount,
-        frontier: graph.frontier.facts(),
-        renderPatches: graph.renderPatchFrontier.facts(),
-        feedback: graph.feedbackRing.facts(),
+        cover: graph.cover.facts(),
         virtualRaster: Object.freeze({
             sourceRevision: graph.virtualRaster.model.sourceRevision,
             pageSize: graph.virtualRaster.addressSpace.pageSize,
@@ -1639,12 +1507,12 @@ function graphContractSnapshot(graph: WebMercatorTerrainGraph): WebMercatorTerra
         }),
         persistentIdentityCount: stableIdentitySnapshot(graph).length,
         passIds: Object.freeze({
-            renderPatches: graph.renderPatchFrontier.identityObjects().passes[0]!.id,
+            cover: graph.cover.identityObjects().passes[0]!.id,
             terrain: graph.passes.terrain.id,
         }),
         commandIds: Object.freeze({
-            renderPatches: Object.freeze(
-                graph.renderPatchFrontier.facts().parity.map(parity => parity.commandIds)
+            cover: Object.freeze(
+                graph.cover.facts().parity.map(parity => parity.commandIds)
             ),
             drawTerrain: Object.freeze(Object.fromEntries(
                 Object.entries(graph.commands.terrain).map(([ id, commands ]) => [
@@ -1672,7 +1540,6 @@ function createState<Presentation extends string>(
         virtualRequestedPageCount: 0,
         staleFeedbackCount: 0,
         supersededFeedbackCount: 0,
-        latestFeedbackDiagnostics: Object.freeze([]),
         terrainPresentation,
     }
 }
@@ -1681,19 +1548,15 @@ function clearDecisionFeedback<Presentation extends string>(
     state: WebMercatorTerrainState<Presentation>
 ): void {
 
-    delete state.latestFrontierFacts
-    delete state.latestRenderPatchFeedback
-    state.latestFeedbackDiagnostics = Object.freeze([])
+    delete state.latestCoverFeedback
 }
 
 function stateSnapshot<Presentation extends string>(
     state: WebMercatorTerrainState<Presentation>,
-    pendingFeedbackCount: number,
-    feedbackRing: VirtualRasterGpuFeedbackRing
+    pendingFeedbackCount: number
 ): WebMercatorTerrainRendererState<Presentation> {
 
-    const latest = state.latestFrontierFacts
-    const renderPatches = state.latestRenderPatchFeedback
+    const cover = state.latestCoverFeedback
     return Object.freeze({
         initialized: state.initialized,
         disposed: state.disposed,
@@ -1709,46 +1572,25 @@ function stateSnapshot<Presentation extends string>(
         readbackInFlightCount: pendingFeedbackCount,
         staleFeedbackCount: state.staleFeedbackCount,
         supersededFeedbackCount: state.supersededFeedbackCount,
-        frontierCount: latest?.activeFrontierCount ?? 0,
-        visibleNodeCount: latest?.visibleInstanceCount ?? 0,
-        demandCount: latest?.demandCount ?? 0,
-        fallbackCount: latest?.fallbackCount ?? 0,
-        staleGenerationCount: latest?.staleGenerationCount ?? 0,
-        budgetLimitedCount: latest?.budgetLimitedCount ?? 0,
-        levelRange: Object.freeze([
-            latest?.minimumSelectedMatrixLevel,
-            latest?.maximumSelectedMatrixLevel,
+        coverCandidateCount: cover?.candidateCount ?? 0,
+        coverPatchCount: cover?.patchCount ?? 0,
+        coverDemandCount: cover?.demandCount ?? 0,
+        coverLevelRange: Object.freeze([
+            cover?.minimumMatrixLevel,
+            cover?.maximumMatrixLevel,
         ] as const),
-        maximumObservedSse: latest?.maximumObservedSse ?? 0,
-        renderPatchCount: renderPatches?.selectedPatchCount ?? 0,
-        renderPatchLevelRange: Object.freeze([
-            renderPatches?.minimumMatrixLevel,
-            renderPatches?.maximumMatrixLevel,
-        ] as const),
-        renderPatchCellSpanRange: Object.freeze([
-            renderPatches?.minimumCellSpanPixels,
-            renderPatches?.maximumCellSpanPixels,
-        ] as const),
-        renderPatchDescriptorOverflowCount:
-            renderPatches?.descriptorOverflowCount ?? 0,
-        renderPatchLookupOverflowCount: renderPatches?.lookupOverflowCount ?? 0,
-        ...(renderPatches === undefined
-            ? {}
-            : { renderPatchFrameEpoch: renderPatches.frameEpoch }),
-        renderPatchBaselineBudget: renderPatches?.baselinePatchBudget ?? 0,
-        renderPatchFrameBudget: renderPatches?.framePatchBudget ?? 0,
-        renderPatchRequestedCount: renderPatches?.requestedPatchCount ?? 0,
-        renderPatchMinimumTrialCount: renderPatches?.minimumTrialPatchCount ?? 0,
-        renderPatchRenderRootCount: renderPatches?.renderRootPatchCount ?? 0,
-        renderPatchSelectedBiasLevels: renderPatches?.selectedBiasLevels ?? 0,
-        renderPatchBudgetLimitedByMinimumTrial:
-            renderPatches?.budgetLimitedByMinimumTrial ?? false,
-        ...(renderPatches === undefined ? {} : { renderPatchFeedback: renderPatches }),
-        convergenceState: latest?.convergenceState ?? 'transitioning',
-        ...(latest === undefined ? {} : { frontierFacts: latest }),
-        latestFeedbackDiagnostics: state.latestFeedbackDiagnostics,
+        coverDescriptorOverflowCount: cover?.descriptorOverflowCount ?? 0,
+        coverLookupOverflowCount: cover?.lookupOverflowCount ?? 0,
+        coverDemandOverflowCount: cover?.demandOverflowCount ?? 0,
+        coverMaximumAdjacentLevelDelta: cover?.maximumAdjacentLevelDelta ?? 0,
+        ...(cover === undefined ? {} : {
+            coverFinestMatrixLevel: cover.finestMatrixLevel,
+            sourceLevelCeiling: cover.sourceLevelCeiling,
+            coverFrameEpoch: cover.frameEpoch,
+            coverFeedback: cover,
+        }),
+        convergenceState: cover === undefined ? 'transitioning' : 'converged',
         terrainPresentation: state.terrainPresentation,
-        feedback: feedbackRing.facts(),
     })
 }
 
@@ -1806,30 +1648,15 @@ function sameSize(left: SurfaceSize, right: SurfaceSize): boolean {
     return left.width === right.width && left.height === right.height
 }
 
-function terrainRenderPatchCapacity({
-    size,
-    renderRootCount,
-    theoreticalMaximum,
-}: Readonly<{
-    size: SurfaceSize
-    renderRootCount: number
-    theoreticalMaximum: number
-}>): number {
+function terrainCoverCapacity(size: SurfaceSize): number {
 
-    const nominalPatchSpan = TERRAIN_SECTOR_SIZE *
-        GPU_RENDER_PATCH_DEFAULT_MAXIMUM_CELL_SPAN_PIXELS
+    const nominalPatchSpan = TERRAIN_SECTOR_SIZE * 8
     const viewportColumns = Math.ceil(size.width / nominalPatchSpan) + 1
     const viewportRows = Math.ceil(size.height / nominalPatchSpan) + 1
-    const maximumFrameBudget = Math.ceil(
-        viewportColumns * viewportRows * TERRAIN_MAXIMUM_PATCH_COUNT_RATIO
-    )
-    const required = Math.max(
-        renderRootCount,
-        maximumFrameBudget * TERRAIN_BALANCE_CAPACITY_HEADROOM
-    )
+    const required = Math.max(16, viewportColumns * viewportRows * 12)
     let capacity = 1
     while (capacity < required) capacity *= 2
-    return Math.min(theoreticalMaximum, capacity)
+    return Math.min(4096, capacity)
 }
 
 function assertVirtualRaster(value: WebMercatorTerrainVirtualRaster) {
@@ -1842,7 +1669,7 @@ function assertVirtualRaster(value: WebMercatorTerrainVirtualRaster) {
         value.representation?.kind !== 'tiled-field-representation' ||
         value.spatialProfile?.kind !== 'tile-spatial-profile' ||
         value.viewDemandProducer?.kind !== 'view-demand-producer' ||
-        typeof value.reconcileFeedback !== 'function') {
+        typeof value.reconcileViewDemands !== 'function') {
         throw new TypeError(
             'Web Mercator terrain renderer requires a prepared WebMercator Virtual Raster runtime'
         )

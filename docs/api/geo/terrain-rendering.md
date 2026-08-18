@@ -10,85 +10,47 @@ apiSources:
 
 [简体中文](./terrain-rendering_zh.md) | [Geo overview](./README.md)
 
-`createWebMercatorTerrainRenderer` is Geo's complete OGC `WebMercatorQuad` terrain
-orchestrator. It composes a `MapFieldLayer`, Web Mercator Virtual Raster runtime, GPU
-data frontier, GPU render-patch frontier, generated terrain WGSL, indirect draw,
-feedback, capture-sized resize, and disposal into one explicit renderer. The name is intentionally
-projection-specific. There is no generic `TerrainFieldRenderer` alias: a globe or
-another tiling topology requires a renderer with different spatial and selection
-semantics.
+`createWebMercatorTerrainRenderer` is Geo's OGC `WebMercatorQuad` terrain
+orchestrator. It composes one `MapFieldLayer`, one prepared Virtual Raster runtime,
+one `GpuWebMercatorQuadCover`, generated terrain WGSL, indirect drawing,
+capture-sized resize, delayed demand settlement, and disposal. The name is
+projection-specific; there is no generic terrain alias that pretends planar and globe
+selection are equivalent.
 
-`webMercatorTerrainWgslModule` owns the entire terrain vertex path. It reconstructs
-wide-fixed logical positions from render patches, takes camera-relative differences
-before f32 conversion, resolves neighboring render patches, snaps mixed-LoD shared
-edges, samples height through the logical Virtual Raster accessor, and projects the
-result. It also provides the built-in fragment entry point named by
-`WEB_MERCATOR_TERRAIN_TILE_WIREFRAME_FRAGMENT_ENTRY_POINT`. The renderer's
-`presentationShader` is an extension source for application fragment entry points; it
-consumes `WebMercatorTerrainVertexOutput` and must not duplicate position, stitching,
-tile lookup, or height-sampling logic.
+The frame order is:
 
-Raster LoD and geometry LoD are separate authorities. The data frontier owns demand,
-residency, publication, and fallback up to the source matrix limit. The render-patch
-frontier traverses an immutable, prefix-free geographic safety cover and may refine the
-terrain grid beyond the source limit. A render patch carries only geometry identity.
-Terrain requests the finest logical Virtual Raster level, and the page table resolves
-each coordinate to the available physical page. Virtual Raster removes CPU padding and
-physical-atlas coupling; mesh stitching removes T-junction cracks.
+```text
+view upload -> inverse-cover compute -> terrain drawIndirect
+```
 
-Render-patch refinement is canonical for the current camera, viewport, render roots,
-and policy. Each horizontal terrain footprint is clipped against all six WebGPU
-homogeneous clip planes to obtain visible evaluation positions. At those positions,
-the GPU projects a symmetric one-cell displacement along both horizontal axes and uses
-the area-equivalent pixel span of their local Jacobian as the refinement metric. The
-metric is local and does not shrink merely because viewport clipping leaves a smaller
-visible sliver during zoom-in.
+The cover is the only geometry-LoD authority. It derives a prefix-free, standard-tile
+cover from current camera facts without root traversal or atlas residency. Its output
+contains full `tileMatrix/tileRow/tileCol` identities, a neighbor lookup, desired page
+feedback, and an indirect instance count. The final cover is 2:1 edge-balanced before
+terrain rendering.
 
-The GPU counts 17 complete uniform-bias cuts and chooses a stateless in-budget base.
-Each `(render root, bias trial)` is counted by an independent GPU invocation rather than
-serializing all 17 tree traversals in one invocation. At renderer creation, persistent
-render-patch capacity is derived from viewport patch budget with explicit 2:1-balance headroom, rounded to a power of
-two, and bounded by the theoretical data-frontier maximum. It is not multiplied blindly from
-resident data-tile capacity. The balance kernel retains the maximum 14-pass correctness bound
-but stops after an even scratch/primary pair reports no additional split, using
-`workgroupUniformLoad` so every lane exits in uniform control flow.
+Raster demand is explicitly downstream. Cover feedback retains desired precision and
+source ceiling, then the renderer creates a `ViewTileDemandSet`.
+`VirtualRasterRuntime.reconcileViewDemands()` schedules only executable source pages.
+Already exact-resident pages do not consume the concurrent request budget. Missing
+exact pages continue rendering through page-table ancestor fallback; residency timing
+never changes geometry topology.
 
-It then repeatedly identifies the greatest above-threshold Q8-quantized local span.
-Every terminal patch with that exact error belongs to one indivisible cohort: the GPU
-splits the complete cohort only when all of its visible children fit the residual frame
-budget. It never selects an equal-error subset by logical tile identity, traversal
-order, or screen direction. Unused slots are valid when the next complete quality
-cohort does not fit. The primary lookup is rebuilt from that error-cohort-filled cut
-before bounded 2:1 balancing. Local selection never reads data-frontier topology,
-previous-parity topology, or a previous bias. Delayed render-patch feedback exposes
-base, fill, budget-limited, unbalanced, and balance facts, but never controls a later
-render cut.
+`webMercatorTerrainWgslModule` owns the full vertex path. It reconstructs wide-fixed
+standard-tile positions, subtracts the camera before f32 conversion, resolves cover
+neighbors, snaps mixed-LoD edges, samples height by global field coordinate, and
+projects the result. The built-in
+`WEB_MERCATOR_TERRAIN_TILE_WIREFRAME_FRAGMENT_ENTRY_POINT` displays the post-stitch
+mesh with stable per-tile colors. Application presentation WGSL supplies fragment
+shading only.
 
-`render(capture)` consumes one `GeoViewSourceCapture<ViewInput>`. It performs Surface and
-depth-target resize only when `capture.size` changed, submits from `capture.view`, and returns
-one `GeoFrameResult<WebMercatorTerrainFrameValue>`. The result value contains the immediate
-submitted frame identity/provenance and exact view. `WebMercatorTerrainFrameSettlement`
-directly satisfies `GeoFrameSettlement`; `residencyWorkCount` is the only page-work count.
-There is no public renderer `renderFrame()` or `resize()` compatibility path.
+`render(capture)` consumes one `GeoViewSourceCapture<ViewInput>`, submits the
+matching view, and returns `GeoFrameResult<WebMercatorTerrainFrameValue>`.
+Submission/native observation, delayed cover readback, raster request settlement, and
+later publication remain separate promises. Superseded cover feedback cannot reconcile
+demand or overwrite current facts. The renderer owns two map-meta/cover parity sets;
+the Underwater Terrain application uses a measured two-frame in-flight bound.
 
-`render()` returns as soon as the current work is submitted. Native observation,
-delayed GPU feedback, feedback-driven residency, and convergence remain separate promises;
-none retains frame-submission authority. Feedback for an older camera is reported as
-superseded and cannot reconcile residency or overwrite current facts. A decision is
-settled only after its frontier is converged and it requests no additional pages. When
-the camera or residency decision key changes, the renderer immediately withdraws the
-previous frontier and render-patch facts and reports `transitioning` until feedback for
-the current decision settles. Returning to an earlier camera does not reuse its old
-settled status because intervening decisions have mutated the GPU-resident frontier.
-
-Lower-level consumers may compose `gpuRenderPatchReadWgslModule` directly. It exposes
-bounded visible-instance lookup, covering-patch lookup, neighbor resolution, and edge
-coordinate snapping with explicit storage bindings and layout dependencies. Generated
-modules never read a CPU-selected tile list or round-trip draw counts through the CPU.
-
-The renderer does not own a map host, camera controller, view source, source manifest, network
-transport, decoder, Worker system, or application cache policy. Those remain explicit
-composition inputs. The Underwater Terrain example therefore owns source-specific
-loading and decoding, map/UI assembly, cache-budget choice, and its fragment presentation only.
-Its `main.ts` owns page bootstrap and proof loading, while `application.ts` keeps the explicit
-map/runtime/raster/renderer/source/driver/controller assembly readable in isolation.
+The renderer does not own a map host, controller, source manifest, URL policy, Worker
+system, decoder, or persistent cache choice. Those remain explicit application
+composition.

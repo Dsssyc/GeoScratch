@@ -41,6 +41,7 @@ export type GpuWebMercatorQuadCoverReferenceDemand = Readonly<{
     desiredSampleLevel: number
     sourceLevelCeiling: number
     requestPage: GpuWebMercatorQuadCoverReferencePatch
+    priority: number
 }>
 
 export type GpuWebMercatorQuadCoverReferenceResult = Readonly<{
@@ -48,8 +49,6 @@ export type GpuWebMercatorQuadCoverReferenceResult = Readonly<{
     demands: readonly GpuWebMercatorQuadCoverReferenceDemand[]
     facts: Readonly<{
         selectionPath: 'gpu-camera-inverse-webmercatorquad-cover'
-        rootTraversalCount: 0
-        trialCount: 0
         finestMatrixLevel: number
         minimumMatrixLevel: number
         maximumMatrixLevel: number
@@ -57,7 +56,6 @@ export type GpuWebMercatorQuadCoverReferenceResult = Readonly<{
         candidateCount: number
         patchCount: number
         demandCount: number
-        budgetLimited: boolean
     }>
 }>
 
@@ -78,18 +76,12 @@ export function evaluateGpuWebMercatorQuadCoverReference(
 
     validateInput(input)
     const focus = normalizedCamera(input.view)
-    const requestedFinest = clamp(
+    const finestMatrixLevel = clamp(
         Math.ceil(input.view.zoomHint) + pitchLevelBoost(input.view.cameraPitchRadians),
         input.policy.minimumMatrixLevel,
         input.policy.maximumMatrixLevel
     )
-    let finestMatrixLevel = requestedFinest
-    let generated = generate(input, focus, finestMatrixLevel)
-    while (generated.patches.length > input.policy.maximumPatches &&
-        finestMatrixLevel > input.policy.minimumMatrixLevel) {
-        finestMatrixLevel--
-        generated = generate(input, focus, finestMatrixLevel)
-    }
+    const generated = generate(input, focus, finestMatrixLevel)
     if (generated.patches.length > input.policy.maximumPatches) {
         return invalidCover(
             'The minimum standard cover exceeds its declared patch capacity.',
@@ -106,8 +98,6 @@ export function evaluateGpuWebMercatorQuadCoverReference(
         demands: Object.freeze(demands),
         facts: Object.freeze({
             selectionPath: 'gpu-camera-inverse-webmercatorquad-cover' as const,
-            rootTraversalCount: 0 as const,
-            trialCount: 0 as const,
             finestMatrixLevel,
             minimumMatrixLevel: input.policy.minimumMatrixLevel,
             maximumMatrixLevel: input.policy.maximumMatrixLevel,
@@ -115,7 +105,6 @@ export function evaluateGpuWebMercatorQuadCoverReference(
             candidateCount: generated.candidateCount,
             patchCount: generated.patches.length,
             demandCount: demands.length,
-            budgetLimited: finestMatrixLevel < requestedFinest,
         }),
     })
 }
@@ -182,12 +171,12 @@ function coverWindows(
             minTileCol: Math.floor(finer.minTileCol / 2),
             maxTileCol: Math.floor(finer.maxTileCol / 2),
         }
-        const expanded = {
+        const expanded = alignToParentGroups({
             minTileRow: parentWindow.minTileRow - LEVEL_HALO_TILES,
             maxTileRow: parentWindow.maxTileRow + LEVEL_HALO_TILES,
             minTileCol: parentWindow.minTileCol - LEVEL_HALO_TILES,
             maxTileCol: parentWindow.maxTileCol + LEVEL_HALO_TILES,
-        }
+        })
         windows.set(matrixLevel, matrixLevel === input.policy.minimumMatrixLevel
             ? limit
             : fitWindow(expanded, limit))
@@ -200,23 +189,21 @@ function geometryLimit(
     matrixLevel: number
 ): IntegerBounds {
 
-    const exact = input.spatialProfile.coverage.limit(String(matrixLevel))
-    if (exact !== undefined) return integerBounds(exact)
-    const sourceLevel = input.policy.sourceMaximumMatrixLevel
-    const source = input.spatialProfile.coverage.limit(String(sourceLevel))
-    if (source === undefined || matrixLevel < sourceLevel) {
+    const rootLevel = input.policy.minimumMatrixLevel
+    const root = input.spatialProfile.coverage.limit(String(rootLevel))
+    if (root === undefined || matrixLevel < rootLevel) {
         return invalidCover(
-            'Cover levels require source coverage through the declared source ceiling.',
-            { sourceMaximumMatrixLevel: sourceLevel },
+            'Cover levels require one standard minimum-level safety domain.',
+            { minimumMatrixLevel: rootLevel },
             { matrixLevel, limits: input.spatialProfile.coverage.limits }
         )
     }
-    const scale = 2 ** (matrixLevel - sourceLevel)
+    const scale = 2 ** (matrixLevel - rootLevel)
     return Object.freeze({
-        minTileRow: source.minTileRow * scale,
-        maxTileRow: (source.maxTileRow + 1) * scale - 1,
-        minTileCol: source.minTileCol * scale,
-        maxTileCol: (source.maxTileCol + 1) * scale - 1,
+        minTileRow: root.minTileRow * scale,
+        maxTileRow: (root.maxTileRow + 1) * scale - 1,
+        minTileCol: root.minTileCol * scale,
+        maxTileCol: (root.maxTileCol + 1) * scale - 1,
     })
 }
 
@@ -253,6 +240,7 @@ function createDemands(
             desiredSampleLevel: patch.matrixLevel,
             sourceLevelCeiling: input.policy.sourceMaximumMatrixLevel,
             requestPage,
+            priority: demandPriority(patch.matrixLevel, requestPage, focus),
         })
         const existing = byRequest.get(requestPage.key)
         if (existing === undefined ||
@@ -262,12 +250,25 @@ function createDemands(
     }
     return [ ...byRequest.values() ]
         .sort((left, right) =>
-            right.desiredSampleLevel - left.desiredSampleLevel ||
-            distanceToFocus(left.requestPage, focus) -
-                distanceToFocus(right.requestPage, focus) ||
+            right.priority - left.priority ||
             comparePatch(left.requestPage, right.requestPage)
         )
-        .slice(0, input.policy.maximumDemands)
+}
+
+function demandPriority(
+    desiredSampleLevel: number,
+    requestPage: GpuWebMercatorQuadCoverReferencePatch,
+    focus: readonly [number, number]
+): number {
+
+    const size = 2 ** requestPage.matrixLevel
+    const cameraRow = clamp(Math.floor(focus[1] * size), 0, size - 1)
+    const cameraCol = clamp(Math.floor(focus[0] * size), 0, size - 1)
+    const rowDistance = Math.abs(requestPage.tileRow - cameraRow)
+    const rawColDistance = Math.abs(requestPage.tileCol - cameraCol)
+    const colDistance = Math.min(rawColDistance, size - rawColDistance)
+    return desiredSampleLevel * 1_000_000 + 999_999 -
+        Math.min(rowDistance + colDistance, 999_999)
 }
 
 function referencePatch(
@@ -344,6 +345,16 @@ function fitWindow(bounds: IntegerBounds, limit: IntegerBounds): IntegerBounds {
     })
 }
 
+function alignToParentGroups(bounds: IntegerBounds): IntegerBounds {
+
+    return Object.freeze({
+        minTileRow: Math.floor(bounds.minTileRow / 2) * 2,
+        maxTileRow: Math.ceil((bounds.maxTileRow + 1) / 2) * 2 - 1,
+        minTileCol: Math.floor(bounds.minTileCol / 2) * 2,
+        maxTileCol: Math.ceil((bounds.maxTileCol + 1) / 2) * 2 - 1,
+    })
+}
+
 function fitStart(value: number, span: number, minimum: number, maximum: number): number {
 
     return clamp(value, minimum, maximum - span + 1)
@@ -371,18 +382,6 @@ function intersectsVisible(
         patch.tileCol / size < visible.east &&
         (patch.tileRow + 1) / size > visible.north &&
         patch.tileRow / size < visible.south
-}
-
-function distanceToFocus(
-    patch: GpuWebMercatorQuadCoverReferencePatch,
-    focus: readonly [number, number]
-): number {
-
-    const size = 2 ** patch.matrixLevel
-    return Math.hypot(
-        (patch.tileCol + 0.5) / size - focus[0],
-        (patch.tileRow + 0.5) / size - focus[1]
-    )
 }
 
 function comparePatch(

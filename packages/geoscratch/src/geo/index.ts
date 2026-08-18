@@ -24,7 +24,7 @@ export type {
     PlanarTileBounds,
     PlanarTileSpatialProfileDescriptor,
     TileSpatialCameraEncoding,
-    TileSpatialFrontierEncoding,
+    TileSpatialFixedEncoding,
     TileSpatialProfile,
     WebMercatorPlanarTileSpatialProfile,
     WebMercatorPlanarTileSpatialProfileDescriptor,
@@ -108,58 +108,28 @@ export type {
     MapFieldLayerDescriptor,
 } from './map-field-layer.js'
 export {
-    gpuTileFrontierPolicy,
-    gpuTileFrontierRenderWgslModule,
-} from './gpu-tile-frontier-layout.js'
+    GpuWebMercatorQuadCover,
+    decodeGpuWebMercatorQuadCoverFeedback,
+    gpuWebMercatorQuadCoverPolicy,
+} from './gpu-web-mercator-quad-cover.js'
 export type {
-    GpuTileFrontierConvergenceState,
-    GpuTileFrontierDemand,
-    GpuTileFrontierDescriptor,
-    GpuTileFrontierDrawTemplate,
-    GpuTileFrontierFacts,
-    GpuTileFrontierLevelMetric,
-    GpuTileFrontierPolicy,
-    GpuTileFrontierRenderWgslModule,
-    GpuTileFrontierRenderWgslOptions,
-    GpuTileFrontierView,
-} from './gpu-tile-frontier-layout.js'
-export { GpuTileFrontier } from './gpu-tile-frontier.js'
+    GpuWebMercatorQuadCoverCommands,
+    GpuWebMercatorQuadCoverDemand,
+    GpuWebMercatorQuadCoverDescriptor,
+    GpuWebMercatorQuadCoverFacts,
+    GpuWebMercatorQuadCoverFeedback,
+    GpuWebMercatorQuadCoverFrame,
+    GpuWebMercatorQuadCoverIdentityObjects,
+    GpuWebMercatorQuadCoverPolicy,
+    GpuWebMercatorQuadCoverRenderTemplate,
+    GpuWebMercatorQuadCoverSelectionFacts,
+    GpuWebMercatorQuadCoverViewToken,
+} from './gpu-web-mercator-quad-cover.js'
+export { gpuWebMercatorQuadCoverReadWgslModule } from './gpu-web-mercator-quad-cover-layout.js'
 export type {
-    GpuTileFrontierCoreFacts,
-    GpuTileFrontierDrawArgument,
-    GpuTileFrontierFeedbackLayout,
-    GpuTileFrontierFeedbackOutput,
-    GpuTileFrontierFeedbackSection,
-    GpuTileFrontierFrame,
-    GpuTileFrontierRenderTemplate,
-    GpuTileFrontierSeed,
-    GpuTileFrontierViewToken,
-} from './gpu-tile-frontier.js'
-export {
-    GPU_RENDER_PATCH_BALANCE_PASS_COUNT,
-    GPU_RENDER_PATCH_DEFAULT_CELLS_PER_EDGE,
-    GPU_RENDER_PATCH_DEFAULT_MAXIMUM_CELL_SPAN_PIXELS,
-    GPU_RENDER_PATCH_MAXIMUM_MATRIX_LEVEL,
-    GpuRenderPatchFeedbackStaleError,
-    createGpuRenderPatchFrontier,
-    decodeGpuRenderPatchState,
-    gpuRenderPatchReadWgslModule,
-    gpuRenderPatchWgslModule,
-} from './gpu-render-patch-frontier.js'
-export type {
-    GpuRenderPatchCommands,
-    GpuRenderPatchFeedback,
-    GpuRenderPatchFrontier,
-    GpuRenderPatchFrontierDescriptor,
-    GpuRenderPatchFrontierFacts,
-    GpuRenderPatchIdentityObjects,
-    GpuRenderPatchReadWgslModule,
-    GpuRenderPatchReadWgslOptions,
-    GpuRenderPatchRenderTemplate,
-    GpuRenderPatchRootDescriptor,
-    GpuRenderPatchSelectionFacts,
-    GpuRenderPatchViewTemplate,
-} from './gpu-render-patch-frontier.js'
+    GpuWebMercatorQuadCoverReadWgslModule,
+    GpuWebMercatorQuadCoverReadWgslOptions,
+} from './gpu-web-mercator-quad-cover-layout.js'
 export {
     WEB_MERCATOR_TERRAIN_TILE_WIREFRAME_FRAGMENT_ENTRY_POINT,
     webMercatorTerrainWgslModule,
@@ -403,11 +373,3 @@ export type {
     VirtualRasterGpuStateDescriptor,
     VirtualRasterGpuUpdate,
 } from './virtual-raster-gpu.js'
-export { VirtualRasterGpuFeedbackRing } from './virtual-raster-gpu-feedback.js'
-export type {
-    GpuTileFrontierRetirement,
-    VirtualRasterGpuFeedbackBatch,
-    VirtualRasterGpuFeedbackCounters,
-    VirtualRasterGpuFeedbackRingFacts,
-    VirtualRasterGpuFeedbackSlotFacts,
-} from './virtual-raster-gpu-feedback.js'

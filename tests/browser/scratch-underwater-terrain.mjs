@@ -35,15 +35,14 @@ const tilePort = process.env.UNDERWATER_TERRAIN_TILE_PORT === undefined
     : positiveInteger(process.env.UNDERWATER_TERRAIN_TILE_PORT)
 const tileBaseUrl = `http://127.0.0.1:${tilePort}`
 const expectedStageOrder = Object.freeze([
-    'frontier-compute',
-    'render-patch-compute',
+    'inverse-cover-compute',
     'terrain',
 ])
 const requiredProvenanceNames = Object.freeze([
-    'frontier-map-meta-to-render-patch',
-    'render-patch-visible-to-terrain-draw',
-    'render-patch-lookup-to-terrain-draw',
-    'render-patch-indirect-to-terrain-draw',
+    'cover-map-meta-to-cover-compute',
+    'cover-visible-to-terrain-draw',
+    'cover-lookup-to-terrain-draw',
+    'cover-indirect-to-terrain-draw',
 ])
 const cameraCenter = Object.freeze([ 120.980697, 31.684162 ])
 const cameraScenarios = Object.freeze([
@@ -341,8 +340,8 @@ async function captureCameraAbaTransition(page) {
         finalFacts,
         repeatedFacts,
         signatures: Object.freeze([
-            frontierSignature(finalFacts),
-            frontierSignature(repeatedFacts),
+            coverSignature(finalFacts),
+            coverSignature(repeatedFacts),
         ]),
     })
 }
@@ -416,7 +415,7 @@ async function captureConvergedCamera(page, definition) {
         cameraMatches(value, definition.camera)
     ))
     facts.push(current)
-    signatures.push(frontierSignature(current))
+    signatures.push(coverSignature(current))
     const firstPath = resolve(outputDirectory, `${definition.name}-stable-first.png`)
     const firstPng = await page.locator('#GPUFrame').screenshot({ path: firstPath })
 
@@ -427,7 +426,7 @@ async function captureConvergedCamera(page, definition) {
             Number(value.observedFrames) > previousFrames && cameraMatches(value, definition.camera)
         ))
         facts.push(current)
-        signatures.push(frontierSignature(current))
+        signatures.push(coverSignature(current))
     }
 
     const finalPath = resolve(outputDirectory, `${definition.name}-stable-final.png`)
@@ -445,13 +444,16 @@ async function captureConvergedCamera(page, definition) {
 async function waitForConvergedFacts(page, additional = () => true) {
 
     return await waitForUnderwaterTerrainFacts(page, facts => {
-        const frontier = parseJsonOrUndefined(facts.frontier)
+        const cover = parseJsonOrUndefined(facts.coverFeedback)
         const virtualRaster = parseJsonOrUndefined(facts.virtualRaster)
         return facts.status === 'ready' &&
-            facts.frontierConverged === 'true' &&
-            frontier?.convergenceState === 'converged' &&
-            frontier?.demandCount === 0 &&
-            frontier?.staleGenerationCount === 0 &&
+            facts.coverConverged === 'true' &&
+            facts.convergenceState === 'converged' &&
+            cover?.patchCount > 0 &&
+            cover?.descriptorOverflowCount === 0 &&
+            cover?.lookupOverflowCount === 0 &&
+            cover?.demandOverflowCount === 0 &&
+            cover?.maximumAdjacentLevelDelta <= 1 &&
             Number(facts.frames) === Number(facts.observedFrames) &&
             Number(facts.currentPendingNativeObservations) === 0 &&
             virtualRasterIdle(virtualRaster) && additional(facts)
@@ -490,24 +492,27 @@ function bearingDistance(left, right) {
     return Math.min(difference, 360 - difference)
 }
 
-function frontierSignature(facts) {
+function coverSignature(facts) {
 
-    const frontier = parseJsonOrUndefined(facts.frontier)
+    const cover = parseJsonOrUndefined(facts.coverFeedback)
     const camera = parseJsonOrUndefined(facts.cameraView)
     return JSON.stringify({
-        activeFrontierCount: frontier?.activeFrontierCount,
-        visibleInstanceCount: frontier?.visibleInstanceCount,
-        refineCandidateCount: frontier?.refineCandidateCount,
-        coarsenCandidateCount: frontier?.coarsenCandidateCount,
-        coarsenGracePendingCount: frontier?.coarsenGracePendingCount,
-        demandCount: frontier?.demandCount,
-        fallbackCount: frontier?.fallbackCount,
-        budgetLimitedCount: frontier?.budgetLimitedCount,
-        maximumObservedSse: frontier?.maximumObservedSse,
-        minimumSelectedMatrixLevel: frontier?.minimumSelectedMatrixLevel,
-        maximumSelectedMatrixLevel: frontier?.maximumSelectedMatrixLevel,
-        convergenceState: frontier?.convergenceState,
-        residencySnapshotEpoch: frontier?.residencySnapshotEpoch,
+        candidateCount: cover?.candidateCount,
+        patchCount: cover?.patchCount,
+        demandCount: cover?.demandCount,
+        minimumMatrixLevel: cover?.minimumMatrixLevel,
+        maximumMatrixLevel: cover?.maximumMatrixLevel,
+        maximumAdjacentLevelDelta: cover?.maximumAdjacentLevelDelta,
+        finestMatrixLevel: cover?.finestMatrixLevel,
+        sourceLevelCeiling: cover?.sourceLevelCeiling,
+        demands: cover?.demands?.map(demand => ({
+            desiredSampleLevel: demand.desiredSampleLevel,
+            sourceLevelCeiling: demand.sourceLevelCeiling,
+            requestMatrixLevel: demand.requestMatrixLevel,
+            tileRow: demand.tileRow,
+            tileCol: demand.tileCol,
+            priority: demand.priority,
+        })),
         camera,
     })
 }
@@ -629,7 +634,7 @@ async function waitForUnderwaterTerrainFacts(page, predicate) {
 function waitFacts(facts) {
 
     if (facts === undefined) return undefined
-    const frontier = parseJsonOrUndefined(facts.frontier)
+    const cover = parseJsonOrUndefined(facts.coverFeedback)
     const virtualRaster = parseJsonOrUndefined(facts.virtualRaster)
     return {
         status: facts.status,
@@ -638,7 +643,7 @@ function waitFacts(facts) {
         currentPendingNativeObservations: Number(facts.currentPendingNativeObservations),
         frameWork: parseJsonOrUndefined(facts.frameWork),
         cameraView: parseJsonOrUndefined(facts.cameraView),
-        frontier,
+        cover,
         virtualRaster: virtualRaster === undefined ? undefined : {
             residency: selectFacts(virtualRaster.residency, [
                 'demandGeneration',
@@ -1014,7 +1019,7 @@ function validateNormalProof(proof, failures) {
         }
         if (new Set(result.signatures).size !== 1) {
             failures.push(
-                `${result.name} frontier facts changed across identical camera frames: ` +
+                `${result.name} cover facts changed across identical camera frames: ` +
                 result.signatures.join(' -> ')
             )
         }
@@ -1044,25 +1049,22 @@ function validateNormalProof(proof, failures) {
             }
         }
     }
-    const normalizationProofs = scenarios.flatMap(result => result.facts.map(facts => (
-        parseJsonOrUndefined(facts.renderPatchFeedback)
-    ))).filter(feedback => (
-        feedback?.selectedBiasStep > 0 &&
-        feedback?.requestedPatchCount > feedback?.unbalancedPatchCount &&
-        feedback?.unbalancedPatchCount <= feedback?.framePatchBudget
-    ))
-    if (normalizationProofs.length === 0) {
-        failures.push('no camera scenario exercised GPU render-patch budget normalization')
-    }
-    const balanceProofs = scenarios.flatMap(result => result.facts.map(facts => (
-        parseJsonOrUndefined(facts.renderPatchFeedback)
-    ))).filter(feedback => (
-        feedback?.balanceSplitCount > 0 &&
-        feedback?.balanceOverheadPatchCount === feedback.balanceSplitCount * 3 &&
+    const coverProofs = scenarios.flatMap(result => result.facts.map(facts => (
+        parseJsonOrUndefined(facts.coverFeedback)
+    )))
+    const pitchedMultiLevelProofs = coverProofs.filter(feedback => (
+        feedback?.minimumMatrixLevel < feedback?.maximumMatrixLevel &&
         feedback?.maximumAdjacentLevelDelta === 1
     ))
+    if (pitchedMultiLevelProofs.length === 0) {
+        failures.push('no camera scenario exercised the multi-level inverse cover')
+    }
+    const balanceProofs = coverProofs.filter(feedback => (
+        feedback?.maximumAdjacentLevelDelta === 1 &&
+        feedback?.patchCount > 1
+    ))
     if (balanceProofs.length === 0) {
-        failures.push('no camera scenario exercised final render-patch balancing')
+        failures.push('no camera scenario exercised final inverse-cover balancing')
     }
     validateUnderwaterTerrainFacts('resized', resized, failures)
     validateUnderwaterTerrainFacts('drained', drained, failures, 'stopped')
@@ -1129,7 +1131,7 @@ function validateNormalProof(proof, failures) {
             'dem-virtual-raster-demand',
             'pagehide-listener',
             'underwater-terrain-control-panel',
-            'underwater-terrain-gpu-frontier',
+            'underwater-terrain-inverse-cover',
             'dem-virtual-raster-streaming',
             'scratch-runtime',
             'maplibre-map',
@@ -1171,11 +1173,11 @@ function validateUnderwaterTerrainFacts(label, facts, failures, expectedStatus =
         facts.stageCount !== String(expectedStageOrder.length)) {
         failures.push(`${label} stage order was incorrect`)
     }
-    const count = Number(facts.visibleNodeCount)
+    const count = Number(facts.coverPatchCount)
     if (!Number.isSafeInteger(count) || count < 1 || count > 5_000) {
-        failures.push(`${label} visible node count was outside 1..5000`)
+        failures.push(`${label} cover patch count was outside 1..5000`)
     }
-    if (facts.selectionPath !== 'gpu-resident-active-frontier' ||
+    if (facts.selectionPath !== 'gpu-camera-inverse-webmercatorquad-cover' ||
         facts.countPath !== 'gpu-produced-indirect-arguments' ||
         facts.cpuSelectionUploadCount !== '0') {
         failures.push(`${label} did not use the clean GPU selection/count path`)
@@ -1215,103 +1217,59 @@ function validateUnderwaterTerrainFacts(label, facts, failures, expectedStatus =
     }
     const contract = parseJson(facts.graphContract, `${label} graph contract`, failures)
     if (contract?.countPath !== 'gpu-produced-indirect-arguments' ||
-        contract?.selectionPath !== 'gpu-resident-active-frontier' ||
-        contract?.dataMaximumMatrixLevel !== 10 ||
-        contract?.renderMaximumMatrixLevel !== 14 ||
-        contract?.renderPatches?.selectionPath !==
-            'gpu-balanced-error-cohort-filled-render-root-local-cell-projection' ||
-        contract?.renderPatches?.renderRootCount < 1 ||
-        contract?.renderPatches?.maximumCellSpanPixels !== 8 ||
-        contract?.renderPatches?.nominalPatchSpanPixels !== 512 ||
-        contract?.renderPatches?.maximumPatchCountRatio !== 3 ||
-        contract?.renderPatches?.biasStepCount !== 17 ||
-        contract?.renderPatches?.balancePassCount !== 14 ||
-        contract?.renderPatches?.balanceWorkgroupSize !== 256 ||
-        contract?.renderPatches?.budgetFillWorkgroupSize !== 1 ||
-        contract?.renderPatches?.renderPatchLookupCapacity <=
-            contract?.renderPatches?.maximumRenderPatches ||
+        contract?.selectionPath !== 'gpu-camera-inverse-webmercatorquad-cover' ||
+        contract?.sourceMaximumMatrixLevel !== 10 ||
+        contract?.coverMaximumMatrixLevel !== 14 ||
+        contract?.cover?.selectionPath !==
+            'gpu-camera-inverse-webmercatorquad-cover' ||
+        contract?.cover?.policy?.sourceMaximumMatrixLevel !== 10 ||
+        contract?.cover?.policy?.maximumMatrixLevel !== 14 ||
+        contract?.cover?.policy?.maximumPatches < count ||
+        contract?.cover?.lookupCapacity <= contract?.cover?.policy?.maximumPatches ||
+        contract?.cover?.coverageLimitCount < 1 ||
         contract?.terrainVertexCount !== 24_576 ||
         JSON.stringify(contract?.stageOrder) !== JSON.stringify(expectedStageOrder)) {
         failures.push(`${label} persistent graph contract drifted`)
     }
     parseJson(facts.cameraView, `${label} camera view`, failures)
-    const levelRange = parseJson(facts.levelRange, `${label} data level range`, failures)
-    if (!Array.isArray(levelRange) || levelRange[1] > 10) {
-        failures.push(`${label} data frontier exceeded the z10 source ceiling`)
-    }
-    const renderPatchFeedback = parseJson(
-        facts.renderPatchFeedback,
-        `${label} render-patch feedback`,
+    const cover = parseJson(facts.coverFeedback, `${label} cover feedback`, failures)
+    const coverLevelRange = parseJson(
+        facts.coverLevelRange,
+        `${label} cover level range`,
         failures
     )
-    const renderPatchLevelRange = parseJson(
-        facts.renderPatchLevelRange,
-        `${label} render-patch level range`,
-        failures
+    const demandLevelsAreValid = Array.isArray(cover?.demands) && cover.demands.every(
+        demand => demand?.sourceLevelCeiling === 10 &&
+            demand?.requestMatrixLevel <= demand.sourceLevelCeiling &&
+            demand?.desiredSampleLevel >= demand.requestMatrixLevel &&
+            demand?.desiredSampleLevel <= 14 &&
+            demand?.decisionFrameEpoch === cover.frameEpoch
     )
-    const renderPatchCellSpanRange = parseJson(
-        facts.renderPatchCellSpanRange,
-        `${label} render-patch cell-span range`,
-        failures
-    )
-    const minimumTrialLimited = renderPatchFeedback?.minimumTrialPatchCount >
-        renderPatchFeedback?.framePatchBudget
-    if (renderPatchFeedback?.selectedPatchCount !== Number(facts.renderPatchCount) ||
-        renderPatchFeedback?.descriptorOverflowCount !== 0 ||
-        renderPatchFeedback?.lookupOverflowCount !== 0 ||
-        renderPatchFeedback?.baselinePatchBudget < 1 ||
-        renderPatchFeedback?.framePatchBudget < renderPatchFeedback?.baselinePatchBudget ||
-        renderPatchFeedback?.requestedPatchCount <
-            renderPatchFeedback?.unbalancedPatchCount ||
-        renderPatchFeedback?.basePatchCount >
-            renderPatchFeedback?.unbalancedPatchCount ||
-        renderPatchFeedback?.budgetFillSplitCount < 0 ||
-        renderPatchFeedback?.budgetLimitedRefinementCount < 0 ||
-        renderPatchFeedback?.budgetLimitedRefinementCount >
-            renderPatchFeedback?.unbalancedPatchCount ||
-        (renderPatchFeedback?.budgetFillSplitCount === 0 &&
-            renderPatchFeedback?.basePatchCount !==
-                renderPatchFeedback?.unbalancedPatchCount) ||
-        renderPatchFeedback?.selectedPatchCount !==
-            renderPatchFeedback?.unbalancedPatchCount +
-                renderPatchFeedback?.balanceSplitCount * 3 ||
-        renderPatchFeedback?.balanceOverheadPatchCount !==
-            renderPatchFeedback?.balanceSplitCount * 3 ||
-        renderPatchFeedback?.maximumAdjacentLevelDelta > 1 ||
-        renderPatchFeedback?.balancePassCount !== 14 ||
-        !Number.isSafeInteger(renderPatchFeedback?.minimumTrialPatchCount) ||
-        renderPatchFeedback.minimumTrialPatchCount < 0 ||
-        renderPatchFeedback.minimumTrialPatchCount >
-            renderPatchFeedback.selectedPatchCount ||
-        !Number.isSafeInteger(renderPatchFeedback?.renderRootPatchCount) ||
-        renderPatchFeedback.renderRootPatchCount <
-            renderPatchFeedback.minimumTrialPatchCount ||
-        renderPatchFeedback?.budgetLimitedByMinimumTrial !== minimumTrialLimited ||
-        (!minimumTrialLimited &&
-            renderPatchFeedback?.unbalancedPatchCount >
-                renderPatchFeedback?.framePatchBudget) ||
-        !Array.isArray(renderPatchLevelRange) || renderPatchLevelRange[0] < 4 ||
-        renderPatchLevelRange[1] > 14 ||
-        !Array.isArray(renderPatchCellSpanRange) || renderPatchCellSpanRange[0] < 0 ||
-        renderPatchCellSpanRange[1] > 65_535) {
-        failures.push(`${label} projected-grid render-patch feedback was inconsistent`)
+    if (cover?.patchCount !== count ||
+        cover?.candidateCount < cover?.patchCount ||
+        cover?.demandCount !== Number(facts.coverDemandCount) ||
+        cover?.demands?.length !== cover?.demandCount ||
+        cover?.descriptorOverflowCount !== 0 ||
+        cover?.lookupOverflowCount !== 0 ||
+        cover?.demandOverflowCount !== 0 ||
+        cover?.maximumAdjacentLevelDelta > 1 ||
+        cover?.sourceLevelCeiling !== 10 ||
+        cover?.finestMatrixLevel > 14 ||
+        cover?.frameEpoch !== Number(facts.coverFrameEpoch) ||
+        !Array.isArray(coverLevelRange) ||
+        coverLevelRange[0] !== cover?.minimumMatrixLevel ||
+        coverLevelRange[1] !== cover?.maximumMatrixLevel ||
+        !demandLevelsAreValid) {
+        failures.push(`${label} inverse-cover feedback was inconsistent`)
     }
     if (contract?.virtualRaster?.completeImageUpload !== false ||
         contract?.virtualRaster?.crossPageFiltering !== 'logical-bilinear' ||
         contract?.virtualRaster?.coordinateEncoding !== 'wide-fixed') {
         failures.push(`${label} virtual raster graph contract drifted`)
     }
-    const frontier = parseJson(facts.frontier, `${label} frontier facts`, failures)
-    if (frontier?.visibleInstanceCount !== count ||
-        frontier?.activeFrontierCount < frontier?.visibleInstanceCount ||
-        frontier?.demandCount !== Number(facts.demandCount) ||
-        frontier?.staleGenerationCount !== 0 || frontier?.frontierOverflow ||
-        frontier?.demandOverflow || frontier?.visibleOverflow) {
-        failures.push(`${label} GPU frontier facts were inconsistent`)
-    }
-    if (expectedStatus === 'ready' && (facts.frontierConverged !== 'true' ||
-        frontier?.convergenceState !== 'converged' || frontier?.demandCount !== 0)) {
-        failures.push(`${label} GPU frontier did not converge`)
+    if (expectedStatus === 'ready' && (facts.coverConverged !== 'true' ||
+        facts.convergenceState !== 'converged')) {
+        failures.push(`${label} GPU inverse cover did not converge`)
     }
     validateVirtualRasterFacts(label, facts, failures)
 }
@@ -1541,23 +1499,17 @@ function summarizeNormalProof(proof) {
 
 function summarizeFacts(facts) {
 
-    const frontier = parseJsonOrUndefined(facts.frontier)
-    const renderPatchFeedback = parseJsonOrUndefined(facts.renderPatchFeedback)
+    const coverFeedback = parseJsonOrUndefined(facts.coverFeedback)
     return {
         status: facts.status,
         frames: Number(facts.frames),
         observedFrames: Number(facts.observedFrames),
-        visibleNodeCount: Number(facts.visibleNodeCount),
-        frontierCount: Number(facts.frontierCount),
-        levelRange: [
-            frontier?.minimumSelectedMatrixLevel,
-            frontier?.maximumSelectedMatrixLevel,
-        ],
-        convergenceState: frontier?.convergenceState,
-        renderPatchCount: Number(facts.renderPatchCount),
-        renderPatchLevelRange: parseJsonOrUndefined(facts.renderPatchLevelRange),
-        renderPatchCellSpanRange: parseJsonOrUndefined(facts.renderPatchCellSpanRange),
-        renderPatchFeedback,
+        coverPatchCount: Number(facts.coverPatchCount),
+        coverCandidateCount: Number(facts.coverCandidateCount),
+        coverDemandCount: Number(facts.coverDemandCount),
+        coverLevelRange: parseJsonOrUndefined(facts.coverLevelRange),
+        convergenceState: facts.convergenceState,
+        coverFeedback,
         cameraView: parseJsonOrUndefined(facts.cameraView),
         stableIdentityCount: Number(facts.currentStableIdentityCount),
         stableIdentityHash: facts.currentStableIdentityHash,
@@ -1647,7 +1599,9 @@ function summarizeCleanupProof(proof) {
             resizeGeneration: proof.graphState.resizeGeneration,
             staleBindSetPreparationCount: proof.graphState.staleBindSetPreparationCount,
             lastResizeFacts: proof.graphState.lastResizeFacts,
-            visibleNodeCount: proof.graphState.visibleNodeCount,
+            coverPatchCount: proof.graphState.coverPatchCount,
+            coverCandidateCount: proof.graphState.coverCandidateCount,
+            convergenceState: proof.graphState.convergenceState,
         },
     }
 }

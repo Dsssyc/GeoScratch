@@ -2,7 +2,7 @@
 docId: geo.virtual-raster.zh
 canonical: false
 translationOf: ./virtual-raster.md
-canonicalDigest: 56f6f4a3f18e410503d644641e4755446760ea4e0aa79eb05d2fbe93ada92d0e
+canonicalDigest: ecd19ece63e108f1047e5950bb36dce4fbf398d3249163279423aabd4051fd0e
 ---
 # Virtual Raster
 
@@ -36,15 +36,21 @@ ownership 即发生转移；创建失败会释放 owned executor，runtime dispo
 scheduler work，再严格释放 executor 一次。相互独立的 shutdown failure 会共同保留，不会
 因为一个 authority 失败而跳过另一个。Runtime facts 只报告声明的 executor ownership，
 不会虚构 executor 业务状态。Transfer helper 显式表达 `ArrayBuffer`
-ownership。Residency stage page 并发布 coherent snapshot；lease 防止
-submission 仍可能采样时 physical slot 被回收。GPU feedback ring 限制异步 readback，
-并拒绝 stale slot。Feedback lowering 会把缺席的 in-flight page 严格延续一个后续 feedback
-generation，以吸收交替 GPU frontier transaction，而不会把单批缺席误判为取消；连续两批
-缺席仍会取消过期工作。Demand-controller facts 会报告固定 grace 和当前 deferred count。
-Deferred work 会降级为 background prefetch，因此在有界 request budget 下，当前 refinement
-和 safety cover 始终优先。
-报告的 deferred count 只包含真正进入该有界调度集的 page，不包括因预算被丢弃的 grace
-candidate。
+ownership。Residency stage page 并发布 coherent snapshot；需要跨异步工作保持 physical
+assignment 的 consumer 仍可显式使用 lease。Runtime 自身通过
+`reconcileViewDemands()` 消费显式 `ViewTileDemandSet`；它不检查 camera、zoom、
+projected error、相邻关系或 geometry topology。
+
+Demand producer 保留 `desiredSampleLevel` 与 `sourceLevelCeiling`；下落为
+`VirtualRasterDemandSet` 时只传递可执行 page、priority、usage、generation 与 reason。
+因此已知 source ceiling 会阻止不可能的请求，却不会改写 desired precision。Runtime 创建
+时会为每个 pinned safety-cover page 预留 request 与 physical-page capacity；
+`ViewDemandProducer.maxDemands` 是剩余的
+`min(maxPhysicalPages, maxRequests) - safetyCoverPageCount`，所以可以为 0。Reconcile 会把
+由该 runtime-owned producer 生成的 exact-resident 与 missing page 一起交给 scheduler；
+foreign 或超容量 set 会失败，而不会被静默重排或截断。Scheduler 对 resident page 执行
+mark-used，只请求 missing page。因此紧张 atlas 不会让两个当前 detail page 在一个空闲
+slot 中相互驱逐。完整 cover feedback 不受这项 residency budget 截断。
 
 `VirtualRasterGpuState.encode()` 会记录精确 update ownership，并在同一个 open
 submission 中把 staged publication 排在依赖它的 command 之前。该 submission 进入同一

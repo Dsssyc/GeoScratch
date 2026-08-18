@@ -2,7 +2,7 @@
 
 # geoscratch/geo API Reference
 
-Public symbols: 317.
+Public symbols: 285.
 
 ## `packages/geoscratch/src/geo/coordinate-domain.ts`
 
@@ -492,449 +492,194 @@ Kind: `Type Alias`.
 type GeoViewSourceDescriptor<View> = Readonly<{ id: string; capture: any }>
 ```
 
-## `packages/geoscratch/src/geo/gpu-render-patch-frontier.ts`
+## `packages/geoscratch/src/geo/gpu-web-mercator-quad-cover-layout.ts`
 
-### `createGpuRenderPatchFrontier`
-
-Kind: `Function`.
-
-Creates a GPU-owned balanced terrain-mesh frontier independent of raster source detail.
-
-```ts
-Function createGpuRenderPatchFrontier
-```
-
-```ts
-createGpuRenderPatchFrontier(runtime: GPURuntime, options: GpuRenderPatchFrontierDescriptor): Promise<Readonly<{ id: string; capture: any; commandsFor: any; dispose: any; encode: any; facts: any; feedback: any; identityObjects: any; initialize: any; renderTemplates: any }>>
-```
-
-### `decodeGpuRenderPatchState`
+### `gpuWebMercatorQuadCoverReadWgslModule`
 
 Kind: `Function`.
 
-Decodes and validates bounded render-patch counters copied from GPU state.
+Generates standard-tile lookup, neighbor, and edge-stitching WGSL for one cover.
 
 ```ts
-Function decodeGpuRenderPatchState
+Function gpuWebMercatorQuadCoverReadWgslModule
 ```
 
 ```ts
-decodeGpuRenderPatchState(bytes: Uint8Array, options: Readonly<{ expectedFrameEpoch?: number; maximumRenderPatches: number }>): GpuRenderPatchSelectionFacts
+gpuWebMercatorQuadCoverReadWgslModule(options: GpuWebMercatorQuadCoverReadWgslOptions): GpuWebMercatorQuadCoverReadWgslModule
 ```
 
-### `GPU_RENDER_PATCH_BALANCE_PASS_COUNT`
-
-Kind: `Variable`.
-
-Bounded pass count used to enforce adjacent render-patch level balance.
-
-```ts
-const GPU_RENDER_PATCH_BALANCE_PASS_COUNT: 14
-```
-
-### `GPU_RENDER_PATCH_DEFAULT_CELLS_PER_EDGE`
-
-Kind: `Variable`.
-
-Default terrain grid resolution along each render-patch edge.
-
-```ts
-const GPU_RENDER_PATCH_DEFAULT_CELLS_PER_EDGE: 64
-```
-
-### `GPU_RENDER_PATCH_DEFAULT_MAXIMUM_CELL_SPAN_PIXELS`
-
-Kind: `Variable`.
-
-Default screen-space cell span that triggers geometry refinement.
-
-```ts
-const GPU_RENDER_PATCH_DEFAULT_MAXIMUM_CELL_SPAN_PIXELS: 8
-```
-
-### `GPU_RENDER_PATCH_MAXIMUM_MATRIX_LEVEL`
-
-Kind: `Variable`.
-
-Highest matrix level representable by the current compact render-patch key.
-
-```ts
-const GPU_RENDER_PATCH_MAXIMUM_MATRIX_LEVEL: 14
-```
-
-### `GpuRenderPatchCommands`
-
-Kind: `Type Alias`.
-
-Names the persistent GPU commands that derive one render-patch cut for a frame.
-
-```ts
-type GpuRenderPatchCommands = Readonly<{ balance: DispatchCommand; clearLookup: ClearBufferCommand; count: DispatchCommand; expand: DispatchCommand; feedback: ReadbackCommand; fill: DispatchCommand; finalize: DispatchCommand; reset: DispatchCommand; resetFinalDiagnostics: DispatchCommand; select: DispatchCommand; validate: DispatchCommand }>
-```
-
-### `GpuRenderPatchFeedback`
+### `GpuWebMercatorQuadCoverReadWgslModule`
 
 Kind: `Type Alias`.
 
 ```ts
-type GpuRenderPatchFeedback = Readonly<GpuRenderPatchSelectionFacts & { frontierId: string; kind: "gpu-render-patch-feedback"; submissionId: string }>
+type GpuWebMercatorQuadCoverReadWgslModule = Readonly<{ bindings: Readonly<{ group: number; lookupEntries: number; visibleInstances: number }>; code: string; kind: "gpu-web-mercator-quad-cover-read-wgsl-module"; layoutDependencies: readonly LayoutArtifact[]; namespace: string }>
 ```
 
-### `GpuRenderPatchFeedbackStaleError`
+### `GpuWebMercatorQuadCoverReadWgslOptions`
+
+Kind: `Type Alias`.
+
+```ts
+type GpuWebMercatorQuadCoverReadWgslOptions = Readonly<{ group: number; lookupEntriesBinding: number; namespace?: string; visibleInstancesBinding: number }>
+```
+
+## `packages/geoscratch/src/geo/gpu-web-mercator-quad-cover.ts`
+
+### `decodeGpuWebMercatorQuadCoverFeedback`
+
+Kind: `Function`.
+
+Decodes and validates bounded inverse-cover state and desired-page feedback.
+
+```ts
+Function decodeGpuWebMercatorQuadCoverFeedback
+```
+
+```ts
+decodeGpuWebMercatorQuadCoverFeedback(stateBytes: Uint8Array, demandBytes: Uint8Array, options: Readonly<{ expectedFrameEpoch: number; maximumPatches: number; sourceLevelCeiling: number }>): Readonly<GpuWebMercatorQuadCoverSelectionFacts & { demands: readonly GpuWebMercatorQuadCoverDemand[] }>
+```
+
+### `GpuWebMercatorQuadCover`
 
 Kind: `Class`.
 
-Reports feedback whose frame epoch no longer matches the requested render-patch decision.
+Owns the bounded GPU graph that derives one standard WebMercatorQuad view cover.
 
 ```ts
-class GpuRenderPatchFeedbackStaleError
+class GpuWebMercatorQuadCover
 ```
 
 Members:
 
-- `cause`: `cause: unknown` (external, inherited, optional)
-- `constructor`: `Constructor constructor`
-  - `constructor(expectedFrameEpoch: number, actualFrameEpoch: number): GpuRenderPatchFeedbackStaleError`
-- `diagnostic`: `diagnostic: GeoDiagnostic` (inherited, readonly)
-- `message`: `message: string` (external, inherited)
-- `name`: `name: string` (external, inherited)
-- `stack`: `stack: string` (external, inherited, optional)
-
-### `GpuRenderPatchFrontier`
-
-Kind: `Type Alias`.
-
-```ts
-type GpuRenderPatchFrontier = Readonly<{ id: string; capture: any; commandsFor: any; dispose: any; encode: any; facts: any; feedback: any; identityObjects: any; initialize: any; renderTemplates: any }>
-```
-
-### `GpuRenderPatchFrontierDescriptor`
-
-Kind: `Type Alias`.
-
-Configures one stateless GPU render-patch authority over immutable geographic roots.
-
-```ts
-type GpuRenderPatchFrontierDescriptor = Readonly<{ cellsPerPatchEdge?: number; coordinateBits: number; elevationRangeMeters: readonly [number, number]; maximumCellSpanPixels?: number; maximumPatchCountRatio?: number; maximumRenderPatches: number; renderMaximumMatrixLevel?: number; renderRoots: readonly GpuRenderPatchRootDescriptor[]; vertexCount: number; viewTemplates: readonly [GpuRenderPatchViewTemplate, GpuRenderPatchViewTemplate] }>
-```
-
-### `GpuRenderPatchFrontierFacts`
-
-Kind: `Type Alias`.
-
-Describes immutable render-patch graph identity, policy, and owned GPU objects.
-
-```ts
-type GpuRenderPatchFrontierFacts = Readonly<{ balancePassCount: number; balanceWorkgroupSize: number; biasStepCount: number; biasStepsPerLevel: number; budgetFillWorkgroupSize: number; cellsPerPatchEdge: number; disposed: boolean; drawArgumentBytes: number; id: string; maximumCellSpanPixels: number; maximumMatrixLevel: number; maximumPatchCountRatio: number; maximumRenderPatches: number; maximumRootMatrixLevel: number; minimumRootMatrixLevel: number; nominalPatchSpanPixels: number; parity: readonly Readonly<{ balancePatchBufferId: string; balancePatchLookupBufferId: string; commandIds: readonly string[]; drawArgumentBufferId: string; mapMetaBufferId: string; parity: 0 | 1; renderPatchBufferId: string; renderPatchLookupBufferId: string; renderRootBufferId: string; stateBufferId: string }>[]; renderPatchBytes: number; renderPatchLookupBytes: number; renderPatchLookupCapacity: number; renderRootCount: number; selectionPath: "gpu-balanced-error-cohort-filled-render-root-local-cell-projection"; workgroupSize: number }>
-```
-
-### `GpuRenderPatchIdentityObjects`
-
-Kind: `Type Alias`.
-
-```ts
-type GpuRenderPatchIdentityObjects = Readonly<{ bindLayouts: readonly BindLayout[]; bindSets: readonly BindSet[]; commands: readonly (ClearBufferCommand | DispatchCommand | ReadbackCommand)[]; passes: readonly ComputePassSpec[]; pipelines: readonly ComputePipeline[]; programs: readonly Program[]; resources: readonly BufferResource[]; uploads: readonly UploadCommand[] }>
-```
-
-### `gpuRenderPatchReadWgslModule`
-
-Kind: `Function`.
-
-Generates bounded read-side lookup, neighbor, and edge-stitching WGSL for render patches.
-
-```ts
-Function gpuRenderPatchReadWgslModule
-```
-
-```ts
-gpuRenderPatchReadWgslModule(options: GpuRenderPatchReadWgslOptions): GpuRenderPatchReadWgslModule
-```
-
-### `GpuRenderPatchReadWgslModule`
-
-Kind: `Type Alias`.
-
-```ts
-type GpuRenderPatchReadWgslModule = Readonly<{ bindings: Readonly<{ group: number; lookupEntries: number; visibleInstances: number }>; code: string; kind: "gpu-render-patch-read-wgsl-module"; layoutDependencies: readonly LayoutArtifact[]; namespace: string }>
-```
-
-### `GpuRenderPatchReadWgslOptions`
-
-Kind: `Type Alias`.
-
-```ts
-type GpuRenderPatchReadWgslOptions = Readonly<{ group: number; lookupEntriesBinding: number; namespace?: string; visibleInstancesBinding: number }>
-```
-
-### `GpuRenderPatchRenderTemplate`
-
-Kind: `Type Alias`.
-
-```ts
-type GpuRenderPatchRenderTemplate = Readonly<{ drawArgument: Readonly<{ offset: number; region: BufferRegion; resource: BufferResource; size: 16 }>; frontierId: string; mapMeta: BufferResource; parity: 0 | 1; renderPatchLookup: BufferResource; templateId: "patch-mesh"; visibleInstances: BufferResource }>
-```
-
-### `GpuRenderPatchRootDescriptor`
-
-Kind: `Type Alias`.
-
-Identifies one immutable, prefix-free tile root for GPU geometry traversal.
-
-```ts
-type GpuRenderPatchRootDescriptor = Readonly<{ matrixLevel: number; tileCol: number; tileRow: number }>
-```
-
-### `GpuRenderPatchSelectionFacts`
-
-Kind: `Type Alias`.
-
-Reports validated delayed facts for base selection, priority fill, and balancing.
-
-```ts
-type GpuRenderPatchSelectionFacts = Readonly<{ balanceOverheadPatchCount: number; balancePassCount: number; balanceSplitCount: number; baselinePatchBudget: number; basePatchCount: number; budgetFillSplitCount: number; budgetLimitedByMinimumTrial: boolean; budgetLimitedRefinementCount: number; descriptorOverflowCount: number; frameEpoch: number; framePatchBudget: number; lookupOverflowCount: number; maximumAdjacentLevelDelta: number; maximumCellSpanPixels?: number; maximumMatrixLevel?: number; minimumCellSpanPixels?: number; minimumMatrixLevel?: number; minimumTrialPatchCount: number; renderRootPatchCount: number; requestedPatchCount: number; selectedBiasLevels: number; selectedBiasStep: number; selectedPatchCount: number; unbalancedPatchCount: number }>
-```
-
-### `GpuRenderPatchViewTemplate`
-
-Kind: `Type Alias`.
-
-Supplies frame parity and current map-view metadata without coupling geometry to data tiles.
-
-```ts
-type GpuRenderPatchViewTemplate = Readonly<{ frontierId: string; mapMeta: BufferResource; parity: 0 | 1 }>
-```
-
-### `gpuRenderPatchWgslModule`
-
-Kind: `Function`.
-
-Produces WGSL accessors and lookup helpers for GPU-selected render patches.
-
-```ts
-Function gpuRenderPatchWgslModule
-```
-
-```ts
-gpuRenderPatchWgslModule(): Readonly<{ code: string; layoutDependencies: readonly LayoutArtifact[] }>
-```
-
-## `packages/geoscratch/src/geo/gpu-tile-frontier-layout.ts`
-
-### `GpuTileFrontierConvergenceState`
-
-Kind: `Type Alias`.
-
-```ts
-type GpuTileFrontierConvergenceState = "converged" | "transitioning" | "budget-limited"
-```
-
-### `GpuTileFrontierDemand`
-
-Kind: `Type Alias`.
-
-```ts
-type GpuTileFrontierDemand = Readonly<{ childMask: number; decisionFrameEpoch: number; page: VirtualRasterPageIdentity; parent: VirtualRasterPageIdentity; parentCompactIndex: number; parentGeneration: number; parentPhysicalSlot: number; priority: number; residencySnapshotEpoch: number }>
-```
-
-### `GpuTileFrontierDescriptor`
-
-Kind: `Type Alias`.
-
-```ts
-type GpuTileFrontierDescriptor = Readonly<{ drawTemplates: readonly GpuTileFrontierDrawTemplate[]; gpuState: VirtualRasterGpuState; levelMetrics: readonly GpuTileFrontierLevelMetric[]; policy: GpuTileFrontierPolicy; roots: readonly VirtualRasterPageIdentity[]; spatialProfile: TileSpatialProfile }>
-```
-
-### `GpuTileFrontierDrawTemplate`
-
-Kind: `Type Alias`.
-
-```ts
-type GpuTileFrontierDrawTemplate = Readonly<{ firstInstance?: number; firstVertex?: number; id: string; vertexCount: number }>
-```
-
-### `GpuTileFrontierFacts`
-
-Kind: `Type Alias`.
-
-```ts
-type GpuTileFrontierFacts = Readonly<{ activeFrontierCount: number; budgetLimitedCount: number; coarsenCandidateCount: number; coarsenGracePendingCount: number; convergenceState: GpuTileFrontierConvergenceState; demandCount: number; demandOverflow: boolean; fallbackCount: number; frameEpoch: number; frontierOverflow: boolean; maximumObservedSse: number; maximumSelectedMatrixLevel?: number; minimumSelectedMatrixLevel?: number; refineCandidateCount: number; residencySnapshotEpoch: number; staleGenerationCount: number; visibleInstanceCount: number; visibleOverflow: boolean }>
-```
-
-### `GpuTileFrontierLevelMetric`
-
-Kind: `Type Alias`.
-
-```ts
-type GpuTileFrontierLevelMetric = Readonly<{ geometricErrorMeters: number; matrixLevel: number; maximumElevationMeters: number; minimumElevationMeters: number }>
-```
-
-### `gpuTileFrontierPolicy`
-
-Kind: `Function`.
-
-Validates and freezes screen-error, distance, capacity, and transition policy.
-
-```ts
-Function gpuTileFrontierPolicy
-```
-
-```ts
-gpuTileFrontierPolicy(input: GpuTileFrontierPolicy): GpuTileFrontierPolicy
-```
-
-### `GpuTileFrontierPolicy`
-
-Kind: `Type Alias`.
-
-```ts
-type GpuTileFrontierPolicy = Readonly<{ coarsenErrorPixels: number; invisibleGraceFrames: number; maximumActiveTiles: number; maximumDemands: number; maximumMatrixLevel: number; minimumMatrixLevel: number; refineErrorPixels: number; transitionReservePages: number }>
-```
-
-### `gpuTileFrontierRenderWgslModule`
-
-Kind: `Function`.
-
-Produces WGSL accessors for map metadata and visible tile instances.
-
-```ts
-Function gpuTileFrontierRenderWgslModule
-```
-
-```ts
-gpuTileFrontierRenderWgslModule(options: GpuTileFrontierRenderWgslOptions = {}): GpuTileFrontierRenderWgslModule
-```
-
-### `GpuTileFrontierRenderWgslModule`
-
-Kind: `Type Alias`.
-
-```ts
-type GpuTileFrontierRenderWgslModule = Readonly<{ code: string; layoutDependencies: readonly LayoutArtifact[] }>
-```
-
-### `GpuTileFrontierRenderWgslOptions`
-
-Kind: `Type Alias`.
-
-```ts
-type GpuTileFrontierRenderWgslOptions = Readonly<{ namespace?: string }>
-```
-
-### `GpuTileFrontierView`
-
-Kind: `Type Alias`.
-
-```ts
-type GpuTileFrontierView = GeoViewSnapshot
-```
-
-## `packages/geoscratch/src/geo/gpu-tile-frontier.ts`
-
-### `GpuTileFrontier`
-
-Kind: `Class`.
-
-Owns GPU resources that select a bounded resident tile cut and indirect draw arguments.
-
-```ts
-class GpuTileFrontier
-```
-
-Members:
-
+- `capture`: `Method capture`
+  - `capture(builder: SubmissionBuilder, frame: GpuWebMercatorQuadCoverFrame): SubmissionBuilder`
+- `commandsFor`: `Method commandsFor`
+  - `commandsFor(frame: GpuWebMercatorQuadCoverFrame): GpuWebMercatorQuadCoverCommands`
 - `create`: `Method create` (static)
-  - `create(runtime: GPURuntime, descriptor: GpuTileFrontierDescriptor): Promise<GpuTileFrontier>`
-- `descriptor`: `Accessor descriptor`
-  - `descriptor(): GpuTileFrontierDescriptor`
+  - `create(runtime: GPURuntime, input: GpuWebMercatorQuadCoverDescriptor): Promise<GpuWebMercatorQuadCover>`
+- `descriptor`: `descriptor: GpuWebMercatorQuadCoverDescriptor` (readonly)
 - `dispose`: `Method dispose`
   - `dispose(): void`
-- `drawArgument`: `Method drawArgument`
-  - `drawArgument(frame: GpuTileFrontierFrame, id: string): GpuTileFrontierDrawArgument`
 - `encode`: `Method encode`
-  - `encode(builder: SubmissionBuilder, frame: GpuTileFrontierFrame): SubmissionBuilder`
+  - `encode(builder: SubmissionBuilder, frame: GpuWebMercatorQuadCoverFrame): SubmissionBuilder`
 - `facts`: `Method facts`
-  - `facts(): GpuTileFrontierCoreFacts`
+  - `facts(): GpuWebMercatorQuadCoverFacts`
+- `feedback`: `Method feedback`
+  - `feedback(frame: GpuWebMercatorQuadCoverFrame, submitted: SubmittedWork): Promise<GpuWebMercatorQuadCoverFeedback>`
 - `frame`: `Method frame`
-  - `frame(viewToken: GpuTileFrontierViewToken): GpuTileFrontierFrame`
+  - `frame(token: GpuWebMercatorQuadCoverViewToken): GpuWebMercatorQuadCoverFrame`
 - `id`: `id: string` (readonly)
+- `identityObjects`: `Method identityObjects`
+  - `identityObjects(): GpuWebMercatorQuadCoverIdentityObjects`
+- `initialize`: `Method initialize`
+  - `initialize(builder: SubmissionBuilder): SubmissionBuilder`
 - `renderTemplates`: `Method renderTemplates`
-  - `renderTemplates(id: string): readonly [Readonly<{ drawArgument: Readonly<{ offset: number; region: BufferRegion; resource: BufferResource; size: 16 }>; frontierId: string; mapMeta: BufferResource; parity: 0 | 1; source: "A" | "B"; target: "A" | "B"; templateId: string; visibleInstances: BufferResource }>, Readonly<{ drawArgument: Readonly<{ offset: number; region: BufferRegion; resource: BufferResource; size: 16 }>; frontierId: string; mapMeta: BufferResource; parity: 0 | 1; source: "A" | "B"; target: "A" | "B"; templateId: string; visibleInstances: BufferResource }>]`
+  - `renderTemplates(): readonly [Readonly<{ coverId: string; coverLookup: BufferResource; drawArgument: Readonly<{ offset: 0; region: BufferRegion; resource: BufferResource; size: 16 }>; mapMeta: BufferResource; parity: 0 | 1; templateId: "patch-mesh"; visibleInstances: BufferResource }>, Readonly<{ coverId: string; coverLookup: BufferResource; drawArgument: Readonly<{ offset: 0; region: BufferRegion; resource: BufferResource; size: 16 }>; mapMeta: BufferResource; parity: 0 | 1; templateId: "patch-mesh"; visibleInstances: BufferResource }>]`
 - `runtime`: `runtime: GPURuntime` (readonly)
-- `stageSeed`: `Method stageSeed`
-  - `stageSeed(snapshot: VirtualRasterSnapshot): GpuTileFrontierSeed`
 - `writeView`: `Method writeView`
-  - `writeView(view: GpuTileFrontierView): GpuTileFrontierViewToken`
+  - `writeView(view: GeoViewSnapshot): GpuWebMercatorQuadCoverViewToken`
 
-### `GpuTileFrontierCoreFacts`
+### `GpuWebMercatorQuadCoverCommands`
 
 Kind: `Type Alias`.
 
 ```ts
-type GpuTileFrontierCoreFacts = Readonly<{ addressSpaceId: string; bufferBytes: Readonly<Record<keyof GpuTileFrontierResourceGraph, number>>; capacities: Readonly<{ activeTiles: number; demands: number; drawTemplates: number; lookupEntries: number; physicalSlots: number; scanBlocks: number; transitionReservePages: number }>; disposed: boolean; feedbackOutput: GpuTileFrontierFeedbackOutput; id: string; lastViewFrameEpoch?: number; parityTemplates: readonly Readonly<{ commandIds: readonly string[]; parity: 0 | 1; source: "A" | "B"; target: "A" | "B" }>[]; runtimeId: string; seededSnapshotEpoch?: number }>
+type GpuWebMercatorQuadCoverCommands = Readonly<{ demandFeedback: ReadbackCommand; generate: DispatchCommand; stateFeedback: ReadbackCommand }>
 ```
 
-### `GpuTileFrontierDrawArgument`
+### `GpuWebMercatorQuadCoverDemand`
 
 Kind: `Type Alias`.
 
 ```ts
-type GpuTileFrontierDrawArgument = Readonly<{ frameEpoch: number; frontierId: string; offset: number; region: BufferRegion; resource: BufferResource; size: 16; templateId: string }>
+type GpuWebMercatorQuadCoverDemand = Readonly<{ decisionFrameEpoch: number; desiredSampleLevel: number; priority: number; requestMatrixLevel: number; residencySnapshotEpoch: number; sourceLevelCeiling: number; tileCol: number; tileRow: number }>
 ```
 
-### `GpuTileFrontierFeedbackLayout`
+### `GpuWebMercatorQuadCoverDescriptor`
 
 Kind: `Type Alias`.
 
 ```ts
-type GpuTileFrontierFeedbackLayout = Readonly<{ byteLength: number; counters: GpuTileFrontierFeedbackSection; demands: GpuTileFrontierFeedbackSection; diagnostics: GpuTileFrontierFeedbackSection; retirements: GpuTileFrontierFeedbackSection }>
+type GpuWebMercatorQuadCoverDescriptor = Readonly<{ elevationRangeMeters: readonly [number, number]; policy: GpuWebMercatorQuadCoverPolicy; spatialProfile: WebMercatorPlanarTileSpatialProfile; vertexCount: number }>
 ```
 
-### `GpuTileFrontierFeedbackOutput`
+### `GpuWebMercatorQuadCoverFacts`
 
 Kind: `Type Alias`.
 
 ```ts
-type GpuTileFrontierFeedbackOutput = Readonly<{ bufferId: string; layout: GpuTileFrontierFeedbackLayout }>
+type GpuWebMercatorQuadCoverFacts = Readonly<{ coverageLimitCount: number; disposed: boolean; id: string; lookupCapacity: number; parity: readonly Readonly<{ commandIds: readonly string[]; demandBufferId: string; drawArgumentBufferId: string; lookupBufferId: string; mapMetaBufferId: string; parity: 0 | 1; patchBufferId: string; stateBufferId: string }>[]; policy: GpuWebMercatorQuadCoverPolicy; runtimeId: string; selectionPath: "gpu-camera-inverse-webmercatorquad-cover" }>
 ```
 
-### `GpuTileFrontierFeedbackSection`
+### `GpuWebMercatorQuadCoverFeedback`
 
 Kind: `Type Alias`.
 
 ```ts
-type GpuTileFrontierFeedbackSection = Readonly<{ bufferId: string; byteLength: number; capacity: number; offset: number }>
+type GpuWebMercatorQuadCoverFeedback = GpuWebMercatorQuadCoverSelectionFacts & Readonly<{ coverId: string; demands: readonly GpuWebMercatorQuadCoverDemand[]; kind: "gpu-web-mercator-quad-cover-feedback"; submissionId: string }>
 ```
 
-### `GpuTileFrontierFrame`
+### `GpuWebMercatorQuadCoverFrame`
 
 Kind: `Type Alias`.
 
 ```ts
-type GpuTileFrontierFrame = Readonly<{ feedbackOutput: GpuTileFrontierFeedbackOutput; frameEpoch: number; frontierId: string; kind: "gpu-tile-frontier-frame"; parity: 0 | 1; source: "A" | "B"; target: "A" | "B"; visibleInstances: BufferResource }>
+type GpuWebMercatorQuadCoverFrame = Readonly<{ coverId: string; frameEpoch: number; kind: "gpu-web-mercator-quad-cover-frame"; parity: 0 | 1; residencySnapshotEpoch: number; visibleInstances: BufferResource }>
 ```
 
-### `GpuTileFrontierRenderTemplate`
+### `GpuWebMercatorQuadCoverIdentityObjects`
 
 Kind: `Type Alias`.
 
 ```ts
-type GpuTileFrontierRenderTemplate = Readonly<{ drawArgument: Readonly<{ offset: number; region: BufferRegion; resource: BufferResource; size: 16 }>; frontierId: string; mapMeta: BufferResource; parity: 0 | 1; source: "A" | "B"; target: "A" | "B"; templateId: string; visibleInstances: BufferResource }>
+type GpuWebMercatorQuadCoverIdentityObjects = Readonly<{ bindLayouts: readonly BindLayout[]; bindSets: readonly BindSet[]; commands: readonly (ClearBufferCommand | DispatchCommand | ReadbackCommand)[]; passes: readonly ComputePassSpec[]; pipelines: readonly ComputePipeline[]; programs: readonly Program[]; resources: readonly BufferResource[]; uploads: readonly UploadCommand[] }>
 ```
 
-### `GpuTileFrontierSeed`
+### `gpuWebMercatorQuadCoverPolicy`
 
-Kind: `Type Alias`.
+Kind: `Function`.
+
+Validates immutable quality, source-ceiling, and capacity facts for one camera-derived standard WebMercatorQuad cover.
 
 ```ts
-type GpuTileFrontierSeed = Readonly<{ clears: readonly ClearBufferCommand[]; commands: readonly (ClearBufferCommand | UploadCommand)[]; snapshot: VirtualRasterSnapshot; snapshotEpoch: number; uploads: readonly UploadCommand[] }>
+Function gpuWebMercatorQuadCoverPolicy
 ```
 
-### `GpuTileFrontierViewToken`
+```ts
+gpuWebMercatorQuadCoverPolicy(input: GpuWebMercatorQuadCoverPolicy): GpuWebMercatorQuadCoverPolicy
+```
+
+### `GpuWebMercatorQuadCoverPolicy`
 
 Kind: `Type Alias`.
 
 ```ts
-type GpuTileFrontierViewToken = Readonly<{ frameEpoch: number; frontierId: string; isDisposed: boolean; kind: "gpu-tile-frontier-view-token"; residencySnapshotEpoch: number; dispose: any }>
+type GpuWebMercatorQuadCoverPolicy = Readonly<{ maximumMatrixLevel: number; maximumPatches: number; minimumMatrixLevel: number; sourceMaximumMatrixLevel: number }>
+```
+
+### `GpuWebMercatorQuadCoverRenderTemplate`
+
+Kind: `Type Alias`.
+
+```ts
+type GpuWebMercatorQuadCoverRenderTemplate = Readonly<{ coverId: string; coverLookup: BufferResource; drawArgument: Readonly<{ offset: 0; region: BufferRegion; resource: BufferResource; size: 16 }>; mapMeta: BufferResource; parity: 0 | 1; templateId: "patch-mesh"; visibleInstances: BufferResource }>
+```
+
+### `GpuWebMercatorQuadCoverSelectionFacts`
+
+Kind: `Type Alias`.
+
+```ts
+type GpuWebMercatorQuadCoverSelectionFacts = Readonly<{ candidateCount: number; demandCount: number; demandOverflowCount: number; descriptorOverflowCount: number; finestMatrixLevel: number; frameEpoch: number; lookupOverflowCount: number; maximumAdjacentLevelDelta: number; maximumMatrixLevel?: number; minimumMatrixLevel?: number; patchCount: number; sourceLevelCeiling: number }>
+```
+
+### `GpuWebMercatorQuadCoverViewToken`
+
+Kind: `Type Alias`.
+
+```ts
+type GpuWebMercatorQuadCoverViewToken = Readonly<{ coverId: string; frameEpoch: number; isDisposed: boolean; kind: "gpu-web-mercator-quad-cover-view-token"; parity: 0 | 1; residencySnapshotEpoch: number; dispose: any }>
 ```
 
 ## `packages/geoscratch/src/geo/map-field-layer.ts`
@@ -1547,7 +1292,7 @@ type PlanarTileBounds = Readonly<{ east: number; north: number; south: number; w
 
 Kind: `Function`.
 
-Defines planar bounds, camera encoding, and frontier encoding for one tiled topology.
+Defines planar bounds, camera encoding, and fixed coordinates for one tiled topology.
 
 ```ts
 Function planarTileSpatialProfile
@@ -1573,12 +1318,12 @@ Kind: `Type Alias`.
 type TileSpatialCameraEncoding = Readonly<{ high: readonly [number, number]; low: readonly [number, number] }>
 ```
 
-### `TileSpatialFrontierEncoding`
+### `TileSpatialFixedEncoding`
 
 Kind: `Type Alias`.
 
 ```ts
-type TileSpatialFrontierEncoding = Readonly<{ coordinateBits: number; highLimbMeters: readonly [number, number]; quantumMeters: readonly [number, number]; rootColumnBits: number; rootRowBits: number }>
+type TileSpatialFixedEncoding = Readonly<{ coordinateBits: number; highLimbMeters: readonly [number, number]; quantumMeters: readonly [number, number]; rootColumnBits: number; rootRowBits: number }>
 ```
 
 ### `TileSpatialProfile`
@@ -1586,7 +1331,7 @@ type TileSpatialFrontierEncoding = Readonly<{ coordinateBits: number; highLimbMe
 Kind: `Type Alias`.
 
 ```ts
-type TileSpatialProfile = Readonly<{ coordinateBits: number; coordinateFrame: "planar"; coverage: TileMatrixCoverage; frontierEncoding: TileSpatialFrontierEncoding; id: string; kind: "tile-spatial-profile"; topology: TileTopology; children: any; comparePath: any; coveredChildren: any; encodeCamera: any; isPathPrefix: any; matrixId: any; matrixLevel: any; normalizedBounds: any; parent: any; path: any; tileBounds: any }>
+type TileSpatialProfile = Readonly<{ coordinateBits: number; coordinateFrame: "planar"; coverage: TileMatrixCoverage; fixedEncoding: TileSpatialFixedEncoding; id: string; kind: "tile-spatial-profile"; topology: TileTopology; children: any; comparePath: any; coveredChildren: any; encodeCamera: any; isPathPrefix: any; matrixId: any; matrixLevel: any; normalizedBounds: any; parent: any; path: any; tileBounds: any }>
 ```
 
 ### `webMercatorPlanarTileSpatialProfile`
@@ -1694,7 +1439,7 @@ type ViewDemandProduction = Readonly<{ demands: readonly ViewTileDemandDescripto
 Kind: `Type Alias`.
 
 ```ts
-type ViewTileDemand = Readonly<{ deadlineMs?: number; generation: number; intent: ViewTileDemandIntent; page: VirtualRasterPageIdentity; priority: WorkerTaskPriority; reason: string; source: Readonly<{ frameEpoch: number; kind: "view"; producerId: string; residencySnapshotEpoch: number; viewId: string }> }>
+type ViewTileDemand = Readonly<{ deadlineMs?: number; desiredSampleLevel: number; generation: number; intent: ViewTileDemandIntent; page: VirtualRasterPageIdentity; priority: WorkerTaskPriority; reason: string; source: Readonly<{ frameEpoch: number; kind: "view"; producerId: string; residencySnapshotEpoch: number; viewId: string }>; sourceLevelCeiling: number }>
 ```
 
 ### `ViewTileDemandDescriptor`
@@ -1702,7 +1447,7 @@ type ViewTileDemand = Readonly<{ deadlineMs?: number; generation: number; intent
 Kind: `Type Alias`.
 
 ```ts
-type ViewTileDemandDescriptor = Readonly<{ deadlineMs?: number; intent: ViewTileDemandIntent; page: VirtualRasterPageIdentity; priority: WorkerTaskPriority; reason: string }>
+type ViewTileDemandDescriptor = Readonly<{ deadlineMs?: number; desiredSampleLevel: number; intent: ViewTileDemandIntent; page: VirtualRasterPageIdentity; priority: WorkerTaskPriority; reason: string; sourceLevelCeiling: number }>
 ```
 
 ### `ViewTileDemandIntent`
@@ -1936,73 +1681,6 @@ Kind: `Type Alias`.
 
 ```ts
 type VirtualRasterRequestSchedulerFacts = Readonly<{ activeDecodeCount: number; activeNetworkCount: number; activeRequestCount: number; cancellationCount: number; completedRequestCount: number; degradationCount: number; demandedPageCount: number; disposed: boolean; failedRequestCount: number; generation: number; history: readonly VirtualRasterDemandHistoryEntry[]; maxRequests: number; queuedRequestCount: number; reprioritizationCount: number; staleResultCount: number }>
-```
-
-## `packages/geoscratch/src/geo/virtual-raster-gpu-feedback.ts`
-
-### `GpuTileFrontierRetirement`
-
-Kind: `Type Alias`.
-
-```ts
-type GpuTileFrontierRetirement = Readonly<{ contentEpoch: number; decisionFrameEpoch: number; generation: number; page: VirtualRasterPageIdentity; physicalSlot: number; residencySnapshotEpoch: number }>
-```
-
-### `VirtualRasterGpuFeedbackBatch`
-
-Kind: `Type Alias`.
-
-```ts
-type VirtualRasterGpuFeedbackBatch = Readonly<{ counters: VirtualRasterGpuFeedbackCounters; demands: readonly GpuTileFrontierDemand[]; diagnostics: readonly GeoDiagnostic[]; facts: GpuTileFrontierFacts; frameEpoch: number; frontierId: string; kind: "virtual-raster-gpu-feedback-batch"; residencySnapshotEpoch: number; retirements: readonly GpuTileFrontierRetirement[]; ringId: string; submissionId: string }>
-```
-
-### `VirtualRasterGpuFeedbackCounters`
-
-Kind: `Type Alias`.
-
-```ts
-type VirtualRasterGpuFeedbackCounters = Readonly<{ acceptedCoarsenCount: number; acceptedRefineCount: number; balanceRejectedCount: number; budgetLimitedCount: number; coarsenCandidateCount: number; coarsenGracePendingCount: number; currentFrontierCount: number; demandCount: number; discardedStaleRetirementCount: number; fallbackCount: number; lookupDuplicateCount: number; nextFrontierCount: number; refineCandidateCount: number; retirementCount: number; staleGenerationCount: number; visibleInstanceCount: number }>
-```
-
-### `VirtualRasterGpuFeedbackRing`
-
-Kind: `Class`.
-
-Owns bounded rotating readbacks for delayed GPU tile-frontier demand and retirement feedback.
-
-```ts
-class VirtualRasterGpuFeedbackRing
-```
-
-Members:
-
-- `create`: `Method create` (static)
-  - `create(frontier: GpuTileFrontier): Promise<VirtualRasterGpuFeedbackRing>`
-- `dispose`: `Method dispose`
-  - `dispose(): void`
-- `encode`: `Method encode`
-  - `encode(builder: SubmissionBuilder, frame: GpuTileFrontierFrame): SubmissionBuilder`
-- `facts`: `Method facts`
-  - `facts(): VirtualRasterGpuFeedbackRingFacts`
-- `feedback`: `Method feedback`
-  - `feedback(frame: GpuTileFrontierFrame, submitted: SubmittedWork): Promise<Readonly<{ counters: VirtualRasterGpuFeedbackCounters; demands: readonly Readonly<{ childMask: number; decisionFrameEpoch: number; page: VirtualRasterPageIdentity; parent: VirtualRasterPageIdentity; parentCompactIndex: number; parentGeneration: number; parentPhysicalSlot: number; priority: number; residencySnapshotEpoch: number }>[]; diagnostics: readonly Readonly<{ actual?: unknown; code: string; evidence?: readonly Readonly<{ kind: string; value?: unknown }>[]; expected?: unknown; message: string; phase: GeoDiagnosticPhase; related?: readonly Readonly<{ id?: (...) | (...); kind: string; label?: (...) | (...); [key: string]: unknown }>[]; severity: GeoDiagnosticSeverity; subject: GeoDiagnosticSubject; version: 1 }>[]; facts: GpuTileFrontierFacts; frameEpoch: number; frontierId: string; kind: "virtual-raster-gpu-feedback-batch"; residencySnapshotEpoch: number; retirements: readonly Readonly<{ contentEpoch: number; decisionFrameEpoch: number; generation: number; page: VirtualRasterPageIdentity; physicalSlot: number; residencySnapshotEpoch: number }>[]; ringId: string; submissionId: string }>>`
-- `frontier`: `frontier: GpuTileFrontier` (readonly)
-- `id`: `id: string` (readonly)
-
-### `VirtualRasterGpuFeedbackRingFacts`
-
-Kind: `Type Alias`.
-
-```ts
-type VirtualRasterGpuFeedbackRingFacts = Readonly<{ disposed: boolean; frontierId: string; id: string; issuedCount: number; runtimeId: string; slotCount: 3; slots: readonly VirtualRasterGpuFeedbackSlotFacts[] }>
-```
-
-### `VirtualRasterGpuFeedbackSlotFacts`
-
-Kind: `Type Alias`.
-
-```ts
-type VirtualRasterGpuFeedbackSlotFacts = Readonly<{ commandId: string; index: number; state: GPUReadbackCommandState }>
 ```
 
 ## `packages/geoscratch/src/geo/virtual-raster-gpu.ts`
@@ -2330,7 +2008,7 @@ createVirtualRasterRuntime<Model extends Readonly<{ addressSpace: VirtualRasterA
 Kind: `Type Alias`.
 
 ```ts
-type VirtualRasterDemandController = Readonly<{ lease: VirtualRasterResidencyLease; abandonPublication: any; acknowledgePublication: any; dispose: any; facts: any; initialize: any; reconcileFeedback: any; retainPublication: any }>
+type VirtualRasterDemandController = Readonly<{ abandonPublication: any; acknowledgePublication: any; dispose: any; facts: any; initialize: any; reconcileViewDemands: any }>
 ```
 
 ### `VirtualRasterDemandControllerDescriptor`
@@ -2346,7 +2024,7 @@ type VirtualRasterDemandControllerDescriptor<Model extends VirtualRasterRuntimeM
 Kind: `Type Alias`.
 
 ```ts
-type VirtualRasterDemandControllerFacts = Readonly<{ acknowledgedSnapshotEpoch: number; activeDemandCount: number; deferredDemandCount: number; disposed: boolean; feedbackDemandGraceGenerations: number; generation: number; lastDecisionFrameEpoch: number; lease: ReturnType<VirtualRasterResidencyLease["facts"]>; transitionCount: number }>
+type VirtualRasterDemandControllerFacts = Readonly<{ acknowledgedSnapshotEpoch: number; activeDemandCount: number; disposed: boolean; generation: number; lastDecisionFrameEpoch: number; safetyDemandCount: number; viewDemandCapacity: number }>
 ```
 
 ### `VirtualRasterExecutorBinding`
@@ -2372,7 +2050,7 @@ type VirtualRasterFeedbackReconciliation = Readonly<{ generation: number; reques
 Kind: `Type Alias`.
 
 ```ts
-type VirtualRasterRuntime<Model extends VirtualRasterRuntimeModel = VirtualRasterRuntimeModel> = Omit<Model, "kind"> & Readonly<{ gpu: VirtualRasterGpuState; kind: "virtual-raster-runtime"; model: Model; residency: VirtualRasterResidency; residencyLease: VirtualRasterResidencyLease; scheduler: VirtualRasterRequestScheduler; viewDemandProducer: ViewDemandProducer; acknowledge: any; dispose: any; initialize: any; inspect: any; publish: any; reconcileFeedback: any; stopDemand: any }>
+type VirtualRasterRuntime<Model extends VirtualRasterRuntimeModel = VirtualRasterRuntimeModel> = Omit<Model, "kind"> & Readonly<{ gpu: VirtualRasterGpuState; kind: "virtual-raster-runtime"; model: Model; residency: VirtualRasterResidency; scheduler: VirtualRasterRequestScheduler; viewDemandProducer: ViewDemandProducer; acknowledge: any; dispose: any; initialize: any; inspect: any; publish: any; reconcileViewDemands: any; stopDemand: any }>
 ```
 
 ### `VirtualRasterRuntimeDescriptor`
@@ -3136,7 +2814,7 @@ createWebMercatorTerrainRenderer<ViewInput, Presentation extends string>(__named
 Kind: `Type Alias`.
 
 ```ts
-type WebMercatorTerrainContractFacts = Readonly<{ commandIds: Readonly<{ drawTerrain: Readonly<Record<string, readonly string[]>>; renderPatches: readonly (readonly string[])[] }>; countPath: "gpu-produced-indirect-arguments"; dataMaximumMatrixLevel: number; feedback: VirtualRasterGpuFeedbackRingFacts; fieldLayer: Readonly<{ demandProducerId: string; fieldId: string; id: string; representationId: string; spatialProfileId: string; viewAdapterId: string }>; frontier: ReturnType<GpuTileFrontier["facts"]>; passIds: Readonly<{ renderPatches: string; terrain: string }>; persistentIdentityCount: number; renderMaximumMatrixLevel: number; renderPatches: GpuRenderPatchFrontierFacts; selectionPath: "gpu-resident-active-frontier"; stageOrder: readonly string[]; terrainVertexCount: number; virtualRaster: Readonly<{ completeImageUpload: false; coordinateEncoding: WebMercatorVirtualRasterField["addressCodec"]["positionCodec"]["facts"]["encoding"]; crossPageFiltering: "logical-bilinear"; levelCount: number; maxPhysicalPages: number; pageSize: readonly number[]; sourceRevision: string }> }>
+type WebMercatorTerrainContractFacts = Readonly<{ commandIds: Readonly<{ cover: readonly (readonly string[])[]; drawTerrain: Readonly<Record<string, readonly string[]>> }>; countPath: "gpu-produced-indirect-arguments"; cover: ReturnType<GpuWebMercatorQuadCover["facts"]>; coverMaximumMatrixLevel: number; fieldLayer: Readonly<{ demandProducerId: string; fieldId: string; id: string; representationId: string; spatialProfileId: string; viewAdapterId: string }>; passIds: Readonly<{ cover: string; terrain: string }>; persistentIdentityCount: number; selectionPath: "gpu-camera-inverse-webmercatorquad-cover"; sourceMaximumMatrixLevel: number; stageOrder: readonly string[]; terrainVertexCount: number; virtualRaster: Readonly<{ completeImageUpload: false; coordinateEncoding: WebMercatorVirtualRasterField["addressCodec"]["positionCodec"]["facts"]["encoding"]; crossPageFiltering: "logical-bilinear"; levelCount: number; maxPhysicalPages: number; pageSize: readonly number[]; sourceRevision: string }> }>
 ```
 
 ### `WebMercatorTerrainFrame`
@@ -3153,10 +2831,10 @@ type WebMercatorTerrainFrame<Presentation extends string = string> = Readonly<{ 
 
 Kind: `Type Alias`.
 
-Delayed frontier feedback, residency work, and convergence state for one terrain frame.
+Delayed inverse-cover feedback, residency work, and convergence state for one terrain frame.
 
 ```ts
-type WebMercatorTerrainFrameSettlement = GeoFrameSettlement & Readonly<{ feedback?: VirtualRasterGpuFeedbackBatch; reconciliation?: VirtualRasterFeedbackReconciliation; renderPatchFeedback?: GpuRenderPatchFeedback; residencySettlement: Promise<unknown>; residencyWorkCount: number; superseded: boolean }>
+type WebMercatorTerrainFrameSettlement = GeoFrameSettlement & Readonly<{ coverFeedback?: GpuWebMercatorQuadCoverFeedback; reconciliation?: VirtualRasterFeedbackReconciliation; residencySettlement: Promise<unknown>; residencyWorkCount: number; superseded: boolean }>
 ```
 
 ### `WebMercatorTerrainFrameValue`
@@ -3230,7 +2908,7 @@ type WebMercatorTerrainRendererDescriptor<ViewInput, Presentation extends string
 Kind: `Type Alias`.
 
 ```ts
-type WebMercatorTerrainRendererState<Presentation extends string = string> = Readonly<{ budgetLimitedCount: number; convergenceState: GpuTileFrontierFacts["convergenceState"]; demandCount: number; disposed: boolean; fallbackCount: number; feedback: VirtualRasterGpuFeedbackRingFacts; frame: number; frontierCount: number; frontierFacts?: GpuTileFrontierFacts; initialized: boolean; lastResizeFacts?: WebMercatorTerrainResizeFacts; latestFeedbackDiagnostics: readonly unknown[]; levelRange: readonly [number | undefined, number | undefined]; maximumObservedSse: number; readbackInFlightCount: number; renderPatchBaselineBudget: number; renderPatchBudgetLimitedByMinimumTrial: boolean; renderPatchCellSpanRange: readonly [number | undefined, number | undefined]; renderPatchCount: number; renderPatchDescriptorOverflowCount: number; renderPatchFeedback?: GpuRenderPatchFeedback; renderPatchFrameBudget: number; renderPatchFrameEpoch?: number; renderPatchLevelRange: readonly [number | undefined, number | undefined]; renderPatchLookupOverflowCount: number; renderPatchMinimumTrialCount: number; renderPatchRenderRootCount: number; renderPatchRequestedCount: number; renderPatchSelectedBiasLevels: number; resizeGeneration: number; size: SurfaceSize; staleBindSetPreparationCount: number; staleFeedbackCount: number; staleGenerationCount: number; supersededFeedbackCount: number; terrainPresentation: Presentation; virtualRequestedPageCount: number; virtualSnapshotEpoch: number; visibleNodeCount: number }>
+type WebMercatorTerrainRendererState<Presentation extends string = string> = Readonly<{ convergenceState: "converged" | "transitioning"; coverCandidateCount: number; coverDemandCount: number; coverDemandOverflowCount: number; coverDescriptorOverflowCount: number; coverFeedback?: GpuWebMercatorQuadCoverFeedback; coverFinestMatrixLevel?: number; coverFrameEpoch?: number; coverLevelRange: readonly [number | undefined, number | undefined]; coverLookupOverflowCount: number; coverMaximumAdjacentLevelDelta: number; coverPatchCount: number; disposed: boolean; frame: number; initialized: boolean; lastResizeFacts?: WebMercatorTerrainResizeFacts; readbackInFlightCount: number; resizeGeneration: number; size: SurfaceSize; sourceLevelCeiling?: number; staleBindSetPreparationCount: number; staleFeedbackCount: number; supersededFeedbackCount: number; terrainPresentation: Presentation; virtualRequestedPageCount: number; virtualSnapshotEpoch: number }>
 ```
 
 ### `WebMercatorTerrainResizeFacts`

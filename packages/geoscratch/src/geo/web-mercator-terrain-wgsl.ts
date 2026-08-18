@@ -1,5 +1,5 @@
 import { layoutCodec, type LayoutArtifact } from '../scratch/index.js'
-import { gpuRenderPatchReadWgslModule } from './gpu-render-patch-frontier.js'
+import { gpuWebMercatorQuadCoverReadWgslModule } from './gpu-web-mercator-quad-cover-layout.js'
 
 /** Built-in fragment entry point for post-stitch logical-tile wireframe diagnostics. */
 export const WEB_MERCATOR_TERRAIN_TILE_WIREFRAME_FRAGMENT_ENTRY_POINT =
@@ -46,8 +46,8 @@ export const webMercatorTerrainConfigCodec = layoutCodec({
         { name: 'elevationRange', type: 'vec2f' },
         { name: 'coordinateBits', type: 'u32' },
         { name: 'exaggeration', type: 'f32' },
-        { name: 'renderMaximumMatrixLevel', type: 'u32' },
-        { name: 'renderPatchLookupCapacity', type: 'u32' },
+        { name: 'coverMaximumMatrixLevel', type: 'u32' },
+        { name: 'coverLookupCapacity', type: 'u32' },
     ],
 }, { usage: [ 'uniform' ] })
 
@@ -87,7 +87,7 @@ export function webMercatorTerrainWgslModule(
     assertDistinctBindings(bindings)
 
     const patchNamespace = `${namespace}Patch`
-    const patch = gpuRenderPatchReadWgslModule({
+    const patch = gpuWebMercatorQuadCoverReadWgslModule({
         namespace: patchNamespace,
         group: bindings.dataGroup,
         visibleInstancesBinding: bindings.visibleInstances,
@@ -118,7 +118,7 @@ struct ${namespace}VertexOutput {
 }
 
 @group(${bindings.sceneGroup}) @binding(${bindings.mapMeta})
-var<uniform> ${mapMeta}: GpuTileFrontierMapMeta;
+var<uniform> ${mapMeta}: GpuWebMercatorQuadCoverMapMeta;
 @group(${bindings.sceneGroup}) @binding(${bindings.config})
 var<uniform> ${config}: WebMercatorTerrainConfig;
 
@@ -138,7 +138,7 @@ fn ${namespace}_grid_position(index: u32) -> vec2u {
     return vec2u(${positions}[index * 2u], ${positions}[index * 2u + 1u]);
 }
 
-fn ${namespace}_logical_tile_color(instance: GpuRenderPatch) -> vec3f {
+fn ${namespace}_logical_tile_color(instance: GpuWebMercatorQuadCoverPatch) -> vec3f {
     var hash = instance.matrixLevel * 0x9e3779b9u;
     hash = hash ^ (instance.tileRow * 0x85ebca6bu);
     hash = hash ^ (instance.tileCol * 0xc2b2ae35u);
@@ -169,7 +169,7 @@ fn ${namespace}_triangle_centroid(triangle_id: u32) -> vec2f {
 }
 
 fn ${namespace}_fixed_position(
-    instance: GpuRenderPatch,
+    instance: GpuWebMercatorQuadCoverPatch,
     grid: vec2u,
 ) -> ${fixedNamespace}Position {
     let shift = ${config}.coordinateBits - instance.matrixLevel - ${cellsPerPatchEdgeBits}u;
@@ -235,7 +235,7 @@ fn ${vertexEntryPoint}(input: ${namespace}VertexInput) -> ${namespace}VertexOutp
 
     if (grid.x == 0u) {
         let neighbor = ${patchNamespace}_neighbor(instance, 0u, centroid,
-            ${config}.renderMaximumMatrixLevel, ${config}.renderPatchLookupCapacity);
+            ${config}.coverMaximumMatrixLevel, ${config}.coverLookupCapacity);
         if (neighbor.found != 0u) {
             grid.y = ${patchNamespace}_snap_edge_coordinate(
                 grid.y, matrix_level, neighbor.matrixLevel, ${namespace}_cells_per_patch_edge);
@@ -243,7 +243,7 @@ fn ${vertexEntryPoint}(input: ${namespace}VertexInput) -> ${namespace}VertexOutp
     }
     if (grid.x == ${namespace}_cells_per_patch_edge) {
         let neighbor = ${patchNamespace}_neighbor(instance, 1u, centroid,
-            ${config}.renderMaximumMatrixLevel, ${config}.renderPatchLookupCapacity);
+            ${config}.coverMaximumMatrixLevel, ${config}.coverLookupCapacity);
         if (neighbor.found != 0u) {
             grid.y = ${patchNamespace}_snap_edge_coordinate(
                 grid.y, matrix_level, neighbor.matrixLevel, ${namespace}_cells_per_patch_edge);
@@ -251,7 +251,7 @@ fn ${vertexEntryPoint}(input: ${namespace}VertexInput) -> ${namespace}VertexOutp
     }
     if (grid.y == 0u) {
         let neighbor = ${patchNamespace}_neighbor(instance, 3u, centroid,
-            ${config}.renderMaximumMatrixLevel, ${config}.renderPatchLookupCapacity);
+            ${config}.coverMaximumMatrixLevel, ${config}.coverLookupCapacity);
         if (neighbor.found != 0u) {
             grid.x = ${patchNamespace}_snap_edge_coordinate(
                 grid.x, matrix_level, neighbor.matrixLevel, ${namespace}_cells_per_patch_edge);
@@ -259,7 +259,7 @@ fn ${vertexEntryPoint}(input: ${namespace}VertexInput) -> ${namespace}VertexOutp
     }
     if (grid.y == ${namespace}_cells_per_patch_edge) {
         let neighbor = ${patchNamespace}_neighbor(instance, 2u, centroid,
-            ${config}.renderMaximumMatrixLevel, ${config}.renderPatchLookupCapacity);
+            ${config}.coverMaximumMatrixLevel, ${config}.coverLookupCapacity);
         if (neighbor.found != 0u) {
             grid.x = ${patchNamespace}_snap_edge_coordinate(
                 grid.x, matrix_level, neighbor.matrixLevel, ${namespace}_cells_per_patch_edge);

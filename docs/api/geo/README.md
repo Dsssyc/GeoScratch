@@ -10,7 +10,7 @@ apiSources:
 
 Geo is the geographic adaptation layer in `geoscratch/geo`. It composes Scratch
 primitives into coordinate domains, precision encodings, view snapshots, field
-models, tile demand, Virtual Raster residency, GPU-driven frontiers, and terrain
+models, tile demand, Virtual Raster residency, GPU-driven view cover, and terrain
 rendering. Geo owns geographic semantics and may depend on Scratch; it does not hide
 the Scratch runtime or create global GPU state.
 
@@ -25,7 +25,7 @@ structured evidence across exception boundaries.
 - [Fields and layer composition](./fields.md)
 - [Tile models and demand](./tiles-demand.md)
 - [Virtual Raster](./virtual-raster.md)
-- [GPU frontiers](./gpu-frontiers.md)
+- [WebMercatorQuad view cover](./view-cover.md)
 - [Terrain rendering](./terrain-rendering.md)
 
 The current executable topology is planar and Web Mercator capable, but core field and

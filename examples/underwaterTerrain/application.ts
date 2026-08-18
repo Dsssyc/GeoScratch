@@ -168,7 +168,7 @@ export async function startUnderwaterTerrainApplication(
             ],
             initialPresentation: options.tileWireframeEnabled ? 'tile-wireframe' : 'shaded',
         }), {
-            label: 'underwater-terrain-gpu-frontier',
+            label: 'underwater-terrain-inverse-cover',
             release: value => value.dispose(),
         }
     )

@@ -420,36 +420,22 @@ function publishFrameFacts({
     canvas.dataset.frames = String(submittedFrames)
     canvas.dataset.observedFrames = String(observedFrames)
     canvas.dataset.resizeGeneration = String(state.resizeGeneration)
-    canvas.dataset.visibleNodeCount = String(state.visibleNodeCount)
-    canvas.dataset.frontierCount = String(state.frontierCount)
-    canvas.dataset.demandCount = String(state.demandCount)
-    canvas.dataset.fallbackCount = String(state.fallbackCount)
-    canvas.dataset.staleGenerationCount = String(state.staleGenerationCount)
-    canvas.dataset.budgetLimitedCount = String(state.budgetLimitedCount)
-    canvas.dataset.levelRange = JSON.stringify(state.levelRange)
-    canvas.dataset.maximumObservedSse = String(state.maximumObservedSse)
-    canvas.dataset.renderPatchCount = String(state.renderPatchCount)
-    canvas.dataset.renderPatchLevelRange = JSON.stringify(state.renderPatchLevelRange)
-    canvas.dataset.renderPatchCellSpanRange = JSON.stringify(state.renderPatchCellSpanRange)
-    canvas.dataset.renderPatchDescriptorOverflowCount = String(
-        state.renderPatchDescriptorOverflowCount
+    canvas.dataset.coverCandidateCount = String(state.coverCandidateCount)
+    canvas.dataset.coverPatchCount = String(state.coverPatchCount)
+    canvas.dataset.coverDemandCount = String(state.coverDemandCount)
+    canvas.dataset.coverLevelRange = JSON.stringify(state.coverLevelRange)
+    canvas.dataset.coverDescriptorOverflowCount = String(
+        state.coverDescriptorOverflowCount
     )
-    canvas.dataset.renderPatchLookupOverflowCount = String(
-        state.renderPatchLookupOverflowCount
+    canvas.dataset.coverLookupOverflowCount = String(state.coverLookupOverflowCount)
+    canvas.dataset.coverDemandOverflowCount = String(state.coverDemandOverflowCount)
+    canvas.dataset.coverMaximumAdjacentLevelDelta = String(
+        state.coverMaximumAdjacentLevelDelta
     )
-    canvas.dataset.renderPatchFrameEpoch = String(state.renderPatchFrameEpoch ?? '')
-    canvas.dataset.renderPatchBaselineBudget = String(state.renderPatchBaselineBudget)
-    canvas.dataset.renderPatchFrameBudget = String(state.renderPatchFrameBudget)
-    canvas.dataset.renderPatchRequestedCount = String(state.renderPatchRequestedCount)
-    canvas.dataset.renderPatchMinimumTrialCount = String(state.renderPatchMinimumTrialCount)
-    canvas.dataset.renderPatchRenderRootCount = String(state.renderPatchRenderRootCount)
-    canvas.dataset.renderPatchSelectedBiasLevels = String(
-        state.renderPatchSelectedBiasLevels
-    )
-    canvas.dataset.renderPatchBudgetLimitedByMinimumTrial = String(
-        state.renderPatchBudgetLimitedByMinimumTrial
-    )
-    canvas.dataset.renderPatchFeedback = JSON.stringify(state.renderPatchFeedback ?? null)
+    canvas.dataset.coverFinestMatrixLevel = String(state.coverFinestMatrixLevel ?? '')
+    canvas.dataset.sourceLevelCeiling = String(state.sourceLevelCeiling ?? '')
+    canvas.dataset.coverFrameEpoch = String(state.coverFrameEpoch ?? '')
+    canvas.dataset.coverFeedback = JSON.stringify(state.coverFeedback ?? null)
     canvas.dataset.convergenceState = state.convergenceState
     canvas.dataset.readbackInFlightCount = String(state.readbackInFlightCount)
     canvas.dataset.staleFeedbackCount = String(state.staleFeedbackCount)
@@ -461,9 +447,7 @@ function publishFrameFacts({
         cachePolicy
     ))
     canvas.dataset.provenance = JSON.stringify(latestProvenance)
-    canvas.dataset.frontier = JSON.stringify(state.frontierFacts ?? null)
-    canvas.dataset.frontierDiagnostics = JSON.stringify(state.latestFeedbackDiagnostics)
-    canvas.dataset.frontierConverged = String(state.convergenceState === 'converged')
+    canvas.dataset.coverConverged = String(state.convergenceState === 'converged')
     canvas.dataset.terrainPresentation = state.terrainPresentation
     canvas.dataset.cameraView = JSON.stringify(latestCamera === undefined ? null : {
         center: latestCamera.center,

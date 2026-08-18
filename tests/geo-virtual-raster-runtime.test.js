@@ -27,6 +27,12 @@ describe('Geo Virtual Raster runtime lifetime', () => {
             executor,
         })
 
+        expect(runtime.viewDemandProducer.maxDemands).to.equal(0)
+        expect(runtime.inspect().demand).to.deep.include({
+            safetyDemandCount: 1,
+            viewDemandCapacity: 0,
+        })
+
         await runtime.dispose()
         await runtime.dispose()
 

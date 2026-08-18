@@ -16,13 +16,14 @@ matrix dimensions, and per-level limits. Topology describes parent, child, and n
 relationships independently from projection. Spatial profiles encode tile bounds and
 camera-relative coordinates for a particular map or globe model.
 
-`ViewDemandProducer` turns a view snapshot into prioritized tile demand using
-frustum/viewport evidence, projected error, distance, and source limits. It is one
-demand producer, not the Virtual Raster owner. Other producers may request simulation
-regions, prefetch corridors, edit neighborhoods, or analytic extents, then merge into a
-generation-tagged demand set.
+`ViewDemandProducer` validates, deduplicates, prioritizes, and bounds caller-derived
+tile candidates against one immutable view provenance record. It does not inspect the
+camera or choose LoD itself. A view-cover, simulation, editor, prefetch corridor, or
+analytic extent remains the semantic demand producer.
 
-Demand is intent rather than residency. It carries usage, priority, revision, and
-generation so stale asynchronous loads can be rejected. Source detail level and render
-mesh detail are distinct: a raster source may stop at z10 while a terrain frontier
-continues refining geometry for smoother projection.
+Demand is intent rather than residency. `ViewTileDemand` carries the executable page,
+`desiredSampleLevel`, `sourceLevelCeiling`, priority, intent, reason, generation,
+and exact view/frame/residency provenance. Lowering to Virtual Raster deliberately
+drops the semantic level fields: residency schedules the page but cannot revise the
+producer's LoD decision. A raster source may stop at z10 while standard geometry
+continues through z14.

@@ -10,15 +10,12 @@ import type {
     GeoField,
     TiledFieldRepresentation,
 } from './geo-field.js'
-import type { GeoViewSnapshot } from './geo-view.js'
-import type {
-    GpuTileFrontierDemand,
-} from './gpu-tile-frontier-layout.js'
 import type { TileSpatialProfile } from './tile-spatial-profile.js'
 import {
     ViewDemandProducer,
     virtualRasterDemandSetFromViewDemands,
 } from './view-tile-demand.js'
+import type { ViewTileDemandSet } from './view-tile-demand.js'
 import {
     VirtualRasterRequestScheduler,
     virtualRasterDemandSet,
@@ -28,10 +25,6 @@ import type {
     VirtualRasterPageDemand,
     VirtualRasterRequestExecutor,
 } from './virtual-raster-demand.js'
-import type {
-    GpuTileFrontierRetirement,
-    VirtualRasterGpuFeedbackBatch,
-} from './virtual-raster-gpu-feedback.js'
 import {
     createVirtualRasterGpuState,
 } from './virtual-raster-gpu.js'
@@ -44,7 +37,6 @@ import {
 } from './virtual-raster-residency.js'
 import type {
     VirtualRasterPublication,
-    VirtualRasterResidencyLease,
 } from './virtual-raster-residency.js'
 import type {
     VirtualRasterAddressSpace,
@@ -84,23 +76,18 @@ export type VirtualRasterFeedbackReconciliation = Readonly<{
 export type VirtualRasterDemandControllerFacts = Readonly<{
     disposed: boolean
     generation: number
+    safetyDemandCount: number
+    viewDemandCapacity: number
     lastDecisionFrameEpoch: number
     acknowledgedSnapshotEpoch: number
-    feedbackDemandGraceGenerations: number
-    deferredDemandCount: number
     activeDemandCount: number
-    transitionCount: number
-    lease: ReturnType<VirtualRasterResidencyLease['facts']>
 }>
 
 export type VirtualRasterDemandController = Readonly<{
-    lease: VirtualRasterResidencyLease
     initialize(): VirtualRasterDemandReconciliation
-    reconcileFeedback(
-        feedback: VirtualRasterGpuFeedbackBatch,
-        view: GeoViewSnapshot
+    reconcileViewDemands(
+        demands: ViewTileDemandSet
     ): VirtualRasterFeedbackReconciliation
-    retainPublication(publication: VirtualRasterPublication): number
     acknowledgePublication(publication: VirtualRasterPublication): void
     abandonPublication(publication: VirtualRasterPublication): void
     facts(): VirtualRasterDemandControllerFacts
@@ -161,11 +148,9 @@ export type VirtualRasterRuntime<
     gpu: VirtualRasterGpuState
     scheduler: VirtualRasterRequestScheduler
     viewDemandProducer: ViewDemandProducer
-    residencyLease: VirtualRasterResidencyLease
     initialize(): Promise<VirtualRasterRuntimePublication>
-    reconcileFeedback(
-        feedback: VirtualRasterGpuFeedbackBatch,
-        view: GeoViewSnapshot
+    reconcileViewDemands(
+        demands: ViewTileDemandSet
     ): VirtualRasterFeedbackReconciliation
     publish(): VirtualRasterRuntimePublication
     acknowledge(
@@ -176,25 +161,6 @@ export type VirtualRasterRuntime<
     dispose(): Promise<void>
     inspect(): VirtualRasterRuntimeFacts
 }>
-
-type TransitionLeaseRecord = {
-    page: VirtualRasterPageIdentity
-    generation: number
-    visibleAfterSnapshotEpoch: number
-    acknowledged: boolean
-}
-
-type DeferredFeedbackDemand = Readonly<{
-    page: VirtualRasterPageIdentity
-    priority: Readonly<{
-        class: 'background' | 'user-visible'
-        score: number
-    }>
-    intent: 'prefetch' | 'refinement'
-    reason: string
-}>
-
-const FEEDBACK_DEMAND_GRACE_GENERATIONS = 1
 
 /** Coordinates safety cover, view demand, feedback acknowledgement, and publication retention. */
 export function createVirtualRasterDemandController<
@@ -215,7 +181,8 @@ export function createVirtualRasterDemandController<
         model.safetyCoverPages.length > maxPhysicalPages ||
         model.safetyCoverPages.length > scheduler.maxRequests ||
         viewDemandProducer?.kind !== 'view-demand-producer' ||
-        viewDemandProducer.maxDemands > scheduler.maxRequests) {
+        viewDemandProducer.maxDemands + model.safetyCoverPages.length >
+            Math.min(maxPhysicalPages, scheduler.maxRequests)) {
         return invalidRuntime(
             model,
             'Virtual Raster GPU demand requires one matching scheduler/residency owner and budgets that contain the safety cover.',
@@ -229,22 +196,13 @@ export function createVirtualRasterDemandController<
             }
         )
     }
-    const lease = residency.createLease({
-        id: `virtual-raster-frontier.${model.id}`,
-        maximumPages: maxPhysicalPages,
-        maxHistory,
-    })
     const safetyKeys = new Set(model.safetyCoverPages.map(page => page.key))
-    const transitions = new Map<string, TransitionLeaseRecord>()
-    let previousFeedbackDemands = new Map<string, DeferredFeedbackDemand>()
-    let deferredDemandCount = 0
+    const viewDemandCapacity = viewDemandProducer.maxDemands
     let activeDemandKeys = new Set(safetyKeys)
     let disposed = false
     let generation = 0
     let lastDecisionFrameEpoch = -1
     let acknowledgedSnapshotEpoch = 0
-    let ringId: string | undefined
-    let frontierId: string | undefined
     for (const page of model.safetyCoverPages) residency.pin(page)
 
     function initialize(): VirtualRasterDemandReconciliation {
@@ -265,169 +223,62 @@ export function createVirtualRasterDemandController<
         }))
     }
 
-    function reconcileFeedback(
-        feedback: VirtualRasterGpuFeedbackBatch,
-        view: GeoViewSnapshot
+    function reconcileViewDemands(
+        demandSet: ViewTileDemandSet
     ): VirtualRasterFeedbackReconciliation {
 
         assertActive()
-        const canonical = canonicalGpuFeedback(
-            model,
-            feedback,
-            lastDecisionFrameEpoch,
-            acknowledgedSnapshotEpoch,
-            ringId,
-            frontierId
-        )
-        if (view?.kind !== 'geo-view-snapshot' ||
-            view.frameEpoch !== feedback.frameEpoch ||
-            view.residencySnapshotEpoch !== feedback.residencySnapshotEpoch) {
+        if (demandSet?.kind !== 'view-tile-demand-set' ||
+            !Array.isArray(demandSet.demands) ||
+            demandSet.demands.length > viewDemandCapacity ||
+            demandSet.demands.some(demand =>
+                demand?.page?.addressSpaceId !== model.addressSpace.id ||
+                demand?.source?.producerId !== viewDemandProducer.id
+            )) {
             return invalidRuntime(
                 model,
-                'Virtual Raster GPU feedback must be lowered against the exact Geo view that produced it.',
+                'Virtual Raster accepts only bounded explicit demand from its own view-demand producer.',
                 {
-                    feedbackFrameEpoch: feedback.frameEpoch,
-                    feedbackResidencySnapshotEpoch: feedback.residencySnapshotEpoch,
-                    viewKind: view?.kind,
-                    viewId: view?.id,
-                    viewFrameEpoch: view?.frameEpoch,
-                    viewResidencySnapshotEpoch: view?.residencySnapshotEpoch,
+                    kind: 'view-tile-demand-set',
+                    addressSpaceId: model.addressSpace.id,
+                    producerId: viewDemandProducer.id,
+                    viewDemandCapacity,
                 }
             )
         }
-        ringId ??= feedback.ringId
-        frontierId ??= feedback.frontierId
-        lastDecisionFrameEpoch = feedback.frameEpoch
-        let retainedCount = 0
-        for (const demand of canonical.demands) {
-            if (safetyKeys.has(demand.parent.key)) continue
-            const existing = transitions.get(demand.parent.key)
-            if (!lease.retain(demand.parent, demand.parentGeneration)) continue
-            if (existing?.generation !== demand.parentGeneration) {
-                transitions.set(demand.parent.key, {
-                    page: demand.parent,
-                    generation: demand.parentGeneration,
-                    visibleAfterSnapshotEpoch: feedback.residencySnapshotEpoch,
-                    acknowledged: true,
-                })
-                retainedCount++
-            }
-        }
-        let retiredCount = 0
-        for (const retirement of canonical.retirements) {
-            if (safetyKeys.has(retirement.page.key)) continue
-            const record = transitions.get(retirement.page.key)
-            if (record === undefined || record.generation !== retirement.generation ||
-                !record.acknowledged ||
-                feedback.residencySnapshotEpoch <= record.visibleAfterSnapshotEpoch) continue
-            const current = residency.currentSnapshot.resolve(retirement.page)
-            if (current.status !== 'resident' ||
-                current.physicalSlot !== retirement.physicalSlot ||
-                current.generation !== retirement.generation ||
-                current.contentEpoch !== retirement.contentEpoch) continue
-            if (lease.release(retirement.page, retirement.generation)) retiredCount++
-            transitions.delete(retirement.page.key)
-        }
         const demandGeneration = ++generation
-        const currentFeedbackDemands = new Map<string, DeferredFeedbackDemand>()
-        for (const demand of canonical.demands) {
-            const candidate = Object.freeze({
-                page: demand.page,
-                priority: Object.freeze({
-                    class: 'user-visible' as const,
-                    score: demand.priority,
-                }),
-                intent: 'refinement' as const,
-                reason: `gpu-frontier:${feedback.frameEpoch}`,
-            })
-            const existing = currentFeedbackDemands.get(demand.page.key)
-            if (existing === undefined || candidate.priority.score > existing.priority.score) {
-                currentFeedbackDemands.set(demand.page.key, candidate)
-            }
-        }
-        const deferredFeedbackDemands = [ ...previousFeedbackDemands.values() ]
-            .filter(demand => !currentFeedbackDemands.has(demand.page.key))
-            .map(demand => Object.freeze({
-                ...demand,
-                priority: Object.freeze({
-                    class: 'background' as const,
-                    score: demand.priority.score,
-                }),
-                intent: 'prefetch' as const,
-                reason: `gpu-frontier-grace:${feedback.frameEpoch}`,
-            }))
-        const viewDemands = viewDemandProducer.produce({
-            view,
+        const normalized = Object.freeze({
+            kind: 'view-tile-demand-set' as const,
             generation: demandGeneration,
-            demands: [
-                ...currentFeedbackDemands.values(),
-                ...deferredFeedbackDemands,
-            ],
+            demands: Object.freeze(demandSet.demands.map(demand => Object.freeze({
+                ...demand,
+                generation: demandGeneration,
+            }))),
         })
-        const feedbackBudget = Math.max(0, scheduler.maxRequests - safetyKeys.size)
-        const requested = virtualRasterDemandSetFromViewDemands(viewDemands).demands
+        const requested = virtualRasterDemandSetFromViewDemands(normalized).demands
             .filter(demand => !safetyKeys.has(demand.page.key))
-            .slice(0, feedbackBudget)
-        deferredDemandCount = requested.filter(demand =>
-            demand.reason.startsWith('gpu-frontier-grace:')
-        ).length
-        previousFeedbackDemands = new Map(requested.flatMap(demand => {
-            const current = currentFeedbackDemands.get(demand.page.key)
-            return current === undefined ? [] : [ [ demand.page.key, current ] ]
-        }))
         activeDemandKeys = new Set([
             ...safetyKeys,
             ...requested.map(demand => demand.page.key),
         ])
+        const frameEpochs = demandSet.demands.map(demand => demand.source.frameEpoch)
+        if (frameEpochs.length > 0) lastDecisionFrameEpoch = Math.max(...frameEpochs)
         const reconciliation = scheduler.reconcile(virtualRasterDemandSet({
             generation: demandGeneration,
             demands: [
-                ...model.safetyCoverPages.map(page => safetyDemand(page, demandGeneration)),
-                ...requested.filter(demand => !safetyKeys.has(demand.page.key)),
+                ...model.safetyCoverPages.map(page =>
+                    safetyDemand(page, demandGeneration)
+                ),
+                ...requested,
             ],
         }))
         return Object.freeze({
             generation: demandGeneration,
             requestedCount: reconciliation.requestedCount,
-            retainedCount,
-            retiredCount,
+            retainedCount: reconciliation.retainedCount,
+            retiredCount: reconciliation.cancelledCount,
             settlement: reconciliation.settled,
         })
-    }
-
-    function retainPublication(publication: VirtualRasterPublication): number {
-
-        assertActive()
-        if (publication.snapshot.addressSpace !== model.addressSpace ||
-            publication.inspect().state !== 'pending') {
-            return invalidRuntime(
-                model,
-                'Transition leases can retain only the active pending residency publication.',
-                publication.inspect()
-            )
-        }
-        let retainedCount = 0
-        for (const page of model.safetyCoverPages) {
-            const resolved = publication.snapshot.resolve(page)
-            if (resolved.status === 'resident' && resolved.generation !== undefined) {
-                lease.retain(page, resolved.generation)
-            }
-        }
-        for (const upload of publication.uploads) {
-            if (!activeDemandKeys.has(upload.page.key)) continue
-            const existing = transitions.get(upload.page.key)
-            if (!lease.retain(upload.page, upload.generation)) continue
-            if (!safetyKeys.has(upload.page.key) && existing?.generation !== upload.generation) {
-                transitions.set(upload.page.key, {
-                    page: upload.page,
-                    generation: upload.generation,
-                    visibleAfterSnapshotEpoch: publication.snapshot.epoch,
-                    acknowledged: false,
-                })
-                retainedCount++
-            }
-        }
-        return retainedCount
     }
 
     function acknowledgePublication(publication: VirtualRasterPublication): void {
@@ -443,11 +294,6 @@ export function createVirtualRasterDemandController<
             )
         }
         acknowledgedSnapshotEpoch = publication.snapshot.epoch
-        for (const record of transitions.values()) {
-            if (record.visibleAfterSnapshotEpoch === publication.snapshot.epoch) {
-                record.acknowledged = true
-            }
-        }
     }
 
     function abandonPublication(publication: VirtualRasterPublication): void {
@@ -461,12 +307,6 @@ export function createVirtualRasterDemandController<
                 publication.inspect()
             )
         }
-        for (const [ key, record ] of transitions) {
-            if (record.acknowledged ||
-                record.visibleAfterSnapshotEpoch !== publication.snapshot.epoch) continue
-            lease.release(record.page, record.generation)
-            transitions.delete(key)
-        }
     }
 
     function facts(): VirtualRasterDemandControllerFacts {
@@ -474,13 +314,11 @@ export function createVirtualRasterDemandController<
         return Object.freeze({
             disposed,
             generation,
+            safetyDemandCount: safetyKeys.size,
+            viewDemandCapacity,
             lastDecisionFrameEpoch,
             acknowledgedSnapshotEpoch,
-            feedbackDemandGraceGenerations: FEEDBACK_DEMAND_GRACE_GENERATIONS,
-            deferredDemandCount,
             activeDemandCount: activeDemandKeys.size,
-            transitionCount: transitions.size,
-            lease: lease.facts(),
         })
     }
 
@@ -489,11 +327,7 @@ export function createVirtualRasterDemandController<
         if (disposed) return
         disposed = true
         for (const page of model.safetyCoverPages) residency.unpin(page)
-        transitions.clear()
-        previousFeedbackDemands.clear()
-        deferredDemandCount = 0
         activeDemandKeys.clear()
-        lease.dispose()
     }
 
     function assertActive(): void {
@@ -503,10 +337,8 @@ export function createVirtualRasterDemandController<
     }
 
     return Object.freeze({
-        lease,
         initialize,
-        reconcileFeedback,
-        retainPublication,
+        reconcileViewDemands,
         acknowledgePublication,
         abandonPublication,
         facts,
@@ -578,7 +410,8 @@ export async function createVirtualRasterRuntime<
         })
         viewDemandProducer = new ViewDemandProducer({
             id: viewDemandProducerId,
-            maxDemands: maxRequests,
+            maxDemands: Math.min(maxPhysicalPages, maxRequests) -
+                model.safetyCoverPages.length,
         })
         demandController = createVirtualRasterDemandController({
             model,
@@ -635,7 +468,6 @@ export async function createVirtualRasterRuntime<
             )
         }
         const publication = activeScheduler.publish()
-        activeDemandController.retainPublication(publication)
         let update: VirtualRasterGpuUpdate
         try {
             update = activeGpuState.stage(publication)
@@ -764,9 +596,8 @@ export async function createVirtualRasterRuntime<
         gpu: activeGpuState,
         scheduler: activeScheduler,
         viewDemandProducer: activeViewDemandProducer,
-        residencyLease: activeDemandController.lease,
         initialize,
-        reconcileFeedback: activeDemandController.reconcileFeedback,
+        reconcileViewDemands: activeDemandController.reconcileViewDemands,
         publish,
         acknowledge,
         stopDemand,
@@ -846,111 +677,6 @@ async function failRuntimeCreation({
     )
 }
 
-function canonicalGpuFeedback(
-    model: VirtualRasterRuntimeModel,
-    feedback: VirtualRasterGpuFeedbackBatch,
-    lastDecisionFrameEpoch: number,
-    acknowledgedSnapshotEpoch: number,
-    ringId: string | undefined,
-    frontierId: string | undefined
-): Readonly<{
-    demands: readonly GpuTileFrontierDemand[]
-    retirements: readonly GpuTileFrontierRetirement[]
-}> {
-
-    if (feedback.kind !== 'virtual-raster-gpu-feedback-batch' ||
-        typeof feedback.ringId !== 'string' || feedback.ringId.length === 0 ||
-        typeof feedback.frontierId !== 'string' || feedback.frontierId.length === 0 ||
-        !nonNegativeInteger(feedback.frameEpoch) || feedback.frameEpoch > 0xffff_ffff ||
-        feedback.frameEpoch <= lastDecisionFrameEpoch ||
-        !nonNegativeInteger(feedback.residencySnapshotEpoch) ||
-        feedback.residencySnapshotEpoch > 0xffff_ffff ||
-        feedback.residencySnapshotEpoch > acknowledgedSnapshotEpoch ||
-        (ringId !== undefined && feedback.ringId !== ringId) ||
-        (frontierId !== undefined && feedback.frontierId !== frontierId)) {
-        return invalidRuntime(
-            model,
-            'GPU feedback must come from one stable frontier and advance monotonically within acknowledged residency.',
-            {
-                ringId: feedback.ringId,
-                frontierId: feedback.frontierId,
-                frameEpoch: feedback.frameEpoch,
-                residencySnapshotEpoch: feedback.residencySnapshotEpoch,
-                lastDecisionFrameEpoch,
-                acknowledgedSnapshotEpoch,
-            }
-        )
-    }
-    const demands = new Map<string, GpuTileFrontierDemand>()
-    for (const demand of feedback.demands) {
-        try {
-            model.addressSpace.assertPage(demand.page)
-            model.addressSpace.assertPage(demand.parent)
-        } catch (error) {
-            return invalidRuntime(
-                model,
-                'GPU demand pages must belong to the configured Virtual Raster coverage.',
-                demand,
-                error
-            )
-        }
-        const expectedParent = model.addressSpace.parent(demand.page)
-        const tile = demand.page.tile!
-        const expectedChildMask = 1 << ((tile.tileRow % 2) * 2 + tile.tileCol % 2)
-        if (expectedParent?.key !== demand.parent.key ||
-            demand.parentCompactIndex !== model.addressSpace.tableIndex(demand.parent) ||
-            !nonNegativeInteger(demand.parentPhysicalSlot) ||
-            demand.parentPhysicalSlot > 0xffff_ffff ||
-            !positiveInteger(demand.parentGeneration) || demand.parentGeneration > 0xffff_ffff ||
-            !nonNegativeInteger(demand.priority) || demand.priority > 0xffff_ffff ||
-            demand.childMask !== expectedChildMask ||
-            demand.decisionFrameEpoch !== feedback.frameEpoch ||
-            demand.residencySnapshotEpoch !== feedback.residencySnapshotEpoch) {
-            return invalidRuntime(
-                model,
-                'GPU demand must identify one covered child and its acknowledged parent assignment.',
-                { demand, expectedParent }
-            )
-        }
-        const existing = demands.get(demand.page.key)
-        if (existing === undefined || demand.priority > existing.priority) {
-            demands.set(demand.page.key, demand)
-        }
-    }
-    const retirements: GpuTileFrontierRetirement[] = []
-    for (const retirement of feedback.retirements) {
-        try {
-            model.addressSpace.assertPage(retirement.page)
-        } catch (error) {
-            return invalidRuntime(
-                model,
-                'GPU retirement pages must belong to the configured Virtual Raster coverage.',
-                retirement,
-                error
-            )
-        }
-        if (!nonNegativeInteger(retirement.physicalSlot) ||
-            retirement.physicalSlot > 0xffff_ffff ||
-            !positiveInteger(retirement.generation) || retirement.generation > 0xffff_ffff ||
-            !positiveInteger(retirement.contentEpoch) || retirement.contentEpoch > 0xffff_ffff ||
-            retirement.decisionFrameEpoch !== feedback.frameEpoch ||
-            retirement.residencySnapshotEpoch !== feedback.residencySnapshotEpoch) {
-            return invalidRuntime(
-                model,
-                'GPU retirement must identify one physical assignment from this feedback frame.',
-                retirement
-            )
-        }
-        retirements.push(retirement)
-    }
-    return Object.freeze({
-        demands: Object.freeze([ ...demands.values() ].sort((left, right) =>
-            left.page.key.localeCompare(right.page.key)
-        )),
-        retirements: Object.freeze(retirements),
-    })
-}
-
 function safetyDemand(
     page: VirtualRasterPageIdentity,
     generation: number
@@ -979,10 +705,12 @@ function assertRuntimeModel(
         model.representation.field !== model.field ||
         model.representation.plane !== model.plane ||
         model.representation.spatialProfile !== model.spatialProfile ||
-        !Array.isArray(model.safetyCoverPages) || model.safetyCoverPages.length === 0) {
+        !Array.isArray(model.safetyCoverPages) || model.safetyCoverPages.length === 0 ||
+        new Set(model.safetyCoverPages.map(page => page?.key)).size !==
+            model.safetyCoverPages.length) {
         return invalidRuntime(
             model,
-            'A Virtual Raster runtime model requires one coherent tiled field and a non-empty safety cover.',
+            'A Virtual Raster runtime model requires one coherent tiled field and a unique non-empty safety cover.',
             model
         )
     }
@@ -1007,7 +735,7 @@ function invalidRuntime(
 
     const addressSpaceId = model?.addressSpace?.id
     throw new GeoDiagnosticError(createGeoDiagnostic({
-        code: 'GEO_GPU_TILE_FRONTIER_INVALID',
+        code: 'GEO_VIRTUAL_RASTER_RUNTIME_INVALID',
         phase: 'selection',
         subject: {
             kind: 'virtual-raster-runtime',

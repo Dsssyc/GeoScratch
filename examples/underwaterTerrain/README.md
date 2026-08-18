@@ -21,8 +21,8 @@ the newest revision instead of replaying intermediate views. The two canvases ke
 WebGL and WebGPU contexts and do not claim shared depth or atomic presentation.
 
 The high-pitch benchmark runs 90 display-paced camera updates in both shaded and wireframe
-presentations. Render-root/trial traversal is parallel, persistent patch capacity follows the
-viewport budget, and 2:1 balancing exits once a complete scratch/primary pair produces no split.
+presentations. One inverse-cover compute dispatch directly generates bounded standard
+`WebMercatorQuad` patches and performs local 2:1 closure; no root/trial traversal exists.
 The acceptance gate requires at least 65 submitted camera transitions, zero stale transitions,
 lag P95 no greater than one frame, and native observation P95 no greater than 25 ms.
 
@@ -55,47 +55,25 @@ the page, alter cache query parameters, or rebuild the virtual raster.
 
 ## Data and geometry LoD
 
-The source-backed `WebMercatorQuad` data frontier is capped by the manifest at
-`z10`. Its level metric is one raster texel (`TileMatrix.cellSize`), independent
-of the 64 by 64 render mesh. Terrain geometry is a separate authority: persistent
-GPU compute stages traverse an immutable, prefix-free geographic safety cover into
-frustum-culled render patches through `z14`, then write the logical-patch lookup and
-terrain indirect draw arguments. Zooming beyond `z10` therefore continues to refine
-geometry without requesting, decoding, or caching synthetic higher-level raster pages.
-Loading, eviction, and fallback cannot redefine the geometry traversal roots.
+The manifest declares source pages through z10. `GpuWebMercatorQuadCover` independently
+selects geometry through z14, but every output remains a standard
+`(tileMatrix, tileRow, tileCol)` identity. Camera-centered bands select from the fixed
+global matrix; they are not a moving clipmap grid. The GPU derives parent-aligned nested
+windows from the current view, conservatively rejects invisible candidates, performs
+local 2:1 closure, builds the full-identity neighbor lookup, and writes indirect draw
+arguments in one bounded dispatch.
 
-Render-patch selection combines local projected grid spacing with a global,
-pitch-aware frame budget. The GPU counts 17 complete quadtree cuts at quarter-LoD
-thresholds, selects the finest cut inside the budget, emits that cut, and finalizes
-the indirect draw count in one ordered compute pass. No patch count or selected
-bias is read back to control the frame. The previous bias may be retained only
-within the budget hysteresis band and at most one quarter-step coarser than the
-current optimum. Local patch decisions are stateless: projected footprints are
-clipped against the complete WebGPU clip volume to obtain visible evaluation points,
-then a one-cell projective differential measures local grid spacing. The square root of
-the absolute pixel-space Jacobian determinant is an area-equivalent span, so rotating
-the camera bearing cannot make a farther diagonal patch refine first merely by changing
-grid-axis alignment. It also cannot become coarser merely because zooming leaves a
-smaller clipped fragment at a viewport edge. The same settled camera, viewport, render
-roots, policy, and global bias always produce the same render cut regardless of camera
-history or data-frontier residency.
+The cover also emits desired raster facts. A z14 geometry patch retains
+`desiredSampleLevel = 14` while lowering its executable request to the corresponding
+z10 source ancestor. `VirtualRasterRuntime.reconcileViewDemands()` consumes those
+explicit pages, removes already exact-resident work, and schedules the remaining pages
+in bounded batches. Virtual Raster never inspects zoom or selects geometry LoD.
 
-The coarsest trial stops at the fixed render roots. Counts across the 17 trials are
-not assumed to be monotonic: child AABBs can all be rejected while a conservative
-parent AABB still intersects the frustum. The GPU selects the first fine-to-coarse
-trial inside budget; if none fits, it selects the trial with the smallest measured
-count. It never truncates descriptors or leaves terrain holes. Delayed feedback
-reports the baseline and pitch-adjusted budgets, requested and selected counts,
-minimum-trial and render-root counts, selected bias, level range, and overflow counters.
-An over-capacity trial saturates immediately above render capacity, because an exact
-count for a cut that cannot be selected would add traversal work without changing the
-decision.
-
-A render patch stores only `(matrixLevel, tileRow, tileCol)`. Terrain asks the logical
-Virtual Raster accessor for its finest level; the page table independently resolves
-each coordinate to the available source page and fallback level. Edge vertex snapping
-therefore uses render LoD without embedding raster residency into mesh topology.
-Wireframe mode makes post-`z10` geometry subdivision directly visible.
+Terrain samples by global fixed coordinate. Until an exact source page is resident,
+the page table resolves a lower ancestor without changing geometry topology. Mesh
+stitching uses only the standard geometry cover. Wireframe mode therefore shows
+post-z10 geometry directly while network, cache, and atlas activity remain source
+truthful.
 
 The application does not own the terrain vertex shader. Geo's
 `webMercatorTerrainWgslModule` generates logical patch lookup, high-precision
