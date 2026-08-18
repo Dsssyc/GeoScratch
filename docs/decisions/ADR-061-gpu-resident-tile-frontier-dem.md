@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted
+Superseded by [ADR-083](ADR-083-webmercator-inverse-cover-passive-virtual-raster.md)
+for view/LoD authority. Its GPU-driven demand, bounded feedback, indirect execution,
+generation safety, and no-CPU-hot-path requirements remain historical foundations.
 
 ## Date
 

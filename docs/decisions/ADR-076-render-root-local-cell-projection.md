@@ -2,12 +2,10 @@
 
 ## Status
 
-Partially superseded by ADR-077, which replaces the basis-dependent product of the two
-projected axis lengths with a rotation-invariant Jacobian determinant. This ADR still
-supersedes ADR-065's clipped-footprint error metric and ADR-066's source-page render
-roots. ADR-078 supersedes ADR-066's final uniform-cut and hysteresis policy with a
-stateless base cut plus local priority fill. ADR-068's balanced-cut contract remains in
-force.
+Superseded by [ADR-083](ADR-083-webmercator-inverse-cover-passive-virtual-raster.md)
+for immutable render roots and root-forward traversal. ADR-077's rotation-invariant
+local projection evidence and ADR-068's final-cover balance invariant remain inputs to
+the inverse standard cover.
 
 ## Date
 

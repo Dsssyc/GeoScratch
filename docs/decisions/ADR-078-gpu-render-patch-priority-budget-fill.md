@@ -2,11 +2,10 @@
 
 ## Status
 
-Accepted. Supersedes ADR-066's global budget hysteresis and its use of one uniformly
-biased trial cut as the final pre-balance topology. The 17 measured trials remain as
-bounded base-cut candidates. ADR-068's level-difference-one balance contract,
-ADR-076's immutable render roots and local projected-cell evaluation, and ADR-077's
-rotation-invariant determinant metric remain in force.
+Superseded by [ADR-083](ADR-083-webmercator-inverse-cover-passive-virtual-raster.md).
+Complete error cohorts and 17 measured trial cuts are no longer selection architecture.
+Its stateless-current-view, deterministic-tie, and explicit-budget principles remain
+requirements for the inverse standard cover.
 
 ## Date
 

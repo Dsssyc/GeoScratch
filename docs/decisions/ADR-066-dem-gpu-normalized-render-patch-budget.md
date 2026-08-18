@@ -2,11 +2,10 @@
 
 ## Status
 
-Partially superseded by ADR-078. This ADR still defines the normalized frame budget and
-the 17 measured complete-cut trials, but the selected trial is now a safe base cut.
-ADR-078 removes global history and fills residual budget by current local priority
-before ADR-068 balancing. ADR-076 supersedes this ADR's source-page render roots and
-clipped-footprint metric.
+Superseded by [ADR-083](ADR-083-webmercator-inverse-cover-passive-virtual-raster.md).
+ADR-078 previously superseded its global hysteresis, and ADR-076 previously superseded
+its source-page roots and clipped metric. The normalized-budget evidence remains
+historical; the 17 complete-cut trials are no longer current architecture.
 
 ## Date
 

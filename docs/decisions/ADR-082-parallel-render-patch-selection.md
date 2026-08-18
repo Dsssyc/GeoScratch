@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted. Preserves ADR-076 through ADR-078 selection semantics and ADR-081 frame authority.
+Superseded by [ADR-083](ADR-083-webmercator-inverse-cover-passive-virtual-raster.md).
+The measured high-pitch benchmark and bounded frame-authority gates remain required,
+but parallel root/trial traversal is no longer current architecture.
 
 ## Date
 

@@ -2,8 +2,10 @@
 
 ## Status
 
-Accepted. ADR-076 changes the traversal roots and error metric; this ADR's final-cut
-balance and validation contract remains current.
+Partially superseded by
+[ADR-083](ADR-083-webmercator-inverse-cover-passive-virtual-raster.md). The restricted
+quadtree implementation is replaced; the final-cover edge-adjacent level-difference-one
+and validation contract remains current.
 
 ## Date
 

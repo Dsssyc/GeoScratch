@@ -2,11 +2,10 @@
 
 ## Status
 
-Accepted; supersedes ADR-076 only for the way the two local projected cell-axis
-differentials are combined. ADR-076's immutable render roots, visible evaluation
-positions, canonical local decisions, and bounded balancing remain in force. ADR-078
-later replaces the final uniform budget cut and hysteresis with a stateless base cut
-plus local priority fill; it does not change this ADR's metric.
+Partially superseded by
+[ADR-083](ADR-083-webmercator-inverse-cover-passive-virtual-raster.md). The old
+render-root frontier is replaced, while the rotation-invariant local Jacobian metric
+remains valid evidence for conservative view-derived level decisions.
 
 ## Date
 
