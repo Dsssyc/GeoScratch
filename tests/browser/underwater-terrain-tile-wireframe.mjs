@@ -22,6 +22,20 @@ const timeout = positiveInteger(
     120_000
 )
 const headless = process.env.UNDERWATER_TERRAIN_HEADLESS !== '0'
+const viewportWidth = positiveInteger(
+    process.env.UNDERWATER_TERRAIN_TILE_WIREFRAME_VIEWPORT_WIDTH,
+    1280
+)
+const viewportHeight = positiveInteger(
+    process.env.UNDERWATER_TERRAIN_TILE_WIREFRAME_VIEWPORT_HEIGHT,
+    800
+)
+const configuredPitchThresholdDegrees = finiteRange(
+    process.env.VITE_UNDERWATER_TERRAIN_VARIABLE_LOD_PITCH_DEGREES,
+    60,
+    0,
+    90
+)
 const outputDirectory = resolve(
     process.env.UNDERWATER_TERRAIN_TILE_WIREFRAME_OUTPUT ??
         '/tmp/geoscratch-underwater-terrain-inverse-cover'
@@ -46,6 +60,24 @@ const oddParityTopDownCamera = Object.freeze({
 const oddParityPitchedCamera = Object.freeze({
     ...oddParityTopDownCamera,
     pitch: 70,
+})
+const pitchBoundaryCameras = Object.freeze({
+    topDown: Object.freeze({ ...oddParityTopDownCamera, bearing: 0, pitch: 0 }),
+    below: Object.freeze({
+        ...oddParityTopDownCamera,
+        bearing: 0,
+        pitch: Math.max(0, configuredPitchThresholdDegrees - 0.1),
+    }),
+    boundary: Object.freeze({
+        ...oddParityTopDownCamera,
+        bearing: 0,
+        pitch: configuredPitchThresholdDegrees,
+    }),
+    high: Object.freeze({
+        ...oddParityTopDownCamera,
+        bearing: 0,
+        pitch: Math.max(configuredPitchThresholdDegrees, 70),
+    }),
 })
 const vitePort = await findAvailablePort()
 let tilePort = await findAvailablePort()
@@ -135,7 +167,7 @@ if (failures.length > 0) process.exitCode = 1
 async function runProof(activeBrowser) {
 
     const context = await activeBrowser.newContext({
-        viewport: { width: 1280, height: 800 },
+        viewport: { width: viewportWidth, height: viewportHeight },
         deviceScaleFactor: 1,
     })
     const page = await context.newPage()
@@ -219,6 +251,22 @@ async function runProof(activeBrowser) {
             zoomSamples.push(previous)
         }
 
+        const pitchBoundary = {}
+        for (const [ label, pitchCamera ] of Object.entries(pitchBoundaryCameras)) {
+            previous = await settle(
+                page,
+                'tile-wireframe',
+                previous.observedFrames,
+                pitchCamera
+            )
+            pitchBoundary[label] = Object.freeze({
+                ...previous,
+                ...(label === 'topDown' ? {
+                    capture: await capture(page, 'wide-top-down'),
+                } : {}),
+            })
+        }
+
         previous = await settle(
             page,
             'tile-wireframe',
@@ -277,6 +325,7 @@ async function runProof(activeBrowser) {
             wireframe: Object.freeze({ ...wireframe, capture: wireframeCapture }),
             canonical: Object.freeze(canonical),
             zoomSamples: Object.freeze(zoomSamples),
+            pitchBoundary: Object.freeze(pitchBoundary),
             oddParityTopDown,
             shadedTracking,
             wireframeTracking,
@@ -552,6 +601,7 @@ function validateProof(value, processState) {
         wireframe,
         canonical = [],
         zoomSamples = [],
+        pitchBoundary,
         oddParityTopDown,
         shadedTracking,
         wireframeTracking,
@@ -584,6 +634,10 @@ function validateProof(value, processState) {
         wireframe,
         ...canonical,
         ...zoomSamples,
+        pitchBoundary?.topDown,
+        pitchBoundary?.below,
+        pitchBoundary?.boundary,
+        pitchBoundary?.high,
         oddParityTopDown?.bearingZero,
         oddParityTopDown?.direct,
         oddParityTopDown?.returned,
@@ -635,6 +689,32 @@ function validateProof(value, processState) {
     expect(failures,
         zoomSamples.length === 5 && zoomRegressions.length === 0,
     `zoom-in coarsened the inverse cover: ${JSON.stringify(zoomRegressions)}`)
+    const thresholdRadians = configuredPitchThresholdDegrees * Math.PI / 180
+    expect(failures,
+        Math.abs(
+            baseline?.graphContract?.cover?.policy?.variableLodPitchThresholdRadians -
+            thresholdRadians
+        ) < 1e-6,
+    'terrain graph did not expose the configured variable-LoD pitch threshold')
+    for (const [ label, sample ] of [
+        [ 'top-down', pitchBoundary?.topDown ],
+        [ 'below-threshold', pitchBoundary?.below ],
+    ]) {
+        expect(failures,
+            sample?.coverFeedback?.selectionMode === 'uniform' &&
+            sample.coverFeedback.minimumMatrixLevel ===
+                sample.coverFeedback.maximumMatrixLevel,
+        `${label} footprint did not settle to one uniform projected-cell level`)
+    }
+    for (const [ label, sample ] of [
+        [ 'threshold', pitchBoundary?.boundary ],
+        [ 'high-pitch', pitchBoundary?.high ],
+    ]) {
+        expect(failures,
+            sample?.coverFeedback?.selectionMode === 'variable' &&
+            sample.coverFeedback.maximumAdjacentLevelDelta <= 1,
+        `${label} footprint did not use the variable projected-cell cover`)
+    }
     const oddBearingZero = oddParityTopDown?.bearingZero
     const oddDirect = oddParityTopDown?.direct
     const oddReturned = oddParityTopDown?.returned
@@ -855,6 +935,16 @@ function positiveInteger(value, fallback) {
 
     const parsed = Number(value)
     return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback
+}
+
+function finiteRange(value, fallback, minimum, maximum) {
+
+    if (value === undefined || String(value).trim().length === 0) return fallback
+    const parsed = Number(value)
+    if (!Number.isFinite(parsed) || parsed < minimum || parsed > maximum) {
+        throw new RangeError(`Expected a finite value in [${minimum}, ${maximum}]`)
+    }
+    return parsed
 }
 
 function serializeError(error) {

@@ -1,15 +1,12 @@
 import { throwGeoDiagnostic } from './diagnostics.js'
 import type { GeoViewSnapshot } from './geo-view.js'
 import type { GpuWebMercatorQuadCoverPolicy } from './gpu-web-mercator-quad-cover.js'
-import type { TileMatrixLimits } from './tile-matrix.js'
 import type { WebMercatorPlanarTileSpatialProfile } from './tile-spatial-profile.js'
 import {
     WEB_MERCATOR_QUAD_HALF_WORLD,
     WEB_MERCATOR_QUAD_WORLD_WIDTH,
     WebMercatorQuad,
 } from './web-mercator-quad.js'
-
-const DISTANCE_BAND_RADIUS_TILES = 2
 
 export type GpuWebMercatorQuadCoverReferenceBounds = Readonly<{
     west: number
@@ -23,6 +20,7 @@ export type GpuWebMercatorQuadCoverReferenceInput = Readonly<{
     policy: GpuWebMercatorQuadCoverPolicy
     view: GeoViewSnapshot
     visibleBounds: GpuWebMercatorQuadCoverReferenceBounds
+    elevationRangeMeters: readonly [number, number]
 }>
 
 export type GpuWebMercatorQuadCoverReferencePatch = Readonly<{
@@ -55,6 +53,9 @@ export type GpuWebMercatorQuadCoverReferenceResult = Readonly<{
         candidateCount: number
         patchCount: number
         demandCount: number
+        selectionMode: 'uniform' | 'variable'
+        minimumCellSpanPixels?: number
+        maximumCellSpanPixels?: number
     }>
 }>
 
@@ -66,7 +67,7 @@ type IntegerBounds = Readonly<{
 }>
 
 /**
- * CPU oracle for the deterministic matrix-aligned level-band construction used by
+ * CPU oracle for the deterministic pitch-gated projected-cell construction used by
  * the GPU WebMercatorQuad inverse cover.
  */
 export function evaluateGpuWebMercatorQuadCoverReference(
@@ -76,12 +77,13 @@ export function evaluateGpuWebMercatorQuadCoverReference(
     validateInput(input)
     const focus = normalizedCamera(input.view)
     const fixedCamera = cameraFixedPosition(input)
-    const finestMatrixLevel = clamp(
-        Math.ceil(input.view.zoomHint) + pitchLevelBoost(input.view.cameraPitchRadians),
-        input.policy.minimumMatrixLevel,
-        input.policy.maximumMatrixLevel
-    )
-    const generated = generate(input, fixedCamera, finestMatrixLevel)
+    const selectionMode = input.view.cameraPitchRadians <
+        input.policy.variableLodPitchThresholdRadians
+        ? 'uniform'
+        : 'variable'
+    const generated = selectionMode === 'uniform'
+        ? generateUniform(input)
+        : generateVariable(input, fixedCamera)
     if (generated.patches.length > input.policy.maximumPatches) {
         return invalidCover(
             'The minimum standard cover exceeds its declared patch capacity.',
@@ -98,30 +100,61 @@ export function evaluateGpuWebMercatorQuadCoverReference(
         demands: Object.freeze(demands),
         facts: Object.freeze({
             selectionPath: 'gpu-camera-inverse-webmercatorquad-cover' as const,
-            finestMatrixLevel,
-            minimumMatrixLevel: input.policy.minimumMatrixLevel,
-            maximumMatrixLevel: input.policy.maximumMatrixLevel,
+            finestMatrixLevel: generated.finestMatrixLevel,
+            minimumMatrixLevel: minimumPatchLevel(generated.patches),
+            maximumMatrixLevel: maximumPatchLevel(generated.patches),
             sourceLevelCeiling: input.policy.sourceMaximumMatrixLevel,
             candidateCount: generated.candidateCount,
             patchCount: generated.patches.length,
             demandCount: demands.length,
+            selectionMode,
+            ...(generated.cellSpans.length === 0 ? {} : {
+                minimumCellSpanPixels: Math.min(...generated.cellSpans),
+                maximumCellSpanPixels: Math.max(...generated.cellSpans),
+            }),
         }),
     })
 }
 
-function generate(
+function generateUniform(input: GpuWebMercatorQuadCoverReferenceInput) {
+
+    let candidateCount = 0
+    for (let matrixLevel = input.policy.minimumMatrixLevel;
+        matrixLevel <= input.policy.maximumMatrixLevel;
+        matrixLevel++) {
+        const window = visibleWindow(input, matrixLevel)
+        const patches = patchesInWindow(input, matrixLevel, window)
+        candidateCount += windowArea(window)
+        const cellSpans = patches.map(patch => projectedCellSpanPixels(input, patch))
+        const maximumSpan = cellSpans.length === 0 ? 0 : Math.max(...cellSpans)
+        if (maximumSpan <= input.policy.maximumCellSpanPixels ||
+            matrixLevel === input.policy.maximumMatrixLevel) {
+            patches.sort(comparePatch)
+            return {
+                patches,
+                candidateCount,
+                cellSpans,
+                finestMatrixLevel: matrixLevel,
+            }
+        }
+    }
+    throw new Error('Unreachable uniform WebMercatorQuad cover level')
+}
+
+function generateVariable(
     input: GpuWebMercatorQuadCoverReferenceInput,
-    fixedCamera: readonly [bigint, bigint],
-    finestMatrixLevel: number
+    fixedCamera: readonly [bigint, bigint]
 ) {
 
-    const windows = coverWindows(input, fixedCamera, finestMatrixLevel)
+    const windows = variableWindows(input, fixedCamera)
     const patches: GpuWebMercatorQuadCoverReferencePatch[] = []
     let candidateCount = 0
+    const finestMatrixLevel = Math.max(...windows.keys())
     for (let matrixLevel = finestMatrixLevel;
         matrixLevel >= input.policy.minimumMatrixLevel;
         matrixLevel--) {
-        const window = windows.get(matrixLevel)!
+        const window = windows.get(matrixLevel)
+        if (window === undefined) continue
         const finer = windows.get(matrixLevel + 1)
         for (let tileRow = window.minTileRow; tileRow <= window.maxTileRow; tileRow++) {
             for (let tileCol = window.minTileCol; tileCol <= window.maxTileCol; tileCol++) {
@@ -137,39 +170,87 @@ function generate(
         }
     }
     patches.sort(comparePatch)
-    return { patches, candidateCount }
+    return {
+        patches,
+        candidateCount,
+        cellSpans: patches.map(patch => projectedCellSpanPixels(input, patch)),
+        finestMatrixLevel,
+    }
 }
 
-function coverWindows(
+function variableWindows(
     input: GpuWebMercatorQuadCoverReferenceInput,
-    fixedCamera: readonly [bigint, bigint],
-    finestMatrixLevel: number
+    fixedCamera: readonly [bigint, bigint]
 ): ReadonlyMap<number, IntegerBounds> {
 
     const windows = new Map<number, IntegerBounds>()
-    for (let matrixLevel = finestMatrixLevel;
-        matrixLevel >= input.policy.minimumMatrixLevel;
-        matrixLevel--) {
-        const limit = geometryLimit(input, matrixLevel)
-        if (matrixLevel === input.policy.minimumMatrixLevel) {
-            windows.set(matrixLevel, limit)
-            continue
-        }
-        let band = distanceBandWindow(
-            fixedCamera,
-            matrixLevel,
+    windows.set(input.policy.minimumMatrixLevel, geometryLimit(
+        input,
+        input.policy.minimumMatrixLevel
+    ))
+    const radius = projectedSearchRadius(input)
+    for (let childLevel = input.policy.minimumMatrixLevel + 1;
+        childLevel <= input.policy.maximumMatrixLevel;
+        childLevel++) {
+        const parentLevel = childLevel - 1
+        const parentLimit = geometryLimit(input, parentLevel)
+        const cameraRow = cameraTileIndex(
+            fixedCamera[1],
+            parentLevel,
             input.spatialProfile.coordinateBits
         )
-        const finer = windows.get(matrixLevel + 1)
-        if (finer !== undefined) {
-            band = unionBounds(band, {
-                minTileRow: Math.floor(finer.minTileRow / 2),
-                maxTileRow: Math.floor(finer.maxTileRow / 2),
-                minTileCol: Math.floor(finer.minTileCol / 2),
-                maxTileCol: Math.floor(finer.maxTileCol / 2),
-            })
+        const cameraCol = cameraTileIndex(
+            fixedCamera[0],
+            parentLevel,
+            input.spatialProfile.coordinateBits
+        )
+        const search = fitWindow({
+            minTileRow: cameraRow - radius,
+            maxTileRow: cameraRow + radius,
+            minTileCol: cameraCol - radius,
+            maxTileCol: cameraCol + radius,
+        }, parentLimit)
+        let childWindow: IntegerBounds | undefined
+        for (let tileRow = search.minTileRow; tileRow <= search.maxTileRow; tileRow++) {
+            for (let tileCol = search.minTileCol; tileCol <= search.maxTileCol; tileCol++) {
+                const parent = referencePatch(parentLevel, tileRow, tileCol)
+                if (!intersectsVisible(parent, input.visibleBounds) ||
+                    projectedCellSpanPixels(input, parent) <=
+                        input.policy.maximumCellSpanPixels) continue
+                const children = {
+                    minTileRow: tileRow * 2,
+                    maxTileRow: tileRow * 2 + 1,
+                    minTileCol: tileCol * 2,
+                    maxTileCol: tileCol * 2 + 1,
+                }
+                childWindow = childWindow === undefined
+                    ? children
+                    : unionBounds(childWindow, children)
+            }
         }
-        windows.set(matrixLevel, fitWindow(alignToParentGroups(band), limit))
+        if (childWindow !== undefined) {
+            windows.set(childLevel, fitWindow(
+                alignToParentGroups(childWindow),
+                geometryLimit(input, childLevel)
+            ))
+        }
+    }
+    for (let matrixLevel = input.policy.maximumMatrixLevel - 1;
+        matrixLevel > input.policy.minimumMatrixLevel;
+        matrixLevel--) {
+        const finer = windows.get(matrixLevel + 1)
+        if (finer === undefined) continue
+        const parent = {
+            minTileRow: Math.floor(finer.minTileRow / 2),
+            maxTileRow: Math.floor(finer.maxTileRow / 2),
+            minTileCol: Math.floor(finer.minTileCol / 2),
+            maxTileCol: Math.floor(finer.maxTileCol / 2),
+        }
+        const current = windows.get(matrixLevel)
+        windows.set(matrixLevel, fitWindow(
+            alignToParentGroups(current === undefined ? parent : unionBounds(current, parent)),
+            geometryLimit(input, matrixLevel)
+        ))
     }
     return windows
 }
@@ -188,44 +269,61 @@ function cameraFixedPosition(
     ]) as readonly [bigint, bigint]
 }
 
-function distanceBandWindow(
-    fixedCamera: readonly [bigint, bigint],
-    matrixLevel: number,
-    coordinateBits: number
-): IntegerBounds {
-
-    const [ minTileCol, maxTileCol ] = distanceBandAxis(
-        fixedCamera[0],
-        matrixLevel,
-        coordinateBits
-    )
-    const [ minTileRow, maxTileRow ] = distanceBandAxis(
-        fixedCamera[1],
-        matrixLevel,
-        coordinateBits
-    )
-    return alignToParentGroups({
-        minTileRow,
-        maxTileRow,
-        minTileCol,
-        maxTileCol,
-    })
-}
-
-function distanceBandAxis(
+function cameraTileIndex(
     fixed: bigint,
     matrixLevel: number,
     coordinateBits: number
-): readonly [number, number] {
+): number {
 
     const fractionalBits = BigInt(coordinateBits - matrixLevel)
-    const tile = Number(fixed >> fractionalBits)
-    const fractionalMask = (1n << fractionalBits) - 1n
-    const hasFraction = (fixed & fractionalMask) !== 0n
-    return Object.freeze([
-        tile - DISTANCE_BAND_RADIUS_TILES,
-        tile + DISTANCE_BAND_RADIUS_TILES - (hasFraction ? 0 : 1),
-    ]) as readonly [number, number]
+    return Number(fixed >> fractionalBits)
+}
+
+function projectedSearchRadius(input: GpuWebMercatorQuadCoverReferenceInput): number {
+
+    const focalPixels = input.view.viewport[1] /
+        (2 * Math.tan(input.view.verticalFovRadians / 2))
+    return Math.max(2, Math.ceil(
+        focalPixels /
+        (input.policy.cellsPerPatchEdge * input.policy.maximumCellSpanPixels)
+    ) + 2)
+}
+
+function visibleWindow(
+    input: GpuWebMercatorQuadCoverReferenceInput,
+    matrixLevel: number
+): IntegerBounds {
+
+    const size = 2 ** matrixLevel
+    const visible = input.visibleBounds
+    return fitWindow({
+        minTileRow: Math.floor(visible.north * size),
+        maxTileRow: Math.ceil(visible.south * size) - 1,
+        minTileCol: Math.floor(visible.west * size),
+        maxTileCol: Math.ceil(visible.east * size) - 1,
+    }, geometryLimit(input, matrixLevel))
+}
+
+function patchesInWindow(
+    input: GpuWebMercatorQuadCoverReferenceInput,
+    matrixLevel: number,
+    window: IntegerBounds
+): GpuWebMercatorQuadCoverReferencePatch[] {
+
+    const patches: GpuWebMercatorQuadCoverReferencePatch[] = []
+    for (let tileRow = window.minTileRow; tileRow <= window.maxTileRow; tileRow++) {
+        for (let tileCol = window.minTileCol; tileCol <= window.maxTileCol; tileCol++) {
+            const patch = referencePatch(matrixLevel, tileRow, tileCol)
+            if (intersectsVisible(patch, input.visibleBounds)) patches.push(patch)
+        }
+    }
+    return patches
+}
+
+function windowArea(window: IntegerBounds): number {
+
+    return (window.maxTileRow - window.minTileRow + 1) *
+        (window.maxTileCol - window.minTileCol + 1)
 }
 
 function unionBounds(left: IntegerBounds, right: IntegerBounds): IntegerBounds {
@@ -364,11 +462,6 @@ function normalizedCamera(view: GeoViewSnapshot): readonly [number, number] {
     ]) as readonly [number, number]
 }
 
-function pitchLevelBoost(pitch: number): number {
-
-    return Math.floor(Math.sin(pitch) ** 2 * 1.5)
-}
-
 function fitWindow(bounds: IntegerBounds, limit: IntegerBounds): IntegerBounds {
 
     const height = Math.min(
@@ -438,6 +531,155 @@ function intersectsVisible(
         patch.tileRow / size < visible.south
 }
 
+type ClipPoint = readonly [number, number, number, number]
+
+function projectedCellSpanPixels(
+    input: GpuWebMercatorQuadCoverReferenceInput,
+    patch: GpuWebMercatorQuadCoverReferencePatch
+): number {
+
+    const bounds = WebMercatorQuad.tileBounds(WebMercatorQuad.tile({
+        matrixId: patch.matrixId,
+        tileRow: patch.tileRow,
+        tileCol: patch.tileCol,
+    })).projected
+    const cameraX = input.view.cameraHigh[0] + input.view.cameraLow[0]
+    const cameraY = input.view.cameraHigh[1] + input.view.cameraLow[1]
+    const cameraZ = input.view.cameraHigh[2] + input.view.cameraLow[2]
+    const relative = {
+        minimumX: bounds.west - cameraX,
+        maximumX: bounds.east - cameraX,
+        minimumY: bounds.south - cameraY,
+        maximumY: bounds.north - cameraY,
+    }
+    return Math.max(...input.elevationRangeMeters.map(elevation =>
+        projectedPlaneCellSpanPixels(
+            input,
+            relative,
+            elevation - cameraZ
+        )
+    ))
+}
+
+function projectedPlaneCellSpanPixels(
+    input: GpuWebMercatorQuadCoverReferenceInput,
+    bounds: Readonly<{
+        minimumX: number
+        maximumX: number
+        minimumY: number
+        maximumY: number
+    }>,
+    elevation: number
+): number {
+
+    const matrix = input.view.clipFromRelativeWorld
+    let polygon: ClipPoint[] = [
+        multiplyClip(matrix, [ bounds.minimumX, bounds.minimumY, elevation, 1 ]),
+        multiplyClip(matrix, [ bounds.maximumX, bounds.minimumY, elevation, 1 ]),
+        multiplyClip(matrix, [ bounds.maximumX, bounds.maximumY, elevation, 1 ]),
+        multiplyClip(matrix, [ bounds.minimumX, bounds.maximumY, elevation, 1 ]),
+    ]
+    for (let plane = 0; plane < 6 && polygon.length > 0; plane++) {
+        polygon = clipPolygonToPlane(polygon, plane)
+    }
+    if (polygon.length === 0) return 0
+
+    const cellMeters = (bounds.maximumX - bounds.minimumX) /
+        input.policy.cellsPerPatchEdge
+    const xDelta: ClipPoint = [
+        matrix[0]! * cellMeters,
+        matrix[1]! * cellMeters,
+        matrix[2]! * cellMeters,
+        matrix[3]! * cellMeters,
+    ]
+    const yDelta: ClipPoint = [
+        matrix[4]! * cellMeters,
+        matrix[5]! * cellMeters,
+        matrix[6]! * cellMeters,
+        matrix[7]! * cellMeters,
+    ]
+    return Math.max(...polygon.map(point => projectedCellAreaScalePixels(
+        input.view.viewport,
+        point,
+        xDelta,
+        yDelta
+    )))
+}
+
+function multiplyClip(matrix: readonly number[], point: ClipPoint): ClipPoint {
+
+    return Object.freeze([ 0, 1, 2, 3 ].map(row =>
+        matrix[row]! * point[0] +
+        matrix[row + 4]! * point[1] +
+        matrix[row + 8]! * point[2] +
+        matrix[row + 12]! * point[3]
+    )) as unknown as ClipPoint
+}
+
+function clipPolygonToPlane(input: readonly ClipPoint[], plane: number): ClipPoint[] {
+
+    if (input.length === 0) return []
+    const output: ClipPoint[] = []
+    let start = input.at(-1)!
+    let startDistance = clipPlaneDistance(start, plane)
+    for (const end of input) {
+        const endDistance = clipPlaneDistance(end, plane)
+        const startInside = startDistance >= 0
+        const endInside = endDistance >= 0
+        if (startInside !== endInside) {
+            const ratio = startDistance / (startDistance - endDistance)
+            output.push(Object.freeze(start.map((value, index) =>
+                value + (end[index]! - value) * ratio
+            )) as unknown as ClipPoint)
+        }
+        if (endInside) output.push(end)
+        start = end
+        startDistance = endDistance
+    }
+    return output
+}
+
+function clipPlaneDistance(point: ClipPoint, plane: number): number {
+
+    switch (plane) {
+        case 0: return point[2]
+        case 1: return point[3] - point[2]
+        case 2: return point[0] + point[3]
+        case 3: return point[3] - point[0]
+        case 4: return point[1] + point[3]
+        default: return point[3] - point[1]
+    }
+}
+
+function projectedCellAreaScalePixels(
+    viewport: readonly [number, number],
+    clip: ClipPoint,
+    xDelta: ClipPoint,
+    yDelta: ClipPoint
+): number {
+
+    const minimumCellW = clip[3] - 0.5 * (Math.abs(xDelta[3]) + Math.abs(yDelta[3]))
+    if (minimumCellW <= 1e-5) return Math.max(...viewport)
+    const xPixels = projectedAxisCellDeltaPixels(viewport, clip, xDelta)
+    const yPixels = projectedAxisCellDeltaPixels(viewport, clip, yDelta)
+    return Math.sqrt(Math.abs(
+        xPixels[0] * yPixels[1] - xPixels[1] * yPixels[0]
+    ))
+}
+
+function projectedAxisCellDeltaPixels(
+    viewport: readonly [number, number],
+    clip: ClipPoint,
+    delta: ClipPoint
+): readonly [number, number] {
+
+    const reciprocalW = 1 / clip[3]
+    return Object.freeze([
+        (delta[0] - clip[0] * reciprocalW * delta[3]) * reciprocalW * viewport[0] * 0.5,
+        (delta[1] - clip[1] * reciprocalW * delta[3]) * reciprocalW * viewport[1] * 0.5,
+    ])
+}
+
 function comparePatch(
     left: GpuWebMercatorQuadCoverReferencePatch,
     right: GpuWebMercatorQuadCoverReferencePatch
@@ -448,14 +690,14 @@ function comparePatch(
         left.tileCol - right.tileCol
 }
 
-function integerBounds(limit: TileMatrixLimits): IntegerBounds {
+function minimumPatchLevel(patches: readonly GpuWebMercatorQuadCoverReferencePatch[]): number {
 
-    return Object.freeze({
-        minTileRow: limit.minTileRow,
-        maxTileRow: limit.maxTileRow,
-        minTileCol: limit.minTileCol,
-        maxTileCol: limit.maxTileCol,
-    })
+    return Math.min(...patches.map(patch => patch.matrixLevel))
+}
+
+function maximumPatchLevel(patches: readonly GpuWebMercatorQuadCoverReferencePatch[]): number {
+
+    return Math.max(...patches.map(patch => patch.matrixLevel))
 }
 
 function validateInput(input: GpuWebMercatorQuadCoverReferenceInput): void {
@@ -464,9 +706,13 @@ function validateInput(input: GpuWebMercatorQuadCoverReferenceInput): void {
     const values = bounds === undefined
         ? []
         : [ bounds.west, bounds.north, bounds.east, bounds.south ]
+    const elevationRange = input?.elevationRangeMeters
     if (input?.spatialProfile?.kind !== 'tile-spatial-profile' ||
         input.spatialProfile.coverage.tileMatrixSet !== WebMercatorQuad ||
         input.view?.kind !== 'geo-view-snapshot' ||
+        elevationRange?.length !== 2 ||
+        elevationRange.some(value => !Number.isFinite(value)) ||
+        elevationRange[0] > elevationRange[1] ||
         values.length !== 4 || values.some(value => !Number.isFinite(value)) ||
         bounds.west < 0 || bounds.north < 0 || bounds.east > 1 || bounds.south > 1 ||
         bounds.west >= bounds.east || bounds.north >= bounds.south) {
@@ -475,6 +721,7 @@ function validateInput(input: GpuWebMercatorQuadCoverReferenceInput): void {
             {
                 profile: 'WebMercatorPlanarTileSpatialProfile',
                 view: 'GeoViewSnapshot',
+                elevationRangeMeters: 'ordered finite pair',
                 visibleBounds: 'finite normalized west < east and north < south',
             },
             input

@@ -35,6 +35,9 @@ export const gpuWebMercatorQuadCoverPolicyCodec = layoutCodec({
         { name: 'lookupCapacity', type: 'u32' },
         { name: 'minimumElevationMeters', type: 'f32' },
         { name: 'maximumElevationMeters', type: 'f32' },
+        { name: 'cellsPerPatchEdge', type: 'u32' },
+        { name: 'maximumCellSpanPixels', type: 'f32' },
+        { name: 'variableLodPitchThresholdRadians', type: 'f32' },
         { name: 'reserved0', type: 'u32' },
     ],
 }, { usage: [ 'uniform', 'storage', 'readback' ] })
@@ -99,9 +102,9 @@ export const gpuWebMercatorQuadCoverStateCodec = layoutCodec({
         { name: 'maximumAdjacentLevelDelta', type: 'u32' },
         { name: 'finestMatrixLevel', type: 'u32' },
         { name: 'sourceLevelCeiling', type: 'u32' },
-        { name: 'reserved0', type: 'u32' },
-        { name: 'reserved1', type: 'u32' },
-        { name: 'reserved2', type: 'u32' },
+        { name: 'selectionMode', type: 'u32' },
+        { name: 'minimumCellSpanQ8', type: 'u32' },
+        { name: 'maximumCellSpanQ8', type: 'u32' },
         { name: 'reserved3', type: 'u32' },
     ],
 }, { usage: [ 'storage', 'readback' ] })

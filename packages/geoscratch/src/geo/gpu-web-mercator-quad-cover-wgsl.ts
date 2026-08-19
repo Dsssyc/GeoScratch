@@ -21,6 +21,11 @@ struct GpuWebMercatorQuadCoverQuanta {
     high: u32,
 };
 
+struct GpuWebMercatorQuadCoverClipPolygon {
+    vertices: array<vec4f, 10>,
+    count: u32,
+};
+
 @group(0) @binding(0)
 var<uniform> mapMeta: GpuWebMercatorQuadCoverMapMeta;
 @group(0) @binding(1)
@@ -39,7 +44,6 @@ var<storage, read_write> coverDemands: array<GpuWebMercatorQuadCoverDemand>;
 var<storage, read_write> drawArguments: array<u32>;
 
 const WEB_MERCATOR_WORLD_WIDTH_METERS: f32 = 40075016.0f;
-const COVER_DISTANCE_BAND_RADIUS_TILES: i32 = 2i;
 
 fn coverSubtractExpansions(
     leftHigh: f32,
@@ -189,6 +193,123 @@ fn coverPatchVisible(bounds: GpuWebMercatorQuadCoverBounds) -> bool {
     return true;
 }
 
+fn coverClipPlaneDistance(point: vec4f, plane: u32) -> f32 {
+    switch plane {
+        case 0u: { return point.z; }
+        case 1u: { return point.w - point.z; }
+        case 2u: { return point.x + point.w; }
+        case 3u: { return point.w - point.x; }
+        case 4u: { return point.y + point.w; }
+        default: { return point.w - point.y; }
+    }
+}
+
+fn coverClipPolygonToPlane(
+    input: GpuWebMercatorQuadCoverClipPolygon,
+    plane: u32,
+) -> GpuWebMercatorQuadCoverClipPolygon {
+    var output: GpuWebMercatorQuadCoverClipPolygon;
+    if (input.count == 0u) { return output; }
+    var start = input.vertices[input.count - 1u];
+    var startDistance = coverClipPlaneDistance(start, plane);
+    for (var index = 0u; index < input.count; index += 1u) {
+        let end = input.vertices[index];
+        let endDistance = coverClipPlaneDistance(end, plane);
+        let startInside = startDistance >= 0.0f;
+        let endInside = endDistance >= 0.0f;
+        if (startInside != endInside) {
+            let ratio = startDistance / (startDistance - endDistance);
+            output.vertices[output.count] = mix(start, end, ratio);
+            output.count += 1u;
+        }
+        if (endInside) {
+            output.vertices[output.count] = end;
+            output.count += 1u;
+        }
+        start = end;
+        startDistance = endDistance;
+    }
+    return output;
+}
+
+fn coverProjectedAxisCellDeltaPixels(clip: vec4f, delta: vec4f) -> vec2f {
+    let reciprocalW = 1.0f / clip.w;
+    let ndcDelta = (
+        delta.xy - clip.xy * reciprocalW * delta.w
+    ) * reciprocalW;
+    return ndcDelta * mapMeta.viewport * 0.5f;
+}
+
+fn coverProjectedCellAreaScalePixels(
+    clip: vec4f,
+    xDelta: vec4f,
+    yDelta: vec4f,
+) -> f32 {
+    let minimumCellW = clip.w - 0.5f * (
+        abs(xDelta.w) + abs(yDelta.w)
+    );
+    if (minimumCellW <= 1e-5f) {
+        return max(mapMeta.viewport.x, mapMeta.viewport.y);
+    }
+    let xPixels = coverProjectedAxisCellDeltaPixels(clip, xDelta);
+    let yPixels = coverProjectedAxisCellDeltaPixels(clip, yDelta);
+    return sqrt(abs(xPixels.x * yPixels.y - xPixels.y * yPixels.x));
+}
+
+fn coverProjectedPlaneCellSpanPixels(
+    bounds: GpuWebMercatorQuadCoverBounds,
+    elevation: f32,
+) -> f32 {
+    var polygon: GpuWebMercatorQuadCoverClipPolygon;
+    polygon.count = 4u;
+    for (var index = 0u; index < 4u; index += 1u) {
+        let point = vec3f(
+            select(
+                bounds.minimum.x,
+                bounds.maximum.x,
+                index == 1u || index == 2u,
+            ),
+            select(bounds.minimum.y, bounds.maximum.y, index >= 2u),
+            elevation,
+        );
+        polygon.vertices[index] = mapMeta.clipFromRelativeWorld * vec4f(point, 1.0f);
+    }
+    for (var plane = 0u; plane < 6u; plane += 1u) {
+        polygon = coverClipPolygonToPlane(polygon, plane);
+        if (polygon.count == 0u) { return 0.0f; }
+    }
+
+    let cellMeters = max(
+        bounds.maximum.x - bounds.minimum.x,
+        bounds.maximum.y - bounds.minimum.y,
+    ) / f32(coverPolicy.cellsPerPatchEdge);
+    let xDelta = mapMeta.clipFromRelativeWorld[0] * cellMeters;
+    let yDelta = mapMeta.clipFromRelativeWorld[1] * cellMeters;
+    var maximumSpan = 0.0f;
+    for (var index = 0u; index < polygon.count; index += 1u) {
+        maximumSpan = max(
+            maximumSpan,
+            coverProjectedCellAreaScalePixels(
+                polygon.vertices[index],
+                xDelta,
+                yDelta,
+            ),
+        );
+    }
+    return maximumSpan;
+}
+
+fn coverProjectedCellSpanPixels(bounds: GpuWebMercatorQuadCoverBounds) -> f32 {
+    return max(
+        coverProjectedPlaneCellSpanPixels(bounds, bounds.minimum.z),
+        coverProjectedPlaneCellSpanPixels(bounds, bounds.maximum.z),
+    );
+}
+
+fn coverCellSpanQ8(value: f32) -> u32 {
+    return u32(round(clamp(value, 0.0f, 65535.0f) * 256.0f));
+}
+
 fn coverLimit(matrixLevel: u32) -> GpuWebMercatorQuadCoverLimit {
     return coverageLimits[matrixLevel - coverPolicy.minimumMatrixLevel];
 }
@@ -271,21 +392,52 @@ fn coverCameraTileIndex(low: u32, high: u32, matrixLevel: u32) -> u32 {
     return (high << (32u - shift)) | (low >> shift);
 }
 
-fn coverCameraHasTileFraction(low: u32, high: u32, matrixLevel: u32) -> bool {
-    let fractionalBits = coverPolicy.coordinateBits - matrixLevel;
-    if (fractionalBits < 32u) {
-        let mask = (1u << fractionalBits) - 1u;
-        return (low & mask) != 0u;
-    }
-    if (fractionalBits == 32u) {
-        return low != 0u;
-    }
-    let highBits = fractionalBits - 32u;
-    let highMask = (1u << highBits) - 1u;
-    return low != 0u || (high & highMask) != 0u;
+fn coverWindowValid(value: GpuWebMercatorQuadCoverWindow) -> bool {
+    return value.minTileRow <= value.maxTileRow &&
+        value.minTileCol <= value.maxTileCol;
 }
 
-fn coverDistanceBandWindow(matrixLevel: u32) -> GpuWebMercatorQuadCoverWindow {
+fn coverInvalidWindow() -> GpuWebMercatorQuadCoverWindow {
+    return GpuWebMercatorQuadCoverWindow(1i, 0i, 1i, 0i);
+}
+
+fn coverProjectedSearchRadiusTiles() -> i32 {
+    let focalPixels = mapMeta.viewport.y * 0.5f /
+        tan(mapMeta.verticalFovRadians * 0.5f);
+    return max(2i, i32(ceil(
+        focalPixels /
+        (f32(coverPolicy.cellsPerPatchEdge) * coverPolicy.maximumCellSpanPixels)
+    )) + 2i);
+}
+
+fn coverUniformRadiusMeters() -> f32 {
+    let cameraElevation = mapMeta.cameraHigh.z + mapMeta.cameraLow.z;
+    let height = max(
+        1.0f,
+        max(
+            cameraElevation - coverPolicy.minimumElevationMeters,
+            cameraElevation - coverPolicy.maximumElevationMeters,
+        ),
+    );
+    let tangentY = tan(mapMeta.verticalFovRadians * 0.5f);
+    let tangentX = tangentY * mapMeta.viewport.x / mapMeta.viewport.y;
+    let sinePitch = sin(mapMeta.cameraPitchRadians);
+    let cosinePitch = cos(mapMeta.cameraPitchRadians);
+    var maximumRadius = 0.0f;
+    for (var corner = 0u; corner < 4u; corner += 1u) {
+        let x = select(-tangentX, tangentX, (corner & 1u) != 0u);
+        let y = select(-tangentY, tangentY, (corner & 2u) != 0u);
+        let denominator = cosinePitch - y * sinePitch;
+        if (denominator <= 1e-4f) { return WEB_MERCATOR_WORLD_WIDTH_METERS; }
+        let distance = height / denominator;
+        let right = distance * x;
+        let forward = distance * (sinePitch + y * cosinePitch);
+        maximumRadius = max(maximumRadius, length(vec2f(right, forward)));
+    }
+    return maximumRadius;
+}
+
+fn coverUniformWindow(matrixLevel: u32) -> GpuWebMercatorQuadCoverWindow {
     let tileRow = i32(coverCameraTileIndex(
         mapMeta.cameraFixedLow.y,
         mapMeta.cameraFixedHigh.y,
@@ -296,22 +448,64 @@ fn coverDistanceBandWindow(matrixLevel: u32) -> GpuWebMercatorQuadCoverWindow {
         mapMeta.cameraFixedHigh.x,
         matrixLevel,
     ));
-    let rowFraction = coverCameraHasTileFraction(
+    let tileMeters = ldexp(WEB_MERCATOR_WORLD_WIDTH_METERS, -i32(matrixLevel));
+    let radius = i32(ceil(coverUniformRadiusMeters() / tileMeters)) + 1i;
+    return coverAlignToParentGroups(GpuWebMercatorQuadCoverWindow(
+        tileRow - radius,
+        tileRow + radius,
+        tileCol - radius,
+        tileCol + radius,
+    ));
+}
+
+fn coverVariableRefinementWindow(
+    childLevel: u32,
+) -> GpuWebMercatorQuadCoverWindow {
+    let parentLevel = childLevel - 1u;
+    let radius = coverProjectedSearchRadiusTiles();
+    let parentRow = i32(coverCameraTileIndex(
         mapMeta.cameraFixedLow.y,
         mapMeta.cameraFixedHigh.y,
-        matrixLevel,
-    );
-    let colFraction = coverCameraHasTileFraction(
+        parentLevel,
+    ));
+    let parentCol = i32(coverCameraTileIndex(
         mapMeta.cameraFixedLow.x,
         mapMeta.cameraFixedHigh.x,
-        matrixLevel,
-    );
-    return coverAlignToParentGroups(GpuWebMercatorQuadCoverWindow(
-        tileRow - COVER_DISTANCE_BAND_RADIUS_TILES,
-        tileRow + COVER_DISTANCE_BAND_RADIUS_TILES - select(1i, 0i, rowFraction),
-        tileCol - COVER_DISTANCE_BAND_RADIUS_TILES,
-        tileCol + COVER_DISTANCE_BAND_RADIUS_TILES - select(1i, 0i, colFraction),
+        parentLevel,
     ));
+    let search = coverFitWindow(GpuWebMercatorQuadCoverWindow(
+        parentRow - radius,
+        parentRow + radius,
+        parentCol - radius,
+        parentCol + radius,
+    ), coverGeometryWindow(parentLevel));
+    var output = coverInvalidWindow();
+    for (var tileRow = search.minTileRow; tileRow <= search.maxTileRow; tileRow += 1i) {
+        for (var tileCol = search.minTileCol; tileCol <= search.maxTileCol; tileCol += 1i) {
+            coverState.candidateCount += 1u;
+            let bounds = coverPatchBounds(parentLevel, u32(tileRow), u32(tileCol));
+            if (!coverPatchVisible(bounds) ||
+                coverProjectedCellSpanPixels(bounds) <= coverPolicy.maximumCellSpanPixels) {
+                continue;
+            }
+            let children = GpuWebMercatorQuadCoverWindow(
+                tileRow * 2i,
+                tileRow * 2i + 1i,
+                tileCol * 2i,
+                tileCol * 2i + 1i,
+            );
+            if (coverWindowValid(output)) {
+                output = coverUnionWindow(output, children);
+            } else {
+                output = children;
+            }
+        }
+    }
+    if (!coverWindowValid(output)) { return output; }
+    return coverFitWindow(
+        coverAlignToParentGroups(output),
+        coverGeometryWindow(childLevel),
+    );
 }
 
 fn coverUnionWindow(
@@ -324,11 +518,6 @@ fn coverUnionWindow(
         min(left.minTileCol, right.minTileCol),
         max(left.maxTileCol, right.maxTileCol),
     );
-}
-
-fn coverPitchLevelBoost() -> u32 {
-    let sine = sin(mapMeta.cameraPitchRadians);
-    return u32(floor(sine * sine * 1.5f));
 }
 
 fn coverFullyCoveredByFiner(
@@ -571,6 +760,8 @@ fn coverFinalizeLookupAndDemands() {
     coverState.minimumMatrixLevel = 0xffffffffu;
     coverState.maximumMatrixLevel = 0u;
     coverState.maximumAdjacentLevelDelta = 0u;
+    coverState.minimumCellSpanQ8 = 0xffffffffu;
+    coverState.maximumCellSpanQ8 = 0u;
     coverState.demandCount = 0u;
     for (var index = 0u; index < coverPolicy.lookupCapacity; index += 1u) {
         coverLookup[index].occupied = 0u;
@@ -584,6 +775,21 @@ fn coverFinalizeLookupAndDemands() {
         coverState.maximumMatrixLevel = max(
             coverState.maximumMatrixLevel,
             candidate.matrixLevel,
+        );
+        let cellSpan = coverCellSpanQ8(coverProjectedCellSpanPixels(
+            coverPatchBounds(
+                candidate.matrixLevel,
+                candidate.tileRow,
+                candidate.tileCol,
+            ),
+        ));
+        coverState.minimumCellSpanQ8 = min(
+            coverState.minimumCellSpanQ8,
+            cellSpan,
+        );
+        coverState.maximumCellSpanQ8 = max(
+            coverState.maximumCellSpanQ8,
+            cellSpan,
         );
         coverEmitDemand(candidate);
         if (!coverLookupInsert(patchIndex)) {
@@ -624,51 +830,107 @@ fn generateWebMercatorQuadCover() {
     coverState.maximumMatrixLevel = 0u;
     coverState.maximumAdjacentLevelDelta = 0u;
     coverState.sourceLevelCeiling = coverPolicy.sourceMaximumMatrixLevel;
+    coverState.selectionMode = select(
+        1u,
+        0u,
+        mapMeta.cameraPitchRadians < coverPolicy.variableLodPitchThresholdRadians,
+    );
+    coverState.minimumCellSpanQ8 = 0xffffffffu;
+    coverState.maximumCellSpanQ8 = 0u;
     drawArguments[0] = coverPolicy.vertexCount;
     drawArguments[1] = 0u;
     drawArguments[2] = 0u;
     drawArguments[3] = 0u;
 
-    let requestedFinest = u32(ceil(mapMeta.zoomHint)) + coverPitchLevelBoost();
-    let finestLevel = clamp(
-        requestedFinest,
-        coverPolicy.minimumMatrixLevel,
-        coverPolicy.maximumMatrixLevel,
-    );
-    coverState.finestMatrixLevel = finestLevel;
-
     var windows: array<GpuWebMercatorQuadCoverWindow, 25>;
-    var buildLevel = i32(finestLevel);
-    loop {
-        if (buildLevel < i32(coverPolicy.minimumMatrixLevel)) { break; }
-        let matrixLevel = u32(buildLevel);
-        let limit = coverGeometryWindow(matrixLevel);
-        if (buildLevel == i32(coverPolicy.minimumMatrixLevel)) {
-            windows[matrixLevel] = limit;
-        } else {
-            var band = coverDistanceBandWindow(matrixLevel);
-            if (matrixLevel < finestLevel) {
-                let finer = windows[matrixLevel + 1u];
-                let parent = GpuWebMercatorQuadCoverWindow(
+    for (var index = 0u; index < 25u; index += 1u) {
+        windows[index] = coverInvalidWindow();
+    }
+    var finestLevel = coverPolicy.minimumMatrixLevel;
+    let uniformMode = coverState.selectionMode == 0u;
+    if (uniformMode) {
+        for (var testLevel = coverPolicy.minimumMatrixLevel;
+            testLevel <= coverPolicy.maximumMatrixLevel;
+            testLevel += 1u) {
+            let window = coverFitWindow(
+                coverUniformWindow(testLevel),
+                coverGeometryWindow(testLevel),
+            );
+            var maximumSpan = 0.0f;
+            var visibleCount = 0u;
+            for (var tileRow = window.minTileRow;
+                tileRow <= window.maxTileRow;
+                tileRow += 1i) {
+                for (var tileCol = window.minTileCol;
+                    tileCol <= window.maxTileCol;
+                    tileCol += 1i) {
+                    coverState.candidateCount += 1u;
+                    let bounds = coverPatchBounds(testLevel, u32(tileRow), u32(tileCol));
+                    if (coverPatchVisible(bounds)) {
+                        visibleCount += 1u;
+                        maximumSpan = max(
+                            maximumSpan,
+                            coverProjectedCellSpanPixels(bounds),
+                        );
+                    }
+                }
+            }
+            if ((visibleCount > 0u && maximumSpan <= coverPolicy.maximumCellSpanPixels) ||
+                testLevel == coverPolicy.maximumMatrixLevel) {
+                finestLevel = testLevel;
+                windows[testLevel] = window;
+                break;
+            }
+        }
+    } else {
+        windows[coverPolicy.minimumMatrixLevel] = coverGeometryWindow(
+            coverPolicy.minimumMatrixLevel,
+        );
+        for (var childLevel = coverPolicy.minimumMatrixLevel + 1u;
+            childLevel <= coverPolicy.maximumMatrixLevel;
+            childLevel += 1u) {
+            windows[childLevel] = coverVariableRefinementWindow(childLevel);
+        }
+        var nestLevel = i32(coverPolicy.maximumMatrixLevel) - 1i;
+        loop {
+            if (nestLevel <= i32(coverPolicy.minimumMatrixLevel)) { break; }
+            let finer = windows[u32(nestLevel + 1i)];
+            if (coverWindowValid(finer)) {
+                var parent = GpuWebMercatorQuadCoverWindow(
                     finer.minTileRow / 2i,
                     finer.maxTileRow / 2i,
                     finer.minTileCol / 2i,
                     finer.maxTileCol / 2i,
                 );
-                band = coverUnionWindow(band, parent);
+                let current = windows[u32(nestLevel)];
+                if (coverWindowValid(current)) {
+                    parent = coverUnionWindow(current, parent);
+                }
+                windows[u32(nestLevel)] = coverFitWindow(
+                    coverAlignToParentGroups(parent),
+                    coverGeometryWindow(u32(nestLevel)),
+                );
             }
-            windows[matrixLevel] = coverFitWindow(
-                coverAlignToParentGroups(band),
-                limit,
-            );
+            nestLevel -= 1i;
         }
-        buildLevel -= 1i;
+        for (var observedLevel = coverPolicy.minimumMatrixLevel;
+            observedLevel <= coverPolicy.maximumMatrixLevel;
+            observedLevel += 1u) {
+            if (coverWindowValid(windows[observedLevel])) {
+                finestLevel = observedLevel;
+            }
+        }
     }
+    coverState.finestMatrixLevel = finestLevel;
 
     var matrixLevel = i32(finestLevel);
     loop {
         if (matrixLevel < i32(coverPolicy.minimumMatrixLevel)) { break; }
         let window = windows[u32(matrixLevel)];
+        if (!coverWindowValid(window)) {
+            matrixLevel -= 1i;
+            continue;
+        }
         var tileRow = window.minTileRow;
         loop {
             if (tileRow > window.maxTileRow) { break; }
@@ -677,6 +939,7 @@ fn generateWebMercatorQuadCover() {
                 if (tileCol > window.maxTileCol) { break; }
                 coverState.candidateCount += 1u;
                 let coveredByFiner = matrixLevel < i32(finestLevel) &&
+                    coverWindowValid(windows[u32(matrixLevel + 1i)]) &&
                     coverFullyCoveredByFiner(
                         u32(tileRow),
                         u32(tileCol),

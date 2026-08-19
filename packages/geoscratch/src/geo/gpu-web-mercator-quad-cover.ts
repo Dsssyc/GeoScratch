@@ -49,6 +49,9 @@ export type GpuWebMercatorQuadCoverPolicy = Readonly<{
     maximumMatrixLevel: number
     sourceMaximumMatrixLevel: number
     maximumPatches: number
+    cellsPerPatchEdge: number
+    maximumCellSpanPixels: number
+    variableLodPitchThresholdRadians: number
 }>
 
 export type GpuWebMercatorQuadCoverDescriptor = Readonly<{
@@ -116,6 +119,9 @@ export type GpuWebMercatorQuadCoverSelectionFacts = Readonly<{
     maximumAdjacentLevelDelta: number
     finestMatrixLevel: number
     sourceLevelCeiling: number
+    selectionMode: 'uniform' | 'variable'
+    minimumCellSpanPixels?: number
+    maximumCellSpanPixels?: number
 }>
 
 export type GpuWebMercatorQuadCoverFeedback =
@@ -202,8 +208,8 @@ const capturedBuilders = new WeakSet<SubmissionBuilder>()
 let nextCoverId = 1
 
 /**
- * Validates immutable quality, source-ceiling, and capacity facts for one
- * camera-derived standard WebMercatorQuad cover.
+ * Validates immutable projected-cell quality, pitch boundary, source-ceiling,
+ * and capacity facts for one camera-derived standard WebMercatorQuad cover.
  */
 export function gpuWebMercatorQuadCoverPolicy(
     input: GpuWebMercatorQuadCoverPolicy
@@ -214,15 +220,23 @@ export function gpuWebMercatorQuadCoverPolicy(
         !level(input?.sourceMaximumMatrixLevel) ||
         input.minimumMatrixLevel > input.sourceMaximumMatrixLevel ||
         input.sourceMaximumMatrixLevel > input.maximumMatrixLevel ||
-        !positiveSafeInteger(input.maximumPatches)) {
+        !positiveSafeInteger(input.maximumPatches) ||
+        !positiveSafeInteger(input.cellsPerPatchEdge) ||
+        !positiveFinite(input.maximumCellSpanPixels) ||
+        !Number.isFinite(input.variableLodPitchThresholdRadians) ||
+        input.variableLodPitchThresholdRadians < 0 ||
+        input.variableLodPitchThresholdRadians > Math.PI / 2) {
         return throwGeoDiagnostic({
             code: 'GEO_WEB_MERCATOR_COVER_POLICY_INVALID',
             phase: 'selection',
             subject: { kind: 'web-mercator-quad-cover' },
-            message: 'A WebMercatorQuad cover policy requires ordered levels and a positive patch capacity.',
+            message: 'A WebMercatorQuad cover policy requires ordered levels, projected-cell quality, a pitch boundary, and a positive patch capacity.',
             expected: {
                 levels: '0 <= minimum <= sourceMaximum <= maximum <= 24',
                 maximumPatches: 'positive safe integer',
+                cellsPerPatchEdge: 'positive safe integer',
+                maximumCellSpanPixels: 'positive finite number',
+                variableLodPitchThresholdRadians: '[0, PI / 2]',
             },
             actual: input,
         })
@@ -238,6 +252,11 @@ function level(value: number): boolean {
 function positiveSafeInteger(value: number): boolean {
 
     return Number.isSafeInteger(value) && value > 0
+}
+
+function positiveFinite(value: number): boolean {
+
+    return Number.isFinite(value) && value > 0
 }
 
 /** Owns the bounded GPU graph that derives one standard WebMercatorQuad view cover. */
@@ -353,6 +372,10 @@ export class GpuWebMercatorQuadCover {
                     lookupCapacity,
                     minimumElevationMeters: descriptor.elevationRangeMeters[0],
                     maximumElevationMeters: descriptor.elevationRangeMeters[1],
+                    cellsPerPatchEdge: descriptor.policy.cellsPerPatchEdge,
+                    maximumCellSpanPixels: descriptor.policy.maximumCellSpanPixels,
+                    variableLodPitchThresholdRadians:
+                        descriptor.policy.variableLodPitchThresholdRadians,
                     reserved0: 0,
                 }),
             }))
@@ -991,6 +1014,14 @@ export function decodeGpuWebMercatorQuadCoverFeedback(
     const maximumAdjacentLevelDelta = word(9)
     const finestMatrixLevel = word(10)
     const sourceLevelCeiling = word(11)
+    const selectionModeWord = word(12)
+    const minimumCellSpanQ8 = word(13)
+    const maximumCellSpanQ8 = word(14)
+    const selectionMode = selectionModeWord === 0
+        ? 'uniform' as const
+        : selectionModeWord === 1
+            ? 'variable' as const
+            : undefined
     if (frameEpoch !== options.expectedFrameEpoch ||
         patchCount > options.maximumPatches ||
         demandCount > demandCapacity ||
@@ -998,6 +1029,8 @@ export function decodeGpuWebMercatorQuadCoverFeedback(
         lookupOverflowCount !== 0 ||
         demandOverflowCount !== 0 ||
         maximumAdjacentLevelDelta > 1 ||
+        selectionMode === undefined ||
+        minimumCellSpanQ8 > maximumCellSpanQ8 ||
         sourceLevelCeiling !== options.sourceLevelCeiling ||
         (patchCount > 0 && (
             minimumMatrixLevel === 0xffff_ffff ||
@@ -1017,6 +1050,9 @@ export function decodeGpuWebMercatorQuadCoverFeedback(
             maximumAdjacentLevelDelta,
             finestMatrixLevel,
             sourceLevelCeiling,
+            selectionModeWord,
+            minimumCellSpanQ8,
+            maximumCellSpanQ8,
         })}`)
     }
     const demandView = new DataView(
@@ -1048,8 +1084,11 @@ export function decodeGpuWebMercatorQuadCoverFeedback(
         maximumAdjacentLevelDelta: number
         finestMatrixLevel: number
         sourceLevelCeiling: number
+        selectionMode: 'uniform' | 'variable'
         minimumMatrixLevel?: number
         maximumMatrixLevel?: number
+        minimumCellSpanPixels?: number
+        maximumCellSpanPixels?: number
     } = {
         frameEpoch,
         candidateCount,
@@ -1061,10 +1100,13 @@ export function decodeGpuWebMercatorQuadCoverFeedback(
         maximumAdjacentLevelDelta,
         finestMatrixLevel,
         sourceLevelCeiling,
+        selectionMode,
     }
     if (patchCount > 0) {
         facts.minimumMatrixLevel = minimumMatrixLevel
         facts.maximumMatrixLevel = maximumMatrixLevel
+        facts.minimumCellSpanPixels = minimumCellSpanQ8 / 256
+        facts.maximumCellSpanPixels = maximumCellSpanQ8 / 256
     }
     return Object.freeze({
         ...facts,

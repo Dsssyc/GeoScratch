@@ -228,6 +228,8 @@ export type WebMercatorTerrainRendererDescriptor<
     fieldSampling: WebMercatorTerrainSamplingWgslOptions
     elevationRangeMeters: readonly [number, number]
     exaggeration?: number
+    /** Pitch boundary below which the complete visible footprint uses one geometry level. */
+    variableLodPitchThresholdRadians?: number
     presentations: readonly WebMercatorTerrainPresentationDescriptor<Presentation>[]
     initialPresentation: Presentation
     observeProvenance?: (facts: readonly WebMercatorTerrainProvenanceFact[]) => void
@@ -334,6 +336,8 @@ const WEB_MERCATOR_TERRAIN_STAGE_ORDER = Object.freeze([
 ])
 const TERRAIN_SECTOR_SIZE = 64
 const TERRAIN_COVER_MAXIMUM_MATRIX_LEVEL = 14
+const TERRAIN_MAXIMUM_CELL_SPAN_PIXELS = 8
+const TERRAIN_VARIABLE_LOD_PITCH_THRESHOLD_RADIANS = Math.PI / 3
 const BUFFER_COPY_DST = 0x08
 const BUFFER_UNIFORM = 0x40
 const BUFFER_STORAGE = 0x80
@@ -356,6 +360,7 @@ export async function createWebMercatorTerrainRenderer<
     fieldSampling,
     elevationRangeMeters,
     exaggeration = 1,
+    variableLodPitchThresholdRadians = TERRAIN_VARIABLE_LOD_PITCH_THRESHOLD_RADIANS,
     presentations,
     initialPresentation,
     observeProvenance,
@@ -372,6 +377,7 @@ export async function createWebMercatorTerrainRenderer<
     assertPresentationShader(presentationShader)
     assertFieldSampling(fieldSampling)
     assertElevation(elevationRangeMeters, exaggeration)
+    assertVariableLodPitchThreshold(variableLodPitchThresholdRadians)
     const presentationTable = normalizePresentations(presentations, initialPresentation)
     const terrainFieldLayer = fieldLayer as unknown as WebMercatorTerrainMapField
     if (observeProvenance !== undefined && typeof observeProvenance !== 'function') {
@@ -390,7 +396,7 @@ export async function createWebMercatorTerrainRenderer<
     )
     const sourceMinimumMatrixLevel = sourceMatrixLevels[0]!
     const sourceMaximumMatrixLevel = sourceMatrixLevels.at(-1)!
-    const coverCapacity = terrainCoverCapacity(size)
+    const coverCapacity = terrainCoverCapacity(size, variableLodPitchThresholdRadians)
     const cover = await GpuWebMercatorQuadCover.create(runtime, {
         spatialProfile: terrainFieldLayer.spatialProfile,
         policy: gpuWebMercatorQuadCoverPolicy({
@@ -398,6 +404,9 @@ export async function createWebMercatorTerrainRenderer<
             maximumMatrixLevel: TERRAIN_COVER_MAXIMUM_MATRIX_LEVEL,
             sourceMaximumMatrixLevel,
             maximumPatches: coverCapacity,
+            cellsPerPatchEdge: TERRAIN_SECTOR_SIZE,
+            maximumCellSpanPixels: TERRAIN_MAXIMUM_CELL_SPAN_PIXELS,
+            variableLodPitchThresholdRadians,
         }),
         elevationRangeMeters: exaggeratedElevationRange,
         vertexCount: geometry.vertexCount,
@@ -1648,15 +1657,30 @@ function sameSize(left: SurfaceSize, right: SurfaceSize): boolean {
     return left.width === right.width && left.height === right.height
 }
 
-function terrainCoverCapacity(size: SurfaceSize): number {
+function terrainCoverCapacity(size: SurfaceSize, uniformPitchThresholdRadians: number): number {
 
     const nominalPatchSpan = TERRAIN_SECTOR_SIZE * 8
     const viewportColumns = Math.ceil(size.width / nominalPatchSpan) + 1
     const viewportRows = Math.ceil(size.height / nominalPatchSpan) + 1
-    const required = Math.max(16, viewportColumns * viewportRows * 12)
+    const pitchCapacityScale = Math.ceil(
+        1 / Math.max(Math.cos(uniformPitchThresholdRadians), 0.25)
+    )
+    const required = Math.max(
+        16,
+        viewportColumns * viewportRows * 12 * pitchCapacityScale
+    )
     let capacity = 1
     while (capacity < required) capacity *= 2
     return Math.min(4096, capacity)
+}
+
+function assertVariableLodPitchThreshold(value: number) {
+
+    if (!Number.isFinite(value) || value < 0 || value > Math.PI / 2) {
+        throw new RangeError(
+            'Web Mercator terrain variable LoD pitch threshold must be within [0, PI / 2] radians'
+        )
+    }
 }
 
 function assertVirtualRaster(value: WebMercatorTerrainVirtualRaster) {

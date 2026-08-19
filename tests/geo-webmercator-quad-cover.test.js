@@ -1,5 +1,6 @@
 import { expect } from 'chai'
 import { GPURuntime } from 'geoscratch/scratch'
+import { mat4 } from 'wgpu-matrix'
 import {
     WebMercatorQuad,
     createGeoViewSnapshot,
@@ -49,33 +50,43 @@ function fixture(options = {}) {
         maximumMatrixLevel,
         sourceMaximumMatrixLevel,
         maximumPatches: options.maximumPatches ?? 256,
+        cellsPerPatchEdge: options.cellsPerPatchEdge ?? 64,
+        maximumCellSpanPixels: options.maximumCellSpanPixels ?? 8,
+        variableLodPitchThresholdRadians:
+            options.variableLodPitchThresholdRadians ?? Math.PI / 3,
     })
 
     function view({
         x = 0,
         y = 0,
-        altitude = 1_000_000,
+        altitude,
         zoom = 10,
         pitch = 0,
+        viewport = [ 1280, 800 ],
         frameEpoch = 1,
     } = {}) {
 
+        const resolvedAltitude = altitude ?? WORLD_WIDTH / 2 ** zoom * 1.5
+        const verticalFovRadians = Math.PI / 3
+        const clipFromRelativeWorld = mat4.perspective(
+            verticalFovRadians,
+            viewport[0] / viewport[1],
+            1,
+            resolvedAltitude * 16,
+            new Float64Array(16)
+        )
+        mat4.rotateX(clipFromRelativeWorld, pitch, clipFromRelativeWorld)
         return createGeoViewSnapshot({
             id: `cover-view-${frameEpoch}`,
-            clipFromRelativeWorld: [
-                1 / HALF_WORLD, 0, 0, 0,
-                0, 1 / HALF_WORLD, 0, 0,
-                0, 0, 1 / 1_000_000, 0,
-                0, 0, 1, 1,
-            ],
-            cameraHigh: [ Math.fround(x), Math.fround(y), Math.fround(altitude) ],
+            clipFromRelativeWorld,
+            cameraHigh: [ Math.fround(x), Math.fround(y), Math.fround(resolvedAltitude) ],
             cameraLow: [
                 x - Math.fround(x),
                 y - Math.fround(y),
-                altitude - Math.fround(altitude),
+                resolvedAltitude - Math.fround(resolvedAltitude),
             ],
-            viewport: [ 1280, 800 ],
-            verticalFovRadians: Math.PI / 3,
+            viewport,
+            verticalFovRadians,
             cameraLatitudeRadians: 0,
             cameraPitchRadians: pitch,
             zoomHint: zoom,
@@ -86,7 +97,7 @@ function fixture(options = {}) {
 
     function evaluate({
         currentView = view(),
-        visibleBounds = { west: 0.42, north: 0.42, east: 0.58, south: 0.58 },
+        visibleBounds = visibleBoundsForView(currentView),
     } = {}) {
 
         return evaluateGpuWebMercatorQuadCoverReference({
@@ -94,10 +105,25 @@ function fixture(options = {}) {
             policy,
             view: currentView,
             visibleBounds,
+            elevationRangeMeters: [ -120, 30 ],
         })
     }
 
     return { spatialProfile, policy, view, evaluate }
+}
+
+function visibleBoundsForView(view) {
+
+    const level = Math.max(0, Math.ceil(view.zoomHint))
+    const scale = 2 ** level
+    const x = (view.cameraHigh[0] + view.cameraLow[0] + HALF_WORLD) / WORLD_WIDTH
+    const y = (HALF_WORLD - view.cameraHigh[1] - view.cameraLow[1]) / WORLD_WIDTH
+    return {
+        west: Math.max(0, x - 4 / scale),
+        east: Math.min(1, x + 4 / scale),
+        north: Math.max(0, y - 3 / scale),
+        south: Math.min(1, y + 3 / scale),
+    }
 }
 
 function scaledBounds(patch, maximumLevel) {
@@ -184,6 +210,31 @@ function expectStandardBalancedCover(result, maximumLevel) {
 
 describe('GPU WebMercatorQuad inverse cover reference', () => {
 
+    it('validates projected-cell policy and assigns the exact threshold to variable mode', () => {
+
+        const threshold = Math.PI / 3
+        const setup = fixture({ variableLodPitchThresholdRadians: threshold })
+
+        expect(setup.policy).to.deep.include({
+            cellsPerPatchEdge: 64,
+            maximumCellSpanPixels: 8,
+            variableLodPitchThresholdRadians: threshold,
+        })
+        for (const variableLodPitchThresholdRadians of [
+            -Number.EPSILON,
+            Math.PI / 2 + Number.EPSILON,
+            Number.NaN,
+        ]) {
+            expect(() => fixture({ variableLodPitchThresholdRadians })).to.throw()
+        }
+        expect(setup.evaluate({
+            currentView: setup.view({ pitch: threshold - 1e-6 }),
+        }).facts.selectionMode).to.equal('uniform')
+        expect(setup.evaluate({
+            currentView: setup.view({ pitch: threshold }),
+        }).facts.selectionMode).to.equal('variable')
+    })
+
     it('emits one deterministic standard prefix-free and 2:1-balanced cover', () => {
 
         const setup = fixture()
@@ -214,6 +265,38 @@ describe('GPU WebMercatorQuad inverse cover reference', () => {
                 `${patch.matrixLevel}/${size - 1 - patch.tileRow}/${patch.tileCol}`
             )).to.equal(true)
         }
+    })
+
+    it('uses one projected-cell level across a wide top-down visible footprint', () => {
+
+        const setup = fixture({
+            minimumMatrixLevel: 10,
+            sourceMaximumMatrixLevel: 10,
+            maximumMatrixLevel: 14,
+            maximumPatches: 512,
+        })
+        const halfColumns = 5 / 2 ** 14
+        const halfRows = 3 / 2 ** 14
+        const result = setup.evaluate({
+            currentView: setup.view({
+                altitude: 8_850,
+                zoom: 13.25,
+                pitch: 0,
+                viewport: [ 1512, 864 ],
+            }),
+            visibleBounds: {
+                west: 0.5 - halfColumns,
+                east: 0.5 + halfColumns,
+                north: 0.5 - halfRows,
+                south: 0.5 + halfRows,
+            },
+        })
+        const levels = new Set(result.patches.map(patch => patch.matrixLevel))
+
+        expect(result.facts.selectionMode).to.equal('uniform')
+        expect(levels.size).to.equal(1)
+        expect(result.patches.length).to.be.greaterThan(16)
+        expectStandardBalancedCover(result, setup.policy.maximumMatrixLevel)
     })
 
     it('keeps equal-distance samples symmetric at odd camera tile indices', () => {
@@ -300,11 +383,11 @@ describe('GPU WebMercatorQuad inverse cover reference', () => {
         const fine = setup.evaluate({ currentView: setup.view({ zoom: 10 }) })
 
         for (const [ x, y ] of [
-            [ 0.45, 0.45 ],
+            [ 0.498, 0.498 ],
             [ 0.5, 0.5 ],
-            [ 0.55, 0.45 ],
-            [ 0.45, 0.55 ],
-            [ 0.55, 0.55 ],
+            [ 0.502, 0.498 ],
+            [ 0.498, 0.502 ],
+            [ 0.502, 0.502 ],
         ]) {
             const coarsePatch = patchAt(coarse, x, y)
             const finePatch = patchAt(fine, x, y)
@@ -339,7 +422,7 @@ describe('GPU WebMercatorQuad inverse cover reference', () => {
         const setup = fixture()
         const result = setup.evaluate({
             currentView: setup.view({ x: 0, y: 0, zoom: 10, pitch: 0 }),
-            visibleBounds: { west: 0.46, north: 0.46, east: 0.54, south: 0.54 },
+            visibleBounds: { west: 0.496, north: 0.497, east: 0.504, south: 0.503 },
         })
         const desiredLevel = Math.max(...result.demands.map(demand =>
             demand.desiredSampleLevel
@@ -371,7 +454,12 @@ describe('GPU WebMercatorQuad inverse cover reference', () => {
         const setup = fixture({ sourceMaximumMatrixLevel: 10, maximumMatrixLevel: 14 })
         const result = setup.evaluate({
             currentView: setup.view({ zoom: 14 }),
-            visibleBounds: { west: 0.49, north: 0.49, east: 0.51, south: 0.51 },
+            visibleBounds: {
+                west: 0.5 - 3 / 2 ** 14,
+                north: 0.5 - 2 / 2 ** 14,
+                east: 0.5 + 3 / 2 ** 14,
+                south: 0.5 + 2 / 2 ** 14,
+            },
         })
 
         expect(result.patches.some(patch => patch.matrixLevel === 14)).to.equal(true)
@@ -426,9 +514,9 @@ describe('GPU WebMercatorQuad inverse cover lowering', () => {
             1,
             11,
             10,
-            0,
-            0,
-            0,
+            1,
+            2 * 256,
+            15 * 128,
             0,
         ])
         const demandWords = new Uint32Array(4 * 8)
@@ -458,6 +546,9 @@ describe('GPU WebMercatorQuad inverse cover lowering', () => {
             maximumAdjacentLevelDelta: 1,
             finestMatrixLevel: 11,
             sourceLevelCeiling: 10,
+            selectionMode: 'variable',
+            minimumCellSpanPixels: 2,
+            maximumCellSpanPixels: 7.5,
             demands: [
                 {
                     desiredSampleLevel: 11,
