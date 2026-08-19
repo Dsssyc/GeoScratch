@@ -43,6 +43,7 @@ const pageBoundaryCamera = Object.freeze({
 })
 const westCamera = Object.freeze({ center: [ 120.80, 31.68 ], zoom: 11 })
 const eastCamera = Object.freeze({ center: [ 121.72, 31.65 ], zoom: 11 })
+const cancellationCamera = Object.freeze({ center: [ 120.08, 31.68 ], zoom: 11 })
 const northCamera = Object.freeze({ center: [ 120.98, 31.98 ], zoom: 11 })
 const southCamera = Object.freeze({ center: [ 120.98, 31.64 ], zoom: 11 })
 const churnWestCamera = Object.freeze({ center: [ 120.55, 31.65 ], zoom: 11 })
@@ -339,7 +340,7 @@ async function runCancellationProof(activeBrowser) {
         const initial = await waitForStableFacts(page)
         await page.evaluate(camera => (
             window.__UNDERWATER_TERRAIN_PROOF__.moveCamera(camera)
-        ), defaultCamera)
+        ), cancellationCamera)
         const before = await waitForDemandActivity(
             page,
             () => delayedDetailedRequestCount > 0

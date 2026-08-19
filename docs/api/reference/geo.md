@@ -640,7 +640,7 @@ type GpuWebMercatorQuadCoverIdentityObjects = Readonly<{ bindLayouts: readonly B
 
 Kind: `Function`.
 
-Validates immutable quality, source-ceiling, and capacity facts for one camera-derived standard WebMercatorQuad cover.
+Validates immutable projected-cell quality, pitch boundary, source-ceiling, and capacity facts for one camera-derived standard WebMercatorQuad cover.
 
 ```ts
 Function gpuWebMercatorQuadCoverPolicy
@@ -655,7 +655,7 @@ gpuWebMercatorQuadCoverPolicy(input: GpuWebMercatorQuadCoverPolicy): GpuWebMerca
 Kind: `Type Alias`.
 
 ```ts
-type GpuWebMercatorQuadCoverPolicy = Readonly<{ maximumMatrixLevel: number; maximumPatches: number; minimumMatrixLevel: number; sourceMaximumMatrixLevel: number }>
+type GpuWebMercatorQuadCoverPolicy = Readonly<{ cellsPerPatchEdge: number; maximumCellSpanPixels: number; maximumMatrixLevel: number; maximumPatches: number; minimumMatrixLevel: number; sourceMaximumMatrixLevel: number; variableLodPitchThresholdRadians: number }>
 ```
 
 ### `GpuWebMercatorQuadCoverRenderTemplate`
@@ -671,7 +671,7 @@ type GpuWebMercatorQuadCoverRenderTemplate = Readonly<{ coverId: string; coverLo
 Kind: `Type Alias`.
 
 ```ts
-type GpuWebMercatorQuadCoverSelectionFacts = Readonly<{ candidateCount: number; demandCount: number; demandOverflowCount: number; descriptorOverflowCount: number; finestMatrixLevel: number; frameEpoch: number; lookupOverflowCount: number; maximumAdjacentLevelDelta: number; maximumMatrixLevel?: number; minimumMatrixLevel?: number; patchCount: number; sourceLevelCeiling: number }>
+type GpuWebMercatorQuadCoverSelectionFacts = Readonly<{ candidateCount: number; demandCount: number; demandOverflowCount: number; descriptorOverflowCount: number; finestMatrixLevel: number; frameEpoch: number; lookupOverflowCount: number; maximumAdjacentLevelDelta: number; maximumCellSpanPixels?: number; maximumMatrixLevel?: number; minimumCellSpanPixels?: number; minimumMatrixLevel?: number; patchCount: number; selectionMode: "uniform" | "variable"; sourceLevelCeiling: number }>
 ```
 
 ### `GpuWebMercatorQuadCoverViewToken`
@@ -2900,7 +2900,7 @@ type WebMercatorTerrainRenderer<ViewInput, Presentation extends string = string>
 Kind: `Type Alias`.
 
 ```ts
-type WebMercatorTerrainRendererDescriptor<ViewInput, Presentation extends string = string> = Readonly<{ elevationRangeMeters: readonly [number, number]; exaggeration?: number; fieldLayer: MapFieldLayer<ViewInput>; fieldSampling: WebMercatorTerrainSamplingWgslOptions; initialPresentation: Presentation; observeProvenance?: (facts: readonly WebMercatorTerrainProvenanceFact[]) => void; presentations: readonly WebMercatorTerrainPresentationDescriptor<Presentation>[]; presentationShader: string; runtime: GPURuntime; size: SurfaceSize; surface: Surface; virtualRaster: VirtualRasterRuntime<WebMercatorVirtualRasterField> }>
+type WebMercatorTerrainRendererDescriptor<ViewInput, Presentation extends string = string> = Readonly<{ elevationRangeMeters: readonly [number, number]; exaggeration?: number; fieldLayer: MapFieldLayer<ViewInput>; fieldSampling: WebMercatorTerrainSamplingWgslOptions; initialPresentation: Presentation; observeProvenance?: (facts: readonly WebMercatorTerrainProvenanceFact[]) => void; presentations: readonly WebMercatorTerrainPresentationDescriptor<Presentation>[]; presentationShader: string; runtime: GPURuntime; size: SurfaceSize; surface: Surface; variableLodPitchThresholdRadians?: number; virtualRaster: VirtualRasterRuntime<WebMercatorVirtualRasterField> }>
 ```
 
 ### `WebMercatorTerrainRendererState`

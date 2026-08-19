@@ -57,12 +57,30 @@ the page, alter cache query parameters, or rebuild the virtual raster.
 
 The manifest declares source pages through z10. `GpuWebMercatorQuadCover` independently
 selects geometry through z14, but every output remains a standard
-`(tileMatrix, tileRow, tileCol)` identity. Camera-centered bands select from the fixed
-global matrix; they are not a moving clipmap grid. The GPU derives continuous
-wide-fixed camera-to-tile AABB distance bands, expands them outward to complete parent
-groups, conservatively rejects invisible candidates, performs local 2:1 closure,
-builds the full-identity neighbor lookup, and writes indirect draw arguments in one
-bounded dispatch.
+`(tileMatrix, tileRow, tileCol)` identity. Camera/view-derived windows select from the
+fixed global matrix; they are not a moving clipmap grid. Below 60 degrees pitch, the
+GPU evaluates projected geometry-cell span over the complete viewport footprint and
+uses one uniform level. At and above 60 degrees it probes standard parent candidates
+directly and refines only where the rotation-invariant local projective Jacobian
+exceeds the eight-pixel cell threshold. Both paths conservatively reject invisible
+candidates, perform local 2:1 closure, build the full-identity neighbor lookup, and
+write indirect draw arguments in one bounded dispatch.
+
+The boundary can be configured before Vite starts:
+
+```text
+VITE_UNDERWATER_TERRAIN_VARIABLE_LOD_PITCH_DEGREES=55 npm run dev
+```
+
+Missing or blank input uses 60. Values must be finite degrees from 0 through 90;
+invalid input fails before GPU initialization. This environment variable is example
+composition only. Geo receives normalized radians and never reads Vite or process
+environment state.
+
+This is a hard quality/performance boundary. A camera immediately below the threshold
+keeps one level over the full footprint and can draw substantially more geometry than
+the variable cut at the boundary. Lower the environment value when sustained tilted
+interaction matters more than uniform pre-boundary detail.
 
 The cover also emits desired raster facts. A z14 geometry patch retains
 `desiredSampleLevel = 14` while lowering its executable request to the corresponding

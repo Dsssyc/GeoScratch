@@ -45,9 +45,13 @@ prefix-free, deterministic, and edge-adjacent by at most one level. Virtual Rast
 explicit `ViewTileDemandSet` pages and owns no camera, zoom, SSE, or adjacency policy; keep
 geometry level, desired sample level, resolved sample level, and source ceiling distinct. Do not
 restore `GpuTileFrontier`, `GpuRenderPatchFrontier`, render roots, trial cuts, atlas-driven geometry,
-or a moving clipmap grid. Any change to this path must run shaded and wireframe 90-frame pitched
-benchmarks, zoom monotonicity, A-B-A identity, standard/source-level demand, 2:1, overflow,
-construction, and native-observation gates.
+or a moving clipmap grid. Geometry quality uses the rotation-invariant local projected-cell
+Jacobian. Pitch below the normalized policy threshold must emit one level over the complete
+visible footprint; pitch at or above it may use variable projected-cell LoD. The terrain default
+is 60 degrees, while application environment parsing remains outside Geo. Any change to this path
+must run wide top-down uniformity, exact pitch-boundary ownership, shaded and wireframe 90-frame
+pitched benchmarks, zoom monotonicity, A-B-A identity, standard/source-level demand, 2:1,
+overflow, construction, and native-observation gates.
 
 ## Build, Test, and Development Commands
 

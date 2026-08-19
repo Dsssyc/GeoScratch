@@ -2,8 +2,10 @@
 
 ## Status
 
-Approved on 2026-08-19. This English document is canonical. The paired Chinese
-document is a reviewed translation; English governs conflicts.
+Superseded on 2026-08-19 by
+`2026-08-19-webmercator-projected-cell-pitch-gated-cover-design.md`. This English
+document remains the canonical historical account of the parity-bias repair; its
+constant-radius quality policy is no longer current.
 
 This design repairs one defect in ADR-083's inverse cover. It does not introduce a
 second selector or replace the accepted architecture.

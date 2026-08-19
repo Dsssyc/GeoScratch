@@ -216,6 +216,8 @@ describe('Underwater Terrain clean cut', () => {
             'createGeoFrameController({',
         ]) expect(application).to.include(required)
         expect(application).to.include('maximumInFlightFrames: 2')
+        expect(main).to.include('VITE_UNDERWATER_TERRAIN_VARIABLE_LOD_PITCH_DEGREES')
+        expect(application).to.include('variableLodPitchThresholdRadians:')
         expect(application).not.to.match(/URLSearchParams|localStorage|tweakpane|Pane/)
     })
 
@@ -242,6 +244,8 @@ describe('Underwater Terrain clean cut', () => {
         expect(cover).to.include('export class GpuWebMercatorQuadCover')
         expect(cover).to.include('desiredSampleLevel')
         expect(cover).to.include('sourceLevelCeiling')
+        expect(cover).to.include('maximumCellSpanPixels')
+        expect(cover).to.include('variableLodPitchThresholdRadians')
         expect(wgsl).to.include('fn generateWebMercatorQuadCover()')
         expect(wgsl).to.include('coverCameraTileIndex')
         expect(wgsl).to.include('coverAlignToParentGroups')

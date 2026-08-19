@@ -118,27 +118,38 @@ export function evaluateGpuWebMercatorQuadCoverReference(
 
 function generateUniform(input: GpuWebMercatorQuadCoverReferenceInput) {
 
-    let candidateCount = 0
-    for (let matrixLevel = input.policy.minimumMatrixLevel;
-        matrixLevel <= input.policy.maximumMatrixLevel;
-        matrixLevel++) {
-        const window = visibleWindow(input, matrixLevel)
-        const patches = patchesInWindow(input, matrixLevel, window)
-        candidateCount += windowArea(window)
-        const cellSpans = patches.map(patch => projectedCellSpanPixels(input, patch))
-        const maximumSpan = cellSpans.length === 0 ? 0 : Math.max(...cellSpans)
-        if (maximumSpan <= input.policy.maximumCellSpanPixels ||
-            matrixLevel === input.policy.maximumMatrixLevel) {
-            patches.sort(comparePatch)
-            return {
-                patches,
-                candidateCount,
-                cellSpans,
-                finestMatrixLevel: matrixLevel,
-            }
-        }
+    const probeLevel = clamp(
+        Math.ceil(input.view.zoomHint),
+        input.policy.minimumMatrixLevel,
+        input.policy.maximumMatrixLevel
+    )
+    const probeWindow = visibleWindow(input, probeLevel)
+    const probePatches = patchesInWindow(input, probeLevel, probeWindow)
+    const probeSpans = probePatches.map(patch => projectedCellSpanPixels(input, patch))
+    const maximumProbeSpan = probeSpans.length === 0 ? 0 : Math.max(...probeSpans)
+    const levelAdjustment = maximumProbeSpan > 0
+        ? Math.ceil(Math.log2(maximumProbeSpan / input.policy.maximumCellSpanPixels))
+        : 0
+    const matrixLevel = clamp(
+        probeLevel + levelAdjustment,
+        input.policy.minimumMatrixLevel,
+        input.policy.maximumMatrixLevel
+    )
+    const window = visibleWindow(input, matrixLevel)
+    const patches = matrixLevel === probeLevel
+        ? probePatches
+        : patchesInWindow(input, matrixLevel, window)
+    const cellSpans = matrixLevel === probeLevel
+        ? probeSpans
+        : patches.map(patch => projectedCellSpanPixels(input, patch))
+    patches.sort(comparePatch)
+    return {
+        patches,
+        candidateCount: windowArea(probeWindow) +
+            (matrixLevel === probeLevel ? 0 : windowArea(window)),
+        cellSpans,
+        finestMatrixLevel: matrixLevel,
     }
-    throw new Error('Unreachable uniform WebMercatorQuad cover level')
 }
 
 function generateVariable(

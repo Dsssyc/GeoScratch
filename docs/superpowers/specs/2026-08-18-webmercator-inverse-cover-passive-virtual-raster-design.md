@@ -3,7 +3,10 @@
 ## Status
 
 Approved on 2026-08-18. This English document is the canonical design. The paired
-Chinese document is a reviewed translation; English governs conflicts.
+Chinese document is a reviewed translation; English governs conflicts. The
+projected-cell correction in
+`2026-08-19-webmercator-projected-cell-pitch-gated-cover-design.md` supersedes the
+constant two-tile quality field while preserving this document's authority boundaries.
 
 ## Problem
 
@@ -39,11 +42,11 @@ Horizontal world repetition is render-instance metadata: the canonical data key 
 ### One view-cover authority
 
 The camera-derived cover is the only geometry LoD authority. It starts from the
-standard tile containing the canonical camera position at the requested finest
-level, not from world roots or resident atlas pages. It directly enumerates standard
-matrix tiles in continuous camera-to-tile AABB distance bands, conservatively rejects
-invisible candidates, closes adjacency to a maximum level difference of one, and emits
-one prefix-free cover.
+standard tile containing the canonical camera position, not from world roots or
+resident atlas pages. It directly enumerates standard matrix tiles in bounded
+camera/view-derived projected-cell windows, conservatively rejects invisible
+candidates, closes adjacency to a maximum level difference of one, and emits one
+prefix-free cover.
 
 No previous-frame topology, atlas state, request state, or render-root trial may
 select a settled geometry cut.
@@ -106,23 +109,22 @@ example only supplies source and presentation policy.
 
 ### Camera anchor and visibility
 
-The GPU derives every band from the camera's canonical wide-fixed WebMercator
-position and requested zoom. A two-tile continuous AABB-distance radius is expanded
-outward to complete parent groups; it is never shifted or shrunk by tile-index parity.
-This is a level-selection field, not a camera-local geometry grid and not a claim that
-the camera anchor itself must be visible in a pitched view. Relative view-projection
-facts and the configured elevation interval conservatively reject generated
-candidates outside the view.
+The GPU derives every search window from the camera's canonical wide-fixed
+WebMercator position and current projection facts. Below the configured pitch
+threshold, a conservative viewport footprint selects one projected-cell quality
+level. At or above the threshold, bounded parent windows produce children only where
+the local projective-cell metric exceeds its pixel threshold. Neither mode shifts or
+shrinks by tile-index parity. Relative view-projection facts and the configured
+elevation interval conservatively reject generated candidates outside the view.
 
-### Matrix-aligned level bands
+### Matrix-aligned level windows
 
-The cover uses view-centered nested bands only as a level-selection field. For each
-participating matrix level, it converts the continuous fixed-coordinate distance band
-to standard top-left-origin tile row and column limits and enumerates those identities
-directly. Bands expand outward to complete parent groups and include the parent
-projection of the finer band. Consequently, selected regions remain nested in
-standard tile space rather than a moving game-style grid. Each non-minimum level
-enumerates at most 36 candidates.
+The cover uses view-centered windows only as a level-selection field. It converts each
+projected-cell envelope to standard top-left-origin tile row and column limits and
+enumerates those identities directly. Variable windows expand outward to complete
+parent groups and include the parent projection of finer windows. Consequently,
+selected regions remain nested in standard tile space rather than a moving game-style
+grid. Candidate work scales with the bounded visible footprint and hard capacity.
 
 The implementation may use bounded matrix-aligned windows or an equivalent direct
 band enumerator, but it must prove these observable properties:
@@ -136,8 +138,8 @@ band enumerator, but it must prove these observable properties:
 - zoom-in cannot coarsen a still-visible location under otherwise fixed inputs;
 - pitched distance cannot make a farther equivalent tile finer than a nearer tile.
 
-The fixed-coordinate construction and symmetry regression matrix are specified in
-`docs/superpowers/specs/2026-08-19-webmercator-continuous-distance-band-symmetry-design.md`.
+The current construction and regression matrix are specified in
+`docs/superpowers/specs/2026-08-19-webmercator-projected-cell-pitch-gated-cover-design.md`.
 
 A final conservative tile/footprint test is allowed. It runs over the directly
 generated bounded candidates; it is not an excuse to restore world-root traversal.

@@ -29,6 +29,17 @@ contains full `tileMatrix/tileRow/tileCol` identities, a neighbor lookup, desire
 feedback, and an indirect instance count. The final cover is 2:1 edge-balanced before
 terrain rendering.
 
+The built-in terrain policy uses 64 cells per standard patch, an eight-pixel maximum
+area-equivalent projected cell span, and a 60-degree variable-LoD pitch threshold.
+`variableLodPitchThresholdRadians` may override that threshold in the renderer
+descriptor. Below it, the complete visible footprint uses one geometry level; at or
+above it, projected-cell evidence produces finer near and coarser far patches. Cover
+capacity is allocated from viewport size and the configured uniform-pitch range, so
+capacity failure remains explicit rather than causing hidden quality degradation.
+The threshold is an explicit quality/performance switch: a view immediately below it
+may draw substantially more geometry than the variable cut at the boundary. Applications
+that prioritize sustained high-pitch interaction should configure a lower threshold.
+
 Raster demand is explicitly downstream. Cover feedback retains desired precision and
 source ceiling, then the renderer creates a `ViewTileDemandSet`.
 `VirtualRasterRuntime.reconcileViewDemands()` schedules only executable source pages.

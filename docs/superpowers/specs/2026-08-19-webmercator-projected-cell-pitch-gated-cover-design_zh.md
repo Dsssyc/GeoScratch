@@ -98,11 +98,11 @@ camera-centered world envelope，并在 parent alignment 前增加一个标准�
 envelope 在 world space 中使用 radial bound，因此 bearing 只旋转内部 visibility，不会
 破坏覆盖保证。
 
-Kernel 从粗到细直接枚举每个允许 level 的有界 envelope，拒绝不可见 candidate，并记录
-完整可见足迹的最大 local projected-cell span。第一个整体不超过
-`maximumCellSpanPixels` 的 level 成为 uniform level；maximum level 是终止 fallback。
-该层的一个 aligned window 替换可见 ancestors，同一 settled top-down footprint 内不得
-出现更细孤岛。
+Kernel 在经过 clamp 的 `ceil(zoomHint)` probe level 上只评估一次完整 footprint。标准
+matrix level 每提升一级，projected cell span 精确减半，因此
+`ceil(log2(maximumSpan / maximumCellSpanPixels))` 可以直接反解 uniform level，无需重复
+扫描每一级。只输出反解后的 aligned window；maximum level 是终止 fallback。同一
+settled top-down footprint 内不得出现更细孤岛或 coarse safety patch。
 
 可观察不变量：
 

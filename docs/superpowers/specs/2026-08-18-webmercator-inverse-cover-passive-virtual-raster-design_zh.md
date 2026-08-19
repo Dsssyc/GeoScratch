@@ -3,6 +3,8 @@
 ## 状态
 
 设计于 2026-08-18 获得批准。英文配对文档是事实基准；中英文冲突时以英文为准。
+`2026-08-19-webmercator-projected-cell-pitch-gated-cover-design.md` 中的 projected-cell
+修正取代固定两瓦片质量场，但保留本文的 authority 边界。
 
 ## 问题
 
@@ -32,10 +34,10 @@ frontier 做细分/合并，`GpuRenderPatchFrontier` 则从不可变 safety-cove
 
 ### 唯一视图覆盖 authority
 
-相机反向生成的 cover 是唯一几何 LoD authority。它从请求最细层级中包含相机规范位置
-的标准瓦片出发，而不是从世界 roots 或 atlas resident pages 开始。它在标准矩阵上直接
-枚举连续 camera-to-tile AABB distance bands，保守剔除不可见 candidate，经相邻最大一级
-闭包后输出唯一的 prefix-free cover。
+相机反向生成的 cover 是唯一几何 LoD authority。它从包含相机规范位置的标准瓦片开始
+candidate search，而不是从世界 roots 或 atlas resident pages 开始。它在标准矩阵上直接
+枚举有界 camera/view-derived projected-cell window，保守剔除不可见 candidate，经相邻
+最大一级闭包后输出唯一的 prefix-free cover。
 
 上一帧 topology、atlas 状态、request 状态与 render-root trial 都不能决定 settled geometry
 cut。
@@ -86,16 +88,16 @@ cache policy、URL 或 atlas ownership。
 
 ## 标准反向覆盖
 
-GPU 根据相机的规范 wide-fixed WebMercator position 与请求 zoom 推导每一级 band。
-连续 AABB-distance 半径固定为两个该级瓦片，并且只向外扩张到完整 parent groups，不能
-因 tile-index parity 平移或缩小。它只是层级选择场，不是相机局部几何格网，也不声称在
-倾斜视图中相机锚点本身必须可见。Relative view-projection facts 与配置的高程区间继续
-保守剔除视图外 candidate。
+GPU 从相机的规范 wide-fixed WebMercator position 与当前 projection fact 推导每个 search
+window。低于配置的 pitch threshold 时，保守 viewport footprint 选择一个 projected-cell
+quality level；等于或高于阈值时，只有 local projective-cell metric 超过像素阈值的有界
+parent window 才生成 children。两种 mode 都不会因 tile-index parity 平移或缩小。
+Relative view-projection fact 与配置的 elevation interval 会保守拒绝视图外 candidate。
 
-嵌套 bands 只作为层级选择场。每一级都把连续 fixed-coordinate distance band 转换成标准
-top-left-origin tile row/column limits 并直接枚举；band 只向外扩张到完整 parent groups，
-并包含 finer band 的 parent 投影。因此最终仍是固定 WebMercatorQuad 格网，而不是游戏式
-移动格网。每个非 minimum level 最多枚举 36 个 candidate。
+View-centered window 只作为 level-selection field。每个 projected-cell envelope 都转换为
+标准 top-left-origin row/column limit 并直接枚举。Variable window 向外扩张到完整 parent
+group，并包含 finer window 的 parent projection，因此 selected region 保持标准 tile-space
+nesting，而不是移动式游戏格网。Candidate 工作量随有界可见足迹与硬容量增长。
 
 实现必须证明：
 
@@ -107,8 +109,8 @@ top-left-origin tile row/column limits 并直接枚举；band 只向外扩张到
 - 其他输入固定时 zoom-in 不会让仍可见位置变粗；
 - 等价条件下更远瓦片不会比更近瓦片更细。
 
-Fixed-coordinate 构造与对称性回归矩阵详见
-`docs/superpowers/specs/2026-08-19-webmercator-continuous-distance-band-symmetry-design.md`。
+当前构造与回归矩阵详见
+`docs/superpowers/specs/2026-08-19-webmercator-projected-cell-pitch-gated-cover-design.md`。
 
 允许对直接生成的有限 candidates 做最终保守 footprint test；这不能成为恢复世界 root
 遍历的借口。

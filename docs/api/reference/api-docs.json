@@ -18197,7 +18197,7 @@
             "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:346"
+            "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:350"
           ],
           "summary": "Assembles a WebMercatorQuad Virtual Raster terrain renderer with GPU-driven selection, precision-aware vertex generation, mesh stitching, and explicit lifetime.",
           "declaration": "Function createWebMercatorTerrainRenderer",
@@ -18214,7 +18214,7 @@
             "packages/geoscratch/src/geo/gpu-web-mercator-quad-cover.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/gpu-web-mercator-quad-cover.ts:956"
+            "packages/geoscratch/src/geo/gpu-web-mercator-quad-cover.ts:979"
           ],
           "summary": "Decodes and validates bounded inverse-cover state and desired-page feedback.",
           "declaration": "Function decodeGpuWebMercatorQuadCoverFeedback",
@@ -18737,7 +18737,7 @@
             "packages/geoscratch/src/geo/gpu-web-mercator-quad-cover.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/gpu-web-mercator-quad-cover.ts:244"
+            "packages/geoscratch/src/geo/gpu-web-mercator-quad-cover.ts:263"
           ],
           "summary": "Owns the bounded GPU graph that derives one standard WebMercatorQuad view cover.",
           "declaration": "class GpuWebMercatorQuadCover",
@@ -18902,7 +18902,7 @@
             "packages/geoscratch/src/geo/gpu-web-mercator-quad-cover.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/gpu-web-mercator-quad-cover.ts:129"
+            "packages/geoscratch/src/geo/gpu-web-mercator-quad-cover.ts:135"
           ],
           "summary": "",
           "declaration": "type GpuWebMercatorQuadCoverCommands = Readonly<{ demandFeedback: ReadbackCommand; generate: DispatchCommand; stateFeedback: ReadbackCommand }>"
@@ -18916,7 +18916,7 @@
             "packages/geoscratch/src/geo/gpu-web-mercator-quad-cover.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/gpu-web-mercator-quad-cover.ts:95"
+            "packages/geoscratch/src/geo/gpu-web-mercator-quad-cover.ts:98"
           ],
           "summary": "",
           "declaration": "type GpuWebMercatorQuadCoverDemand = Readonly<{ decisionFrameEpoch: number; desiredSampleLevel: number; priority: number; requestMatrixLevel: number; residencySnapshotEpoch: number; sourceLevelCeiling: number; tileCol: number; tileRow: number }>"
@@ -18930,7 +18930,7 @@
             "packages/geoscratch/src/geo/gpu-web-mercator-quad-cover.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/gpu-web-mercator-quad-cover.ts:54"
+            "packages/geoscratch/src/geo/gpu-web-mercator-quad-cover.ts:57"
           ],
           "summary": "",
           "declaration": "type GpuWebMercatorQuadCoverDescriptor = Readonly<{ elevationRangeMeters: readonly [number, number]; policy: GpuWebMercatorQuadCoverPolicy; spatialProfile: WebMercatorPlanarTileSpatialProfile; vertexCount: number }>"
@@ -18944,7 +18944,7 @@
             "packages/geoscratch/src/geo/gpu-web-mercator-quad-cover.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/gpu-web-mercator-quad-cover.ts:135"
+            "packages/geoscratch/src/geo/gpu-web-mercator-quad-cover.ts:141"
           ],
           "summary": "",
           "declaration": "type GpuWebMercatorQuadCoverFacts = Readonly<{ coverageLimitCount: number; disposed: boolean; id: string; lookupCapacity: number; parity: readonly Readonly<{ commandIds: readonly string[]; demandBufferId: string; drawArgumentBufferId: string; lookupBufferId: string; mapMetaBufferId: string; parity: 0 | 1; patchBufferId: string; stateBufferId: string }>[]; policy: GpuWebMercatorQuadCoverPolicy; runtimeId: string; selectionPath: \"gpu-camera-inverse-webmercatorquad-cover\" }>"
@@ -18958,7 +18958,7 @@
             "packages/geoscratch/src/geo/gpu-web-mercator-quad-cover.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/gpu-web-mercator-quad-cover.ts:121"
+            "packages/geoscratch/src/geo/gpu-web-mercator-quad-cover.ts:127"
           ],
           "summary": "",
           "declaration": "type GpuWebMercatorQuadCoverFeedback = GpuWebMercatorQuadCoverSelectionFacts & Readonly<{ coverId: string; demands: readonly GpuWebMercatorQuadCoverDemand[]; kind: \"gpu-web-mercator-quad-cover-feedback\"; submissionId: string }>"
@@ -18972,7 +18972,7 @@
             "packages/geoscratch/src/geo/gpu-web-mercator-quad-cover.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/gpu-web-mercator-quad-cover.ts:71"
+            "packages/geoscratch/src/geo/gpu-web-mercator-quad-cover.ts:74"
           ],
           "summary": "",
           "declaration": "type GpuWebMercatorQuadCoverFrame = Readonly<{ coverId: string; frameEpoch: number; kind: \"gpu-web-mercator-quad-cover-frame\"; parity: 0 | 1; residencySnapshotEpoch: number; visibleInstances: BufferResource }>"
@@ -18986,7 +18986,7 @@
             "packages/geoscratch/src/geo/gpu-web-mercator-quad-cover.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/gpu-web-mercator-quad-cover.ts:155"
+            "packages/geoscratch/src/geo/gpu-web-mercator-quad-cover.ts:161"
           ],
           "summary": "",
           "declaration": "type GpuWebMercatorQuadCoverIdentityObjects = Readonly<{ bindLayouts: readonly BindLayout[]; bindSets: readonly BindSet[]; commands: readonly (ClearBufferCommand | DispatchCommand | ReadbackCommand)[]; passes: readonly ComputePassSpec[]; pipelines: readonly ComputePipeline[]; programs: readonly Program[]; resources: readonly BufferResource[]; uploads: readonly UploadCommand[] }>"
@@ -19000,9 +19000,9 @@
             "packages/geoscratch/src/geo/gpu-web-mercator-quad-cover.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/gpu-web-mercator-quad-cover.ts:208"
+            "packages/geoscratch/src/geo/gpu-web-mercator-quad-cover.ts:214"
           ],
-          "summary": "Validates immutable quality, source-ceiling, and capacity facts for one camera-derived standard WebMercatorQuad cover.",
+          "summary": "Validates immutable projected-cell quality, pitch boundary, source-ceiling, and capacity facts for one camera-derived standard WebMercatorQuad cover.",
           "declaration": "Function gpuWebMercatorQuadCoverPolicy",
           "signatures": [
             "gpuWebMercatorQuadCoverPolicy(input: GpuWebMercatorQuadCoverPolicy): GpuWebMercatorQuadCoverPolicy"
@@ -19020,7 +19020,7 @@
             "packages/geoscratch/src/geo/gpu-web-mercator-quad-cover.ts:47"
           ],
           "summary": "",
-          "declaration": "type GpuWebMercatorQuadCoverPolicy = Readonly<{ maximumMatrixLevel: number; maximumPatches: number; minimumMatrixLevel: number; sourceMaximumMatrixLevel: number }>"
+          "declaration": "type GpuWebMercatorQuadCoverPolicy = Readonly<{ cellsPerPatchEdge: number; maximumCellSpanPixels: number; maximumMatrixLevel: number; maximumPatches: number; minimumMatrixLevel: number; sourceMaximumMatrixLevel: number; variableLodPitchThresholdRadians: number }>"
         },
         {
           "id": "geoscratch/geo#gpuWebMercatorQuadCoverReadWgslModule",
@@ -19031,7 +19031,7 @@
             "packages/geoscratch/src/geo/gpu-web-mercator-quad-cover-layout.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/gpu-web-mercator-quad-cover-layout.ts:129"
+            "packages/geoscratch/src/geo/gpu-web-mercator-quad-cover-layout.ts:132"
           ],
           "summary": "Generates standard-tile lookup, neighbor, and edge-stitching WGSL for one cover.",
           "declaration": "Function gpuWebMercatorQuadCoverReadWgslModule",
@@ -19048,7 +19048,7 @@
             "packages/geoscratch/src/geo/gpu-web-mercator-quad-cover-layout.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/gpu-web-mercator-quad-cover-layout.ts:116"
+            "packages/geoscratch/src/geo/gpu-web-mercator-quad-cover-layout.ts:119"
           ],
           "summary": "",
           "declaration": "type GpuWebMercatorQuadCoverReadWgslModule = Readonly<{ bindings: Readonly<{ group: number; lookupEntries: number; visibleInstances: number }>; code: string; kind: \"gpu-web-mercator-quad-cover-read-wgsl-module\"; layoutDependencies: readonly LayoutArtifact[]; namespace: string }>"
@@ -19062,7 +19062,7 @@
             "packages/geoscratch/src/geo/gpu-web-mercator-quad-cover-layout.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/gpu-web-mercator-quad-cover-layout.ts:109"
+            "packages/geoscratch/src/geo/gpu-web-mercator-quad-cover-layout.ts:112"
           ],
           "summary": "",
           "declaration": "type GpuWebMercatorQuadCoverReadWgslOptions = Readonly<{ group: number; lookupEntriesBinding: number; namespace?: string; visibleInstancesBinding: number }>"
@@ -19076,7 +19076,7 @@
             "packages/geoscratch/src/geo/gpu-web-mercator-quad-cover.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/gpu-web-mercator-quad-cover.ts:80"
+            "packages/geoscratch/src/geo/gpu-web-mercator-quad-cover.ts:83"
           ],
           "summary": "",
           "declaration": "type GpuWebMercatorQuadCoverRenderTemplate = Readonly<{ coverId: string; coverLookup: BufferResource; drawArgument: Readonly<{ offset: 0; region: BufferRegion; resource: BufferResource; size: 16 }>; mapMeta: BufferResource; parity: 0 | 1; templateId: \"patch-mesh\"; visibleInstances: BufferResource }>"
@@ -19090,10 +19090,10 @@
             "packages/geoscratch/src/geo/gpu-web-mercator-quad-cover.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/gpu-web-mercator-quad-cover.ts:106"
+            "packages/geoscratch/src/geo/gpu-web-mercator-quad-cover.ts:109"
           ],
           "summary": "",
-          "declaration": "type GpuWebMercatorQuadCoverSelectionFacts = Readonly<{ candidateCount: number; demandCount: number; demandOverflowCount: number; descriptorOverflowCount: number; finestMatrixLevel: number; frameEpoch: number; lookupOverflowCount: number; maximumAdjacentLevelDelta: number; maximumMatrixLevel?: number; minimumMatrixLevel?: number; patchCount: number; sourceLevelCeiling: number }>"
+          "declaration": "type GpuWebMercatorQuadCoverSelectionFacts = Readonly<{ candidateCount: number; demandCount: number; demandOverflowCount: number; descriptorOverflowCount: number; finestMatrixLevel: number; frameEpoch: number; lookupOverflowCount: number; maximumAdjacentLevelDelta: number; maximumCellSpanPixels?: number; maximumMatrixLevel?: number; minimumCellSpanPixels?: number; minimumMatrixLevel?: number; patchCount: number; selectionMode: \"uniform\" | \"variable\"; sourceLevelCeiling: number }>"
         },
         {
           "id": "geoscratch/geo#GpuWebMercatorQuadCoverViewToken",
@@ -19104,7 +19104,7 @@
             "packages/geoscratch/src/geo/gpu-web-mercator-quad-cover.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/gpu-web-mercator-quad-cover.ts:61"
+            "packages/geoscratch/src/geo/gpu-web-mercator-quad-cover.ts:64"
           ],
           "summary": "",
           "declaration": "type GpuWebMercatorQuadCoverViewToken = Readonly<{ coverId: string; frameEpoch: number; isDisposed: boolean; kind: \"gpu-web-mercator-quad-cover-view-token\"; parity: 0 | 1; residencySnapshotEpoch: number; dispose: any }>"
@@ -23201,7 +23201,7 @@
             "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:218"
           ],
           "summary": "",
-          "declaration": "type WebMercatorTerrainRendererDescriptor<ViewInput, Presentation extends string = string> = Readonly<{ elevationRangeMeters: readonly [number, number]; exaggeration?: number; fieldLayer: MapFieldLayer<ViewInput>; fieldSampling: WebMercatorTerrainSamplingWgslOptions; initialPresentation: Presentation; observeProvenance?: (facts: readonly WebMercatorTerrainProvenanceFact[]) => void; presentations: readonly WebMercatorTerrainPresentationDescriptor<Presentation>[]; presentationShader: string; runtime: GPURuntime; size: SurfaceSize; surface: Surface; virtualRaster: VirtualRasterRuntime<WebMercatorVirtualRasterField> }>"
+          "declaration": "type WebMercatorTerrainRendererDescriptor<ViewInput, Presentation extends string = string> = Readonly<{ elevationRangeMeters: readonly [number, number]; exaggeration?: number; fieldLayer: MapFieldLayer<ViewInput>; fieldSampling: WebMercatorTerrainSamplingWgslOptions; initialPresentation: Presentation; observeProvenance?: (facts: readonly WebMercatorTerrainProvenanceFact[]) => void; presentations: readonly WebMercatorTerrainPresentationDescriptor<Presentation>[]; presentationShader: string; runtime: GPURuntime; size: SurfaceSize; surface: Surface; variableLodPitchThresholdRadians?: number; virtualRaster: VirtualRasterRuntime<WebMercatorVirtualRasterField> }>"
         },
         {
           "id": "geoscratch/geo#WebMercatorTerrainRendererState",

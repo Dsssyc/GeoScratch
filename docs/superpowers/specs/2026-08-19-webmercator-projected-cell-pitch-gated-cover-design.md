@@ -110,12 +110,12 @@ corner rays; it is expanded by one standard tile before parent-group alignment.
 Because the envelope is radial in world space, bearing rotates visibility inside it
 without changing its guaranteed coverage.
 
-For each permitted level from coarse to fine, the kernel directly enumerates that
-level's bounded envelope, rejects invisible candidates, and records the maximum local
-projected-cell span. The first level whose complete visible footprint is at or below
-`maximumCellSpanPixels` is the uniform level; the maximum level is the terminal
-fallback. One aligned window at that level replaces its visible ancestors. No finer
-island may exist inside the same settled top-down footprint.
+The kernel evaluates the complete footprint once at the clamped `ceil(zoomHint)` probe
+level. Projected cell span changes by exactly a factor of two per standard matrix level,
+so `ceil(log2(maximumSpan / maximumCellSpanPixels))` directly resolves the uniform
+level without repeated level scans. The resolved aligned window is emitted alone; the
+maximum level is the terminal fallback. No finer island or coarse safety patch may
+exist inside the same settled top-down footprint.
 
 Observable uniform-mode invariants:
 

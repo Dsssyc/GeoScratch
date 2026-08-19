@@ -16,23 +16,39 @@ feedback, and indirect draw arguments. CPU frame work uploads view facts and sub
 the persistent graph; it does not materialize a selected tile list.
 
 Every emitted patch is an OGC tile identity `(tileMatrix, tileRow, tileCol)`.
-Camera-centered level bands select from the fixed global matrix and never create a
-moving game-style grid. The kernel starts at the camera-derived finest standard tile,
-constructs continuous wide-fixed camera-to-tile AABB distance bands, expands them
-outward to complete parent groups, conservatively rejects invisible candidates, and
-performs local 2:1 closure only over that bounded candidate cover. Each non-minimum
-level enumerates at most 36 candidates. It does not start at world roots, traverse a
-root-to-leaf quadtree, count trial cuts, or retain previous-frame topology as selection
-authority.
+Camera/view-derived level windows select from the fixed global matrix and never create
+a moving game-style grid. The kernel evaluates the area-equivalent projected span of
+one geometry cell with a rotation-invariant local projective Jacobian. The metric
+includes viewport scale, perspective, foreshortening, and the configured elevation
+range; a cell that can cross the camera plane refines conservatively.
 
-`GpuWebMercatorQuadCoverPolicy` declares ordered geometry/source levels and one hard
-patch capacity. Complete demand capacity is derived from that same bound because one
-patch emits at most one demand. `sourceMaximumMatrixLevel` is a source fact, not a
-geometry ceiling. Geometry patches may continue to z14 while their raster demand lowers to a
-standard z10 ancestor. Feedback retains `desiredSampleLevel`,
+`variableLodPitchThresholdRadians` divides two deterministic modes. A pitch strictly
+below the threshold directly tests complete viewport-footprint windows from coarse to
+fine and emits one uniform geometry level. A pitch equal to or above the threshold
+directly probes bounded standard parents around the precise camera coordinate at every
+possible level and creates nested child windows only where projected cell span exceeds
+the threshold. Both modes conservatively reject invisible candidates and finish with
+the same prefix-free emission and local 2:1 closure. Candidate work scales with the
+bounded visible footprint and hard patch capacity; there is no constant candidate
+claim independent of viewport size. The kernel does not start at world roots, traverse
+a root-to-leaf quadtree, count trial cuts, or retain previous-frame topology as
+selection authority.
+
+`GpuWebMercatorQuadCoverPolicy` declares ordered geometry/source levels, one hard
+patch capacity, `cellsPerPatchEdge`, `maximumCellSpanPixels`, and
+`variableLodPitchThresholdRadians` in `[0, PI / 2]`. Invalid quality or threshold facts
+fail before resource creation. Complete demand capacity is derived from the patch bound
+because one patch emits at most one demand. `sourceMaximumMatrixLevel` is a source fact,
+not a geometry ceiling. Geometry patches may continue to z14 while raster demand lowers
+to a standard z10 ancestor. Feedback retains `desiredSampleLevel`,
 `sourceLevelCeiling`, and the executable request tile as separate facts.
 Demand priority orders desired precision first, then wrapped standard-tile distance
 to the camera anchor, so a tight residency budget does not fall back to row/column key order.
+
+Selection feedback reports `selectionMode`, final minimum/maximum geometry levels,
+and Q8-decoded minimum/maximum projected cell spans. These facts are observation-only;
+they never feed the next frame. Descriptor, lookup, demand, or capacity overflow is a
+hard diagnostic and never silently coarsens the requested cut.
 
 `gpuWebMercatorQuadCoverReadWgslModule()` exposes bounded full-identity lookup,
 covering-neighbor resolution, and edge-coordinate snapping. Lookup entries store the

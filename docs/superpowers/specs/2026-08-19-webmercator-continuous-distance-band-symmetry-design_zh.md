@@ -4,8 +4,9 @@
 
 2026-08-19 已批准。英文文档为事实基准；本文是经审阅的中文翻译，冲突时以英文为准。
 
-本文只修复 ADR-083 inverse cover 中的一处缺陷，不引入第二套 selector，也不替换已接受
-架构。
+本文记录的 parity-bias 修复已在 2026-08-19 被
+`2026-08-19-webmercator-projected-cell-pitch-gated-cover-design.md` 取代。其对称性诊断仍是
+有效历史证据，但固定半径质量 policy 已不再是当前实现。
 
 ## 已观察缺陷
 

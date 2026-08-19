@@ -266,7 +266,6 @@ async function runProof(activeBrowser) {
                 } : {}),
             })
         }
-
         previous = await settle(
             page,
             'tile-wireframe',

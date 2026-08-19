@@ -2,7 +2,7 @@
 docId: geo.terrain-rendering.zh
 canonical: false
 translationOf: ./terrain-rendering.md
-canonicalDigest: 012b3be513fa146376fed159f90e3b3cafee9322b4377072e2030ebf5b02a61f
+canonicalDigest: 179e3761c1c948458e073724b69a3d4cc7f0fad427b742584bc89e5920922aab
 ---
 # 地形渲染
 
@@ -24,6 +24,15 @@ Cover 是唯一 geometry LoD authority。它从当前 camera fact 反向生成 p
 瓦片 cover，不遍历 root，也不依赖 atlas residency。输出包含完整
 `tileMatrix/tileRow/tileCol` identity、neighbor lookup、desired-page feedback 与 indirect
 instance count。最终 cover 在 terrain render 前满足边相邻 2:1。
+
+内建 terrain policy 为每个标准 patch 使用 64 cells、八像素的面积等价 projected-cell
+最大跨度，以及 60 度 variable-LoD pitch threshold。Renderer descriptor 可通过
+`variableLodPitchThresholdRadians` 覆盖该值。低于阈值时完整可见足迹使用一个 geometry
+level；等于或高于阈值时，projected-cell 证据生成近处较细、远处较粗的 patch。Cover
+capacity 同时根据 viewport size 与配置的 uniform-pitch 范围分配，容量不足仍显式失败，
+不会隐藏为质量退化。
+该阈值是显式质量/性能开关：刚低于阈值的视图可能比边界处的 variable cut 绘制显著更多
+geometry。优先保证持续高俯仰交互性能的应用应配置更低阈值。
 
 Raster demand 明确位于下游。Cover feedback 分别保留 desired precision 与 source ceiling，
 renderer 再创建 `ViewTileDemandSet`。`VirtualRasterRuntime.reconcileViewDemands()` 只调度

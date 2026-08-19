@@ -28,13 +28,21 @@ therefore need explicit one-way composition rather than shared authority.
 
 ## Decision
 
-Geo will provide one GPU-driven, camera-derived WebMercatorQuad cover. It anchors the
-finest level at the standard tile containing the canonical camera position, derives
-parent-aligned level bands, conservatively rejects invisible candidates, and directly
-enumerates standard `tileMatrix/tileRow/tileCol` identities. Bands are snapped to the
-fixed OGC matrix hierarchy; no camera-local tile grid is created. The result is
+Geo will provide one GPU-driven, camera-derived WebMercatorQuad cover. It anchors
+candidate search at the standard tile containing the canonical camera position,
+derives parent-aligned view windows, conservatively rejects invisible candidates, and
+directly enumerates standard `tileMatrix/tileRow/tileCol` identities. Windows are
+snapped to the fixed OGC matrix hierarchy; no camera-local tile grid is created. The result is
 canonical, prefix-free, complete over visible source coverage, and balanced so edge
 neighbors differ by at most one level.
+
+The 2026-08-19 projected-cell correction makes level quality explicit. Below a
+configurable pitch threshold, the complete visible footprint selects one level from a
+rotation-invariant local projective-cell metric. At or above the threshold, each level
+directly probes a bounded camera/view-derived parent window and creates children only
+where the same metric exceeds its pixel threshold. The default terrain boundary is 60
+degrees. Candidate work is bounded by visible footprint and hard capacity, not by a
+constant tile radius independent of viewport size.
 
 The cover does not begin at z0, source roots, safety pages, or atlas slots. A bounded
 final visibility test may reject directly generated candidates, but there is no
