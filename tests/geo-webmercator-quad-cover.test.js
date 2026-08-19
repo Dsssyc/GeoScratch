@@ -135,6 +135,26 @@ function patchAt(result, x, y) {
     })
 }
 
+function projectedCameraAtTile(level, tileCol, tileRow, fractionX, fractionY) {
+
+    const scale = 2 ** level
+    const normalizedX = (tileCol + fractionX) / scale
+    const normalizedY = (tileRow + fractionY) / scale
+    return {
+        x: normalizedX * WORLD_WIDTH - HALF_WORLD,
+        y: HALF_WORLD - normalizedY * WORLD_WIDTH,
+        normalizedX,
+        normalizedY,
+    }
+}
+
+function selectedLevel(result, x, y) {
+
+    const patch = patchAt(result, x, y)
+    expect(patch, `cover at ${x},${y}`).not.to.equal(undefined)
+    return patch.matrixLevel
+}
+
 function expectStandardBalancedCover(result, maximumLevel) {
 
     expect(result.patches.length).to.be.greaterThan(0)
@@ -194,6 +214,83 @@ describe('GPU WebMercatorQuad inverse cover reference', () => {
                 `${patch.matrixLevel}/${size - 1 - patch.tileRow}/${patch.tileCol}`
             )).to.equal(true)
         }
+    })
+
+    it('keeps equal-distance samples symmetric at odd camera tile indices', () => {
+
+        const setup = fixture()
+        for (const sample of [
+            { level: 14, col: 13_697, row: 6_670, fx: 0.966, fy: 0.354, axis: 'x' },
+            { level: 12, col: 3_424, row: 1_667, fx: 0.491, fy: 0.589, axis: 'y' },
+        ]) {
+            const camera = projectedCameraAtTile(
+                sample.level,
+                sample.col,
+                sample.row,
+                sample.fx,
+                sample.fy
+            )
+            const delta = 1 / 2 ** sample.level
+            const result = setup.evaluate({
+                currentView: setup.view({
+                    x: camera.x,
+                    y: camera.y,
+                    zoom: sample.level - 0.75,
+                }),
+                visibleBounds: {
+                    west: camera.normalizedX - delta * 4,
+                    east: camera.normalizedX + delta * 4,
+                    north: camera.normalizedY - delta * 4,
+                    south: camera.normalizedY + delta * 4,
+                },
+            })
+            const negative = sample.axis === 'x'
+                ? [ camera.normalizedX - delta, camera.normalizedY ]
+                : [ camera.normalizedX, camera.normalizedY - delta ]
+            const positive = sample.axis === 'x'
+                ? [ camera.normalizedX + delta, camera.normalizedY ]
+                : [ camera.normalizedX, camera.normalizedY + delta ]
+
+            expect(selectedLevel(result, ...negative)).to.equal(
+                selectedLevel(result, ...positive)
+            )
+        }
+    })
+
+    it('expands both directions at an exact odd parent-center boundary', () => {
+
+        const setup = fixture()
+        const level = 10
+        const camera = projectedCameraAtTile(level, 513, 417, 0, 0)
+        const delta = 1.5 / 2 ** level
+        const result = setup.evaluate({
+            currentView: setup.view({ x: camera.x, y: camera.y, zoom: 9.25 }),
+            visibleBounds: {
+                west: camera.normalizedX - delta * 3,
+                east: camera.normalizedX + delta * 3,
+                north: camera.normalizedY - delta * 3,
+                south: camera.normalizedY + delta * 3,
+            },
+        })
+
+        expect(selectedLevel(
+            result,
+            camera.normalizedX - delta,
+            camera.normalizedY
+        )).to.equal(selectedLevel(
+            result,
+            camera.normalizedX + delta,
+            camera.normalizedY
+        ))
+        expect(selectedLevel(
+            result,
+            camera.normalizedX,
+            camera.normalizedY - delta
+        )).to.equal(selectedLevel(
+            result,
+            camera.normalizedX,
+            camera.normalizedY + delta
+        ))
     })
 
     it('does not coarsen visible sample locations during zoom-in', () => {

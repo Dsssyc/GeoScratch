@@ -9,8 +9,7 @@ import {
     WebMercatorQuad,
 } from './web-mercator-quad.js'
 
-const FINE_WINDOW_SPAN = 4
-const LEVEL_HALO_TILES = 1
+const DISTANCE_BAND_RADIUS_TILES = 2
 
 export type GpuWebMercatorQuadCoverReferenceBounds = Readonly<{
     west: number
@@ -76,12 +75,13 @@ export function evaluateGpuWebMercatorQuadCoverReference(
 
     validateInput(input)
     const focus = normalizedCamera(input.view)
+    const fixedCamera = cameraFixedPosition(input)
     const finestMatrixLevel = clamp(
         Math.ceil(input.view.zoomHint) + pitchLevelBoost(input.view.cameraPitchRadians),
         input.policy.minimumMatrixLevel,
         input.policy.maximumMatrixLevel
     )
-    const generated = generate(input, focus, finestMatrixLevel)
+    const generated = generate(input, fixedCamera, finestMatrixLevel)
     if (generated.patches.length > input.policy.maximumPatches) {
         return invalidCover(
             'The minimum standard cover exceeds its declared patch capacity.',
@@ -111,11 +111,11 @@ export function evaluateGpuWebMercatorQuadCoverReference(
 
 function generate(
     input: GpuWebMercatorQuadCoverReferenceInput,
-    focus: readonly [number, number],
+    fixedCamera: readonly [bigint, bigint],
     finestMatrixLevel: number
 ) {
 
-    const windows = coverWindows(input, focus, finestMatrixLevel)
+    const windows = coverWindows(input, fixedCamera, finestMatrixLevel)
     const patches: GpuWebMercatorQuadCoverReferencePatch[] = []
     let candidateCount = 0
     for (let matrixLevel = finestMatrixLevel;
@@ -142,46 +142,100 @@ function generate(
 
 function coverWindows(
     input: GpuWebMercatorQuadCoverReferenceInput,
-    focus: readonly [number, number],
+    fixedCamera: readonly [bigint, bigint],
     finestMatrixLevel: number
 ): ReadonlyMap<number, IntegerBounds> {
 
     const windows = new Map<number, IntegerBounds>()
-    const finestLimit = geometryLimit(input, finestMatrixLevel)
-    const finestSize = 2 ** finestMatrixLevel
-    const focusRow = clamp(Math.floor(focus[1] * finestSize), 0, finestSize - 1)
-    const focusCol = clamp(Math.floor(focus[0] * finestSize), 0, finestSize - 1)
-    windows.set(finestMatrixLevel, fitWindow({
-        minTileRow: Math.floor((focusRow - FINE_WINDOW_SPAN / 2) / 2) * 2,
-        maxTileRow: Math.floor((focusRow - FINE_WINDOW_SPAN / 2) / 2) * 2 +
-            FINE_WINDOW_SPAN - 1,
-        minTileCol: Math.floor((focusCol - FINE_WINDOW_SPAN / 2) / 2) * 2,
-        maxTileCol: Math.floor((focusCol - FINE_WINDOW_SPAN / 2) / 2) * 2 +
-            FINE_WINDOW_SPAN - 1,
-    }, finestLimit))
-
-    for (let matrixLevel = finestMatrixLevel - 1;
+    for (let matrixLevel = finestMatrixLevel;
         matrixLevel >= input.policy.minimumMatrixLevel;
         matrixLevel--) {
-        const finer = windows.get(matrixLevel + 1)!
         const limit = geometryLimit(input, matrixLevel)
-        const parentWindow = {
-            minTileRow: Math.floor(finer.minTileRow / 2),
-            maxTileRow: Math.floor(finer.maxTileRow / 2),
-            minTileCol: Math.floor(finer.minTileCol / 2),
-            maxTileCol: Math.floor(finer.maxTileCol / 2),
+        if (matrixLevel === input.policy.minimumMatrixLevel) {
+            windows.set(matrixLevel, limit)
+            continue
         }
-        const expanded = alignToParentGroups({
-            minTileRow: parentWindow.minTileRow - LEVEL_HALO_TILES,
-            maxTileRow: parentWindow.maxTileRow + LEVEL_HALO_TILES,
-            minTileCol: parentWindow.minTileCol - LEVEL_HALO_TILES,
-            maxTileCol: parentWindow.maxTileCol + LEVEL_HALO_TILES,
-        })
-        windows.set(matrixLevel, matrixLevel === input.policy.minimumMatrixLevel
-            ? limit
-            : fitWindow(expanded, limit))
+        let band = distanceBandWindow(
+            fixedCamera,
+            matrixLevel,
+            input.spatialProfile.coordinateBits
+        )
+        const finer = windows.get(matrixLevel + 1)
+        if (finer !== undefined) {
+            band = unionBounds(band, {
+                minTileRow: Math.floor(finer.minTileRow / 2),
+                maxTileRow: Math.floor(finer.maxTileRow / 2),
+                minTileCol: Math.floor(finer.minTileCol / 2),
+                maxTileCol: Math.floor(finer.maxTileCol / 2),
+            })
+        }
+        windows.set(matrixLevel, fitWindow(alignToParentGroups(band), limit))
     }
     return windows
+}
+
+function cameraFixedPosition(
+    input: GpuWebMercatorQuadCoverReferenceInput
+): readonly [bigint, bigint] {
+
+    const encoded = input.spatialProfile.encodeCamera([
+        input.view.cameraHigh[0] + input.view.cameraLow[0],
+        input.view.cameraHigh[1] + input.view.cameraLow[1],
+    ])
+    return Object.freeze([
+        (BigInt(encoded.high[0]) << 32n) | BigInt(encoded.low[0]),
+        (BigInt(encoded.high[1]) << 32n) | BigInt(encoded.low[1]),
+    ]) as readonly [bigint, bigint]
+}
+
+function distanceBandWindow(
+    fixedCamera: readonly [bigint, bigint],
+    matrixLevel: number,
+    coordinateBits: number
+): IntegerBounds {
+
+    const [ minTileCol, maxTileCol ] = distanceBandAxis(
+        fixedCamera[0],
+        matrixLevel,
+        coordinateBits
+    )
+    const [ minTileRow, maxTileRow ] = distanceBandAxis(
+        fixedCamera[1],
+        matrixLevel,
+        coordinateBits
+    )
+    return alignToParentGroups({
+        minTileRow,
+        maxTileRow,
+        minTileCol,
+        maxTileCol,
+    })
+}
+
+function distanceBandAxis(
+    fixed: bigint,
+    matrixLevel: number,
+    coordinateBits: number
+): readonly [number, number] {
+
+    const fractionalBits = BigInt(coordinateBits - matrixLevel)
+    const tile = Number(fixed >> fractionalBits)
+    const fractionalMask = (1n << fractionalBits) - 1n
+    const hasFraction = (fixed & fractionalMask) !== 0n
+    return Object.freeze([
+        tile - DISTANCE_BAND_RADIUS_TILES,
+        tile + DISTANCE_BAND_RADIUS_TILES - (hasFraction ? 0 : 1),
+    ]) as readonly [number, number]
+}
+
+function unionBounds(left: IntegerBounds, right: IntegerBounds): IntegerBounds {
+
+    return Object.freeze({
+        minTileRow: Math.min(left.minTileRow, right.minTileRow),
+        maxTileRow: Math.max(left.maxTileRow, right.maxTileRow),
+        minTileCol: Math.min(left.minTileCol, right.minTileCol),
+        maxTileCol: Math.max(left.maxTileCol, right.maxTileCol),
+    })
 }
 
 function geometryLimit(
