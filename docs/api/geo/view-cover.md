@@ -18,10 +18,12 @@ the persistent graph; it does not materialize a selected tile list.
 Every emitted patch is an OGC tile identity `(tileMatrix, tileRow, tileCol)`.
 Camera-centered level bands select from the fixed global matrix and never create a
 moving game-style grid. The kernel starts at the camera-derived finest standard tile,
-constructs parent-aligned nested windows, conservatively rejects invisible candidates,
-and performs local 2:1 closure only over that bounded candidate cover. It does not
-start at world roots, traverse a root-to-leaf quadtree, count trial cuts, or retain
-previous-frame topology as selection authority.
+constructs continuous wide-fixed camera-to-tile AABB distance bands, expands them
+outward to complete parent groups, conservatively rejects invisible candidates, and
+performs local 2:1 closure only over that bounded candidate cover. Each non-minimum
+level enumerates at most 36 candidates. It does not start at world roots, traverse a
+root-to-leaf quadtree, count trial cuts, or retain previous-frame topology as selection
+authority.
 
 `GpuWebMercatorQuadCoverPolicy` declares ordered geometry/source levels and one hard
 patch capacity. Complete demand capacity is derived from that same bound because one

@@ -38,6 +38,15 @@ const pitchedCamera = Object.freeze({
     pitch: 70,
     bearing: 90,
 })
+const oddParityTopDownCamera = Object.freeze({
+    ...camera,
+    zoom: 13.25,
+    bearing: 180,
+})
+const oddParityPitchedCamera = Object.freeze({
+    ...oddParityTopDownCamera,
+    pitch: 70,
+})
 const vitePort = await findAvailablePort()
 let tilePort = await findAvailablePort()
 while (tilePort === vitePort) tilePort = await findAvailablePort()
@@ -210,6 +219,48 @@ async function runProof(activeBrowser) {
             zoomSamples.push(previous)
         }
 
+        previous = await settle(
+            page,
+            'tile-wireframe',
+            previous.observedFrames,
+            Object.freeze({ ...oddParityTopDownCamera, bearing: 0 })
+        )
+        const oddParityBearingZero = Object.freeze({
+            ...previous,
+            capture: await capture(page, 'odd-parity-bearing-0'),
+        })
+        previous = await settle(
+            page,
+            'tile-wireframe',
+            previous.observedFrames,
+            oddParityTopDownCamera
+        )
+        const oddParityDirect = Object.freeze({
+            ...previous,
+            capture: await capture(page, 'odd-parity-direct'),
+        })
+        previous = await settle(
+            page,
+            'tile-wireframe',
+            previous.observedFrames,
+            oddParityPitchedCamera
+        )
+        previous = await settle(
+            page,
+            'tile-wireframe',
+            previous.observedFrames,
+            oddParityTopDownCamera
+        )
+        const oddParityReturned = Object.freeze({
+            ...previous,
+            capture: await capture(page, 'odd-parity-returned'),
+        })
+        const oddParityTopDown = Object.freeze({
+            bearingZero: oddParityBearingZero,
+            direct: oddParityDirect,
+            returned: oddParityReturned,
+        })
+
         await page.locator(
             '[data-underwater-terrain-control="tile-wireframe"] .tp-ckbv_w'
         ).click()
@@ -226,6 +277,7 @@ async function runProof(activeBrowser) {
             wireframe: Object.freeze({ ...wireframe, capture: wireframeCapture }),
             canonical: Object.freeze(canonical),
             zoomSamples: Object.freeze(zoomSamples),
+            oddParityTopDown,
             shadedTracking,
             wireframeTracking,
             restored: Object.freeze({ ...restored, capture: restoredCapture }),
@@ -500,6 +552,7 @@ function validateProof(value, processState) {
         wireframe,
         canonical = [],
         zoomSamples = [],
+        oddParityTopDown,
         shadedTracking,
         wireframeTracking,
         restored,
@@ -531,6 +584,9 @@ function validateProof(value, processState) {
         wireframe,
         ...canonical,
         ...zoomSamples,
+        oddParityTopDown?.bearingZero,
+        oddParityTopDown?.direct,
+        oddParityTopDown?.returned,
         restored,
     ]
     for (const [ index, sample ] of samples.entries()) {
@@ -579,6 +635,28 @@ function validateProof(value, processState) {
     expect(failures,
         zoomSamples.length === 5 && zoomRegressions.length === 0,
     `zoom-in coarsened the inverse cover: ${JSON.stringify(zoomRegressions)}`)
+    const oddBearingZero = oddParityTopDown?.bearingZero
+    const oddDirect = oddParityTopDown?.direct
+    const oddReturned = oddParityTopDown?.returned
+    const oddSignature = sample => JSON.stringify({
+        patchCount: sample?.coverFeedback?.patchCount,
+        candidateCount: sample?.coverFeedback?.candidateCount,
+        minimumMatrixLevel: sample?.coverFeedback?.minimumMatrixLevel,
+        maximumMatrixLevel: sample?.coverFeedback?.maximumMatrixLevel,
+        finestMatrixLevel: sample?.coverFeedback?.finestMatrixLevel,
+        maximumAdjacentLevelDelta: sample?.coverFeedback?.maximumAdjacentLevelDelta,
+    })
+    expect(failures,
+        oddSignature(oddBearingZero) === oddSignature(oddDirect),
+    'odd-parity top-down cover changed under a 180-degree bearing')
+    expect(failures,
+        oddSignature(oddDirect) === oddSignature(oddReturned) &&
+        oddDirect?.capture?.canvas?.sha256 === oddReturned?.capture?.canvas?.sha256,
+    'odd-parity top-down cover depended on navigation history')
+    expect(failures,
+        oddDirect?.coverPatchCount > 0 && oddDirect.coverPatchCount <= 96 &&
+        oddDirect.coverFeedback?.maximumAdjacentLevelDelta <= 1,
+    'odd-parity top-down cover exceeded density or adjacency gates')
     expect(failures,
         pitchedShaded?.coverPatchCount <= 96 &&
         wireframe?.coverPatchCount <= 96,

@@ -58,16 +58,18 @@ the page, alter cache query parameters, or rebuild the virtual raster.
 The manifest declares source pages through z10. `GpuWebMercatorQuadCover` independently
 selects geometry through z14, but every output remains a standard
 `(tileMatrix, tileRow, tileCol)` identity. Camera-centered bands select from the fixed
-global matrix; they are not a moving clipmap grid. The GPU derives parent-aligned nested
-windows from the current view, conservatively rejects invisible candidates, performs
-local 2:1 closure, builds the full-identity neighbor lookup, and writes indirect draw
-arguments in one bounded dispatch.
+global matrix; they are not a moving clipmap grid. The GPU derives continuous
+wide-fixed camera-to-tile AABB distance bands, expands them outward to complete parent
+groups, conservatively rejects invisible candidates, performs local 2:1 closure,
+builds the full-identity neighbor lookup, and writes indirect draw arguments in one
+bounded dispatch.
 
 The cover also emits desired raster facts. A z14 geometry patch retains
 `desiredSampleLevel = 14` while lowering its executable request to the corresponding
 z10 source ancestor. `VirtualRasterRuntime.reconcileViewDemands()` consumes those
-explicit pages, removes already exact-resident work, and schedules the remaining pages
-in bounded batches. Virtual Raster never inspects zoom or selects geometry LoD.
+explicit pages. The scheduler marks exact-resident pages used and requests only missing
+pages within the runtime-owned demand budget. Virtual Raster never inspects zoom or
+selects geometry LoD.
 
 Terrain samples by global fixed coordinate. Until an exact source page is resident,
 the page table resolves a lower ancestor without changing geometry topology. Mesh

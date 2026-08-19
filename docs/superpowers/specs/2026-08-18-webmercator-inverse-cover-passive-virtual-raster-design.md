@@ -41,9 +41,9 @@ Horizontal world repetition is render-instance metadata: the canonical data key 
 The camera-derived cover is the only geometry LoD authority. It starts from the
 standard tile containing the canonical camera position at the requested finest
 level, not from world roots or resident atlas pages. It directly enumerates standard
-matrix tiles in nested level bands, conservatively rejects invisible candidates,
-closes adjacency to a maximum level difference of one, and emits one prefix-free
-cover.
+matrix tiles in continuous camera-to-tile AABB distance bands, conservatively rejects
+invisible candidates, closes adjacency to a maximum level difference of one, and emits
+one prefix-free cover.
 
 No previous-frame topology, atlas state, request state, or render-root trial may
 select a settled geometry cut.
@@ -106,21 +106,23 @@ example only supplies source and presentation policy.
 
 ### Camera anchor and visibility
 
-The GPU derives the finest standard tile from the camera's canonical fixed
-WebMercator position and requested zoom. This is a level-selection anchor, not a
-camera-local geometry grid and not a claim that the anchor itself must be visible in
-a pitched view. Parent-aligned windows expand from that standard tile, while the
-relative view-projection facts and configured elevation interval conservatively
-reject generated candidates outside the view.
+The GPU derives every band from the camera's canonical wide-fixed WebMercator
+position and requested zoom. A two-tile continuous AABB-distance radius is expanded
+outward to complete parent groups; it is never shifted or shrunk by tile-index parity.
+This is a level-selection field, not a camera-local geometry grid and not a claim that
+the camera anchor itself must be visible in a pitched view. Relative view-projection
+facts and the configured elevation interval conservatively reject generated
+candidates outside the view.
 
 ### Matrix-aligned level bands
 
 The cover uses view-centered nested bands only as a level-selection field. For each
-participating matrix level, it intersects the parent-aligned window with standard
-top-left-origin tile row and column limits and enumerates those identities directly.
-Fine regions are snapped to complete parent groups before the next coarser band is
-formed. Consequently, the selected regions are nested in standard tile space rather
-than in a moving game-style grid.
+participating matrix level, it converts the continuous fixed-coordinate distance band
+to standard top-left-origin tile row and column limits and enumerates those identities
+directly. Bands expand outward to complete parent groups and include the parent
+projection of the finer band. Consequently, selected regions remain nested in
+standard tile space rather than a moving game-style grid. Each non-minimum level
+enumerates at most 36 candidates.
 
 The implementation may use bounded matrix-aligned windows or an equivalent direct
 band enumerator, but it must prove these observable properties:
@@ -133,6 +135,9 @@ band enumerator, but it must prove these observable properties:
 - top-down symmetric inputs cannot acquire a directional tie bias;
 - zoom-in cannot coarsen a still-visible location under otherwise fixed inputs;
 - pitched distance cannot make a farther equivalent tile finer than a nearer tile.
+
+The fixed-coordinate construction and symmetry regression matrix are specified in
+`docs/superpowers/specs/2026-08-19-webmercator-continuous-distance-band-symmetry-design.md`.
 
 A final conservative tile/footprint test is allowed. It runs over the directly
 generated bounded candidates; it is not an excuse to restore world-root traversal.

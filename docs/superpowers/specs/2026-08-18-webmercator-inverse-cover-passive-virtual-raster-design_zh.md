@@ -34,8 +34,8 @@ frontier 做细分/合并，`GpuRenderPatchFrontier` 则从不可变 safety-cove
 
 相机反向生成的 cover 是唯一几何 LoD authority。它从请求最细层级中包含相机规范位置
 的标准瓦片出发，而不是从世界 roots 或 atlas resident pages 开始。它在标准矩阵上直接
-枚举嵌套 level bands，保守剔除不可见 candidate，经相邻最大一级闭包后输出唯一的
-prefix-free cover。
+枚举连续 camera-to-tile AABB distance bands，保守剔除不可见 candidate，经相邻最大一级
+闭包后输出唯一的 prefix-free cover。
 
 上一帧 topology、atlas 状态、request 状态与 render-root trial 都不能决定 settled geometry
 cut。
@@ -86,14 +86,16 @@ cache policy、URL 或 atlas ownership。
 
 ## 标准反向覆盖
 
-GPU 根据相机的规范 WebMercator fixed position 与请求 zoom 推导最细标准瓦片。这个
-瓦片只是层级选择锚点，不是相机局部几何格网，也不声称在倾斜视图中锚点本身必须可见。
-按 parent 对齐的窗口从该标准瓦片向外扩展，再由 relative view-projection facts 与配置的
-高程区间保守剔除视图外 candidate。
+GPU 根据相机的规范 wide-fixed WebMercator position 与请求 zoom 推导每一级 band。
+连续 AABB-distance 半径固定为两个该级瓦片，并且只向外扩张到完整 parent groups，不能
+因 tile-index parity 平移或缩小。它只是层级选择场，不是相机局部几何格网，也不声称在
+倾斜视图中相机锚点本身必须可见。Relative view-projection facts 与配置的高程区间继续
+保守剔除视图外 candidate。
 
-嵌套 bands 只作为层级选择场。每一级都把按 parent 对齐的窗口与标准 top-left-origin
-tile row/column limits 求交并直接枚举；细区域必须先对齐到完整 parent groups，再形成下一
-粗级 band。因此最终仍是固定 WebMercatorQuad 格网，而不是游戏式移动格网。
+嵌套 bands 只作为层级选择场。每一级都把连续 fixed-coordinate distance band 转换成标准
+top-left-origin tile row/column limits 并直接枚举；band 只向外扩张到完整 parent groups，
+并包含 finer band 的 parent 投影。因此最终仍是固定 WebMercatorQuad 格网，而不是游戏式
+移动格网。每个非 minimum level 最多枚举 36 个 candidate。
 
 实现必须证明：
 
@@ -104,6 +106,9 @@ tile row/column limits 求交并直接枚举；细区域必须先对齐到完整
 - 俯视对称输入没有方向 tie bias；
 - 其他输入固定时 zoom-in 不会让仍可见位置变粗；
 - 等价条件下更远瓦片不会比更近瓦片更细。
+
+Fixed-coordinate 构造与对称性回归矩阵详见
+`docs/superpowers/specs/2026-08-19-webmercator-continuous-distance-band-symmetry-design.md`。
 
 允许对直接生成的有限 candidates 做最终保守 footprint test；这不能成为恢复世界 root
 遍历的借口。
