@@ -76,7 +76,11 @@ epoch only after every update command is present and native execution succeeds.
 
 The runtime composes those authorities but does not invent camera demand, cache policy,
 network format, or rendering geometry. Cache addresses are pure mappings into Scratch
-Cache; cache remains optional. Applications can use Virtual Raster for DEM, imagery,
+Cache; cache remains optional. `virtualRasterCacheMetadataMatches()` compares untrusted
+stored metadata with every canonical address identity field while allowing source-specific
+payload facts beside that base metadata. A source Worker still validates its own payload
+shape and treats an identity mismatch as a cache miss rather than adopting stale bytes.
+Applications can use Virtual Raster for DEM, imagery,
 flow fields, classifications, simulation grids, or editable rasters without coupling
 their shaders to tile neighbors or atlas coordinates.
 

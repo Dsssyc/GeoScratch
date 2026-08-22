@@ -307,6 +307,15 @@ describe('Underwater Terrain clean cut', () => {
         ]) expect(runtime).not.to.include(forbidden)
     })
 
+    it('validates cached DEM payloads through the canonical Geo cache identity', () => {
+
+        const worker = read('examples', 'underwaterTerrain', 'dem-tile-worker.ts')
+
+        expect(worker).to.include('virtualRasterCacheMetadataMatches(')
+        expect(worker).not.to.include("metadata.domain === 'geo.virtual-raster'")
+        expect(worker).not.to.include("metadata.payloadRepresentation === 'raw/uint8'")
+    })
+
     it('uses only persistent Scratch objects in the frame hot path', () => {
 
         const renderer = read(

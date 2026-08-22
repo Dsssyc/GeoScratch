@@ -240,7 +240,10 @@ export type {
     WebMercatorVirtualRasterWgslModule,
     WebMercatorVirtualRasterWgslOptions,
 } from './web-mercator-virtual-raster-wgsl.js'
-export { virtualRasterCacheAddress } from './virtual-raster-cache-address.js'
+export {
+    virtualRasterCacheAddress,
+    virtualRasterCacheMetadataMatches,
+} from './virtual-raster-cache-address.js'
 export type {
     VirtualRasterCacheAddress,
     VirtualRasterCacheAddressDescriptor,

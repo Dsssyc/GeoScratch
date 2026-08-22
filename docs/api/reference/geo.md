@@ -2,7 +2,7 @@
 
 # geoscratch/geo API Reference
 
-Public symbols: 286.
+Public symbols: 287.
 
 ## `packages/geoscratch/src/geo/coordinate-domain.ts`
 
@@ -1544,6 +1544,20 @@ Kind: `Type Alias`.
 
 ```ts
 type VirtualRasterCacheMetadata = Readonly<{ coherence: VirtualRasterCacheCoherence; decoderVersion: string; domain: "geo.virtual-raster"; matrixId: string; payloadRepresentation: string; plane: string; sampleType: string; schemaVersion: number; sourceId: string; sourceRepresentation: string; tileColumn: number; tileMatrixSetId: string; tileMatrixSetUri: string; tileRow: number }>
+```
+
+### `virtualRasterCacheMetadataMatches`
+
+Kind: `Function`.
+
+Checks untrusted cache metadata against one complete canonical Virtual Raster address.
+
+```ts
+Function virtualRasterCacheMetadataMatches
+```
+
+```ts
+virtualRasterCacheMetadataMatches(address: VirtualRasterCacheAddress, value: unknown): value is Readonly<{ coherence: VirtualRasterCacheCoherence; decoderVersion: string; domain: "geo.virtual-raster"; matrixId: string; payloadRepresentation: string; plane: string; sampleType: string; schemaVersion: number; sourceId: string; sourceRepresentation: string; tileColumn: number; tileMatrixSetId: string; tileMatrixSetUri: string; tileRow: number }>
 ```
 
 ## `packages/geoscratch/src/geo/virtual-raster-demand.ts`

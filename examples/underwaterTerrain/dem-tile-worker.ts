@@ -1,5 +1,6 @@
 import {
     prepareVirtualRasterPageTransfer,
+    virtualRasterCacheMetadataMatches,
 } from 'geoscratch/geo'
 import {
     PersistentCache,
@@ -311,11 +312,10 @@ function validCachedTile(
     const metadata = record.metadata
     return record.payload instanceof ArrayBuffer &&
         record.byteLength === TILE_SIZE * TILE_SIZE &&
-        metadata.domain === 'geo.virtual-raster' &&
+        virtualRasterCacheMetadataMatches(descriptor.cacheAddress, metadata) &&
         metadata.width === TILE_SIZE && metadata.height === TILE_SIZE &&
         metadata.channels === 1 && metadata.dataType === 'uint8' &&
-        metadata.contentVersion === descriptor.contentVersion &&
-        metadata.payloadRepresentation === 'raw/uint8'
+        metadata.contentVersion === descriptor.contentVersion
 }
 
 function candidateStateError(candidateId: string, expected: 'cache' | 'network'): Error {

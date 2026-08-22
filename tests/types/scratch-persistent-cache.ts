@@ -12,6 +12,7 @@ import type {
 } from 'geoscratch/scratch'
 import {
     virtualRasterCacheAddress,
+    virtualRasterCacheMetadataMatches,
 } from 'geoscratch/geo'
 
 type RasterMetadata = Readonly<{
@@ -71,6 +72,7 @@ const address = virtualRasterCacheAddress({
     schemaVersion: 2,
 })
 const addressKey: typeof key = address.key
+const metadataMatches: boolean = virtualRasterCacheMetadataMatches(address, address.metadata)
 
 declare const diagnostic: ScratchDiagnostic
 if (diagnostic.domain === 'cache') {
@@ -90,3 +92,4 @@ void facts
 void observationScope
 void lifecycle
 void addressKey
+void metadataMatches

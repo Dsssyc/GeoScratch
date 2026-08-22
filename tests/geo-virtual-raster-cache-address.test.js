@@ -1,8 +1,10 @@
 import { expect } from 'chai'
-import {
+import * as geoApi from 'geoscratch/geo'
+
+const {
     isGeoDiagnosticError,
     virtualRasterCacheAddress,
-} from 'geoscratch/geo'
+} = geoApi
 
 describe('Geo virtual raster persistent-cache adapter', () => {
 
@@ -63,6 +65,51 @@ describe('Geo virtual raster persistent-cache adapter', () => {
             'kind',
             'metadata',
         ])
+    })
+
+    it('matches complete canonical metadata while permitting source payload facts', () => {
+
+        const expected = address()
+        const metadata = Object.freeze({
+            ...expected.metadata,
+            width: 256,
+            height: 256,
+            channels: 1,
+            dataType: 'uint8',
+        })
+
+        expect(geoApi.virtualRasterCacheMetadataMatches).to.be.a('function')
+        expect(geoApi.virtualRasterCacheMetadataMatches(expected, metadata)).to.equal(true)
+    })
+
+    it('rejects drift in every canonical cache identity family', () => {
+
+        const expected = address()
+        const metadata = expected.metadata
+        const drifted = [
+            { ...metadata, domain: 'other' },
+            { ...metadata, sourceId: 'other-source' },
+            { ...metadata, tileMatrixSetId: 'OtherTileMatrixSet' },
+            { ...metadata, tileMatrixSetUri: 'https://example.com/other-tms' },
+            { ...metadata, matrixId: '11' },
+            { ...metadata, tileRow: metadata.tileRow + 1 },
+            { ...metadata, tileColumn: metadata.tileColumn + 1 },
+            { ...metadata, plane: 'temperature' },
+            {
+                ...metadata,
+                coherence: { mode: 'immutable', contentVersion: 'other-revision' },
+            },
+            { ...metadata, sourceRepresentation: 'image/webp' },
+            { ...metadata, payloadRepresentation: 'raw/float32' },
+            { ...metadata, decoderVersion: 'other-decoder' },
+            { ...metadata, sampleType: 'float32' },
+            { ...metadata, schemaVersion: metadata.schemaVersion + 1 },
+        ]
+
+        for (const candidate of drifted) {
+            expect(geoApi.virtualRasterCacheMetadataMatches(expected, candidate)).to.equal(false)
+        }
+        expect(geoApi.virtualRasterCacheMetadataMatches(expected, null)).to.equal(false)
     })
 
     it('keeps malformed and aggregate-overflow identities in the Geo diagnostic domain', () => {

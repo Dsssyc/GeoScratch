@@ -3147,6 +3147,23 @@
         "declaration": "type VirtualRasterCacheMetadata = Readonly<{ coherence: VirtualRasterCacheCoherence; decoderVersion: string; domain: \"geo.virtual-raster\"; matrixId: string; payloadRepresentation: string; plane: string; sampleType: string; schemaVersion: number; sourceId: string; sourceRepresentation: string; tileColumn: number; tileMatrixSetId: string; tileMatrixSetUri: string; tileRow: number }>"
       },
       {
+        "id": "geoscratch/geo#virtualRasterCacheMetadataMatches",
+        "name": "virtualRasterCacheMetadataMatches",
+        "kind": "Function",
+        "source": "packages/geoscratch/src/geo/virtual-raster-cache-address.ts",
+        "sources": [
+          "packages/geoscratch/src/geo/virtual-raster-cache-address.ts"
+        ],
+        "locations": [
+          "packages/geoscratch/src/geo/virtual-raster-cache-address.ts:114"
+        ],
+        "summary": "Checks untrusted cache metadata against one complete canonical Virtual Raster address.",
+        "declaration": "Function virtualRasterCacheMetadataMatches",
+        "signatures": [
+          "virtualRasterCacheMetadataMatches(address: VirtualRasterCacheAddress, value: unknown): value is Readonly<{ coherence: VirtualRasterCacheCoherence; decoderVersion: string; domain: \"geo.virtual-raster\"; matrixId: string; payloadRepresentation: string; plane: string; sampleType: string; schemaVersion: number; sourceId: string; sourceRepresentation: string; tileColumn: number; tileMatrixSetId: string; tileMatrixSetUri: string; tileRow: number }>"
+        ]
+      },
+      {
         "id": "geoscratch/geo#VirtualRasterCpuPage",
         "name": "VirtualRasterCpuPage",
         "kind": "Type Alias",

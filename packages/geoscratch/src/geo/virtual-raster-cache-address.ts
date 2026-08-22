@@ -110,6 +110,32 @@ export function virtualRasterCacheAddress(
     })
 }
 
+/** Checks untrusted cache metadata against one complete canonical Virtual Raster address. */
+export function virtualRasterCacheMetadataMatches(
+    address: VirtualRasterCacheAddress,
+    value: unknown
+): value is VirtualRasterCacheMetadata {
+
+    if (address?.kind !== 'virtual-raster-cache-address' ||
+        value === null || typeof value !== 'object') return false
+    const expected = address.metadata
+    const actual = value as Partial<VirtualRasterCacheMetadata>
+    return actual.domain === expected.domain &&
+        actual.sourceId === expected.sourceId &&
+        actual.tileMatrixSetId === expected.tileMatrixSetId &&
+        actual.tileMatrixSetUri === expected.tileMatrixSetUri &&
+        actual.matrixId === expected.matrixId &&
+        actual.tileRow === expected.tileRow &&
+        actual.tileColumn === expected.tileColumn &&
+        actual.plane === expected.plane &&
+        coherenceMatches(expected.coherence, actual.coherence) &&
+        actual.sourceRepresentation === expected.sourceRepresentation &&
+        actual.payloadRepresentation === expected.payloadRepresentation &&
+        actual.decoderVersion === expected.decoderVersion &&
+        actual.sampleType === expected.sampleType &&
+        actual.schemaVersion === expected.schemaVersion
+}
+
 function coherenceRevision(coherence: VirtualRasterCacheCoherence): string {
 
     switch (coherence.mode) {
@@ -119,6 +145,24 @@ function coherenceRevision(coherence: VirtualRasterCacheCoherence): string {
             coherence.validator ?? null,
         ])}`
         case 'editable': return `editable-base:${coherence.baseRevision}`
+    }
+}
+
+function coherenceMatches(
+    expected: VirtualRasterCacheCoherence,
+    actual: VirtualRasterCacheCoherence | undefined
+): boolean {
+
+    if (actual?.mode !== expected.mode) return false
+    switch (expected.mode) {
+        case 'immutable':
+            return actual.mode === 'immutable' &&
+                actual.contentVersion === expected.contentVersion
+        case 'revisioned':
+            return actual.mode === 'revisioned' && actual.revision === expected.revision &&
+                actual.validator === expected.validator
+        case 'editable':
+            return actual.mode === 'editable' && actual.baseRevision === expected.baseRevision
     }
 }
 

@@ -2,7 +2,7 @@
 docId: geo.virtual-raster.zh
 canonical: false
 translationOf: ./virtual-raster.md
-canonicalDigest: ecd19ece63e108f1047e5950bb36dce4fbf398d3249163279423aabd4051fd0e
+canonicalDigest: b6f67c4083863d3db4b7c4bfb469fd05c1ed03dae9e315e40844db501294b16b
 ---
 # Virtual Raster
 
@@ -61,6 +61,10 @@ snapshot，因为 queue order 会保留依赖关系。未编码的 staged snapsh
 
 Runtime 组合这些权威，但不虚构 camera demand、cache policy、network format 或
 rendering geometry。Cache address 只是映射到 Scratch Cache 的纯函数，cache 始终可选。
+`virtualRasterCacheMetadataMatches()` 会将不可信 stored metadata 与 canonical address 的
+全部 identity field 比较，同时允许 source-specific payload fact 扩展基础 metadata。
+Source Worker 仍负责验证自己的 payload shape；identity 不匹配时必须视作 cache miss，
+而不是接纳陈旧 bytes。
 应用可以将 Virtual Raster 用于 DEM、imagery、flow field、classification、simulation
 grid 或 editable raster，而无需让 shader 与 tile neighbor 或 atlas coordinate 耦合。
 
