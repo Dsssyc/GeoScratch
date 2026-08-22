@@ -124,10 +124,7 @@ export async function startUnderwaterTerrainApplication(
         run: virtualRaster.stopDemand,
     })
 
-    const elevationRangeMeters = [
-        source.manifest.offset,
-        source.manifest.offset + source.manifest.scale * 255,
-    ].sort((left, right) => left - right) as [number, number]
+    const elevationRangeMeters = source.elevationRangeMeters
     proof?.beforeTerrainShaderModule(runtime)
     const graph = await lifetime.acquire(
         createWebMercatorTerrainRenderer({

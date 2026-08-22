@@ -29,6 +29,11 @@ describe('DEM WebMercator virtual raster', () => {
 
         expect(source.manifest).to.deep.equal(manifest)
         expect(source.facts.contentVersion).to.equal(source.manifest.contentVersion)
+        expect(source.elevationRangeMeters).to.deep.equal([
+            manifest.offset,
+            manifest.offset + manifest.scale * 255,
+        ])
+        expect(Object.isFrozen(source.elevationRangeMeters)).to.equal(true)
         expect(source.elevationBounds).to.deep.equal(manifest.tileElevationBounds)
         expect(Object.isFrozen(source.elevationBounds)).to.equal(true)
         expect(Object.isFrozen(source)).to.equal(true)

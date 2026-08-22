@@ -6,6 +6,8 @@ import {
     webMercatorVirtualRasterField,
 } from 'geoscratch/geo'
 import type {
+    TileMatrixCoverage,
+    TileMatrixLimits,
     VirtualRasterPageIdentity,
     VirtualRasterRuntime,
     WebMercatorTileElevationBounds,
@@ -17,14 +19,6 @@ import type { DemWorkerRequestExecutor } from './dem-tile-executor.ts'
 import type { UnderwaterTerrainCachePolicy } from './cache-policy.ts'
 
 type NumberSequence = ArrayLike<number> & Iterable<number>
-
-type DemTileMatrixLimit = Readonly<{
-    matrixId: string
-    minTileRow: number
-    maxTileRow: number
-    minTileCol: number
-    maxTileCol: number
-}>
 
 type DemVirtualRasterManifest = Readonly<{
     schemaVersion: 3
@@ -53,7 +47,7 @@ type DemVirtualRasterManifest = Readonly<{
         minTileMatrix: string
         maxTileMatrix: string
         tileMatrixIds: readonly string[]
-        limits: readonly DemTileMatrixLimit[]
+        limits: readonly TileMatrixLimits[]
     }>
     tileElevationBounds: readonly WebMercatorTileElevationBounds[]
     nativeResolution: Readonly<{
@@ -83,6 +77,12 @@ type DemVirtualRasterManifest = Readonly<{
 
 type DemVirtualRasterModel = ReturnType<typeof createDemVirtualRasterModel>
 
+type ParsedDemVirtualRasterManifest = Readonly<{
+    manifest: DemVirtualRasterManifest
+    coverage: TileMatrixCoverage
+    elevationRangeMeters: readonly [number, number]
+}>
+
 export type DemTileSourceFacts = Readonly<{
     kind: 'dem-tile-source-facts'
     sourceId: string
@@ -99,6 +99,7 @@ export type DemTileSource = Readonly<{
     kind: 'dem-tile-source'
     id: string
     manifest: DemVirtualRasterManifest
+    elevationRangeMeters: readonly [number, number]
     elevationBounds: readonly WebMercatorTileElevationBounds[]
     model: DemVirtualRasterModel
     facts: DemTileSourceFacts
@@ -132,7 +133,7 @@ const DEM_DEFAULT_MAX_REQUESTS = 24
 const DEM_TILE_SIZE = 256
 const DEM_CACHE_SCHEMA_VERSION = 2
 
-function parseDemVirtualRasterManifest(value: unknown): DemVirtualRasterManifest {
+function parseDemVirtualRasterManifest(value: unknown): ParsedDemVirtualRasterManifest {
 
     const manifest = value as Partial<DemVirtualRasterManifest> | null
     const source = manifest?.source
@@ -168,7 +169,7 @@ function parseDemVirtualRasterManifest(value: unknown): DemVirtualRasterManifest
         (manifest.nodata !== null && !Number.isFinite(manifest.nodata)) ||
         typeof scale !== 'number' || !positiveFinite(scale) ||
         typeof offset !== 'number' || !Number.isFinite(offset) ||
-        !sameNumbers(manifest.overviewLevels, [ 2, 4, 8 ]) ||
+        !sameValues(manifest.overviewLevels, [ 2, 4, 8 ]) ||
         orientation?.source !== 'north-up-row-major' ||
         orientation.cog !== 'north-up-row-major' || orientation.tile !== 'north-up-row-major' ||
         manifest.outerBoundary !== 'clamp' || validators?.coherence !== 'immutable' ||
@@ -177,60 +178,48 @@ function parseDemVirtualRasterManifest(value: unknown): DemVirtualRasterManifest
         validators.etag !== 'content-version-and-standard-tile') {
         throw new TypeError('DEM manifest does not match the WebMercatorQuad COG contract')
     }
-    assertOrderedBounds(source.geographicBounds, 'DEM geographic bounds')
-    assertOrderedBounds(projected.bounds, 'DEM projected bounds')
-    const seen = new Set<string>()
-    const expectedElevationKeys: string[] = []
-    for (let index = 0; index < matrixSet.limits.length; index++) {
-        const limit = matrixSet.limits[index]!
-        if (limit.matrixId !== matrixSet.tileMatrixIds[index] || seen.has(limit.matrixId) ||
-            !nonNegativeInteger(limit.minTileRow) || !nonNegativeInteger(limit.maxTileRow) ||
-            !nonNegativeInteger(limit.minTileCol) || !nonNegativeInteger(limit.maxTileCol) ||
-            limit.minTileRow > limit.maxTileRow || limit.minTileCol > limit.maxTileCol) {
-            throw new TypeError(`DEM TileMatrixLimits ${index} is invalid`)
-        }
-        WebMercatorQuad.tile({
-            matrixId: limit.matrixId,
-            tileRow: limit.maxTileRow,
-            tileCol: limit.maxTileCol,
-        })
-        for (let tileRow = limit.minTileRow; tileRow <= limit.maxTileRow; tileRow++) {
-            for (let tileCol = limit.minTileCol; tileCol <= limit.maxTileCol; tileCol++) {
-                expectedElevationKeys.push(`${limit.matrixId}/${tileRow}/${tileCol}`)
-            }
-        }
-        seen.add(limit.matrixId)
+    const snapshot = deepFreeze(structuredClone(manifest) as DemVirtualRasterManifest)
+    assertOrderedBounds(snapshot.source.geographicBounds, 'DEM geographic bounds')
+    assertOrderedBounds(snapshot.projectedBounds.bounds, 'DEM projected bounds')
+    const coverage = createDemCoverage(snapshot.tileMatrixSet.limits)
+    if (!sameValues(
+        snapshot.tileMatrixSet.tileMatrixIds,
+        coverage.limits.map(limit => limit.matrixId)
+    )) {
+        throw new TypeError('DEM TileMatrixLimits must follow the declared matrix order')
     }
-    const elevationBounds = manifest.tileElevationBounds
+    const elevationBounds = snapshot.tileElevationBounds
     if (!Array.isArray(elevationBounds) ||
-        elevationBounds.length !== expectedElevationKeys.length) {
+        elevationBounds.length !== coverage.entryCount) {
         throw new TypeError('DEM tile elevation bounds must cover every declared tile')
     }
-    const maximumSourceElevation = offset + scale * 255
+    const elevationRangeMeters = Object.freeze([
+        snapshot.offset,
+        snapshot.offset + snapshot.scale * 255,
+    ]) as readonly [number, number]
     for (let index = 0; index < elevationBounds.length; index++) {
         const bounds = elevationBounds[index]!
-        const key = `${bounds?.matrixLevel}/${bounds?.tileRow}/${bounds?.tileCol}`
+        const expected = coverage.coordinate(index)
         if (!nonNegativeInteger(bounds?.matrixLevel) ||
             !nonNegativeInteger(bounds?.tileRow) ||
             !nonNegativeInteger(bounds?.tileCol) ||
-            key !== expectedElevationKeys[index] ||
+            String(bounds.matrixLevel) !== expected.matrixId ||
+            bounds.tileRow !== expected.tileRow || bounds.tileCol !== expected.tileCol ||
             !Number.isFinite(bounds?.minimumElevationMeters) ||
             !Number.isFinite(bounds?.maximumElevationMeters) ||
             bounds.minimumElevationMeters > bounds.maximumElevationMeters ||
-            bounds.minimumElevationMeters < offset ||
-            bounds.maximumElevationMeters > maximumSourceElevation) {
+            bounds.minimumElevationMeters < elevationRangeMeters[0] ||
+            bounds.maximumElevationMeters > elevationRangeMeters[1]) {
             throw new TypeError(`DEM tile elevation bounds ${index} is invalid`)
         }
     }
-    return deepFreeze(structuredClone(manifest) as DemVirtualRasterManifest)
+    return Object.freeze({ manifest: snapshot, coverage, elevationRangeMeters })
 }
 
-function createDemVirtualRasterModel(manifest: DemVirtualRasterManifest) {
-
-    const coverage = tileMatrixCoverage({
-        tileMatrixSet: WebMercatorQuad,
-        limits: manifest.tileMatrixSet.limits,
-    })
+function createDemVirtualRasterModel(
+    manifest: DemVirtualRasterManifest,
+    coverage: TileMatrixCoverage
+) {
     return webMercatorVirtualRasterField({
         id: 'dem-height',
         addressSpaceId: `dem.wmq.${manifest.sourceHash.slice(0, 16)}`,
@@ -263,8 +252,9 @@ export function createDemTileSource({
     if (typeof tileServerUrl !== 'string' || tileServerUrl.length === 0) {
         throw new TypeError('DEM tile source requires a non-empty tile server URL')
     }
-    const manifest = parseDemVirtualRasterManifest(value)
-    const model = createDemVirtualRasterModel(manifest)
+    const parsed = parseDemVirtualRasterManifest(value)
+    const { manifest, coverage, elevationRangeMeters } = parsed
+    const model = createDemVirtualRasterModel(manifest, coverage)
     const baseUrl = tileServerUrl.replace(/\/$/, '')
     const id = `dem.${manifest.sourceHash}`
     const facts = Object.freeze({
@@ -282,6 +272,7 @@ export function createDemTileSource({
         kind: 'dem-tile-source' as const,
         id,
         manifest,
+        elevationRangeMeters,
         elevationBounds: manifest.tileElevationBounds,
         model,
         facts,
@@ -376,6 +367,15 @@ function assertOrderedBounds(value: NumberSequence, name: string): void {
     }
 }
 
+function createDemCoverage(limits: readonly TileMatrixLimits[]): TileMatrixCoverage {
+
+    try {
+        return tileMatrixCoverage({ tileMatrixSet: WebMercatorQuad, limits })
+    } catch {
+        throw new TypeError('DEM TileMatrixLimits are invalid')
+    }
+}
+
 function isFiniteTuple(value: unknown, length: number): value is NumberSequence {
 
     return (Array.isArray(value) || ArrayBuffer.isView(value)) &&
@@ -388,7 +388,7 @@ function isPositiveTuple(value: unknown, length: number): value is NumberSequenc
     return isFiniteTuple(value, length) && Array.from(value).every(number => number > 0)
 }
 
-function sameNumbers(left: unknown, right: readonly number[]): boolean {
+function sameValues(left: unknown, right: readonly (number | string)[]): boolean {
 
     return Array.isArray(left) && left.length === right.length &&
         left.every((value, index) => value === right[index])

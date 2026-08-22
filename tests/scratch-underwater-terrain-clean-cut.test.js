@@ -217,6 +217,9 @@ describe('Underwater Terrain clean cut', () => {
         ]) expect(application).to.include(required)
         expect(application).to.include('maximumInFlightFrames: 2')
         expect(application).to.include('presentationSize: () => canvasPixelSize(canvas)')
+        expect(application).to.include('source.elevationRangeMeters')
+        expect(application).not.to.include('source.manifest.offset')
+        expect(application).not.to.include('source.manifest.scale')
         expect(main).to.include('VITE_UNDERWATER_TERRAIN_VARIABLE_LOD_PITCH_DEGREES')
         expect(application).to.include('variableLodPitchThresholdRadians:')
         expect(application).not.to.match(/URLSearchParams|localStorage|tweakpane|Pane/)
@@ -314,6 +317,19 @@ describe('Underwater Terrain clean cut', () => {
         expect(worker).to.include('virtualRasterCacheMetadataMatches(')
         expect(worker).not.to.include("metadata.domain === 'geo.virtual-raster'")
         expect(worker).not.to.include("metadata.payloadRepresentation === 'raw/uint8'")
+    })
+
+    it('reuses Geo coverage indexing and keeps elevation decoding inside the DEM source', () => {
+
+        const source = read('examples', 'underwaterTerrain', 'dem-source.ts')
+        const application = read('examples', 'underwaterTerrain', 'application.ts')
+
+        expect(source).to.include("import type {\n    TileMatrixCoverage,\n    TileMatrixLimits,")
+        expect(source).to.include('coverage.coordinate(index)')
+        expect(source).not.to.include('type DemTileMatrixLimit')
+        expect(source).not.to.match(/for \(let tileRow[\s\S]*for \(let tileCol/)
+        expect(application).to.include('source.elevationRangeMeters')
+        expect(application).not.to.match(/source\.manifest\.(?:scale|offset)/)
     })
 
     it('uses only persistent Scratch objects in the frame hot path', () => {
