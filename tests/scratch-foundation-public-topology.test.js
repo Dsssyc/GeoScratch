@@ -149,6 +149,7 @@ const geoValues = [
     'virtualRasterAccessor',
     'virtualRasterAddressSpace',
     'virtualRasterCacheAddress',
+    'virtualRasterCacheMetadataMatches',
     'virtualRasterDemandSet',
     'virtualRasterDemandSetFromViewDemands',
     'virtualRasterPlane',
