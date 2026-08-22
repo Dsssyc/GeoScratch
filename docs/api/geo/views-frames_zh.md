@@ -2,14 +2,14 @@
 docId: geo.views-frames.zh
 canonical: false
 translationOf: ./views-frames.md
-canonicalDigest: d5c476a923eecbfcad74584d53d0dcbc2607248c381093ec3c203e3bf68c84d5
+canonicalDigest: cf95524843ef1d730f8e1560720bb7a43f59fc554358845266a379f8ee1f2554
 ---
 # 视图与帧控制
 
 [English](./views-frames.md) | [Geo 概览](./README_zh.md)
 
 `GeoViewAdapter` 读取外部 camera 或 map，并生成不可变 `GeoViewSnapshot`，其中包含
-viewport、matrix、camera position、zoom、orientation，以及单调的 frame 与 residency
+逻辑 `referenceViewport`、matrix、camera position、zoom、orientation，以及单调的 frame 与 residency
 revision。MapLibre 平面 adapter 转换 MapLibre-compatible state，但不会让 MapLibre
 成为 Geo resource owner。
 
@@ -17,10 +17,12 @@ Snapshot 是观测，不是全局 camera state。Screen-based demand 可以在�
 simulation、prefetch、editing 或 offline process 可以产生独立 demand。这一区分避免
 camera locality 成为普遍资源策略。
 
-`GeoViewSource<View>` 捕获一个不可变 `{ view, size }`。它不拥有 frame clock、revision、
-renderer 或外部 camera。`createGeoViewSource()` 会验证并复制正整数 presentation size，
+`GeoViewSource<View>` 捕获一个不可变 `{ view, presentationSize }`。它不拥有 frame clock、revision、
+renderer 或外部 camera。`createGeoViewSource()` 会验证并复制正整数物理 presentation size，
 同时保留 caller 提供的 immutable view。`mapLibrePlanarViewSource()` 把 planar adapter、
-structural MapLibre map、viewport reader 与 minimum elevation 组合成同一种 source contract。
+structural MapLibre map、presentation-size reader 与 minimum elevation 组合成同一种 source contract。
+该 source 从 `map.transform.width/height` 读取 reference pixels，因此 DPR 只改变 WebGPU
+attachment size，不改变 camera projection、tile cover 或 picking。
 未来独立相机可以实现同一契约，而无需修改 renderer。
 
 `GeoFrameController` 为一个装配后的 field 协调 host-state capture、render construction、
@@ -47,7 +49,7 @@ const view = mapLibrePlanarViewSource({
     id: 'map-view',
     adapter,
     map,
-    viewport: readViewport,
+    presentationSize: readPhysicalCanvasSize,
     minimumElevationMeters,
 })
 const frames = createGeoFrameController({

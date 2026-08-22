@@ -19,12 +19,14 @@ Every emitted patch is an OGC tile identity `(tileMatrix, tileRow, tileCol)`.
 Camera/view-derived level windows select from the fixed global matrix and never create
 a moving game-style grid. The kernel evaluates the area-equivalent projected span of
 one geometry cell with a rotation-invariant local projective Jacobian. The metric
-includes viewport scale, perspective, foreshortening, and the configured elevation
-range; a cell that can cross the camera plane refines conservatively.
+uses `referenceViewport` pixels and includes perspective, foreshortening, and exact
+immutable tile elevation bounds. DPR and physical presentation size never change the
+cover; a cell that can cross the camera plane still refines conservatively.
 
 `variableLodPitchThresholdRadians` divides two deterministic modes. A pitch strictly
-below the threshold directly tests complete viewport-footprint windows from coarse to
-fine and emits one uniform geometry level. A pitch equal to or above the threshold
+below the threshold anchors the complete footprint at the 512-reference-pixel
+WebMercator zoom and emits one uniform geometry level, refining the whole footprint
+only when projected quality requires it. A pitch equal to or above the threshold
 directly probes bounded standard parents around the precise camera coordinate at every
 possible level and creates nested child windows only where projected cell span exceeds
 the threshold. Both modes conservatively reject invisible candidates and finish with
@@ -35,7 +37,8 @@ a root-to-leaf quadtree, count trial cuts, or retain previous-frame topology as
 selection authority.
 
 `GpuWebMercatorQuadCoverPolicy` declares ordered geometry/source levels, one hard
-patch capacity, `cellsPerPatchEdge`, `maximumCellSpanPixels`, and
+patch capacity, `referenceTileSizePixels`, `cellsPerPatchEdge`,
+`maximumCellSpanReferencePixels`, `refinementTolerance`, and
 `variableLodPitchThresholdRadians` in `[0, PI / 2]`. Invalid quality or threshold facts
 fail before resource creation. Complete demand capacity is derived from the patch bound
 because one patch emits at most one demand. `sourceMaximumMatrixLevel` is a source fact,
@@ -46,7 +49,8 @@ Demand priority orders desired precision first, then wrapped standard-tile dista
 to the camera anchor, so a tight residency budget does not fall back to row/column key order.
 
 Selection feedback reports `selectionMode`, final minimum/maximum geometry levels,
-and Q8-decoded minimum/maximum projected cell spans. These facts are observation-only;
+and Q8-decoded `minimumCellSpanReferencePixels` /
+`maximumCellSpanReferencePixels`. These facts are observation-only;
 they never feed the next frame. Descriptor, lookup, demand, or capacity overflow is a
 hard diagnostic and never silently coarsens the requested cut.
 
@@ -65,3 +69,9 @@ as constant compatibility vocabulary; structural gates prove those paths are abs
 Virtual Raster is downstream. The cover chooses geometry and desired sample precision;
 Virtual Raster only schedules explicit page demand, manages residency, and resolves
 exact or ancestor data.
+
+An optional complete `WebMercatorTileElevationBounds` hierarchy supplies one immutable
+minimum/maximum pair for every source tile. Geometry above the source ceiling uses the
+source-ceiling ancestor. Partial hierarchies are invalid; an omitted hierarchy uses the
+global descriptor range. Cover facts expose hierarchy/global mode and record count.
+Residency, request completion, cache hits, and atlas contents cannot alter these bounds.

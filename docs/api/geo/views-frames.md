@@ -12,8 +12,8 @@ apiSources:
 [简体中文](./views-frames_zh.md) | [Geo overview](./README.md)
 
 `GeoViewAdapter` reads an external camera or map and produces immutable
-`GeoViewSnapshot` values containing viewport, matrices, camera position, zoom,
-orientation, and monotonic frame and residency revisions. The MapLibre planar adapter
+`GeoViewSnapshot` values containing a logical `referenceViewport`, matrices, camera
+position, zoom, orientation, and monotonic frame and residency revisions. The MapLibre planar adapter
 translates MapLibre-compatible state without making MapLibre the owner of Geo resources.
 
 Snapshots are observations, not global camera state. Screen-based demand may consume
@@ -21,11 +21,13 @@ them for visualization, while simulations, prefetch, editing, or offline process
 produce independent demand. This distinction prevents camera locality from becoming a
 universal resource policy.
 
-`GeoViewSource<View>` captures one immutable `{ view, size }` pair. It owns no frame
+`GeoViewSource<View>` captures one immutable `{ view, presentationSize }` pair. It owns no frame
 clock, revision, renderer, or external camera. `createGeoViewSource()` validates and
-copies the positive integer presentation size while retaining the caller's immutable
+copies the positive integer physical presentation size while retaining the caller's immutable
 view value. `mapLibrePlanarViewSource()` composes a planar adapter, structural MapLibre
-map, viewport reader, and minimum elevation into that same source contract. A future
+map, presentation-size reader, and minimum elevation into that same source contract.
+The source reads reference pixels from `map.transform.width/height`, so DPR changes the
+WebGPU attachment size without changing camera projection, tile cover, or picking. A future
 standalone camera can implement the same contract without changing a renderer.
 
 `GeoFrameController` coordinates host-state capture, render construction, native
@@ -54,7 +56,7 @@ const view = mapLibrePlanarViewSource({
     id: 'map-view',
     adapter,
     map,
-    viewport: readViewport,
+    presentationSize: readPhysicalCanvasSize,
     minimumElevationMeters,
 })
 const frames = createGeoFrameController({

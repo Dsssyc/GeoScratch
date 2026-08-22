@@ -46,9 +46,16 @@ explicit `ViewTileDemandSet` pages and owns no camera, zoom, SSE, or adjacency p
 geometry level, desired sample level, resolved sample level, and source ceiling distinct. Do not
 restore `GpuTileFrontier`, `GpuRenderPatchFrontier`, render roots, trial cuts, atlas-driven geometry,
 or a moving clipmap grid. Geometry quality uses the rotation-invariant local projected-cell
-Jacobian. Pitch below the normalized policy threshold must emit one level over the complete
-visible footprint; pitch at or above it may use variable projected-cell LoD. The terrain default
-is 60 degrees, while application environment parsing remains outside Geo. Any change to this path
+Jacobian in logical reference pixels. `GeoViewSnapshot.referenceViewport` owns camera, cover,
+quality, and picking pixels; `GeoViewSourceCapture.presentationSize` owns physical Surface and
+attachment dimensions. DPR must not change cover identities, levels, counts, or raster demand.
+The built-in terrain policy uses a 512-reference-pixel zoom convention, 128 cells per patch,
+an eight-reference-pixel cell threshold, and explicit numerical tolerance. Pitch below the
+normalized policy threshold must emit one level over the complete visible footprint; pitch at or
+above it may use variable projected-cell LoD. A complete immutable tile-elevation hierarchy may
+tighten patch bounds; partial metadata is invalid and residency cannot supply missing bounds.
+The terrain default is 60 degrees, while application environment parsing remains outside Geo.
+Any change to this path
 must run wide top-down uniformity, exact pitch-boundary ownership, shaded and wireframe 90-frame
 pitched benchmarks, zoom monotonicity, A-B-A identity, standard/source-level demand, 2:1,
 overflow, construction, and native-observation gates.

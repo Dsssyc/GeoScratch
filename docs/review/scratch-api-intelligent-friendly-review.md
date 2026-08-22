@@ -320,9 +320,10 @@ and for an Agent reviewing it:
   MapLibre, ImageBitmap, listeners, or frame scheduling.
 
 The exercise also identifies responsibilities that correctly remain above Scratch.
-Geo owns the data-page frontier and virtual-raster contracts; the Underwater Terrain example owns its
-eight-pixel projected cell-span policy, `z14` ceiling, 64-sector mesh, patch hashing,
-and stitching.
+Geo owns the standard inverse cover, reference-pixel quality policy, immutable tile-elevation
+bounds, virtual-raster contracts, `z14` geometry ceiling, 128-cell patch mesh, patch hashing,
+and stitching. The Underwater Terrain example owns its source manifest, exaggeration, and
+presentation choice.
 The map host owns camera interpretation and the normal basemap. The page lifecycle owns
 coalesced render scheduling, listener removal, late async settlement, and cleanup order.
 Visual correctness still requires a real WebGPU browser and pixel evidence; Scratch's

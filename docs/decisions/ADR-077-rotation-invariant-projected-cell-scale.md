@@ -6,6 +6,8 @@ Partially superseded by
 [ADR-083](ADR-083-webmercator-inverse-cover-passive-virtual-raster.md). The old
 render-root frontier is replaced, while the rotation-invariant local Jacobian metric
 remains valid evidence for conservative view-derived level decisions.
+ADR-084 additionally supersedes the old physical-pixel field names and fixes the metric
+to logical reference pixels; the determinant itself remains unchanged.
 
 ## Date
 

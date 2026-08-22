@@ -112,6 +112,7 @@ export type MapLibrePlanarViewSourceDescriptor = Readonly<{
     id: string
     adapter: MapLibrePlanarViewAdapter
     map: MapLibrePlanarMap
+    /** Reads the physical WebGPU presentation extent independently from map reference pixels. */
     presentationSize(): MapLibrePlanarViewport
     minimumElevationMeters: number
 }>

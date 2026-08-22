@@ -45,6 +45,7 @@ const DRAW_ARGUMENT_BYTES = 16
 type Disposable = { dispose(): void }
 type BufferBindingType = 'uniform' | 'read-storage' | 'storage'
 
+/** Immutable source-metadata elevation range for one standard WebMercatorQuad tile. */
 export type WebMercatorTileElevationBounds = Readonly<{
     matrixLevel: number
     tileRow: number
@@ -368,10 +369,10 @@ export class GpuWebMercatorQuadCover {
         const elevationBoundsMode = descriptor.elevationBounds === undefined
             ? 'global' as const
             : 'hierarchy' as const
-        const elevationBounds = descriptor.elevationBounds ?? [ {
-            matrixLevel: descriptor.policy.minimumMatrixLevel,
-            tileRow: 0,
-            tileCol: 0,
+        const elevationBoundRecords = descriptor.elevationBounds?.map(bounds => ({
+            minimumElevationMeters: bounds.minimumElevationMeters,
+            maximumElevationMeters: bounds.maximumElevationMeters,
+        })) ?? [ {
             minimumElevationMeters: descriptor.elevationRangeMeters[0],
             maximumElevationMeters: descriptor.elevationRangeMeters[1],
         } ]
@@ -405,7 +406,7 @@ export class GpuWebMercatorQuadCover {
             }))
             const elevationBoundsBuffer = own(await runtime.createBuffer({
                 label: 'GPU WebMercatorQuad elevation bounds',
-                size: elevationBounds.length *
+                size: elevationBoundRecords.length *
                     gpuWebMercatorQuadCoverElevationBoundsCodec.byteLength(),
                 usage: BUFFER_COPY_DST | BUFFER_STORAGE,
             }))
@@ -446,7 +447,7 @@ export class GpuWebMercatorQuadCover {
                     layout: gpuWebMercatorQuadCoverElevationBoundsCodec.artifact,
                 }),
                 data: gpuWebMercatorQuadCoverElevationBoundsCodec.uploadView(
-                    elevationBounds
+                    elevationBoundRecords
                 ),
             }))
             const parityResources = await Promise.all([ 0, 1 ].map(

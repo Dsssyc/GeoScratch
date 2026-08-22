@@ -2,7 +2,7 @@
 
 # geoscratch/geo API Reference
 
-Public symbols: 285.
+Public symbols: 286.
 
 ## `packages/geoscratch/src/geo/coordinate-domain.ts`
 
@@ -402,7 +402,7 @@ createGeoViewAdapter<Input>(descriptor: GeoViewAdapterDescriptor<Input>): GeoVie
 
 Kind: `Function`.
 
-Freezes one revisioned camera and viewport observation in a relative-world frame.
+Freezes one revisioned camera and logical reference viewport in a relative-world frame.
 
 ```ts
 Function createGeoViewSnapshot
@@ -455,7 +455,7 @@ type GeoViewReadContext = Readonly<{ frameEpoch: number; residencySnapshotEpoch:
 Kind: `Type Alias`.
 
 ```ts
-type GeoViewSnapshot = Readonly<{ cameraHigh: readonly [number, number, number]; cameraLatitudeRadians: number; cameraLow: readonly [number, number, number]; cameraPitchRadians: number; clipFromRelativeWorld: readonly number[]; frameEpoch: number; id: string; kind: "geo-view-snapshot"; residencySnapshotEpoch: number; verticalFovRadians: number; viewport: readonly [number, number]; zoomHint: number }>
+type GeoViewSnapshot = Readonly<{ cameraHigh: readonly [number, number, number]; cameraLatitudeRadians: number; cameraLow: readonly [number, number, number]; cameraPitchRadians: number; clipFromRelativeWorld: readonly number[]; frameEpoch: number; id: string; kind: "geo-view-snapshot"; referenceViewport: readonly [number, number]; residencySnapshotEpoch: number; verticalFovRadians: number; zoomHint: number }>
 ```
 
 ### `GeoViewSnapshotDescriptor`
@@ -463,14 +463,14 @@ type GeoViewSnapshot = Readonly<{ cameraHigh: readonly [number, number, number];
 Kind: `Type Alias`.
 
 ```ts
-type GeoViewSnapshotDescriptor = Readonly<{ cameraHigh: readonly [number, number, number]; cameraLatitudeRadians: number; cameraLow: readonly [number, number, number]; cameraPitchRadians: number; clipFromRelativeWorld: ArrayLike<number>; frameEpoch: number; id: string; residencySnapshotEpoch: number; verticalFovRadians: number; viewport: readonly [number, number]; zoomHint: number }>
+type GeoViewSnapshotDescriptor = Readonly<{ cameraHigh: readonly [number, number, number]; cameraLatitudeRadians: number; cameraLow: readonly [number, number, number]; cameraPitchRadians: number; clipFromRelativeWorld: ArrayLike<number>; frameEpoch: number; id: string; referenceViewport: readonly [number, number]; residencySnapshotEpoch: number; verticalFovRadians: number; zoomHint: number }>
 ```
 
 ### `GeoViewSource`
 
 Kind: `Type Alias`.
 
-Synchronously captures one immutable view and presentation size.
+Synchronously captures one immutable view and physical presentation size.
 
 ```ts
 type GeoViewSource<View> = Readonly<{ id: string; kind: "geo-view-source"; capture: any }>
@@ -481,7 +481,7 @@ type GeoViewSource<View> = Readonly<{ id: string; kind: "geo-view-source"; captu
 Kind: `Type Alias`.
 
 ```ts
-type GeoViewSourceCapture<View> = Readonly<{ size: Readonly<SurfaceSize>; view: View }>
+type GeoViewSourceCapture<View> = Readonly<{ presentationSize: Readonly<SurfaceSize>; view: View }>
 ```
 
 ### `GeoViewSourceDescriptor`
@@ -601,7 +601,7 @@ type GpuWebMercatorQuadCoverDemand = Readonly<{ decisionFrameEpoch: number; desi
 Kind: `Type Alias`.
 
 ```ts
-type GpuWebMercatorQuadCoverDescriptor = Readonly<{ elevationRangeMeters: readonly [number, number]; policy: GpuWebMercatorQuadCoverPolicy; spatialProfile: WebMercatorPlanarTileSpatialProfile; vertexCount: number }>
+type GpuWebMercatorQuadCoverDescriptor = Readonly<{ elevationBounds?: readonly WebMercatorTileElevationBounds[]; elevationRangeMeters: readonly [number, number]; policy: GpuWebMercatorQuadCoverPolicy; spatialProfile: WebMercatorPlanarTileSpatialProfile; vertexCount: number }>
 ```
 
 ### `GpuWebMercatorQuadCoverFacts`
@@ -609,7 +609,7 @@ type GpuWebMercatorQuadCoverDescriptor = Readonly<{ elevationRangeMeters: readon
 Kind: `Type Alias`.
 
 ```ts
-type GpuWebMercatorQuadCoverFacts = Readonly<{ coverageLimitCount: number; disposed: boolean; id: string; lookupCapacity: number; parity: readonly Readonly<{ commandIds: readonly string[]; demandBufferId: string; drawArgumentBufferId: string; lookupBufferId: string; mapMetaBufferId: string; parity: 0 | 1; patchBufferId: string; stateBufferId: string }>[]; policy: GpuWebMercatorQuadCoverPolicy; runtimeId: string; selectionPath: "gpu-camera-inverse-webmercatorquad-cover" }>
+type GpuWebMercatorQuadCoverFacts = Readonly<{ coverageLimitCount: number; disposed: boolean; elevationBoundCount: number; elevationBoundsBufferId: string; elevationBoundsMode: "global" | "hierarchy"; id: string; lookupCapacity: number; parity: readonly Readonly<{ commandIds: readonly string[]; demandBufferId: string; drawArgumentBufferId: string; lookupBufferId: string; mapMetaBufferId: string; parity: 0 | 1; patchBufferId: string; stateBufferId: string }>[]; policy: GpuWebMercatorQuadCoverPolicy; runtimeId: string; selectionPath: "gpu-camera-inverse-webmercatorquad-cover" }>
 ```
 
 ### `GpuWebMercatorQuadCoverFeedback`
@@ -655,7 +655,7 @@ gpuWebMercatorQuadCoverPolicy(input: GpuWebMercatorQuadCoverPolicy): GpuWebMerca
 Kind: `Type Alias`.
 
 ```ts
-type GpuWebMercatorQuadCoverPolicy = Readonly<{ cellsPerPatchEdge: number; maximumCellSpanPixels: number; maximumMatrixLevel: number; maximumPatches: number; minimumMatrixLevel: number; sourceMaximumMatrixLevel: number; variableLodPitchThresholdRadians: number }>
+type GpuWebMercatorQuadCoverPolicy = Readonly<{ cellsPerPatchEdge: number; maximumCellSpanReferencePixels: number; maximumMatrixLevel: number; maximumPatches: number; minimumMatrixLevel: number; referenceTileSizePixels: number; refinementTolerance: number; sourceMaximumMatrixLevel: number; variableLodPitchThresholdRadians: number }>
 ```
 
 ### `GpuWebMercatorQuadCoverRenderTemplate`
@@ -671,7 +671,7 @@ type GpuWebMercatorQuadCoverRenderTemplate = Readonly<{ coverId: string; coverLo
 Kind: `Type Alias`.
 
 ```ts
-type GpuWebMercatorQuadCoverSelectionFacts = Readonly<{ candidateCount: number; demandCount: number; demandOverflowCount: number; descriptorOverflowCount: number; finestMatrixLevel: number; frameEpoch: number; lookupOverflowCount: number; maximumAdjacentLevelDelta: number; maximumCellSpanPixels?: number; maximumMatrixLevel?: number; minimumCellSpanPixels?: number; minimumMatrixLevel?: number; patchCount: number; selectionMode: "uniform" | "variable"; sourceLevelCeiling: number }>
+type GpuWebMercatorQuadCoverSelectionFacts = Readonly<{ candidateCount: number; demandCount: number; demandOverflowCount: number; descriptorOverflowCount: number; finestMatrixLevel: number; frameEpoch: number; lookupOverflowCount: number; maximumAdjacentLevelDelta: number; maximumCellSpanReferencePixels?: number; maximumMatrixLevel?: number; minimumCellSpanReferencePixels?: number; minimumMatrixLevel?: number; patchCount: number; selectionMode: "uniform" | "variable"; sourceLevelCeiling: number }>
 ```
 
 ### `GpuWebMercatorQuadCoverViewToken`
@@ -680,6 +680,16 @@ Kind: `Type Alias`.
 
 ```ts
 type GpuWebMercatorQuadCoverViewToken = Readonly<{ coverId: string; frameEpoch: number; isDisposed: boolean; kind: "gpu-web-mercator-quad-cover-view-token"; parity: 0 | 1; residencySnapshotEpoch: number; dispose: any }>
+```
+
+### `WebMercatorTileElevationBounds`
+
+Kind: `Type Alias`.
+
+Immutable source-metadata elevation range for one standard WebMercatorQuad tile.
+
+```ts
+type WebMercatorTileElevationBounds = Readonly<{ matrixLevel: number; maximumElevationMeters: number; minimumElevationMeters: number; tileCol: number; tileRow: number }>
 ```
 
 ## `packages/geoscratch/src/geo/map-field-layer.ts`
@@ -793,7 +803,7 @@ type MapLibreMercatorCoordinate = Readonly<{ x: number; y: number; z: number }>
 Kind: `Type Alias`.
 
 ```ts
-type MapLibrePlanarCameraInput = Readonly<{ map: MapLibrePlanarMap; minimumElevationMeters: number; viewport: MapLibrePlanarViewport }>
+type MapLibrePlanarCameraInput = Readonly<{ map: MapLibrePlanarMap; minimumElevationMeters: number; referenceViewport: MapLibrePlanarViewport }>
 ```
 
 ### `MapLibrePlanarCameraState`
@@ -876,7 +886,7 @@ mapLibrePlanarViewSource(descriptor: MapLibrePlanarViewSourceDescriptor): MapLib
 
 Kind: `Type Alias`.
 
-Captures one MapLibre planar camera and viewport without owning host lifecycle.
+Captures one MapLibre planar camera and physical presentation size without host ownership.
 
 ```ts
 type MapLibrePlanarViewSource = GeoViewSource<MapLibrePlanarCameraState>
@@ -887,7 +897,7 @@ type MapLibrePlanarViewSource = GeoViewSource<MapLibrePlanarCameraState>
 Kind: `Type Alias`.
 
 ```ts
-type MapLibrePlanarViewSourceDescriptor = Readonly<{ adapter: MapLibrePlanarViewAdapter; id: string; map: MapLibrePlanarMap; minimumElevationMeters: number; viewport: any }>
+type MapLibrePlanarViewSourceDescriptor = Readonly<{ adapter: MapLibrePlanarViewAdapter; id: string; map: MapLibrePlanarMap; minimumElevationMeters: number; presentationSize: any }>
 ```
 
 ## `packages/geoscratch/src/geo/mercatorCoordinate.ts`
@@ -2900,7 +2910,7 @@ type WebMercatorTerrainRenderer<ViewInput, Presentation extends string = string>
 Kind: `Type Alias`.
 
 ```ts
-type WebMercatorTerrainRendererDescriptor<ViewInput, Presentation extends string = string> = Readonly<{ elevationRangeMeters: readonly [number, number]; exaggeration?: number; fieldLayer: MapFieldLayer<ViewInput>; fieldSampling: WebMercatorTerrainSamplingWgslOptions; initialPresentation: Presentation; observeProvenance?: (facts: readonly WebMercatorTerrainProvenanceFact[]) => void; presentations: readonly WebMercatorTerrainPresentationDescriptor<Presentation>[]; presentationShader: string; runtime: GPURuntime; size: SurfaceSize; surface: Surface; variableLodPitchThresholdRadians?: number; virtualRaster: VirtualRasterRuntime<WebMercatorVirtualRasterField> }>
+type WebMercatorTerrainRendererDescriptor<ViewInput, Presentation extends string = string> = Readonly<{ elevationBounds?: readonly WebMercatorTileElevationBounds[]; elevationRangeMeters: readonly [number, number]; exaggeration?: number; fieldLayer: MapFieldLayer<ViewInput>; fieldSampling: WebMercatorTerrainSamplingWgslOptions; initialPresentation: Presentation; observeProvenance?: (facts: readonly WebMercatorTerrainProvenanceFact[]) => void; presentations: readonly WebMercatorTerrainPresentationDescriptor<Presentation>[]; presentationShader: string; runtime: GPURuntime; size: SurfaceSize; surface: Surface; variableLodPitchThresholdRadians?: number; virtualRaster: VirtualRasterRuntime<WebMercatorVirtualRasterField> }>
 ```
 
 ### `WebMercatorTerrainRendererState`

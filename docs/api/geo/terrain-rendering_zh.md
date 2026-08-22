@@ -2,7 +2,7 @@
 docId: geo.terrain-rendering.zh
 canonical: false
 translationOf: ./terrain-rendering.md
-canonicalDigest: 179e3761c1c948458e073724b69a3d4cc7f0fad427b742584bc89e5920922aab
+canonicalDigest: 1fac14bb03322809f0656c7fbef495927ea7bd143fcc06ca066402cc51fc910c
 ---
 # 地形渲染
 
@@ -25,12 +25,14 @@ Cover 是唯一 geometry LoD authority。它从当前 camera fact 反向生成 p
 `tileMatrix/tileRow/tileCol` identity、neighbor lookup、desired-page feedback 与 indirect
 instance count。最终 cover 在 terrain render 前满足边相邻 2:1。
 
-内建 terrain policy 为每个标准 patch 使用 64 cells、八像素的面积等价 projected-cell
-最大跨度，以及 60 度 variable-LoD pitch threshold。Renderer descriptor 可通过
+内建 terrain policy 使用512 reference-pixel zoom convention、每个标准 patch 128 cells、
+八 reference-pixel 的面积等价 projected-cell 最大跨度、0.005数值 refinement tolerance，
+以及60度 variable-LoD pitch threshold。Renderer descriptor 可通过
 `variableLodPitchThresholdRadians` 覆盖该值。低于阈值时完整可见足迹使用一个 geometry
 level；等于或高于阈值时，projected-cell 证据生成近处较细、远处较粗的 patch。Cover
-capacity 同时根据 viewport size 与配置的 uniform-pitch 范围分配，容量不足仍显式失败，
+capacity 同时根据 reference viewport size 与配置的 uniform-pitch 范围分配，容量不足仍显式失败，
 不会隐藏为质量退化。
+物理 presentation size 与 DPR 不参与 LoD。
 该阈值是显式质量/性能开关：刚低于阈值的视图可能比边界处的 variable cut 绘制显著更多
 geometry。优先保证持续高俯仰交互性能的应用应配置更低阈值。
 
@@ -39,13 +41,18 @@ renderer 再创建 `ViewTileDemandSet`。`VirtualRasterRuntime.reconcileViewDema
 可执行 source page；已经 exact-resident 的页面不占并发请求预算。Exact page 缺失时通过
 page-table ancestor fallback 继续渲染；residency 时序不会改变 geometry topology。
 
+`elevationBounds` 可提供与 source coverage 完全匹配的不可变 bounds hierarchy。Renderer
+按 exaggeration 缩放每条记录，cover 使用 exact 或 source-ceiling-ancestor bounds。省略
+metadata 时使用 global elevation range；部分 metadata 会在创建GPU resource前失败。
+
 `webMercatorTerrainWgslModule` 拥有完整 vertex 路径：它重建 wide-fixed 标准瓦片位置，
 在转成 f32 前减去 camera，解析 cover neighbor，snap 混合 LoD 边，根据全局 field
 coordinate 采样高程并完成投影。内置
 `WEB_MERCATOR_TERRAIN_TILE_WIREFRAME_FRAGMENT_ENTRY_POINT` 用稳定瓦片颜色展示
 post-stitch mesh。应用 presentation WGSL 只提供 fragment shading。
 
-`render(capture)` 消费一个 `GeoViewSourceCapture<ViewInput>`，提交匹配 view，并返回
+`render(capture)` 消费一个 `GeoViewSourceCapture<ViewInput>`，从 `presentationSize` resize
+物理 attachment，提交匹配的 reference-pixel view，并返回
 `GeoFrameResult<WebMercatorTerrainFrameValue>`。Submission/native observation、延迟 cover
 readback、raster request settlement 与后续 publication 保持为独立 promise。被 supersede
 的 cover feedback 不能协调 demand 或覆盖当前 fact。Renderer 拥有两套 map-meta/cover

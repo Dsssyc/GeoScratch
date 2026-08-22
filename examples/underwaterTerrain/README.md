@@ -16,6 +16,8 @@ an unbounded stale queue. A no-draw MapLibre custom-layer driver
 captures a `mapLibrePlanarViewSource`, and the terrain renderer consumes that capture directly
 inside the matching host frame. Size changes, frame settlement, and residency work remain inside
 the public Geo contracts rather than being translated by the example.
+The capture keeps MapLibre CSS/reference pixels separate from the physical WebGPU presentation
+size, so Retina changes attachment resolution without changing terrain topology or DEM demand.
 Capacity-blocked invalidations coalesce until that frame is observed; the next host repaint uses
 the newest revision instead of replaying intermediate views. The two canvases keep independent
 WebGL and WebGPU contexts and do not claim shared depth or atomic presentation.
@@ -59,12 +61,18 @@ The manifest declares source pages through z10. `GpuWebMercatorQuadCover` indepe
 selects geometry through z14, but every output remains a standard
 `(tileMatrix, tileRow, tileCol)` identity. Camera/view-derived windows select from the
 fixed global matrix; they are not a moving clipmap grid. Below 60 degrees pitch, the
-GPU evaluates projected geometry-cell span over the complete viewport footprint and
-uses one uniform level. At and above 60 degrees it probes standard parent candidates
+GPU anchors a 128-cell patch mesh to the 512-reference-pixel WebMercator zoom, evaluates
+projected geometry-cell span over the complete reference viewport footprint, and uses one
+uniform level. At and above 60 degrees it probes standard parent candidates
 directly and refines only where the rotation-invariant local projective Jacobian
-exceeds the eight-pixel cell threshold. Both paths conservatively reject invisible
+exceeds the eight-reference-pixel cell threshold plus the explicit numerical tolerance.
+Both paths conservatively reject invisible
 candidates, perform local 2:1 closure, build the full-identity neighbor lookup, and
 write indirect draw arguments in one bounded dispatch.
+
+The COG manifest contains a complete immutable min/max elevation record for every declared
+source tile. Geometry above z10 uses the z10 ancestor bound. These records tighten culling and
+projected quality without allowing cache, network, residency, or atlas state to influence LoD.
 
 The boundary can be configured before Vite starts:
 

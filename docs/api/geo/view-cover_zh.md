@@ -2,7 +2,7 @@
 docId: geo.view-cover.zh
 canonical: false
 translationOf: ./view-cover.md
-canonicalDigest: 63b8af9641593adfcc2815a3f2c5403f811555990e6e33aaea00369836540a7a
+canonicalDigest: 38f292969193a2e3f2099e4031a08d98e5dd40c46a14895f1b842413649b4375
 ---
 # WebMercatorQuad 视图覆盖
 
@@ -15,12 +15,14 @@ fact 并提交持久图，不生成已选择瓦片数组。
 
 每个输出 patch 都是 OGC `(tileMatrix, tileRow, tileCol)` identity。Camera/view-derived level
 window 只从固定全球矩阵中做选择，不创建游戏式移动格网。Kernel 使用 rotation-invariant
-local projective Jacobian 计算一个 geometry cell 的面积等价投影跨度。该 metric 包含
-viewport scale、perspective、foreshortening 与配置的 elevation range；可能跨 camera plane
+local projective Jacobian 计算一个 geometry cell 的面积等价投影跨度。该 metric 使用
+`referenceViewport` pixels，并包含 perspective、foreshortening 与精确的不可变 tile
+elevation bounds；DPR 与物理 presentation size 不会改变 cover。可能跨 camera plane
 的 cell 会保守细分。
 
-`variableLodPitchThresholdRadians` 划分两个确定性 mode。Pitch 严格小于阈值时，从粗到细
-直接测试完整 viewport-footprint window，并只输出一个 uniform geometry level；pitch 等于
+`variableLodPitchThresholdRadians` 划分两个确定性 mode。Pitch 严格小于阈值时，以512
+reference-pixel WebMercator zoom 锚定完整 footprint，并只输出一个 uniform geometry level；
+只有 projected quality 确实需要时才整体细分。Pitch 等于
 或大于阈值时，在每个可能 level 上围绕精确 camera coordinate 直接探查有界标准 parent，
 只在 projected cell span 超过阈值处生成嵌套 child window。两种 mode 都保守拒绝不可见
 candidate，并使用同一套 prefix-free emission 与局部 2:1 closure。Candidate 工作量随有界
@@ -29,7 +31,8 @@ candidate，并使用同一套 prefix-free emission 与局部 2:1 closure。Cand
 当作选择权威。
 
 `GpuWebMercatorQuadCoverPolicy` 声明有序 geometry/source level、一个 patch 硬容量、
-`cellsPerPatchEdge`、`maximumCellSpanPixels`，以及位于 `[0, PI / 2]` 的
+`referenceTileSizePixels`、`cellsPerPatchEdge`、
+`maximumCellSpanReferencePixels`、`refinementTolerance`，以及位于 `[0, PI / 2]` 的
 `variableLodPitchThresholdRadians`。无效质量或阈值 fact 会在资源创建前失败。由于每个
 patch 最多输出一个 demand，完整 demand capacity 直接由同一上界推导。
 `sourceMaximumMatrixLevel` 是 source fact，不是 geometry ceiling。Geometry patch 可以继续
@@ -39,7 +42,8 @@ Demand priority 先比较 desired precision，再比较到相机锚点的、考�
 标准瓦片距离，使紧张 residency budget 不会退化为 row/column key 顺序。
 
 Selection feedback 报告 `selectionMode`、最终 min/max geometry level，以及由 Q8 解码的
-min/max projected cell span。这些 fact 只用于观察，不反馈给下一帧。Descriptor、lookup、
+`minimumCellSpanReferencePixels` / `maximumCellSpanReferencePixels`。这些 fact 只用于观察，
+不反馈给下一帧。Descriptor、lookup、
 demand 或 capacity overflow 都是硬 diagnostic，不会静默降低 requested cut。
 
 `gpuWebMercatorQuadCoverReadWgslModule()` 提供有界完整 identity lookup、covering-neighbor
@@ -54,3 +58,8 @@ upload，`frame()` 根据 submission-sequence authority 选择 parity，`encode(
 
 Virtual Raster 位于下游。Cover 决定 geometry 与 desired sample precision；Virtual Raster
 只调度显式 page demand、管理 residency，并解析 exact/ancestor 数据。
+
+可选的完整 `WebMercatorTileElevationBounds` hierarchy 为每个 source tile 提供不可变
+min/max pair。高于 source ceiling 的 geometry 使用 source-ceiling ancestor。部分 hierarchy
+非法；省略 hierarchy 时使用 descriptor 的 global range。Cover facts 暴露 hierarchy/global
+mode 与 record count。Residency、request completion、cache hit 和 atlas 内容不能改变这些 bounds。

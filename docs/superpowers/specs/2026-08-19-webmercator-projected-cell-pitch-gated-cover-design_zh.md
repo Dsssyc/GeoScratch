@@ -5,6 +5,10 @@
 本设计于 2026-08-19 获得确认。英文文档是事实基准；本文是经审阅的中文翻译，冲突时
 以英文为准。
 
+其中 pixel domain、uniform anchor、policy name 与64-cell terrain 部分已由
+`2026-08-22-reference-pixel-terrain-lod-design.md` 和 ADR-084 取代；rotation-invariant
+Jacobian 与 pitch-gated inverse-cover 决策仍然有效。
+
 本设计修正 ADR-083 inverse standard cover 内部的质量模型，不恢复 root-forward
 frontier，也不向 Virtual Raster 交付任何 LoD 权威。
 

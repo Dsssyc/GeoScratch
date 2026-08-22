@@ -5,6 +5,10 @@
 Approved on 2026-08-19. This English document is canonical. The paired Chinese
 document is a reviewed translation; English governs conflicts.
 
+The pixel-domain, uniform-anchor, policy-name, and 64-cell terrain portions are
+superseded by `2026-08-22-reference-pixel-terrain-lod-design.md` and ADR-084. The
+rotation-invariant Jacobian and pitch-gated inverse-cover decisions remain active.
+
 This design corrects the quality model inside ADR-083's inverse standard cover. It
 does not restore a root-forward frontier or give Virtual Raster any LoD authority.
 

@@ -4,6 +4,9 @@
 
 Approved for implementation on 2026-08-17.
 
+ADR-084 supersedes the capture field names and pixel semantics: current captures use
+`{ view, presentationSize }`, while the view owns a separate `referenceViewport`.
+
 ## Goal
 
 Make Underwater Terrain a context-efficient application assembly without hiding ownership or
