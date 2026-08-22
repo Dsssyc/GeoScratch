@@ -17,6 +17,7 @@ from rasterio.transform import from_bounds
 from rasterio.warp import transform_bounds
 from rio_cogeo.cogeo import cog_translate, cog_validate
 from rio_cogeo.profiles import cog_profiles
+from rio_tiler.io import Reader
 
 
 DEM_BOUNDS = (
@@ -38,7 +39,7 @@ WEB_MERCATOR_QUAD_URI = (
 )
 WEB_MERCATOR_CRS_URI = "http://www.opengis.net/def/crs/EPSG/0/3857"
 OVERVIEW_LEVELS = (2, 4, 8)
-BUILD_SCHEMA_VERSION = 2
+BUILD_SCHEMA_VERSION = 3
 
 WEB_MERCATOR_QUAD = morecantile.tms.get("WebMercatorQuad")
 
@@ -82,7 +83,10 @@ def _source_hash(source_path: Path) -> str:
     return digest.hexdigest()
 
 
-def _manifest(source_hash: str) -> dict[str, Any]:
+def _manifest(
+    source_hash: str,
+    tile_elevation_bounds: tuple[dict[str, float | int], ...],
+) -> dict[str, Any]:
     projected_bounds = transform_bounds("EPSG:4326", "EPSG:3857", *DEM_BOUNDS)
     native_matrix = WEB_MERCATOR_QUAD.matrix(WEB_MERCATOR_QUAD_MAX_ZOOM)
     projected_pixel_size = (
@@ -92,7 +96,7 @@ def _manifest(source_hash: str) -> dict[str, Any]:
     return {
         "schemaVersion": BUILD_SCHEMA_VERSION,
         "sourceHash": source_hash,
-        "contentVersion": f"dem-{source_hash[:16]}-cog-wmq-v3",
+        "contentVersion": f"dem-{source_hash[:16]}-cog-wmq-v4",
         "source": {
             "crs": "EPSG:4326",
             "geographicBounds": list(DEM_BOUNDS),
@@ -121,6 +125,7 @@ def _manifest(source_hash: str) -> dict[str, Any]:
             ],
             "limits": list(WEB_MERCATOR_QUAD_LIMITS),
         },
+        "tileElevationBounds": list(tile_elevation_bounds),
         "nativeResolution": {
             "closestTileMatrix": str(WEB_MERCATOR_QUAD_MAX_ZOOM),
             "tileMatrixCellSizeMeters": native_matrix.cellSize,
@@ -148,6 +153,42 @@ def _manifest(source_hash: str) -> dict[str, Any]:
             "etag": "content-version-and-standard-tile",
         },
     }
+
+
+def _tile_elevation_bounds(cog_path: Path) -> tuple[dict[str, float | int], ...]:
+    scale = (DEM_ELEVATION_MAX - DEM_ELEVATION_MIN) / 255
+    records: list[dict[str, float | int]] = []
+    with Reader(str(cog_path)) as reader:
+        for limit in WEB_MERCATOR_QUAD_LIMITS:
+            matrix_level = int(limit["matrixId"])
+            for tile_row in range(limit["minTileRow"], limit["maxTileRow"] + 1):
+                for tile_col in range(limit["minTileCol"], limit["maxTileCol"] + 1):
+                    image = reader.tile(
+                        tile_col,
+                        tile_row,
+                        matrix_level,
+                        tilesize=TILE_SIZE,
+                        indexes=1,
+                        resampling_method="nearest",
+                    )
+                    samples = np.ma.asarray(image.array[0]).compressed()
+                    if samples.size == 0:
+                        raise RuntimeError(
+                            "Declared DEM tile contains no valid source samples: "
+                            f"{matrix_level}/{tile_row}/{tile_col}"
+                        )
+                    records.append({
+                        "matrixLevel": matrix_level,
+                        "tileRow": tile_row,
+                        "tileCol": tile_col,
+                        "minimumElevationMeters": float(
+                            int(samples.min()) * scale + DEM_ELEVATION_MIN
+                        ),
+                        "maximumElevationMeters": float(
+                            int(samples.max()) * scale + DEM_ELEVATION_MIN
+                        ),
+                    })
+    return tuple(records)
 
 
 def _read_source(source_path: Path) -> np.ndarray:
@@ -230,8 +271,13 @@ def build_dem_cog(source_path: str | Path, output_directory: str | Path) -> Buil
         temporary_manifest = temporary_directory / "manifest.json"
         _write_source_geotiff(source_tiff, north_up_source, source_hash)
         _write_cog(source_tiff, temporary_cog)
+        tile_elevation_bounds = _tile_elevation_bounds(temporary_cog)
         temporary_manifest.write_text(
-            json.dumps(_manifest(source_hash), indent=2, sort_keys=True) + "\n",
+            json.dumps(
+                _manifest(source_hash, tile_elevation_bounds),
+                indent=2,
+                sort_keys=True,
+            ) + "\n",
             encoding="utf-8",
         )
         os.replace(temporary_cog, cog_path)

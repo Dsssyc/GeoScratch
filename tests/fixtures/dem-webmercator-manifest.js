@@ -8,11 +8,27 @@ const limits = [
     { matrixId: '9', minTileRow: 207, maxTileRow: 209, minTileCol: 426, maxTileCol: 429 },
     { matrixId: '10', minTileRow: 415, maxTileRow: 418, minTileCol: 853, maxTileCol: 858 },
 ]
+const tileElevationBounds = limits.flatMap(limit => {
+    const matrixLevel = Number(limit.matrixId)
+    return Array.from(
+        { length: limit.maxTileRow - limit.minTileRow + 1 },
+        (_, rowOffset) => Array.from(
+            { length: limit.maxTileCol - limit.minTileCol + 1 },
+            (_, colOffset) => ({
+                matrixLevel,
+                tileRow: limit.minTileRow + rowOffset,
+                tileCol: limit.minTileCol + colOffset,
+                minimumElevationMeters: -80 + (matrixLevel % 3),
+                maximumElevationMeters: 4 - (matrixLevel % 2),
+            })
+        )
+    ).flat()
+})
 
 export const demWebMercatorManifest = Object.freeze({
-    schemaVersion: 2,
+    schemaVersion: 3,
     sourceHash: 'aa7a584830f198772d242df1ce1ae47e21b2bdc85bfc1f97101af8be986c57e1',
-    contentVersion: 'dem-aa7a584830f19877-cog-wmq-v3',
+    contentVersion: 'dem-aa7a584830f19877-cog-wmq-v4',
     source: {
         crs: 'EPSG:4326',
         geographicBounds: bounds,
@@ -38,6 +54,7 @@ export const demWebMercatorManifest = Object.freeze({
         tileMatrixIds: [ '4', '5', '6', '7', '8', '9', '10' ],
         limits,
     },
+    tileElevationBounds,
     nativeResolution: {
         closestTileMatrix: '10',
         tileMatrixCellSizeMeters: 152.8740565703525,

@@ -45,7 +45,7 @@ def test_health_manifest_cors_and_cache_contract(built_dem):
     assert health.status_code == 200
     assert health.json() == {
         "status": "ok",
-        "contentVersion": f"dem-{built_dem.source_hash[:16]}-cog-wmq-v3",
+        "contentVersion": f"dem-{built_dem.source_hash[:16]}-cog-wmq-v4",
     }
     assert health.headers["cache-control"] == "no-store"
     assert manifest.status_code == 200

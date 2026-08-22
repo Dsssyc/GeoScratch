@@ -44,6 +44,14 @@ const DRAW_ARGUMENT_BYTES = 16
 type Disposable = { dispose(): void }
 type BufferBindingType = 'uniform' | 'read-storage' | 'storage'
 
+export type WebMercatorTileElevationBounds = Readonly<{
+    matrixLevel: number
+    tileRow: number
+    tileCol: number
+    minimumElevationMeters: number
+    maximumElevationMeters: number
+}>
+
 export type GpuWebMercatorQuadCoverPolicy = Readonly<{
     minimumMatrixLevel: number
     maximumMatrixLevel: number

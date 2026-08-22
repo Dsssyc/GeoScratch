@@ -124,6 +124,7 @@ export type {
     GpuWebMercatorQuadCoverRenderTemplate,
     GpuWebMercatorQuadCoverSelectionFacts,
     GpuWebMercatorQuadCoverViewToken,
+    WebMercatorTileElevationBounds,
 } from './gpu-web-mercator-quad-cover.js'
 export { gpuWebMercatorQuadCoverReadWgslModule } from './gpu-web-mercator-quad-cover-layout.js'
 export type {

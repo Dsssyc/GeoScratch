@@ -20,9 +20,9 @@ from geoscratch_dem_tiles.build import (
 def test_manifest_separates_source_from_standard_web_mercator_tiles(built_dem):
     manifest = json.loads(built_dem.manifest_path.read_text(encoding="utf-8"))
 
-    assert manifest["schemaVersion"] == 2
+    assert manifest["schemaVersion"] == 3
     assert manifest["sourceHash"] == DEM_SOURCE_SHA256
-    assert manifest["contentVersion"] == f"dem-{DEM_SOURCE_SHA256[:16]}-cog-wmq-v3"
+    assert manifest["contentVersion"] == f"dem-{DEM_SOURCE_SHA256[:16]}-cog-wmq-v4"
     assert manifest["source"] == {
         "crs": "EPSG:4326",
         "geographicBounds": list(DEM_BOUNDS),
@@ -67,6 +67,28 @@ def test_manifest_separates_source_from_standard_web_mercator_tiles(built_dem):
         "decoderVersion": "dem-png-unorm8-v1",
         "etag": "content-version-and-standard-tile",
     }
+    elevation_bounds = manifest["tileElevationBounds"]
+    expected_tiles = [
+        (int(limit["matrixId"]), tile_row, tile_col)
+        for limit in WEB_MERCATOR_QUAD_LIMITS
+        for tile_row in range(limit["minTileRow"], limit["maxTileRow"] + 1)
+        for tile_col in range(limit["minTileCol"], limit["maxTileCol"] + 1)
+    ]
+    assert len(elevation_bounds) == len(expected_tiles)
+    assert [
+        (bound["matrixLevel"], bound["tileRow"], bound["tileCol"])
+        for bound in elevation_bounds
+    ] == expected_tiles
+    assert all(
+        DEM_ELEVATION_MIN <= bound["minimumElevationMeters"]
+        <= bound["maximumElevationMeters"] <= DEM_ELEVATION_MAX
+        for bound in elevation_bounds
+    )
+    assert any(
+        bound["minimumElevationMeters"] > DEM_ELEVATION_MIN
+        or bound["maximumElevationMeters"] < DEM_ELEVATION_MAX
+        for bound in elevation_bounds
+    )
     serialized = json.dumps(manifest, sort_keys=True)
     assert "GeoScratchLocalRasterQuad" not in serialized
     assert "southwest" not in serialized

@@ -29,6 +29,8 @@ describe('DEM WebMercator virtual raster', () => {
 
         expect(source.manifest).to.deep.equal(manifest)
         expect(source.facts.contentVersion).to.equal(source.manifest.contentVersion)
+        expect(source.elevationBounds).to.deep.equal(manifest.tileElevationBounds)
+        expect(Object.isFrozen(source.elevationBounds)).to.equal(true)
         expect(Object.isFrozen(source)).to.equal(true)
         expect(Object.isFrozen(model)).to.equal(true)
         expect(model.coverage.entryCount).to.equal(49)
@@ -52,6 +54,25 @@ describe('DEM WebMercator virtual raster', () => {
             unit: 'm',
             interpolation: 'linear',
         })
+    })
+
+    it('rejects incomplete or duplicate immutable elevation bounds', () => {
+
+        const incomplete = structuredClone(manifest)
+        incomplete.tileElevationBounds.pop()
+        expect(() => createDemTileSource({
+            manifest: incomplete,
+            tileServerUrl: 'http://127.0.0.1:8787',
+        })).to.throw(TypeError)
+
+        const duplicate = structuredClone(manifest)
+        duplicate.tileElevationBounds[1] = {
+            ...duplicate.tileElevationBounds[0],
+        }
+        expect(() => createDemTileSource({
+            manifest: duplicate,
+            tileServerUrl: 'http://127.0.0.1:8787',
+        })).to.throw(TypeError)
     })
 
     it('consumes explicit desired/source demand without acquiring LoD authority', async() => {
@@ -193,7 +214,7 @@ describe('DEM WebMercator virtual raster', () => {
 
         expect(source.tileUrl(page)).to.equal(
             'http://127.0.0.1:8787/tiles/WebMercatorQuad/10/418/858.png' +
-            '?v=dem-aa7a584830f19877-cog-wmq-v3'
+            '?v=dem-aa7a584830f19877-cog-wmq-v4'
         )
     })
 
@@ -207,6 +228,28 @@ describe('DEM WebMercator virtual raster', () => {
             minTileCol: 12,
             maxTileCol: 13,
         }
+        expanded.tileElevationBounds.unshift(
+            {
+                ...expanded.tileElevationBounds[0],
+                tileRow: 6,
+                tileCol: 12,
+            },
+            {
+                ...expanded.tileElevationBounds[0],
+                tileRow: 7,
+                tileCol: 12,
+            },
+            {
+                ...expanded.tileElevationBounds[0],
+                tileRow: 7,
+                tileCol: 13,
+            },
+        )
+        expanded.tileElevationBounds.sort((left, right) =>
+            left.matrixLevel - right.matrixLevel ||
+            left.tileRow - right.tileRow ||
+            left.tileCol - right.tileCol
+        )
         const { model } = createDemTileSource({
             manifest: expanded,
             tileServerUrl: 'http://127.0.0.1:8787',
