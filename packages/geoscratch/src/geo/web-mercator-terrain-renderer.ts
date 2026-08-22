@@ -334,9 +334,11 @@ const WEB_MERCATOR_TERRAIN_STAGE_ORDER = Object.freeze([
     'inverse-cover-compute',
     'terrain',
 ])
-const TERRAIN_SECTOR_SIZE = 64
+const TERRAIN_REFERENCE_TILE_SIZE_PIXELS = 512
+const TERRAIN_SECTOR_SIZE = 128
 const TERRAIN_COVER_MAXIMUM_MATRIX_LEVEL = 14
-const TERRAIN_MAXIMUM_CELL_SPAN_PIXELS = 8
+const TERRAIN_MAXIMUM_CELL_SPAN_REFERENCE_PIXELS = 8
+const TERRAIN_REFINEMENT_TOLERANCE = 0.005
 const TERRAIN_VARIABLE_LOD_PITCH_THRESHOLD_RADIANS = Math.PI / 3
 const BUFFER_COPY_DST = 0x08
 const BUFFER_UNIFORM = 0x40
@@ -404,8 +406,11 @@ export async function createWebMercatorTerrainRenderer<
             maximumMatrixLevel: TERRAIN_COVER_MAXIMUM_MATRIX_LEVEL,
             sourceMaximumMatrixLevel,
             maximumPatches: coverCapacity,
+            referenceTileSizePixels: TERRAIN_REFERENCE_TILE_SIZE_PIXELS,
             cellsPerPatchEdge: TERRAIN_SECTOR_SIZE,
-            maximumCellSpanPixels: TERRAIN_MAXIMUM_CELL_SPAN_PIXELS,
+            maximumCellSpanReferencePixels:
+                TERRAIN_MAXIMUM_CELL_SPAN_REFERENCE_PIXELS,
+            refinementTolerance: TERRAIN_REFINEMENT_TOLERANCE,
             variableLodPitchThresholdRadians,
         }),
         elevationRangeMeters: exaggeratedElevationRange,
@@ -1661,7 +1666,8 @@ function sameSize(left: SurfaceSize, right: SurfaceSize): boolean {
 
 function terrainCoverCapacity(size: SurfaceSize, uniformPitchThresholdRadians: number): number {
 
-    const nominalPatchSpan = TERRAIN_SECTOR_SIZE * 8
+    const nominalPatchSpan = TERRAIN_SECTOR_SIZE *
+        TERRAIN_MAXIMUM_CELL_SPAN_REFERENCE_PIXELS
     const viewportColumns = Math.ceil(size.width / nominalPatchSpan) + 1
     const viewportRows = Math.ceil(size.height / nominalPatchSpan) + 1
     const pitchCapacityScale = Math.ceil(

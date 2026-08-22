@@ -30,7 +30,7 @@ describe('WebMercatorQuad inverse-cover clean cut', () => {
             'cameraPitchRadians',
             'refineErrorPixels',
             'coarsenErrorPixels',
-            'maximumCellSpanPixels',
+            'maximumCellSpanReferencePixels',
             'renderMaximumMatrixLevel',
         ]) {
             expect(sources, forbidden).not.to.include(forbidden)

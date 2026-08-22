@@ -45,6 +45,11 @@ var<storage, read_write> drawArguments: array<u32>;
 
 const WEB_MERCATOR_WORLD_WIDTH_METERS: f32 = 40075016.0f;
 
+fn coverEffectiveCellSpanThreshold() -> f32 {
+    return coverPolicy.maximumCellSpanReferencePixels *
+        (1.0f + coverPolicy.refinementTolerance);
+}
+
 fn coverSubtractExpansions(
     leftHigh: f32,
     leftLow: f32,
@@ -406,7 +411,7 @@ fn coverProjectedSearchRadiusTiles() -> i32 {
         tan(mapMeta.verticalFovRadians * 0.5f);
     return max(2i, i32(ceil(
         focalPixels /
-        (f32(coverPolicy.cellsPerPatchEdge) * coverPolicy.maximumCellSpanPixels)
+        (f32(coverPolicy.cellsPerPatchEdge) * coverEffectiveCellSpanThreshold())
     )) + 2i);
 }
 
@@ -516,7 +521,8 @@ fn coverVariableRefinementWindow(
             coverState.candidateCount += 1u;
             let bounds = coverPatchBounds(parentLevel, u32(tileRow), u32(tileCol));
             if (!coverPatchVisible(bounds) ||
-                coverProjectedCellSpanPixels(bounds) <= coverPolicy.maximumCellSpanPixels) {
+                coverProjectedCellSpanPixels(bounds) <=
+                    coverEffectiveCellSpanThreshold()) {
                 continue;
             }
             let children = GpuWebMercatorQuadCoverWindow(
@@ -882,11 +888,14 @@ fn generateWebMercatorQuadCover() {
     var finestLevel = coverPolicy.minimumMatrixLevel;
     let uniformMode = coverState.selectionMode == 0u;
     if (uniformMode) {
-        let probeLevel = clamp(
-            u32(ceil(mapMeta.zoomHint)),
-            coverPolicy.minimumMatrixLevel,
-            coverPolicy.maximumMatrixLevel,
+        let zoomAnchor = mapMeta.zoomHint + log2(
+            512.0f / coverPolicy.referenceTileSizePixels
         );
+        let probeLevel = u32(clamp(
+            i32(floor(zoomAnchor)),
+            i32(coverPolicy.minimumMatrixLevel),
+            i32(coverPolicy.maximumMatrixLevel),
+        ));
         let probeWindow = coverFitWindow(
             coverUniformWindow(probeLevel),
             coverGeometryWindow(probeLevel),
@@ -911,9 +920,10 @@ fn generateWebMercatorQuadCover() {
             }
         }
         var levelAdjustment = 0i;
-        if (visibleCount > 0u && maximumSpan > 0.0f) {
+        let effectiveThreshold = coverEffectiveCellSpanThreshold();
+        if (visibleCount > 0u && maximumSpan > effectiveThreshold) {
             levelAdjustment = i32(ceil(log2(
-                maximumSpan / coverPolicy.maximumCellSpanPixels
+                maximumSpan / effectiveThreshold
             )));
         }
         finestLevel = u32(clamp(

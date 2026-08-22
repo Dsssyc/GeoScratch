@@ -579,8 +579,10 @@ const typedCoverPolicy: GpuWebMercatorQuadCoverPolicy =
         maximumMatrixLevel: 14,
         sourceMaximumMatrixLevel: 0,
         maximumPatches: 256,
-        cellsPerPatchEdge: 64,
-        maximumCellSpanPixels: 8,
+        referenceTileSizePixels: 512,
+        cellsPerPatchEdge: 128,
+        maximumCellSpanReferencePixels: 8,
+        refinementTolerance: 0.005,
         variableLodPitchThresholdRadians: Math.PI / 3,
     })
 const typedCoverDescriptor: GpuWebMercatorQuadCoverDescriptor = {

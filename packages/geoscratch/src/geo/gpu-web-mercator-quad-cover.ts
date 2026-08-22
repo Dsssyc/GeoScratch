@@ -49,8 +49,10 @@ export type GpuWebMercatorQuadCoverPolicy = Readonly<{
     maximumMatrixLevel: number
     sourceMaximumMatrixLevel: number
     maximumPatches: number
+    referenceTileSizePixels: number
     cellsPerPatchEdge: number
-    maximumCellSpanPixels: number
+    maximumCellSpanReferencePixels: number
+    refinementTolerance: number
     variableLodPitchThresholdRadians: number
 }>
 
@@ -120,8 +122,8 @@ export type GpuWebMercatorQuadCoverSelectionFacts = Readonly<{
     finestMatrixLevel: number
     sourceLevelCeiling: number
     selectionMode: 'uniform' | 'variable'
-    minimumCellSpanPixels?: number
-    maximumCellSpanPixels?: number
+    minimumCellSpanReferencePixels?: number
+    maximumCellSpanReferencePixels?: number
 }>
 
 export type GpuWebMercatorQuadCoverFeedback =
@@ -221,8 +223,11 @@ export function gpuWebMercatorQuadCoverPolicy(
         input.minimumMatrixLevel > input.sourceMaximumMatrixLevel ||
         input.sourceMaximumMatrixLevel > input.maximumMatrixLevel ||
         !positiveSafeInteger(input.maximumPatches) ||
+        !positiveFinite(input.referenceTileSizePixels) ||
         !positiveSafeInteger(input.cellsPerPatchEdge) ||
-        !positiveFinite(input.maximumCellSpanPixels) ||
+        !positiveFinite(input.maximumCellSpanReferencePixels) ||
+        !Number.isFinite(input.refinementTolerance) ||
+        input.refinementTolerance < 0 || input.refinementTolerance > 0.1 ||
         !Number.isFinite(input.variableLodPitchThresholdRadians) ||
         input.variableLodPitchThresholdRadians < 0 ||
         input.variableLodPitchThresholdRadians > Math.PI / 2) {
@@ -234,8 +239,10 @@ export function gpuWebMercatorQuadCoverPolicy(
             expected: {
                 levels: '0 <= minimum <= sourceMaximum <= maximum <= 24',
                 maximumPatches: 'positive safe integer',
+                referenceTileSizePixels: 'positive finite number',
                 cellsPerPatchEdge: 'positive safe integer',
-                maximumCellSpanPixels: 'positive finite number',
+                maximumCellSpanReferencePixels: 'positive finite number',
+                refinementTolerance: '[0, 0.1]',
                 variableLodPitchThresholdRadians: '[0, PI / 2]',
             },
             actual: input,
@@ -373,10 +380,12 @@ export class GpuWebMercatorQuadCover {
                     minimumElevationMeters: descriptor.elevationRangeMeters[0],
                     maximumElevationMeters: descriptor.elevationRangeMeters[1],
                     cellsPerPatchEdge: descriptor.policy.cellsPerPatchEdge,
-                    maximumCellSpanPixels: descriptor.policy.maximumCellSpanPixels,
+                    referenceTileSizePixels: descriptor.policy.referenceTileSizePixels,
+                    maximumCellSpanReferencePixels:
+                        descriptor.policy.maximumCellSpanReferencePixels,
+                    refinementTolerance: descriptor.policy.refinementTolerance,
                     variableLodPitchThresholdRadians:
                         descriptor.policy.variableLodPitchThresholdRadians,
-                    reserved0: 0,
                 }),
             }))
             const limitsUpload = own(runtime.createUploadCommand({
@@ -1087,8 +1096,8 @@ export function decodeGpuWebMercatorQuadCoverFeedback(
         selectionMode: 'uniform' | 'variable'
         minimumMatrixLevel?: number
         maximumMatrixLevel?: number
-        minimumCellSpanPixels?: number
-        maximumCellSpanPixels?: number
+        minimumCellSpanReferencePixels?: number
+        maximumCellSpanReferencePixels?: number
     } = {
         frameEpoch,
         candidateCount,
@@ -1105,8 +1114,8 @@ export function decodeGpuWebMercatorQuadCoverFeedback(
     if (patchCount > 0) {
         facts.minimumMatrixLevel = minimumMatrixLevel
         facts.maximumMatrixLevel = maximumMatrixLevel
-        facts.minimumCellSpanPixels = minimumCellSpanQ8 / 256
-        facts.maximumCellSpanPixels = maximumCellSpanQ8 / 256
+        facts.minimumCellSpanReferencePixels = minimumCellSpanQ8 / 256
+        facts.maximumCellSpanReferencePixels = maximumCellSpanQ8 / 256
     }
     return Object.freeze({
         ...facts,

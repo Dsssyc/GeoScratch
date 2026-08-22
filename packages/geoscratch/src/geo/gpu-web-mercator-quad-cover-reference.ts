@@ -54,8 +54,8 @@ export type GpuWebMercatorQuadCoverReferenceResult = Readonly<{
         patchCount: number
         demandCount: number
         selectionMode: 'uniform' | 'variable'
-        minimumCellSpanPixels?: number
-        maximumCellSpanPixels?: number
+        minimumCellSpanReferencePixels?: number
+        maximumCellSpanReferencePixels?: number
     }>
 }>
 
@@ -109,8 +109,8 @@ export function evaluateGpuWebMercatorQuadCoverReference(
             demandCount: demands.length,
             selectionMode,
             ...(generated.cellSpans.length === 0 ? {} : {
-                minimumCellSpanPixels: Math.min(...generated.cellSpans),
-                maximumCellSpanPixels: Math.max(...generated.cellSpans),
+                minimumCellSpanReferencePixels: Math.min(...generated.cellSpans),
+                maximumCellSpanReferencePixels: Math.max(...generated.cellSpans),
             }),
         }),
     })
@@ -119,7 +119,10 @@ export function evaluateGpuWebMercatorQuadCoverReference(
 function generateUniform(input: GpuWebMercatorQuadCoverReferenceInput) {
 
     const probeLevel = clamp(
-        Math.ceil(input.view.zoomHint),
+        Math.floor(
+            input.view.zoomHint +
+            Math.log2(512 / input.policy.referenceTileSizePixels)
+        ),
         input.policy.minimumMatrixLevel,
         input.policy.maximumMatrixLevel
     )
@@ -127,8 +130,9 @@ function generateUniform(input: GpuWebMercatorQuadCoverReferenceInput) {
     const probePatches = patchesInWindow(input, probeLevel, probeWindow)
     const probeSpans = probePatches.map(patch => projectedCellSpanPixels(input, patch))
     const maximumProbeSpan = probeSpans.length === 0 ? 0 : Math.max(...probeSpans)
-    const levelAdjustment = maximumProbeSpan > 0
-        ? Math.ceil(Math.log2(maximumProbeSpan / input.policy.maximumCellSpanPixels))
+    const threshold = effectiveCellSpanThreshold(input)
+    const levelAdjustment = maximumProbeSpan > threshold
+        ? Math.ceil(Math.log2(maximumProbeSpan / threshold))
         : 0
     const matrixLevel = clamp(
         probeLevel + levelAdjustment,
@@ -227,7 +231,7 @@ function variableWindows(
                 const parent = referencePatch(parentLevel, tileRow, tileCol)
                 if (!intersectsVisible(parent, input.visibleBounds) ||
                     projectedCellSpanPixels(input, parent) <=
-                        input.policy.maximumCellSpanPixels) continue
+                        effectiveCellSpanThreshold(input)) continue
                 const children = {
                     minTileRow: tileRow * 2,
                     maxTileRow: tileRow * 2 + 1,
@@ -296,8 +300,16 @@ function projectedSearchRadius(input: GpuWebMercatorQuadCoverReferenceInput): nu
         (2 * Math.tan(input.view.verticalFovRadians / 2))
     return Math.max(2, Math.ceil(
         focalPixels /
-        (input.policy.cellsPerPatchEdge * input.policy.maximumCellSpanPixels)
+        (input.policy.cellsPerPatchEdge * effectiveCellSpanThreshold(input))
     ) + 2)
+}
+
+function effectiveCellSpanThreshold(
+    input: GpuWebMercatorQuadCoverReferenceInput
+): number {
+
+    return input.policy.maximumCellSpanReferencePixels *
+        (1 + input.policy.refinementTolerance)
 }
 
 function visibleWindow(

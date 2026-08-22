@@ -50,8 +50,11 @@ function fixture(options = {}) {
         maximumMatrixLevel,
         sourceMaximumMatrixLevel,
         maximumPatches: options.maximumPatches ?? 256,
-        cellsPerPatchEdge: options.cellsPerPatchEdge ?? 64,
-        maximumCellSpanPixels: options.maximumCellSpanPixels ?? 8,
+        referenceTileSizePixels: options.referenceTileSizePixels ?? 512,
+        cellsPerPatchEdge: options.cellsPerPatchEdge ?? 128,
+        maximumCellSpanReferencePixels:
+            options.maximumCellSpanReferencePixels ?? 8,
+        refinementTolerance: options.refinementTolerance ?? 0.005,
         variableLodPitchThresholdRadians:
             options.variableLodPitchThresholdRadians ?? Math.PI / 3,
     })
@@ -210,14 +213,16 @@ function expectStandardBalancedCover(result, maximumLevel) {
 
 describe('GPU WebMercatorQuad inverse cover reference', () => {
 
-    it('validates projected-cell policy and assigns the exact threshold to variable mode', () => {
+    it('validates reference-pixel policy and assigns the exact threshold to variable mode', () => {
 
         const threshold = Math.PI / 3
         const setup = fixture({ variableLodPitchThresholdRadians: threshold })
 
         expect(setup.policy).to.deep.include({
-            cellsPerPatchEdge: 64,
-            maximumCellSpanPixels: 8,
+            referenceTileSizePixels: 512,
+            cellsPerPatchEdge: 128,
+            maximumCellSpanReferencePixels: 8,
+            refinementTolerance: 0.005,
             variableLodPitchThresholdRadians: threshold,
         })
         for (const variableLodPitchThresholdRadians of [
@@ -226,6 +231,19 @@ describe('GPU WebMercatorQuad inverse cover reference', () => {
             Number.NaN,
         ]) {
             expect(() => fixture({ variableLodPitchThresholdRadians })).to.throw()
+        }
+        for (const referenceTileSizePixels of [ 0, Number.NaN ]) {
+            expect(() => fixture({ referenceTileSizePixels })).to.throw()
+        }
+        for (const maximumCellSpanReferencePixels of [ 0, Number.NaN ]) {
+            expect(() => fixture({ maximumCellSpanReferencePixels })).to.throw()
+        }
+        for (const refinementTolerance of [
+            -Number.EPSILON,
+            0.1 + Number.EPSILON,
+            Number.NaN,
+        ]) {
+            expect(() => fixture({ refinementTolerance })).to.throw()
         }
         expect(setup.evaluate({
             currentView: setup.view({ pitch: threshold - 1e-6 }),
@@ -297,6 +315,20 @@ describe('GPU WebMercatorQuad inverse cover reference', () => {
         expect(levels.size).to.equal(1)
         expect(result.patches.length).to.be.greaterThan(16)
         expectStandardBalancedCover(result, setup.policy.maximumMatrixLevel)
+    })
+
+    it('anchors ordinary top-down geometry to the 512-reference-pixel zoom level', () => {
+
+        const setup = fixture({ maximumPatches: 512 })
+        for (const zoom of [ 8, 9, 10, 11, 12, 13, 14 ]) {
+            const result = setup.evaluate({
+                currentView: setup.view({ zoom, pitch: 0 }),
+            })
+
+            expect(result.facts.selectionMode).to.equal('uniform')
+            expect(result.facts.minimumMatrixLevel).to.equal(zoom)
+            expect(result.facts.maximumMatrixLevel).to.equal(zoom)
+        }
     })
 
     it('keeps equal-distance samples symmetric at odd camera tile indices', () => {
@@ -547,8 +579,8 @@ describe('GPU WebMercatorQuad inverse cover lowering', () => {
             finestMatrixLevel: 11,
             sourceLevelCeiling: 10,
             selectionMode: 'variable',
-            minimumCellSpanPixels: 2,
-            maximumCellSpanPixels: 7.5,
+            minimumCellSpanReferencePixels: 2,
+            maximumCellSpanReferencePixels: 7.5,
             demands: [
                 {
                     desiredSampleLevel: 11,

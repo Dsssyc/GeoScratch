@@ -245,7 +245,9 @@ describe('Underwater Terrain clean cut', () => {
         expect(cover).to.include('export class GpuWebMercatorQuadCover')
         expect(cover).to.include('desiredSampleLevel')
         expect(cover).to.include('sourceLevelCeiling')
-        expect(cover).to.include('maximumCellSpanPixels')
+        expect(cover).to.include('referenceTileSizePixels')
+        expect(cover).to.include('maximumCellSpanReferencePixels')
+        expect(cover).to.include('refinementTolerance')
         expect(cover).to.include('variableLodPitchThresholdRadians')
         expect(wgsl).to.include('fn generateWebMercatorQuadCover()')
         expect(wgsl).to.include('coverCameraTileIndex')
@@ -301,7 +303,7 @@ describe('Underwater Terrain clean cut', () => {
             'cameraPitchRadians',
             'refineErrorPixels',
             'coarsenErrorPixels',
-            'maximumCellSpanPixels',
+            'maximumCellSpanReferencePixels',
         ]) expect(runtime).not.to.include(forbidden)
     })
 

@@ -36,9 +36,10 @@ export const gpuWebMercatorQuadCoverPolicyCodec = layoutCodec({
         { name: 'minimumElevationMeters', type: 'f32' },
         { name: 'maximumElevationMeters', type: 'f32' },
         { name: 'cellsPerPatchEdge', type: 'u32' },
-        { name: 'maximumCellSpanPixels', type: 'f32' },
+        { name: 'referenceTileSizePixels', type: 'f32' },
+        { name: 'maximumCellSpanReferencePixels', type: 'f32' },
+        { name: 'refinementTolerance', type: 'f32' },
         { name: 'variableLodPitchThresholdRadians', type: 'f32' },
-        { name: 'reserved0', type: 'u32' },
     ],
 }, { usage: [ 'uniform', 'storage', 'readback' ] })
 
