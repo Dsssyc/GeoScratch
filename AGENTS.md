@@ -59,6 +59,9 @@ normalized policy threshold must emit one level over the complete visible footpr
 above it may use variable projected-cell LoD. A complete immutable tile-elevation hierarchy may
 tighten patch bounds; partial metadata is invalid and residency cannot supply missing bounds.
 The terrain default is 60 degrees, while application environment parsing remains outside Geo.
+Until a camera decision has settled its delayed cover feedback, every newer same-decision
+terrain frame must retain bounded `needsFollowUp`; latest-only frame admission must not strand
+the final one-frame-lagged readback.
 Any change to this path
 must run wide top-down uniformity, exact pitch-boundary ownership, shaded and wireframe 90-frame
 pitched benchmarks, zoom monotonicity, A-B-A identity, standard/source-level demand, 2:1,

@@ -56,6 +56,13 @@ sample scale or offset.
 DEM manifest schema, HTTP paths, PNG decoding, Worker protocol, cache budgets, map style,
 terrain exaggeration, controls, and presentation WGSL remain application-owned.
 
+### Delayed terrain feedback remains convergent under latest-only admission
+
+Cover feedback is intentionally consumed one submitted frame behind. Every newer frame for an
+unsettled equal camera decision therefore retains `needsFollowUp`. Otherwise a host frame that
+wins latest-only admission before the capture frame is observed could suppress that frame's
+follow-up and leave the newest feedback permanently pending.
+
 ## Consequences
 
 - Underwater Terrain can initialize map, GPU, manifest, and Worker catalog concurrently while
@@ -64,6 +71,7 @@ terrain exaggeration, controls, and presentation WGSL remain application-owned.
   accidentally.
 - Tile coverage order and compact indexing have one Geo implementation without collapsing
   separate validation boundaries.
+- Same-decision host-frame churn cannot strand the final delayed cover feedback.
 - The example becomes thinner through better ownership rather than a broad convenience facade.
 - Flow Layer keeps its current explicit map wait until it adopts `mapLibreFrameDriver()`.
 

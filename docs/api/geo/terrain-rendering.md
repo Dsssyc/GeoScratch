@@ -67,7 +67,10 @@ attachments from `presentationSize`, submits the matching reference-pixel view, 
 returns `GeoFrameResult<WebMercatorTerrainFrameValue>`.
 Submission/native observation, delayed cover readback, raster request settlement, and
 later publication remain separate promises. Superseded cover feedback cannot reconcile
-demand or overwrite current facts. The renderer owns two map-meta/cover parity sets;
+demand or overwrite current facts. Until the latest camera decision is settled, every
+newer frame for that same decision retains `needsFollowUp`; a latest-only frame controller
+therefore cannot suppress the extra frame required to consume one-frame-lagged feedback.
+The renderer owns two map-meta/cover parity sets;
 the Underwater Terrain application uses a measured two-frame in-flight bound.
 
 The renderer does not own a map host, controller, source manifest, URL policy, Worker

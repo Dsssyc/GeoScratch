@@ -423,26 +423,7 @@ describe('Underwater Terrain clean cut', () => {
         })
         const initialized = await graph.initialize()
         await initialized.observation
-        const result = await graph.render({
-            view: Object.freeze({
-                far: 1000,
-                near: 1,
-                clipFromRelativeWorld: [
-                    1, 0, 0, 0,
-                    0, 1, 0, 0,
-                    0, 0, 1, 0,
-                    0, 0, 0, 1,
-                ],
-                cameraLow: [ 0, 0, 0 ],
-                cameraHigh: [ 0, 0, 100 ],
-                referenceViewport: [ 320, 180 ],
-                verticalFovRadians: Math.PI / 3,
-                cameraLatitudeRadians: 31.684162 * Math.PI / 180,
-                cameraPitchRadians: 0,
-                zoomHint: 9,
-            }),
-            presentationSize: { width: 320, height: 180 },
-        })
+        const result = await graph.render(terrainCapture())
         let observedFailure
         try {
             await result.observation
@@ -463,4 +444,68 @@ describe('Underwater Terrain clean cut', () => {
         await virtualRaster.dispose()
         await runtime.dispose()
     })
+
+    it('keeps same-decision feedback convergence live when a newer host frame wins', async() => {
+
+        const fake = createFakeGpu()
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
+        const fakeCanvas = createFakeCanvas()
+        const surface = runtime.createSurface(fakeCanvas.canvas, {
+            label: 'Underwater Terrain feedback-convergence surface',
+            format: 'rgba8unorm',
+            alphaMode: 'premultiplied',
+            size: { width: 320, height: 180 },
+        })
+        const virtualRaster = await createTestVirtualRaster(runtime)
+        const graph = await createTestTerrainRenderer({
+            runtime,
+            surface,
+            virtualRaster,
+            size: { width: 320, height: 180 },
+        })
+        const initialized = await graph.initialize()
+        await initialized.observation
+        const capture = terrainCapture()
+        let first
+        let second
+        try {
+            first = await graph.render(capture)
+            second = await graph.render(capture)
+
+            expect(first.needsFollowUp).to.equal(true)
+            expect(second.needsFollowUp).to.equal(true)
+        } finally {
+            await Promise.allSettled([
+                first?.observation,
+                second?.observation,
+            ].filter(Boolean))
+            graph.dispose()
+            await virtualRaster.dispose()
+            await runtime.dispose()
+        }
+    })
 })
+
+function terrainCapture() {
+
+    return Object.freeze({
+        view: Object.freeze({
+            far: 1000,
+            near: 1,
+            clipFromRelativeWorld: [
+                1, 0, 0, 0,
+                0, 1, 0, 0,
+                0, 0, 1, 0,
+                0, 0, 0, 1,
+            ],
+            cameraLow: [ 0, 0, 0 ],
+            cameraHigh: [ 0, 0, 100 ],
+            referenceViewport: [ 320, 180 ],
+            verticalFovRadians: Math.PI / 3,
+            cameraLatitudeRadians: 31.684162 * Math.PI / 180,
+            cameraPitchRadians: 0,
+            zoomHint: 9,
+        }),
+        presentationSize: { width: 320, height: 180 },
+    })
+}

@@ -2,7 +2,7 @@
 docId: geo.terrain-rendering.zh
 canonical: false
 translationOf: ./terrain-rendering.md
-canonicalDigest: a672292e4e66b3bb8307ee9af8f2825aaf54f851f6389206e8876730ade6bb48
+canonicalDigest: da11d953723b4570b68aea3a190ea1a987ac36ea034ede7c41a4fc7ca5dbdf84
 ---
 # 地形渲染
 
@@ -55,8 +55,10 @@ post-stitch mesh。应用 presentation WGSL 只提供 fragment shading。
 物理 attachment，提交匹配的 reference-pixel view，并返回
 `GeoFrameResult<WebMercatorTerrainFrameValue>`。Submission/native observation、延迟 cover
 readback、raster request settlement 与后续 publication 保持为独立 promise。被 supersede
-的 cover feedback 不能协调 demand 或覆盖当前 fact。Renderer 拥有两套 map-meta/cover
-parity；Underwater Terrain 应用使用经过测量的两帧 in-flight 上限。
+的 cover feedback 不能协调 demand 或覆盖当前 fact。最新 camera decision 完成结算前，
+该 decision 的每个更新 frame 都保留 `needsFollowUp`；latest-only frame controller 因此
+不会抑制消费 one-frame-lagged feedback 所需的额外 frame。Renderer 拥有两套
+map-meta/cover parity；Underwater Terrain 应用使用经过测量的两帧 in-flight 上限。
 
 Renderer 不拥有 map host、controller、source manifest、URL policy、Worker system、
 decoder 或 persistent cache 选择；这些继续由应用显式组合。

@@ -671,9 +671,7 @@ export async function createWebMercatorTerrainRenderer<
         state.frame++
         state.virtualSnapshotEpoch = residencySnapshotEpoch
         const decisionNeedsFeedback = latestSettledDecisionKey !== decisionKey
-        const needsFollowUp = decisionNeedsFeedback && (
-            feedbackEntry === undefined || feedbackEntry.frame.frameEpoch === frame!.frameEpoch
-        )
+        const needsFollowUp = decisionNeedsFeedback
 
         return Object.freeze({
             submitted: submitted!,
