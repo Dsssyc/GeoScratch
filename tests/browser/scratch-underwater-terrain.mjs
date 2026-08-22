@@ -1224,10 +1224,16 @@ function validateUnderwaterTerrainFacts(label, facts, failures, expectedStatus =
             'gpu-camera-inverse-webmercatorquad-cover' ||
         contract?.cover?.policy?.sourceMaximumMatrixLevel !== 10 ||
         contract?.cover?.policy?.maximumMatrixLevel !== 14 ||
+        contract?.cover?.policy?.referenceTileSizePixels !== 512 ||
+        contract?.cover?.policy?.cellsPerPatchEdge !== 128 ||
+        contract?.cover?.policy?.maximumCellSpanReferencePixels !== 8 ||
+        contract?.cover?.policy?.refinementTolerance !== 0.005 ||
         contract?.cover?.policy?.maximumPatches < count ||
         contract?.cover?.lookupCapacity <= contract?.cover?.policy?.maximumPatches ||
         contract?.cover?.coverageLimitCount < 1 ||
-        contract?.terrainVertexCount !== 24_576 ||
+        contract?.cover?.elevationBoundsMode !== 'hierarchy' ||
+        contract?.cover?.elevationBoundCount !== 49 ||
+        contract?.terrainVertexCount !== 98_304 ||
         JSON.stringify(contract?.stageOrder) !== JSON.stringify(expectedStageOrder)) {
         failures.push(`${label} persistent graph contract drifted`)
     }

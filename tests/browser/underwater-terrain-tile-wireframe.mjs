@@ -120,7 +120,10 @@ try {
         args: [ '--enable-unsafe-webgpu' ],
     })
     browserVersion = await browser.version()
-    proof = await runProof(browser)
+    proof = Object.freeze({
+        ...await runProof(browser),
+        dprInvariance: await runDprInvariance(browser),
+    })
 } catch (error) {
     fatalError = serializeError(error)
 } finally {
@@ -334,6 +337,70 @@ async function runProof(activeBrowser) {
     } finally {
         await context.close()
     }
+}
+
+async function runDprInvariance(activeBrowser) {
+    const viewport = Object.freeze({ width: 960, height: 640 })
+    const samples = []
+    for (const deviceScaleFactor of [ 1, 1.25, 1.5, 2, 3 ]) {
+        const context = await activeBrowser.newContext({
+            viewport,
+            deviceScaleFactor,
+        })
+        const page = await context.newPage()
+        const events = observePage(page)
+        try {
+            await page.goto(
+                `${baseUrl}/underwaterTerrain/?proof=1&cache=none&tileServer=${encodeURIComponent(
+                    tileBaseUrl
+                )}`,
+                { waitUntil: 'domcontentloaded', timeout }
+            )
+            await page.locator('#GPUFrame[data-status="ready"]').waitFor({ timeout })
+            const initial = await readFacts(page)
+            const settled = await settle(
+                page,
+                'shaded',
+                initial.observedFrames,
+                camera
+            )
+            const dimensions = await page.evaluate(() => {
+                const canvas = document.querySelector('#GPUFrame')
+                if (!(canvas instanceof HTMLCanvasElement)) {
+                    throw new Error('Underwater Terrain DPR canvas is missing')
+                }
+                return {
+                    devicePixelRatio,
+                    client: [ canvas.clientWidth, canvas.clientHeight ],
+                    presentation: [ canvas.width, canvas.height ],
+                }
+            })
+            const feedback = settled.coverFeedback
+            samples.push(Object.freeze({
+                requestedDeviceScaleFactor: deviceScaleFactor,
+                ...dimensions,
+                referenceViewport: settled.cameraView?.referenceViewport,
+                signature: Object.freeze({
+                    candidateCount: feedback?.candidateCount,
+                    patchCount: feedback?.patchCount,
+                    minimumMatrixLevel: feedback?.minimumMatrixLevel,
+                    maximumMatrixLevel: feedback?.maximumMatrixLevel,
+                    finestMatrixLevel: feedback?.finestMatrixLevel,
+                    maximumAdjacentLevelDelta: feedback?.maximumAdjacentLevelDelta,
+                    demands: feedback?.demands?.map(demand => [
+                        demand.desiredSampleLevel,
+                        demand.requestMatrixLevel,
+                        demand.tileRow,
+                        demand.tileCol,
+                    ]),
+                }),
+                events,
+            }))
+        } finally {
+            await context.close()
+        }
+    }
+    return Object.freeze({ viewport, samples: Object.freeze(samples) })
 }
 
 async function settle(page, presentation, afterObservedFrames, nextCamera) {
@@ -605,6 +672,7 @@ function validateProof(value, processState) {
         shadedTracking,
         wireframeTracking,
         restored,
+        dprInvariance,
         events,
     } = value
     expect(failures,
@@ -740,6 +808,25 @@ function validateProof(value, processState) {
         pitchedShaded?.coverPatchCount <= 96 &&
         wireframe?.coverPatchCount <= 96,
     'pitched inverse cover exceeded its density gate')
+
+    const dprSamples = dprInvariance?.samples ?? []
+    const dprSignatures = dprSamples.map(sample => JSON.stringify(sample.signature))
+    expect(failures,
+        dprSamples.length === 5 && new Set(dprSignatures).size === 1,
+    `DPR changed the settled cover or demand: ${JSON.stringify(dprSamples)}`)
+    for (const sample of dprSamples) {
+        const scale = sample.requestedDeviceScaleFactor
+        expect(failures,
+            Math.abs(sample.devicePixelRatio - scale) < 1e-6 &&
+            sample.referenceViewport?.[0] === dprInvariance.viewport.width &&
+            sample.referenceViewport?.[1] === dprInvariance.viewport.height &&
+            sample.client?.[0] === dprInvariance.viewport.width &&
+            sample.client?.[1] === dprInvariance.viewport.height &&
+            sample.presentation?.[0] === Math.floor(dprInvariance.viewport.width * scale) &&
+            sample.presentation?.[1] === Math.floor(dprInvariance.viewport.height * scale) &&
+            unexpectedEvents(sample.events).length === 0,
+        `DPR presentation/reference separation failed: ${JSON.stringify(sample)}`)
+    }
 
     for (const [ name, tracking ] of [
         [ 'shaded', shadedTracking ],
