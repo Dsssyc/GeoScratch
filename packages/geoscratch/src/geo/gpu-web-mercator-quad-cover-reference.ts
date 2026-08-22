@@ -1,6 +1,7 @@
 import { throwGeoDiagnostic } from './diagnostics.js'
 import type { GeoViewSnapshot } from './geo-view.js'
 import type { GpuWebMercatorQuadCoverPolicy } from './gpu-web-mercator-quad-cover.js'
+import type { WebMercatorTileElevationBounds } from './gpu-web-mercator-quad-cover.js'
 import type { WebMercatorPlanarTileSpatialProfile } from './tile-spatial-profile.js'
 import {
     WEB_MERCATOR_QUAD_HALF_WORLD,
@@ -21,6 +22,7 @@ export type GpuWebMercatorQuadCoverReferenceInput = Readonly<{
     view: GeoViewSnapshot
     visibleBounds: GpuWebMercatorQuadCoverReferenceBounds
     elevationRangeMeters: readonly [number, number]
+    elevationBounds?: readonly WebMercatorTileElevationBounds[]
 }>
 
 export type GpuWebMercatorQuadCoverReferencePatch = Readonly<{
@@ -54,6 +56,8 @@ export type GpuWebMercatorQuadCoverReferenceResult = Readonly<{
         patchCount: number
         demandCount: number
         selectionMode: 'uniform' | 'variable'
+        elevationBoundsMode: 'global' | 'hierarchy'
+        elevationBoundCount: number
         minimumCellSpanReferencePixels?: number
         maximumCellSpanReferencePixels?: number
     }>
@@ -108,6 +112,10 @@ export function evaluateGpuWebMercatorQuadCoverReference(
             patchCount: generated.patches.length,
             demandCount: demands.length,
             selectionMode,
+            elevationBoundsMode: input.elevationBounds === undefined
+                ? 'global' as const
+                : 'hierarchy' as const,
+            elevationBoundCount: input.elevationBounds?.length ?? 0,
             ...(generated.cellSpans.length === 0 ? {} : {
                 minimumCellSpanReferencePixels: Math.min(...generated.cellSpans),
                 maximumCellSpanReferencePixels: Math.max(...generated.cellSpans),
@@ -575,13 +583,34 @@ function projectedCellSpanPixels(
         minimumY: bounds.south - cameraY,
         maximumY: bounds.north - cameraY,
     }
-    return Math.max(...input.elevationRangeMeters.map(elevation =>
+    return Math.max(...elevationRangeForPatch(input, patch).map(elevation =>
         projectedPlaneCellSpanPixels(
             input,
             relative,
             elevation - cameraZ
         )
     ))
+}
+
+function elevationRangeForPatch(
+    input: GpuWebMercatorQuadCoverReferenceInput,
+    patch: GpuWebMercatorQuadCoverReferencePatch
+): readonly [number, number] {
+
+    const hierarchy = input.elevationBounds
+    if (hierarchy === undefined) return input.elevationRangeMeters
+    const matrixLevel = Math.min(
+        patch.matrixLevel,
+        input.policy.sourceMaximumMatrixLevel
+    )
+    const shift = patch.matrixLevel - matrixLevel
+    const tileRow = patch.tileRow >> shift
+    const tileCol = patch.tileCol >> shift
+    const bounds = hierarchy.find(entry =>
+        entry.matrixLevel === matrixLevel &&
+        entry.tileRow === tileRow && entry.tileCol === tileCol
+    )!
+    return [ bounds.minimumElevationMeters, bounds.maximumElevationMeters ]
 }
 
 function projectedPlaneCellSpanPixels(
@@ -748,6 +777,38 @@ function validateInput(input: GpuWebMercatorQuadCoverReferenceInput): void {
                 visibleBounds: 'finite normalized west < east and north < south',
             },
             input
+        )
+    }
+    validateElevationBounds(input)
+}
+
+function validateElevationBounds(input: GpuWebMercatorQuadCoverReferenceInput): void {
+
+    const hierarchy = input.elevationBounds
+    if (hierarchy === undefined) return
+    const expected = input.spatialProfile.coverage.limits.flatMap(limit =>
+        Array.from(
+            { length: limit.maxTileRow - limit.minTileRow + 1 },
+            (_, rowOffset) => Array.from(
+                { length: limit.maxTileCol - limit.minTileCol + 1 },
+                (_, colOffset) => `${limit.matrixId}/` +
+                    `${limit.minTileRow + rowOffset}/${limit.minTileCol + colOffset}`
+            )
+        ).flat()
+    )
+    const valid = hierarchy.length === expected.length && hierarchy.every((entry, index) =>
+        Number.isSafeInteger(entry?.matrixLevel) &&
+        Number.isSafeInteger(entry?.tileRow) && Number.isSafeInteger(entry?.tileCol) &&
+        `${entry.matrixLevel}/${entry.tileRow}/${entry.tileCol}` === expected[index] &&
+        Number.isFinite(entry.minimumElevationMeters) &&
+        Number.isFinite(entry.maximumElevationMeters) &&
+        entry.minimumElevationMeters <= entry.maximumElevationMeters
+    )
+    if (!valid) {
+        invalidCover(
+            'The inverse-cover elevation hierarchy must exactly match source coverage.',
+            { tileKeys: expected },
+            hierarchy
         )
     }
 }

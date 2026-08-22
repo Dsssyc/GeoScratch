@@ -33,14 +33,16 @@ var<uniform> coverPolicy: GpuWebMercatorQuadCoverPolicy;
 @group(0) @binding(2)
 var<storage, read> coverageLimits: array<GpuWebMercatorQuadCoverLimit>;
 @group(0) @binding(3)
-var<storage, read_write> coverPatches: array<GpuWebMercatorQuadCoverPatch>;
+var<storage, read> elevationBounds: array<GpuWebMercatorQuadCoverElevationBounds>;
 @group(0) @binding(4)
-var<storage, read_write> coverLookup: array<GpuWebMercatorQuadCoverLookupEntry>;
+var<storage, read_write> coverPatches: array<GpuWebMercatorQuadCoverPatch>;
 @group(0) @binding(5)
-var<storage, read_write> coverState: GpuWebMercatorQuadCoverState;
+var<storage, read_write> coverLookup: array<GpuWebMercatorQuadCoverLookupEntry>;
 @group(0) @binding(6)
-var<storage, read_write> coverDemands: array<GpuWebMercatorQuadCoverDemand>;
+var<storage, read_write> coverState: GpuWebMercatorQuadCoverState;
 @group(0) @binding(7)
+var<storage, read_write> coverDemands: array<GpuWebMercatorQuadCoverDemand>;
+@group(0) @binding(8)
 var<storage, read_write> drawArguments: array<u32>;
 
 const WEB_MERCATOR_WORLD_WIDTH_METERS: f32 = 40075016.0f;
@@ -120,6 +122,30 @@ fn coverRelativeQuantaMeters(
     return select(meters, -meters, negative);
 }
 
+fn coverPatchElevationBounds(
+    matrixLevel: u32,
+    row: u32,
+    column: u32,
+) -> vec2f {
+    if (coverPolicy.elevationBoundsMode == 0u) {
+        return vec2f(
+            coverPolicy.minimumElevationMeters,
+            coverPolicy.maximumElevationMeters,
+        );
+    }
+    let sourceLevel = min(matrixLevel, coverPolicy.sourceMaximumMatrixLevel);
+    let shift = matrixLevel - sourceLevel;
+    let sourceRow = row >> shift;
+    let sourceColumn = column >> shift;
+    let limit = coverLimit(sourceLevel);
+    let width = limit.maxTileCol - limit.minTileCol + 1u;
+    let index = limit.elevationBoundsOffset +
+        (sourceRow - limit.minTileRow) * width +
+        (sourceColumn - limit.minTileCol);
+    let bounds = elevationBounds[index];
+    return vec2f(bounds.minimumElevationMeters, bounds.maximumElevationMeters);
+}
+
 fn coverPatchBounds(
     matrixLevel: u32,
     row: u32,
@@ -141,14 +167,15 @@ fn coverPatchBounds(
     let maximumX = coverRelativeQuantaMeters(east, cameraX);
     let maximumY = coverRelativeQuantaMeters(cameraY, north);
     let minimumY = coverRelativeQuantaMeters(cameraY, south);
+    let elevation = coverPatchElevationBounds(matrixLevel, row, column);
     let minimumZ = coverSubtractExpansions(
-        coverPolicy.minimumElevationMeters,
+        elevation.x,
         0.0f,
         mapMeta.cameraHigh.z,
         mapMeta.cameraLow.z,
     );
     let maximumZ = coverSubtractExpansions(
-        coverPolicy.maximumElevationMeters,
+        elevation.y,
         0.0f,
         mapMeta.cameraHigh.z,
         mapMeta.cameraLow.z,

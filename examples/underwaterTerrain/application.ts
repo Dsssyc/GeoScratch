@@ -153,6 +153,7 @@ export async function startUnderwaterTerrainApplication(
                 transitionTexels: 16,
             },
             elevationRangeMeters,
+            elevationBounds: source.elevationBounds,
             exaggeration: TERRAIN_EXAGGERATION,
             variableLodPitchThresholdRadians: options.variableLodPitchThresholdRadians,
             presentations: [

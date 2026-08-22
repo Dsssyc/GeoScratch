@@ -22,6 +22,7 @@ import { throwGeoDiagnostic } from './diagnostics.js'
 import type { GeoViewSnapshot } from './geo-view.js'
 import {
     gpuWebMercatorQuadCoverDemandCodec,
+    gpuWebMercatorQuadCoverElevationBoundsCodec,
     gpuWebMercatorQuadCoverLimitCodec,
     gpuWebMercatorQuadCoverLookupEntryCodec,
     gpuWebMercatorQuadCoverMapMetaCodec,
@@ -68,6 +69,7 @@ export type GpuWebMercatorQuadCoverDescriptor = Readonly<{
     spatialProfile: WebMercatorPlanarTileSpatialProfile
     policy: GpuWebMercatorQuadCoverPolicy
     elevationRangeMeters: readonly [number, number]
+    elevationBounds?: readonly WebMercatorTileElevationBounds[]
     vertexCount: number
 }>
 
@@ -156,6 +158,9 @@ export type GpuWebMercatorQuadCoverFacts = Readonly<{
     policy: GpuWebMercatorQuadCoverPolicy
     lookupCapacity: number
     coverageLimitCount: number
+    elevationBoundsMode: 'global' | 'hierarchy'
+    elevationBoundCount: number
+    elevationBoundsBufferId: string
     parity: readonly Readonly<{
         parity: 0 | 1
         mapMetaBufferId: string
@@ -269,6 +274,11 @@ function positiveSafeInteger(value: number): boolean {
     return Number.isSafeInteger(value) && value > 0
 }
 
+function nonNegativeSafeInteger(value: number): boolean {
+
+    return Number.isSafeInteger(value) && value >= 0
+}
+
 function positiveFinite(value: number): boolean {
 
     return Number.isFinite(value) && value > 0
@@ -282,6 +292,7 @@ export class GpuWebMercatorQuadCover {
     readonly descriptor: GpuWebMercatorQuadCoverDescriptor
     readonly #policy: BufferResource
     readonly #coverageLimits: BufferResource
+    readonly #elevationBounds: BufferResource
     readonly #pass: ComputePassSpec
     readonly #templates: readonly [ParityTemplate, ParityTemplate]
     readonly #initializationClears: readonly ClearBufferCommand[]
@@ -300,6 +311,7 @@ export class GpuWebMercatorQuadCover {
         state: Readonly<{
             policy: BufferResource
             coverageLimits: BufferResource
+            elevationBounds: BufferResource
             pass: ComputePassSpec
             templates: readonly [ParityTemplate, ParityTemplate]
             initializationClears: readonly ClearBufferCommand[]
@@ -315,6 +327,7 @@ export class GpuWebMercatorQuadCover {
         this.descriptor = descriptor
         this.#policy = state.policy
         this.#coverageLimits = state.coverageLimits
+        this.#elevationBounds = state.elevationBounds
         this.#pass = state.pass
         this.#templates = state.templates
         this.#initializationClears = state.initializationClears
@@ -338,13 +351,30 @@ export class GpuWebMercatorQuadCover {
 
         const descriptor = snapshotDescriptor(runtime, input)
         const lookupCapacity = nextPowerOfTwo(descriptor.policy.maximumPatches * 2)
-        const limits = descriptor.spatialProfile.coverage.limits.map(limit => ({
-            matrixLevel: Number(limit.matrixId),
-            minTileRow: limit.minTileRow,
-            maxTileRow: limit.maxTileRow,
-            minTileCol: limit.minTileCol,
-            maxTileCol: limit.maxTileCol,
-        }))
+        let elevationBoundsOffset = 0
+        const limits = descriptor.spatialProfile.coverage.limits.map(limit => {
+            const record = {
+                matrixLevel: Number(limit.matrixId),
+                minTileRow: limit.minTileRow,
+                maxTileRow: limit.maxTileRow,
+                minTileCol: limit.minTileCol,
+                maxTileCol: limit.maxTileCol,
+                elevationBoundsOffset,
+            }
+            elevationBoundsOffset += (limit.maxTileRow - limit.minTileRow + 1) *
+                (limit.maxTileCol - limit.minTileCol + 1)
+            return record
+        })
+        const elevationBoundsMode = descriptor.elevationBounds === undefined
+            ? 'global' as const
+            : 'hierarchy' as const
+        const elevationBounds = descriptor.elevationBounds ?? [ {
+            matrixLevel: descriptor.policy.minimumMatrixLevel,
+            tileRow: 0,
+            tileCol: 0,
+            minimumElevationMeters: descriptor.elevationRangeMeters[0],
+            maximumElevationMeters: descriptor.elevationRangeMeters[1],
+        } ]
         const patchBytes = checkedProduct(
             descriptor.policy.maximumPatches,
             gpuWebMercatorQuadCoverPatchCodec.byteLength()
@@ -373,6 +403,12 @@ export class GpuWebMercatorQuadCover {
                 size: limits.length * gpuWebMercatorQuadCoverLimitCodec.byteLength(),
                 usage: BUFFER_COPY_DST | BUFFER_STORAGE,
             }))
+            const elevationBoundsBuffer = own(await runtime.createBuffer({
+                label: 'GPU WebMercatorQuad elevation bounds',
+                size: elevationBounds.length *
+                    gpuWebMercatorQuadCoverElevationBoundsCodec.byteLength(),
+                usage: BUFFER_COPY_DST | BUFFER_STORAGE,
+            }))
             const policyUpload = own(runtime.createUploadCommand({
                 label: 'Upload GPU WebMercatorQuad cover policy',
                 target: policy.region({
@@ -394,6 +430,7 @@ export class GpuWebMercatorQuadCover {
                     refinementTolerance: descriptor.policy.refinementTolerance,
                     variableLodPitchThresholdRadians:
                         descriptor.policy.variableLodPitchThresholdRadians,
+                    elevationBoundsMode: elevationBoundsMode === 'hierarchy' ? 1 : 0,
                 }),
             }))
             const limitsUpload = own(runtime.createUploadCommand({
@@ -402,6 +439,15 @@ export class GpuWebMercatorQuadCover {
                     layout: gpuWebMercatorQuadCoverLimitCodec.artifact,
                 }),
                 data: gpuWebMercatorQuadCoverLimitCodec.uploadView(limits),
+            }))
+            const elevationBoundsUpload = own(runtime.createUploadCommand({
+                label: 'Upload GPU WebMercatorQuad elevation bounds',
+                target: elevationBoundsBuffer.region({
+                    layout: gpuWebMercatorQuadCoverElevationBoundsCodec.artifact,
+                }),
+                data: gpuWebMercatorQuadCoverElevationBoundsCodec.uploadView(
+                    elevationBounds
+                ),
             }))
             const parityResources = await Promise.all([ 0, 1 ].map(
                 async parityValue => {
@@ -465,6 +511,9 @@ export class GpuWebMercatorQuadCover {
                             gpuWebMercatorQuadCoverLimitCodec.wgslAccessors({
                                 namespace: 'GpuWebMercatorQuadCoverLimit',
                             }),
+                            gpuWebMercatorQuadCoverElevationBoundsCodec.wgslAccessors({
+                                namespace: 'GpuWebMercatorQuadCoverElevationBounds',
+                            }),
                             gpuWebMercatorQuadCoverLookupEntryCodec.wgslAccessors({
                                 namespace: 'GpuWebMercatorQuadCoverLookupEntry',
                             }),
@@ -479,6 +528,7 @@ export class GpuWebMercatorQuadCover {
                             ...shared.layoutDependencies,
                             gpuWebMercatorQuadCoverPolicyCodec.artifact,
                             gpuWebMercatorQuadCoverLimitCodec.artifact,
+                            gpuWebMercatorQuadCoverElevationBoundsCodec.artifact,
                             gpuWebMercatorQuadCoverLookupEntryCodec.artifact,
                             gpuWebMercatorQuadCoverStateCodec.artifact,
                             gpuWebMercatorQuadCoverDemandCodec.artifact,
@@ -507,16 +557,22 @@ export class GpuWebMercatorQuadCover {
                         gpuWebMercatorQuadCoverPolicyCodec.byteLength()
                     ),
                     binding(2, 'coverageLimits', 'read-storage', coverageLimits.size),
-                    binding(3, 'coverPatches', 'storage', patchBytes),
-                    binding(4, 'coverLookup', 'storage', lookupBytes),
                     binding(
-                        5,
+                        3,
+                        'elevationBounds',
+                        'read-storage',
+                        elevationBoundsBuffer.size
+                    ),
+                    binding(4, 'coverPatches', 'storage', patchBytes),
+                    binding(5, 'coverLookup', 'storage', lookupBytes),
+                    binding(
+                        6,
                         'coverState',
                         'storage',
                         gpuWebMercatorQuadCoverStateCodec.byteLength()
                     ),
-                    binding(6, 'coverDemands', 'storage', demandBytes),
-                    binding(7, 'drawArguments', 'storage', DRAW_ARGUMENT_BYTES),
+                    binding(7, 'coverDemands', 'storage', demandBytes),
+                    binding(8, 'drawArguments', 'storage', DRAW_ARGUMENT_BYTES),
                 ],
             }))
             const program = own(runtime.createProgram({
@@ -546,6 +602,9 @@ export class GpuWebMercatorQuadCover {
                         coverageLimits: coverageLimits.region({
                             layout: gpuWebMercatorQuadCoverLimitCodec.artifact,
                         }),
+                        elevationBounds: elevationBoundsBuffer.region({
+                            layout: gpuWebMercatorQuadCoverElevationBoundsCodec.artifact,
+                        }),
                         coverPatches: resources.patches.region({
                             layout: gpuWebMercatorQuadCoverPatchCodec.artifact,
                         }),
@@ -571,6 +630,7 @@ export class GpuWebMercatorQuadCover {
                             resources.mapMeta,
                             policy,
                             coverageLimits,
+                            elevationBoundsBuffer,
                             resources.patches,
                             resources.lookup,
                             resources.state,
@@ -636,11 +696,16 @@ export class GpuWebMercatorQuadCover {
                     })
                 }
             )) as unknown as readonly [ParityTemplate, ParityTemplate]
-            const initializationUploads = Object.freeze([ policyUpload, limitsUpload ])
+            const initializationUploads = Object.freeze([
+                policyUpload,
+                limitsUpload,
+                elevationBoundsUpload,
+            ])
             const identity: GpuWebMercatorQuadCoverIdentityObjects = Object.freeze({
                 resources: Object.freeze([
                     policy,
                     coverageLimits,
+                    elevationBoundsBuffer,
                     ...parityResources.flatMap(resources => [
                         resources.mapMeta,
                         resources.patches,
@@ -668,6 +733,7 @@ export class GpuWebMercatorQuadCover {
             const cover = new GpuWebMercatorQuadCover(runtime, descriptor, {
                 policy,
                 coverageLimits,
+                elevationBounds: elevationBoundsBuffer,
                 pass,
                 templates,
                 initializationClears,
@@ -940,6 +1006,11 @@ export class GpuWebMercatorQuadCover {
             policy: this.descriptor.policy,
             lookupCapacity: this.#lookupCapacity,
             coverageLimitCount: this.descriptor.spatialProfile.coverage.limits.length,
+            elevationBoundsMode: this.descriptor.elevationBounds === undefined
+                ? 'global' as const
+                : 'hierarchy' as const,
+            elevationBoundCount: this.descriptor.elevationBounds?.length ?? 0,
+            elevationBoundsBufferId: this.#elevationBounds.id,
             parity: Object.freeze(this.#templates.map(template => Object.freeze({
                 parity: template.resources.parity,
                 mapMetaBufferId: template.resources.mapMeta.id,
@@ -1186,15 +1257,62 @@ function snapshotDescriptor(
             actual: input,
         })
     }
+    const elevationRangeMeters = Object.freeze([
+        input.elevationRangeMeters[0],
+        input.elevationRangeMeters[1],
+    ]) as readonly [number, number]
+    const elevationBounds = snapshotElevationBounds(
+        input.elevationBounds,
+        limits,
+        elevationRangeMeters
+    )
     return Object.freeze({
         spatialProfile,
         policy,
-        elevationRangeMeters: Object.freeze([
-            input.elevationRangeMeters[0],
-            input.elevationRangeMeters[1],
-        ]) as readonly [number, number],
+        elevationRangeMeters,
+        ...(elevationBounds === undefined ? {} : { elevationBounds }),
         vertexCount: input.vertexCount,
     })
+}
+
+function snapshotElevationBounds(
+    input: readonly WebMercatorTileElevationBounds[] | undefined,
+    limits: WebMercatorPlanarTileSpatialProfile['coverage']['limits'],
+    globalRange: readonly [number, number]
+): readonly WebMercatorTileElevationBounds[] | undefined {
+
+    if (input === undefined) return undefined
+    const expected = limits.flatMap(limit =>
+        Array.from(
+            { length: limit.maxTileRow - limit.minTileRow + 1 },
+            (_, rowOffset) => Array.from(
+                { length: limit.maxTileCol - limit.minTileCol + 1 },
+                (_, colOffset) => `${limit.matrixId}/` +
+                    `${limit.minTileRow + rowOffset}/${limit.minTileCol + colOffset}`
+            )
+        ).flat()
+    )
+    const valid = input.length === expected.length && input.every((entry, index) =>
+        level(entry?.matrixLevel) && nonNegativeSafeInteger(entry?.tileRow) &&
+        nonNegativeSafeInteger(entry?.tileCol) &&
+        `${entry.matrixLevel}/${entry.tileRow}/${entry.tileCol}` === expected[index] &&
+        Number.isFinite(entry.minimumElevationMeters) &&
+        Number.isFinite(entry.maximumElevationMeters) &&
+        entry.minimumElevationMeters <= entry.maximumElevationMeters &&
+        entry.minimumElevationMeters >= globalRange[0] &&
+        entry.maximumElevationMeters <= globalRange[1]
+    )
+    if (!valid) {
+        return throwGeoDiagnostic({
+            code: 'GEO_WEB_MERCATOR_COVER_ELEVATION_BOUNDS_INVALID',
+            phase: 'selection',
+            subject: { kind: 'web-mercator-quad-cover' },
+            message: 'WebMercatorQuad elevation bounds must exactly cover declared source tiles.',
+            expected: { tileKeys: expected, globalRange },
+            actual: input,
+        })
+    }
+    return Object.freeze(input.map(entry => Object.freeze({ ...entry })))
 }
 
 function validateView(view: GeoViewSnapshot): void {

@@ -65,6 +65,7 @@ import {
     type TiledFieldRepresentation,
     type WideFixedPosition,
     type WebMercatorQuadPosition,
+    type WebMercatorTileElevationBounds,
     type WebMercatorVirtualRasterField,
     type WebMercatorVirtualRasterFieldDescriptor,
     type WebMercatorVirtualRasterWgslModule,
@@ -585,10 +586,18 @@ const typedCoverPolicy: GpuWebMercatorQuadCoverPolicy =
         refinementTolerance: 0.005,
         variableLodPitchThresholdRadians: Math.PI / 3,
     })
+const typedElevationBounds: readonly WebMercatorTileElevationBounds[] = [ {
+    matrixLevel: 0,
+    tileRow: 0,
+    tileCol: 0,
+    minimumElevationMeters: -100,
+    maximumElevationMeters: 8_000,
+} ]
 const typedCoverDescriptor: GpuWebMercatorQuadCoverDescriptor = {
     spatialProfile: typedFrontierSpatialProfile,
     policy: typedCoverPolicy,
     elevationRangeMeters: [ -100, 8_000 ],
+    elevationBounds: typedElevationBounds,
     vertexCount: 24_576,
 }
 declare const typedCoverRuntime: scr.GPURuntime

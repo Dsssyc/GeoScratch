@@ -45,6 +45,8 @@ function fixture(options = {}) {
     const spatialProfile = webMercatorPlanarTileSpatialProfile({
         addressCodec: webMercatorQuadAddressCodec({ coverage }),
     })
+    const elevationRangeMeters = options.elevationRangeMeters ?? [ -120, 30 ]
+    const elevationBounds = options.elevationBounds
     const policy = gpuWebMercatorQuadCoverPolicy({
         minimumMatrixLevel,
         maximumMatrixLevel,
@@ -108,11 +110,32 @@ function fixture(options = {}) {
             policy,
             view: currentView,
             visibleBounds,
-            elevationRangeMeters: [ -120, 30 ],
+            elevationRangeMeters,
+            ...(elevationBounds === undefined ? {} : { elevationBounds }),
         })
     }
 
-    return { spatialProfile, policy, view, evaluate }
+    return { spatialProfile, policy, elevationRangeMeters, elevationBounds, view, evaluate }
+}
+
+function flatElevationBounds(setup, elevation = 0) {
+
+    return setup.spatialProfile.coverage.limits.flatMap(limit => {
+        const matrixLevel = Number(limit.matrixId)
+        return Array.from(
+            { length: limit.maxTileRow - limit.minTileRow + 1 },
+            (_, rowOffset) => Array.from(
+                { length: limit.maxTileCol - limit.minTileCol + 1 },
+                (_, colOffset) => ({
+                    matrixLevel,
+                    tileRow: limit.minTileRow + rowOffset,
+                    tileCol: limit.minTileCol + colOffset,
+                    minimumElevationMeters: elevation,
+                    maximumElevationMeters: elevation,
+                })
+            )
+        ).flat()
+    })
 }
 
 function visibleBoundsForView(view) {
@@ -329,6 +352,38 @@ describe('GPU WebMercatorQuad inverse cover reference', () => {
             expect(result.facts.minimumMatrixLevel).to.equal(zoom)
             expect(result.facts.maximumMatrixLevel).to.equal(zoom)
         }
+    })
+
+    it('uses complete immutable tile bounds instead of unrelated global extremes', () => {
+
+        const globalSetup = fixture({
+            sourceMaximumMatrixLevel: 2,
+            maximumMatrixLevel: 4,
+            elevationRangeMeters: [ 0, 10_000_000 ],
+        })
+        const hierarchySetup = fixture({
+            sourceMaximumMatrixLevel: 2,
+            maximumMatrixLevel: 4,
+            elevationRangeMeters: [ 0, 10_000_000 ],
+            elevationBounds: flatElevationBounds(globalSetup),
+        })
+        const globalResult = globalSetup.evaluate({
+            currentView: globalSetup.view({ zoom: 2, pitch: 0 }),
+        })
+        const hierarchyResult = hierarchySetup.evaluate({
+            currentView: hierarchySetup.view({ zoom: 2, pitch: 0 }),
+        })
+
+        expect(globalResult.facts.elevationBoundsMode).to.equal('global')
+        expect(hierarchyResult.facts).to.deep.include({
+            elevationBoundsMode: 'hierarchy',
+            elevationBoundCount: 21,
+            minimumMatrixLevel: 2,
+            maximumMatrixLevel: 2,
+        })
+        expect(globalResult.facts.maximumMatrixLevel).to.be.greaterThan(
+            hierarchyResult.facts.maximumMatrixLevel
+        )
     })
 
     it('keeps equal-distance samples symmetric at odd camera tile indices', () => {
@@ -651,6 +706,50 @@ describe('GPU WebMercatorQuad inverse cover lowering', () => {
         expect(fake.calls.dispatchCalls).to.have.length(1)
 
         token.dispose()
+        cover.dispose()
+        await runtime.dispose()
+    })
+
+    it('owns one complete immutable elevation hierarchy and rejects partial metadata', async() => {
+
+        const base = fixture({
+            sourceMaximumMatrixLevel: 2,
+            maximumMatrixLevel: 4,
+            maximumPatches: 64,
+        })
+        const elevationBounds = flatElevationBounds(base)
+        const fake = createFakeGpu()
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
+        const cover = await GpuWebMercatorQuadCover.create(runtime, {
+            spatialProfile: base.spatialProfile,
+            policy: base.policy,
+            elevationRangeMeters: base.elevationRangeMeters,
+            elevationBounds,
+            vertexCount: 98_304,
+        })
+
+        expect(cover.facts()).to.deep.include({
+            elevationBoundsMode: 'hierarchy',
+            elevationBoundCount: elevationBounds.length,
+        })
+        expect(cover.identityObjects().resources.some(resource =>
+            resource.label === 'GPU WebMercatorQuad elevation bounds'
+        )).to.equal(true)
+
+        let partialFailure
+        try {
+            await GpuWebMercatorQuadCover.create(runtime, {
+                spatialProfile: base.spatialProfile,
+                policy: base.policy,
+                elevationRangeMeters: base.elevationRangeMeters,
+                elevationBounds: elevationBounds.slice(1),
+                vertexCount: 98_304,
+            })
+        } catch (error) {
+            partialFailure = error
+        }
+        expect(partialFailure).to.be.instanceOf(Error)
+
         cover.dispose()
         await runtime.dispose()
     })

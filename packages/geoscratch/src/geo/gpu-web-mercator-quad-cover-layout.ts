@@ -40,6 +40,7 @@ export const gpuWebMercatorQuadCoverPolicyCodec = layoutCodec({
         { name: 'maximumCellSpanReferencePixels', type: 'f32' },
         { name: 'refinementTolerance', type: 'f32' },
         { name: 'variableLodPitchThresholdRadians', type: 'f32' },
+        { name: 'elevationBoundsMode', type: 'u32' },
     ],
 }, { usage: [ 'uniform', 'storage', 'readback' ] })
 
@@ -51,6 +52,15 @@ export const gpuWebMercatorQuadCoverLimitCodec = layoutCodec({
         { name: 'maxTileRow', type: 'u32' },
         { name: 'minTileCol', type: 'u32' },
         { name: 'maxTileCol', type: 'u32' },
+        { name: 'elevationBoundsOffset', type: 'u32' },
+    ],
+}, { usage: [ 'storage', 'readback' ] })
+
+export const gpuWebMercatorQuadCoverElevationBoundsCodec = layoutCodec({
+    name: 'GpuWebMercatorQuadCoverElevationBounds',
+    fields: [
+        { name: 'minimumElevationMeters', type: 'f32' },
+        { name: 'maximumElevationMeters', type: 'f32' },
     ],
 }, { usage: [ 'storage', 'readback' ] })
 

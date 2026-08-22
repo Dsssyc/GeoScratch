@@ -19,6 +19,7 @@ import {
     type GpuWebMercatorQuadCoverFeedback,
     type GpuWebMercatorQuadCoverFrame,
     type GpuWebMercatorQuadCoverSelectionFacts,
+    type WebMercatorTileElevationBounds,
 } from './gpu-web-mercator-quad-cover.js'
 import type {
     GeoViewSnapshot,
@@ -227,6 +228,7 @@ export type WebMercatorTerrainRendererDescriptor<
     presentationShader: string
     fieldSampling: WebMercatorTerrainSamplingWgslOptions
     elevationRangeMeters: readonly [number, number]
+    elevationBounds?: readonly WebMercatorTileElevationBounds[]
     exaggeration?: number
     /** Pitch boundary below which the complete visible footprint uses one geometry level. */
     variableLodPitchThresholdRadians?: number
@@ -361,6 +363,7 @@ export async function createWebMercatorTerrainRenderer<
     presentationShader,
     fieldSampling,
     elevationRangeMeters,
+    elevationBounds,
     exaggeration = 1,
     variableLodPitchThresholdRadians = TERRAIN_VARIABLE_LOD_PITCH_THRESHOLD_RADIANS,
     presentations,
@@ -393,6 +396,19 @@ export async function createWebMercatorTerrainRenderer<
         elevationRangeMeters,
         exaggeration
     )
+    const exaggeratedElevationBounds = elevationBounds?.map(bounds => {
+        const range = scaleElevationRange([
+            bounds.minimumElevationMeters,
+            bounds.maximumElevationMeters,
+        ], exaggeration)
+        return Object.freeze({
+            matrixLevel: bounds.matrixLevel,
+            tileRow: bounds.tileRow,
+            tileCol: bounds.tileCol,
+            minimumElevationMeters: range[0],
+            maximumElevationMeters: range[1],
+        })
+    })
     const sourceMatrixLevels = virtualRaster.coverage.limits.map(limit =>
         Number(limit.matrixId)
     )
@@ -414,6 +430,9 @@ export async function createWebMercatorTerrainRenderer<
             variableLodPitchThresholdRadians,
         }),
         elevationRangeMeters: exaggeratedElevationRange,
+        ...(exaggeratedElevationBounds === undefined
+            ? {}
+            : { elevationBounds: exaggeratedElevationBounds }),
         vertexCount: geometry.vertexCount,
     })
     const renderTemplates = createRenderTemplates(cover)
