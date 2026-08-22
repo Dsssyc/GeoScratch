@@ -2,7 +2,7 @@
 docId: geo.views-frames.zh
 canonical: false
 translationOf: ./views-frames.md
-canonicalDigest: cf95524843ef1d730f8e1560720bb7a43f59fc554358845266a379f8ee1f2554
+canonicalDigest: e056efd9b9153c512101194eafaaffa40d566ff8125ed8bb1d878b6512f86e08
 ---
 # 视图与帧控制
 
@@ -117,3 +117,8 @@ layer、listener、capture 与 callback。
 
 Driver 同步的是 frame authority，并不会合并 rendering context。独立 WebGPU canvas 仍不与
 MapLibre 的 WebGL context、render pass、depth buffer 或 atomic presentation 共享状态。
+
+相关决策：`docs/decisions/ADR-080-geo-view-source-terrain-frame-composition.md`
+定义 view source 与 frame composition；
+`docs/decisions/ADR-084-reference-pixel-terrain-lod.md` 区分逻辑 reference pixel
+与物理 presentation pixel。

@@ -73,3 +73,9 @@ the Underwater Terrain application uses a measured two-frame in-flight bound.
 The renderer does not own a map host, controller, source manifest, URL policy, Worker
 system, decoder, or persistent cache choice. Those remain explicit application
 composition.
+
+Related decisions: `docs/decisions/ADR-074-webmercator-terrain-wgsl-ownership.md`
+assigns terrain vertex and stitching ownership;
+`docs/decisions/ADR-083-webmercator-inverse-cover-passive-virtual-raster.md`
+defines inverse-cover composition; `docs/decisions/ADR-084-reference-pixel-terrain-lod.md`
+defines reference-pixel quality and immutable elevation bounds.

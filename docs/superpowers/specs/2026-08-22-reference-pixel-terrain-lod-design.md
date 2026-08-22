@@ -2,8 +2,9 @@
 
 ## Status
 
-Approved for implementation on 2026-08-22. This design refines the projected-cell
-cover accepted in
+Implemented and verified on 2026-08-22. This English document is canonical; the paired
+Chinese document is a reviewed translation, and English governs conflicts. This design
+refines the projected-cell cover accepted in
 `2026-08-19-webmercator-projected-cell-pitch-gated-cover-design.md`; it does not
 restore root-forward traversal or give Virtual Raster LoD authority.
 
@@ -26,16 +27,26 @@ expands otherwise shallow patch bounds and can inflate top-down coverage.
 
 ## External Evidence
 
-Mapbox GL JS 3.29 stores transform width and height without pixel ratio, defines
-cover `tileSize` in screen pixels, and multiplies only the canvas and painter extent
-by device pixel ratio. MapLibre uses the same separation and tests that a 512 by 512
-container with pixel ratio two produces a 1024 by 1024 painter and canvas. Both keep
-canonical tile identity independent from DPR. Raster `@2x` is a representation
-variant of the same `(z, x, y)` tile, and Mapbox does not request a 2x Raster DEM.
+Mapbox GL JS 3.29 stores [transform width and height without pixel ratio](https://github.com/mapbox/mapbox-gl-js/blob/v3.29.0/src/geo/transform.ts#L97-L99),
+defines cover `tileSize` in screen pixels, and multiplies only the
+[painter extent](https://github.com/mapbox/mapbox-gl-js/blob/v3.29.0/src/render/painter.ts#L518-L525)
+and canvas by device pixel ratio. MapLibre uses the same separation and
+[tests](https://github.com/maplibre/maplibre-gl-js/blob/v4.7.1/src/ui/map_tests/map_pixel_ratio.test.ts#L21-L37)
+that a 512 by 512 container with pixel ratio two produces a 1024 by 1024 painter and
+canvas. Both keep canonical tile identity independent from DPR. Raster `@2x` is a
+representation variant of the same `(z, x, y)` tile, while Mapbox's
+[Raster DEM path explicitly disables the 2x URL variant](https://github.com/mapbox/mapbox-gl-js/blob/v3.29.0/src/source/raster_dem_tile_source.ts#L67-L71).
 
-Mapbox also guards terrain split boundaries with a small numerical tolerance and
-uses per-tile elevation bounds when available. MapLibre 4.7.1 and current MapLibre
-use a 128-cell terrain mesh for a 512-screen-pixel tile.
+Mapbox also guards terrain split boundaries with a
+[small numerical tolerance](https://github.com/mapbox/mapbox-gl-js/blob/v3.29.0/src/geo/transform.ts#L1315-L1320)
+and uses [per-tile elevation bounds when available](https://github.com/mapbox/mapbox-gl-js/blob/v3.29.0/src/geo/transform.ts#L1392-L1408).
+MapLibre 4.7.1 fixes the logical tile convention at
+[512 pixels](https://github.com/maplibre/maplibre-gl-js/blob/v4.7.1/src/geo/transform.ts#L77-L79)
+and sets the terrain mesh to
+[128 cells](https://github.com/maplibre/maplibre-gl-js/blob/v4.7.1/src/render/terrain.ts#L138-L145).
+The separately inspected MapLibre commit
+[`49491068aff0f1801c942de1bdc9da5ada0297b0`](https://github.com/maplibre/maplibre-gl-js/blob/49491068aff0f1801c942de1bdc9da5ada0297b0/src/render/terrain.ts#L153-L160)
+retains the 128-cell terrain mesh; the design does not rely on a floating `main` claim.
 
 ## Pixel Domains
 
@@ -103,9 +114,9 @@ At or above the pitch boundary, variable mode retains direct inverse level probi
 projected-cell evidence, prefix-free output, and 2:1 closure. It uses the same
 reference-pixel threshold and tolerance. DPR never enters either mode.
 
-The public policy and feedback names use `ReferencePixels`. The old
-`maximumCellSpanPixels`, `minimumCellSpanPixels`, and `maximumCellSpanPixels` feedback
-names are removed rather than deprecated.
+The public policy and feedback names use `ReferencePixels`. The old ambiguous
+`maximumCellSpanPixels` policy/feedback field and `minimumCellSpanPixels` feedback field
+are removed rather than deprecated.
 
 ## Immutable Elevation Bounds
 
@@ -174,4 +185,3 @@ LoD abstraction is added.
 - Typecheck, documentation generation/checks, all unit tests, package/example build,
   wide browser proof, streaming proof, lifecycle proof, and 90-frame shaded and
   wireframe benchmarks pass.
-

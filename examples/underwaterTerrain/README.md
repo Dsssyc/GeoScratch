@@ -57,6 +57,11 @@ the page, alter cache query parameters, or rebuild the virtual raster.
 
 ## Data and geometry LoD
 
+Current library contracts are documented in [Views and frame control](../../docs/api/geo/views-frames.md),
+[WebMercatorQuad view cover](../../docs/api/geo/view-cover.md), and
+[Terrain rendering](../../docs/api/geo/terrain-rendering.md). The pixel-domain and
+quality rationale is recorded in [ADR-084](../../docs/decisions/ADR-084-reference-pixel-terrain-lod.md).
+
 The manifest declares source pages through z10. `GpuWebMercatorQuadCover` independently
 selects geometry through z14, but every output remains a standard
 `(tileMatrix, tileRow, tileCol)` identity. Camera/view-derived windows select from the

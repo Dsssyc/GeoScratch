@@ -129,3 +129,8 @@ and [current CustomLayerInterface documentation](https://maplibre.org/maplibre-g
 The driver synchronizes frame authority; it does not merge rendering contexts. A separate
 WebGPU canvas still does not share MapLibre's WebGL context, render pass, depth buffer, or
 atomic presentation.
+
+Related decisions: `docs/decisions/ADR-080-geo-view-source-terrain-frame-composition.md`
+defines view-source and frame composition;
+`docs/decisions/ADR-084-reference-pixel-terrain-lod.md` separates logical reference
+pixels from physical presentation pixels.

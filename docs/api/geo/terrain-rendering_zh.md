@@ -2,7 +2,7 @@
 docId: geo.terrain-rendering.zh
 canonical: false
 translationOf: ./terrain-rendering.md
-canonicalDigest: 1fac14bb03322809f0656c7fbef495927ea7bd143fcc06ca066402cc51fc910c
+canonicalDigest: a672292e4e66b3bb8307ee9af8f2825aaf54f851f6389206e8876730ade6bb48
 ---
 # 地形渲染
 
@@ -60,3 +60,9 @@ parity；Underwater Terrain 应用使用经过测量的两帧 in-flight 上限�
 
 Renderer 不拥有 map host、controller、source manifest、URL policy、Worker system、
 decoder 或 persistent cache 选择；这些继续由应用显式组合。
+
+相关决策：`docs/decisions/ADR-074-webmercator-terrain-wgsl-ownership.md`
+规定 terrain vertex 与 stitching 的归属；
+`docs/decisions/ADR-083-webmercator-inverse-cover-passive-virtual-raster.md`
+定义 inverse-cover composition；`docs/decisions/ADR-084-reference-pixel-terrain-lod.md`
+定义 reference-pixel 质量与不可变高程 bounds。

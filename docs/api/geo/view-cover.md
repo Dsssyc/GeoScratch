@@ -75,3 +75,9 @@ minimum/maximum pair for every source tile. Geometry above the source ceiling us
 source-ceiling ancestor. Partial hierarchies are invalid; an omitted hierarchy uses the
 global descriptor range. Cover facts expose hierarchy/global mode and record count.
 Residency, request completion, cache hits, and atlas contents cannot alter these bounds.
+
+Related decisions:
+`docs/decisions/ADR-083-webmercator-inverse-cover-passive-virtual-raster.md`
+establishes inverse cover and passive Virtual Raster authority;
+`docs/decisions/ADR-084-reference-pixel-terrain-lod.md` defines the reference-pixel
+quality model and immutable elevation hierarchy.

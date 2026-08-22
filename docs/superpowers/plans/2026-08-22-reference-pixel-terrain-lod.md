@@ -1,6 +1,10 @@
 # Reference-Pixel Terrain LoD Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Completed checkbox (`- [x]`) state is retained as execution evidence.
+
+**Status:** Completed and verified on 2026-08-22. The implementation landed as the
+bounded commits `5d3e7ee` through `4f0298b`; all steps below are retained as execution
+history rather than future work.
 
 **Goal:** Make WebMercator terrain geometry and raster demand invariant under DPR while adopting a 512-reference-pixel, 128-cell terrain mesh and immutable per-tile elevation bounds.
 
@@ -29,7 +33,7 @@
 - Consumes: ADR-080 view-source composition and ADR-083 inverse-cover authority.
 - Produces: exact naming, policy constants, elevation hierarchy, cleanup, and acceptance constraints for all later tasks.
 
-- [ ] **Step 1: Self-review the spec and ADR**
+- [x] **Step 1: Self-review the spec and ADR**
 
 Run:
 
@@ -41,7 +45,7 @@ rg -n 'TBD|TODO|implement later|fill in|compatibility alias' \
 
 Expected: no placeholder; only the explicit statement that compatibility aliases are absent.
 
-- [ ] **Step 2: Check formatting and commit**
+- [x] **Step 2: Check formatting and commit**
 
 ```bash
 git diff --check
@@ -66,7 +70,7 @@ git commit -m "Define reference-pixel terrain LoD"
 - Produces: `GeoViewSnapshot.referenceViewport`, `GeoViewSourceCapture.presentationSize`, and `MapLibrePlanarViewSourceDescriptor.presentationSize()`.
 - Consumes: `map.transform.width/height` as MapLibre reference pixels and application canvas backing size as presentation pixels.
 
-- [ ] **Step 1: Write failing source-separation tests**
+- [x] **Step 1: Write failing source-separation tests**
 
 Add a MapLibre source case where transform size is 1280 by 800 and presentation size is 2560 by 1600. Assert:
 
@@ -77,7 +81,7 @@ expect(captured).not.to.have.property('size')
 expect(captured.view).not.to.have.property('viewport')
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 ```bash
 npm --workspace geoscratch run build
@@ -86,7 +90,7 @@ npx mocha tests/geo-planar-view-stability.test.js tests/geo-view-demand.test.js
 
 Expected: failures for missing clean-cut fields.
 
-- [ ] **Step 3: Implement the clean cut**
+- [x] **Step 3: Implement the clean cut**
 
 Rename public types and validation to the approved fields. In `mapLibrePlanarViewSource.capture()` read:
 
@@ -104,7 +108,7 @@ return {
 
 The renderer resizes from `capture.presentationSize`; the cover map-meta upload reads `view.referenceViewport`.
 
-- [ ] **Step 4: Remove old names and verify GREEN**
+- [x] **Step 4: Remove old names and verify GREEN**
 
 ```bash
 rg -n 'GeoViewSourceCapture<.*size|captured\.size|descriptor\.viewport|view\.viewport' \
@@ -116,7 +120,7 @@ npm run typecheck
 
 Expected: no old Geo view/presentation names; focused tests and typecheck pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/geoscratch/src/geo examples/underwaterTerrain/application.ts tests
@@ -139,7 +143,7 @@ git commit -m "Separate Geo view and presentation pixels"
 - Produces policy fields `referenceTileSizePixels`, `maximumCellSpanReferencePixels`, and `refinementTolerance` plus reference-pixel feedback names.
 - Produces built-in terrain constants 512, 128, 8, and 0.005.
 
-- [ ] **Step 1: Write failing policy and uniform-level tests**
+- [x] **Step 1: Write failing policy and uniform-level tests**
 
 Assert policy validation, old-name absence, and top-down levels:
 
@@ -156,7 +160,7 @@ for (const zoom of [8, 9, 10, 11, 12, 13, 14]) {
 }
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 ```bash
 npm --workspace geoscratch run build
@@ -165,7 +169,7 @@ npx mocha tests/geo-webmercator-quad-cover.test.js
 
 Expected: missing policy fields and old uniform levels.
 
-- [ ] **Step 3: Implement policy ABI and reference oracle**
+- [x] **Step 3: Implement policy ABI and reference oracle**
 
 Uniform mode uses:
 
@@ -184,12 +188,12 @@ const adjustment = maximumSpan > effectiveThreshold
 
 Mirror the same calculation in WGSL. Variable refinement compares against the same effective threshold.
 
-- [ ] **Step 4: Generate the 128-cell terrain mesh and remove 64-cell assumptions**
+- [x] **Step 4: Generate the 128-cell terrain mesh and remove 64-cell assumptions**
 
 Set the built-in sector size to 128, derive capacity from
 `cellsPerPatchEdge * maximumCellSpanReferencePixels`, and ensure all terrain WGSL receives the same value.
 
-- [ ] **Step 5: Verify GREEN and cleanup**
+- [x] **Step 5: Verify GREEN and cleanup**
 
 ```bash
 rg -n 'maximumCellSpanPixels|minimumCellSpanPixels|TERRAIN_SECTOR_SIZE = 64|\* 8' \
@@ -202,7 +206,7 @@ npm run typecheck
 
 Expected: old API names and stale 64-cell assumptions are absent; tests pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/geoscratch/src/geo tests
@@ -222,14 +226,14 @@ git commit -m "Align terrain cover with reference pixels"
 - Produces manifest schema 3 and complete `tileElevationBounds` records in unexaggerated meters.
 - Produces `DemTileSource.elevationBounds` as an immutable validated array.
 
-- [ ] **Step 1: Write failing Python and TypeScript manifest tests**
+- [x] **Step 1: Write failing Python and TypeScript manifest tests**
 
 Require one unique ordered bounds record for every tile in every declared limit, reject missing/duplicate/out-of-range records, and verify `minimumElevationMeters <= maximumElevationMeters`.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 ```bash
-examples/underwaterTerrain/tile-server/.venv/bin/pytest \
+examples/underwaterTerrain/tile-server/.venv/bin/python -m pytest \
   examples/underwaterTerrain/tile-server/tests/test_build.py -q
 npm --workspace geoscratch run build
 npx mocha tests/geo-virtual-raster-dem.test.js
@@ -237,18 +241,18 @@ npx mocha tests/geo-virtual-raster-dem.test.js
 
 Expected: schema/bounds assertions fail.
 
-- [ ] **Step 3: Generate bounds from valid COG pixels**
+- [x] **Step 3: Generate bounds from valid COG pixels**
 
 For every declared standard tile, read the COG tile mask, compute min/max valid encoded samples, convert through manifest scale/offset, sort by matrix/row/column, and write schema 3 with content-version suffix `cog-wmq-v4`.
 
-- [ ] **Step 4: Validate and snapshot bounds in the example source**
+- [x] **Step 4: Validate and snapshot bounds in the example source**
 
 The parser proves exact coverage completeness before constructing `DemTileSource`. No partial fallback or mutable map remains.
 
-- [ ] **Step 5: Verify GREEN and commit**
+- [x] **Step 5: Verify GREEN and commit**
 
 ```bash
-examples/underwaterTerrain/tile-server/.venv/bin/pytest \
+examples/underwaterTerrain/tile-server/.venv/bin/python -m pytest \
   examples/underwaterTerrain/tile-server/tests -q
 npm --workspace geoscratch run build
 npx mocha tests/geo-virtual-raster-dem.test.js
@@ -272,26 +276,26 @@ git commit -m "Publish immutable terrain elevation bounds"
 - Produces public `WebMercatorTileElevationBounds` records accepted by cover and renderer descriptors.
 - Produces cover facts `elevationBoundsMode: 'global' | 'hierarchy'` and `elevationBoundCount`.
 
-- [ ] **Step 1: Write failing hierarchy validation and selection tests**
+- [x] **Step 1: Write failing hierarchy validation and selection tests**
 
 Test complete exact metadata, partial rejection, source-ceiling ancestor resolution for z11-z14 geometry, global fallback, and a shallow tile that is no longer expanded by another tile's deep bound.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 ```bash
 npm --workspace geoscratch run build
 npx mocha tests/geo-webmercator-quad-cover.test.js
 ```
 
-- [ ] **Step 3: Add the immutable dense GPU buffer**
+- [x] **Step 3: Add the immutable dense GPU buffer**
 
 Add one codec for `{minimumElevationMeters, maximumElevationMeters}`, one offset in each coverage-limit record, one read-only binding, initialization upload, ownership facts, and command read dependencies. Geometry above the source ceiling indexes the source-ceiling ancestor.
 
-- [ ] **Step 4: Use one exact/global patch-bound resolver**
+- [x] **Step 4: Use one exact/global patch-bound resolver**
 
 Replace direct global-z construction in `coverPatchBounds()` and the CPU oracle with a shared conceptual rule. Scale hierarchy values by renderer exaggeration before cover creation.
 
-- [ ] **Step 5: Verify GREEN, lifecycle, and cleanup**
+- [x] **Step 5: Verify GREEN, lifecycle, and cleanup**
 
 ```bash
 npm --workspace geoscratch run build
@@ -303,7 +307,7 @@ npm run typecheck
 
 Expected: hierarchy and fallback tests pass; no orphan buffer, bind entry, or global-only helper remains.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/geoscratch/src/geo examples/underwaterTerrain tests
@@ -327,11 +331,11 @@ git commit -m "Use static elevation bounds in terrain cover"
 **Interfaces:**
 - Documents the exact current public contract and clean-cut names.
 
-- [ ] **Step 1: Rewrite canonical English and Chinese semantic pages**
+- [x] **Step 1: Rewrite canonical English and Chinese semantic pages**
 
 Document reference/presentation pixels, fixed page identity across DPR, 512/128 quality, tolerance, immutable hierarchy/fallback, and picking conversion boundaries.
 
-- [ ] **Step 2: Remove stale claims and regenerate facts**
+- [x] **Step 2: Remove stale claims and regenerate facts**
 
 ```bash
 rg -n 'density.*increase.*geometry|64 cells|GeoViewSourceCapture.*size|viewport reader|maximumCellSpanPixels' \
@@ -341,7 +345,7 @@ npm run docs:translations
 npm run docs:check
 ```
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add AGENTS.md docs examples/underwaterTerrain/README.md
@@ -358,11 +362,11 @@ git commit -m "Document reference-pixel terrain contracts"
 **Interfaces:**
 - Produces DPR, top-down, pitch-boundary, streaming, lifecycle, and performance evidence.
 
-- [ ] **Step 1: Add multi-DPR proof assertions**
+- [x] **Step 1: Add multi-DPR proof assertions**
 
 Run identical logical views at DPR 1, 1.25, 1.5, 2, and 3. Compare cover levels/counts/demands while asserting physical presentation sizes differ by the expected rounded scale.
 
-- [ ] **Step 2: Run required focused browser gates**
+- [x] **Step 2: Run required focused browser gates**
 
 ```bash
 UNDERWATER_TERRAIN_HEADLESS=1 node tests/browser/underwater-terrain-tile-wireframe.mjs
@@ -373,7 +377,7 @@ node tests/browser/underwater-terrain-cache-panel.mjs
 
 Expected: all JSON reports have `status: "passed"`; top-down uses one level, 60 degrees owns variable mode, 2:1 and overflow facts pass, and 90-frame shaded/wireframe timing remains within the existing gate.
 
-- [ ] **Step 3: Run repository-wide verification**
+- [x] **Step 3: Run repository-wide verification**
 
 ```bash
 npm run typecheck
@@ -382,7 +386,7 @@ npm run build
 git diff --check
 ```
 
-- [ ] **Step 4: Audit dead code and dependencies**
+- [x] **Step 4: Audit dead code and dependencies**
 
 ```bash
 rg -n 'GeoViewSourceCapture.*size|captured\.size|\.viewport\b|maximumCellSpanPixels|minimumCellSpanPixels|TERRAIN_SECTOR_SIZE = 64|cog-wmq-v3' \
@@ -393,7 +397,7 @@ git log --oneline --decorate -8
 
 Every match must be an unrelated Scratch render viewport or an explicitly historical document. Remove stale imports, codecs, fields, constants, helpers, tests, and prose discovered by the audit.
 
-- [ ] **Step 5: Commit final proof/cleanup**
+- [x] **Step 5: Commit final proof/cleanup**
 
 ```bash
 git add -A

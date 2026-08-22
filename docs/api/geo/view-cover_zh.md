@@ -2,7 +2,7 @@
 docId: geo.view-cover.zh
 canonical: false
 translationOf: ./view-cover.md
-canonicalDigest: 38f292969193a2e3f2099e4031a08d98e5dd40c46a14895f1b842413649b4375
+canonicalDigest: 6fa429d4f014b1ae56c42f0242a853ff98a745678281c8b328d3b8e9268f7853
 ---
 # WebMercatorQuad 视图覆盖
 
@@ -63,3 +63,8 @@ Virtual Raster 位于下游。Cover 决定 geometry 与 desired sample precision
 min/max pair。高于 source ceiling 的 geometry 使用 source-ceiling ancestor。部分 hierarchy
 非法；省略 hierarchy 时使用 descriptor 的 global range。Cover facts 暴露 hierarchy/global
 mode 与 record count。Residency、request completion、cache hit 和 atlas 内容不能改变这些 bounds。
+
+相关决策：`docs/decisions/ADR-083-webmercator-inverse-cover-passive-virtual-raster.md`
+确立 inverse cover 与被动 Virtual Raster 的权威边界；
+`docs/decisions/ADR-084-reference-pixel-terrain-lod.md` 定义 reference-pixel
+质量模型与不可变高程 hierarchy。

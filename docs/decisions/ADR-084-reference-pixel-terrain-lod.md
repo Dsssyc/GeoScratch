@@ -23,6 +23,9 @@ source, while Mapbox and MapLibre use a 512-screen-pixel tile convention and a
 128-cell terrain mesh. The cover also used one global exaggerated elevation range for
 every patch, which made shallow tiles inherit the deepest source bound.
 
+The pinned Mapbox and MapLibre source observations behind these comparisons are
+recorded in the [reference-pixel terrain LoD design](../superpowers/specs/2026-08-22-reference-pixel-terrain-lod-design.md#external-evidence).
+
 ## Decision
 
 Geo view snapshots use a logical reference-pixel viewport for camera, cover, projected
@@ -77,4 +80,3 @@ not provide additional information at that level.
 
 Rejected because network and cache timing would change geometry topology for an equal
 view.
-
