@@ -292,7 +292,7 @@ function cameraTileIndex(
 
 function projectedSearchRadius(input: GpuWebMercatorQuadCoverReferenceInput): number {
 
-    const focalPixels = input.view.viewport[1] /
+    const focalPixels = input.view.referenceViewport[1] /
         (2 * Math.tan(input.view.verticalFovRadians / 2))
     return Math.max(2, Math.ceil(
         focalPixels /
@@ -610,7 +610,7 @@ function projectedPlaneCellSpanPixels(
         matrix[7]! * cellMeters,
     ]
     return Math.max(...polygon.map(point => projectedCellAreaScalePixels(
-        input.view.viewport,
+        input.view.referenceViewport,
         point,
         xDelta,
         yDelta

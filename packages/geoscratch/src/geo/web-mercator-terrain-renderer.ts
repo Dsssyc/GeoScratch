@@ -522,8 +522,10 @@ export async function createWebMercatorTerrainRenderer<
 
     async function render(capture: GeoViewSourceCapture<ViewInput>) {
 
-        assertSize(capture?.size)
-        if (!sameSize(state.size, capture.size)) await resize(capture.size)
+        assertSize(capture?.presentationSize)
+        if (!sameSize(state.size, capture.presentationSize)) {
+            await resize(capture.presentationSize)
+        }
         const submitted = await submitFrame(capture.view)
         const frame = Object.freeze({
             submitted: submitted.submitted,
@@ -1330,7 +1332,7 @@ function coverDecisionKey(view: GeoViewSnapshot): string {
         view.clipFromRelativeWorld,
         view.cameraHigh,
         view.cameraLow,
-        view.viewport,
+        view.referenceViewport,
         view.verticalFovRadians,
         view.cameraLatitudeRadians,
         view.cameraPitchRadians,

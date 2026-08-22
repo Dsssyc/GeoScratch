@@ -3,7 +3,7 @@ import type { SurfaceSize } from '../scratch/index.js'
 
 export type GeoViewSourceCapture<View> = Readonly<{
     view: View
-    size: Readonly<SurfaceSize>
+    presentationSize: Readonly<SurfaceSize>
 }>
 
 export type GeoViewSourceDescriptor<View> = Readonly<{
@@ -11,7 +11,7 @@ export type GeoViewSourceDescriptor<View> = Readonly<{
     capture(): GeoViewSourceCapture<View>
 }>
 
-/** Synchronously captures one immutable view and presentation size. */
+/** Synchronously captures one immutable view and physical presentation size. */
 export type GeoViewSource<View> = Readonly<{
     kind: 'geo-view-source'
     id: string
@@ -23,7 +23,7 @@ export type GeoViewSnapshotDescriptor = Readonly<{
     clipFromRelativeWorld: ArrayLike<number>
     cameraHigh: readonly [number, number, number]
     cameraLow: readonly [number, number, number]
-    viewport: readonly [number, number]
+    referenceViewport: readonly [number, number]
     verticalFovRadians: number
     cameraLatitudeRadians: number
     cameraPitchRadians: number
@@ -38,7 +38,7 @@ export type GeoViewSnapshot = Readonly<{
     clipFromRelativeWorld: readonly number[]
     cameraHigh: readonly [number, number, number]
     cameraLow: readonly [number, number, number]
-    viewport: readonly [number, number]
+    referenceViewport: readonly [number, number]
     verticalFovRadians: number
     cameraLatitudeRadians: number
     cameraPitchRadians: number
@@ -86,28 +86,32 @@ export function createGeoViewSource<View>(
         capture() {
 
             const captured = read()
-            const size = captured?.size
+            const presentationSize = captured?.presentationSize
             if (captured === null || typeof captured !== 'object' ||
                 !Object.prototype.hasOwnProperty.call(captured, 'view') ||
-                !positiveInteger(size?.width) || !positiveInteger(size?.height)) {
+                !positiveInteger(presentationSize?.width) ||
+                !positiveInteger(presentationSize?.height)) {
                 return invalidView(
-                    'A Geo view source capture requires a view and positive integer size.',
+                    'A Geo view source capture requires a view and positive physical presentation size.',
                     {
                         view: 'present',
-                        size: 'positive integer width and height',
+                        presentationSize: 'positive integer width and height',
                     },
                     captured
                 )
             }
             return Object.freeze({
                 view: captured.view,
-                size: Object.freeze({ width: size.width, height: size.height }),
+                presentationSize: Object.freeze({
+                    width: presentationSize.width,
+                    height: presentationSize.height,
+                }),
             })
         },
     })
 }
 
-/** Freezes one revisioned camera and viewport observation in a relative-world frame. */
+/** Freezes one revisioned camera and logical reference viewport in a relative-world frame. */
 export function createGeoViewSnapshot(
     descriptor: GeoViewSnapshotDescriptor
 ): GeoViewSnapshot {
@@ -121,14 +125,14 @@ export function createGeoViewSnapshot(
     const cameraLow = descriptor?.cameraLow === undefined
         ? []
         : Array.from(descriptor.cameraLow)
-    const viewport = descriptor?.viewport === undefined
+    const referenceViewport = descriptor?.referenceViewport === undefined
         ? []
-        : Array.from(descriptor.viewport)
+        : Array.from(descriptor.referenceViewport)
     const values = [
         ...matrix,
         ...cameraHigh,
         ...cameraLow,
-        ...viewport,
+        ...referenceViewport,
         descriptor?.verticalFovRadians,
         descriptor?.cameraLatitudeRadians,
         descriptor?.cameraPitchRadians,
@@ -138,19 +142,20 @@ export function createGeoViewSnapshot(
     ]
     if (typeof descriptor?.id !== 'string' || descriptor.id.length === 0 ||
         matrix.length !== 16 || cameraHigh.length !== 3 || cameraLow.length !== 3 ||
-        viewport.length !== 2 || values.some(value => !Number.isFinite(value)) ||
-        viewport.some(value => value <= 0) ||
+        referenceViewport.length !== 2 ||
+        values.some(value => !Number.isFinite(value)) ||
+        referenceViewport.some(value => value <= 0) ||
         descriptor.verticalFovRadians <= 0 || descriptor.verticalFovRadians >= Math.PI ||
         Math.abs(descriptor.cameraLatitudeRadians) > Math.PI / 2 ||
         descriptor.cameraPitchRadians < 0 || descriptor.cameraPitchRadians > Math.PI / 2 ||
         !u32(descriptor.frameEpoch) || !u32(descriptor.residencySnapshotEpoch)) {
         return invalidView(
-            'A Geo view snapshot requires finite camera, matrix, viewport, and epoch facts.',
+            'A Geo view snapshot requires finite camera, matrix, reference viewport, and epoch facts.',
             {
                 id: 'non-empty string',
                 matrixLength: 16,
                 cameraLength: 3,
-                viewport: 'positive finite pair',
+                referenceViewport: 'positive finite pair',
                 verticalFovRadians: '(0, PI)',
                 cameraLatitudeRadians: '[-PI/2, PI/2]',
                 cameraPitchRadians: '[0, PI/2]',
@@ -165,7 +170,8 @@ export function createGeoViewSnapshot(
         clipFromRelativeWorld: Object.freeze(matrix),
         cameraHigh: Object.freeze(cameraHigh) as unknown as readonly [number, number, number],
         cameraLow: Object.freeze(cameraLow) as unknown as readonly [number, number, number],
-        viewport: Object.freeze(viewport) as unknown as readonly [number, number],
+        referenceViewport: Object.freeze(referenceViewport) as unknown as
+            readonly [number, number],
         verticalFovRadians: descriptor.verticalFovRadians,
         cameraLatitudeRadians: descriptor.cameraLatitudeRadians,
         cameraPitchRadians: descriptor.cameraPitchRadians,

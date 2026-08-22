@@ -105,7 +105,7 @@ describe('DEM WebMercator virtual raster', () => {
             clipFromRelativeWorld: new Float32Array(16),
             cameraHigh: [ 0, 0, 1 ],
             cameraLow: [ 0, 0, 0 ],
-            viewport: [ 1280, 800 ],
+            referenceViewport: [ 1280, 800 ],
             verticalFovRadians: 1,
             cameraLatitudeRadians: 0,
             cameraPitchRadians: 0,

@@ -1043,8 +1043,8 @@ function validateNormalProof(proof, failures) {
         }
         if (result.viewport !== undefined) {
             const camera = parseJsonOrUndefined(finalFacts.cameraView)
-            if (camera?.viewport?.[0] !== result.viewport.width ||
-                camera?.viewport?.[1] !== result.viewport.height) {
+            if (camera?.referenceViewport?.[0] !== result.viewport.width ||
+                camera?.referenceViewport?.[1] !== result.viewport.height) {
                 failures.push(`${result.name} did not publish the requested viewport`)
             }
         }

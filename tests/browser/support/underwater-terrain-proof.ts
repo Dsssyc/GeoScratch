@@ -456,7 +456,7 @@ function publishFrameFacts({
         bearing: latestCamera.bearingDegrees,
         cameraHigh: latestCamera.cameraHigh,
         cameraLow: latestCamera.cameraLow,
-        viewport: latestCamera.viewport,
+        referenceViewport: latestCamera.referenceViewport,
     })
     canvas.dataset.persistentFacts = JSON.stringify(graph.persistentFacts())
     const identityFacts = graph.currentIdentityFacts()

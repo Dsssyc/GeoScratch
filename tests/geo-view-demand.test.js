@@ -23,7 +23,7 @@ function view(overrides = {}) {
         ],
         cameraHigh: [ 1000, 2000, 100 ],
         cameraLow: [ 0.25, -0.5, 0.125 ],
-        viewport: [ 1280, 720 ],
+        referenceViewport: [ 1280, 720 ],
         verticalFovRadians: Math.PI / 3,
         cameraLatitudeRadians: 0.5,
         cameraPitchRadians: 0.7,
@@ -52,18 +52,18 @@ function pages() {
 
 describe('Geo view snapshots and demand', () => {
 
-    it('captures one immutable view and surface size from a frozen source descriptor', () => {
+    it('captures one immutable view and presentation size from a frozen source descriptor', () => {
 
         const size = { width: 640, height: 360 }
         const viewState = Object.freeze({ camera: 'primary' })
         const descriptor = {
             id: 'primary-view-source',
-            capture: () => ({ view: viewState, size }),
+            capture: () => ({ view: viewState, presentationSize: size }),
         }
         const source = createGeoViewSource(descriptor)
         descriptor.capture = () => ({
             view: Object.freeze({ camera: 'mutated' }),
-            size: { width: 1, height: 1 },
+            presentationSize: { width: 1, height: 1 },
         })
 
         const captured = source.capture()
@@ -74,20 +74,26 @@ describe('Geo view snapshots and demand', () => {
             id: 'primary-view-source',
         })
         expect(captured.view).to.equal(viewState)
-        expect(captured.size).to.deep.equal({ width: 640, height: 360 })
+        expect(captured.presentationSize).to.deep.equal({ width: 640, height: 360 })
         expect(Object.isFrozen(captured)).to.equal(true)
-        expect(Object.isFrozen(captured.size)).to.equal(true)
+        expect(Object.isFrozen(captured.presentationSize)).to.equal(true)
     })
 
     it('rejects invalid source ids, captures, and surface sizes diagnostically', () => {
 
         expect(() => createGeoViewSource({
             id: '',
-            capture: () => ({ view: undefined, size: { width: 1, height: 1 } }),
+            capture: () => ({
+                view: undefined,
+                presentationSize: { width: 1, height: 1 },
+            }),
         })).to.throw(GeoDiagnosticError)
         expect(() => createGeoViewSource({
             id: 'invalid-size',
-            capture: () => ({ view: undefined, size: { width: 10.5, height: 0 } }),
+            capture: () => ({
+                view: undefined,
+                presentationSize: { width: 10.5, height: 0 },
+            }),
         }).capture()).to.throw(GeoDiagnosticError)
     })
 
@@ -114,7 +120,7 @@ describe('Geo view snapshots and demand', () => {
 
     it('rejects non-finite or dimensionally invalid view facts with a Geo diagnostic', () => {
 
-        expect(() => view({ viewport: [ 1280, 0 ] })).to.throw(GeoDiagnosticError)
+        expect(() => view({ referenceViewport: [ 1280, 0 ] })).to.throw(GeoDiagnosticError)
         expect(() => view({ verticalFovRadians: Math.PI })).to.throw(GeoDiagnosticError)
         expect(() => view({ clipFromRelativeWorld: [ 1, 2 ] })).to.throw(GeoDiagnosticError)
     })

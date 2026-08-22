@@ -216,6 +216,7 @@ describe('Underwater Terrain clean cut', () => {
             'createGeoFrameController({',
         ]) expect(application).to.include(required)
         expect(application).to.include('maximumInFlightFrames: 2')
+        expect(application).to.include('presentationSize: () => canvasPixelSize(canvas)')
         expect(main).to.include('VITE_UNDERWATER_TERRAIN_VARIABLE_LOD_PITCH_DEGREES')
         expect(application).to.include('variableLodPitchThresholdRadians:')
         expect(application).not.to.match(/URLSearchParams|localStorage|tweakpane|Pane/)
@@ -405,13 +406,13 @@ describe('Underwater Terrain clean cut', () => {
                 ],
                 cameraLow: [ 0, 0, 0 ],
                 cameraHigh: [ 0, 0, 100 ],
-                viewport: [ 320, 180 ],
+                referenceViewport: [ 320, 180 ],
                 verticalFovRadians: Math.PI / 3,
                 cameraLatitudeRadians: 31.684162 * Math.PI / 180,
                 cameraPitchRadians: 0,
                 zoomHint: 9,
             }),
-            size: { width: 320, height: 180 },
+            presentationSize: { width: 320, height: 180 },
         })
         let observedFailure
         try {

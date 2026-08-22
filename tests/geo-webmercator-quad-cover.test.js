@@ -62,7 +62,7 @@ function fixture(options = {}) {
         altitude,
         zoom = 10,
         pitch = 0,
-        viewport = [ 1280, 800 ],
+        referenceViewport = [ 1280, 800 ],
         frameEpoch = 1,
     } = {}) {
 
@@ -70,7 +70,7 @@ function fixture(options = {}) {
         const verticalFovRadians = Math.PI / 3
         const clipFromRelativeWorld = mat4.perspective(
             verticalFovRadians,
-            viewport[0] / viewport[1],
+            referenceViewport[0] / referenceViewport[1],
             1,
             resolvedAltitude * 16,
             new Float64Array(16)
@@ -85,7 +85,7 @@ function fixture(options = {}) {
                 y - Math.fround(y),
                 resolvedAltitude - Math.fround(resolvedAltitude),
             ],
-            viewport,
+            referenceViewport,
             verticalFovRadians,
             cameraLatitudeRadians: 0,
             cameraPitchRadians: pitch,
@@ -282,7 +282,7 @@ describe('GPU WebMercatorQuad inverse cover reference', () => {
                 altitude: 8_850,
                 zoom: 13.25,
                 pitch: 0,
-                viewport: [ 1512, 864 ],
+                referenceViewport: [ 1512, 864 ],
             }),
             visibleBounds: {
                 west: 0.5 - halfColumns,

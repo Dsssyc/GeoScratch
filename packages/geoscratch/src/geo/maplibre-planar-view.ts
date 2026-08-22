@@ -79,7 +79,7 @@ export type MapLibrePlanarViewport = Readonly<{
 
 export type MapLibrePlanarCameraInput = Readonly<{
     map: MapLibrePlanarMap
-    viewport: MapLibrePlanarViewport
+    referenceViewport: MapLibrePlanarViewport
     minimumElevationMeters: number
 }>
 
@@ -112,11 +112,11 @@ export type MapLibrePlanarViewSourceDescriptor = Readonly<{
     id: string
     adapter: MapLibrePlanarViewAdapter
     map: MapLibrePlanarMap
-    viewport(): MapLibrePlanarViewport
+    presentationSize(): MapLibrePlanarViewport
     minimumElevationMeters: number
 }>
 
-/** Captures one MapLibre planar camera and viewport without owning host lifecycle. */
+/** Captures one MapLibre planar camera and physical presentation size without host ownership. */
 export type MapLibrePlanarViewSource = GeoViewSource<MapLibrePlanarCameraState>
 
 /** Composes a MapLibre host and planar adapter into one immutable Geo view source. */
@@ -125,18 +125,18 @@ export function mapLibrePlanarViewSource(
 ): MapLibrePlanarViewSource {
 
     const { id, adapter, map, minimumElevationMeters } = descriptor ?? {}
-    const readViewport = descriptor?.viewport
+    const readPresentationSize = descriptor?.presentationSize
     if (typeof id !== 'string' || id.length === 0 ||
         adapter?.kind !== 'geo-view-adapter' || typeof adapter.camera !== 'function' ||
-        map?.transform === undefined || typeof readViewport !== 'function' ||
+        map?.transform === undefined || typeof readPresentationSize !== 'function' ||
         !Number.isFinite(minimumElevationMeters)) {
         return invalidMapLibreView(
-            'A MapLibre planar view source requires an adapter, map, viewport reader, and elevation.',
+            'A MapLibre planar view source requires an adapter, map, presentation-size reader, and elevation.',
             {
                 id: 'non-empty string',
                 adapter: 'MapLibrePlanarViewAdapter',
                 map: 'MapLibre-compatible planar map',
-                viewport: 'function',
+                presentationSize: 'function',
                 minimumElevationMeters: 'finite number',
             },
             descriptor,
@@ -147,10 +147,14 @@ export function mapLibrePlanarViewSource(
         id,
         capture() {
 
-            const viewport = readViewport()
+            const presentationSize = readPresentationSize()
+            const referenceViewport = {
+                width: map.transform.width,
+                height: map.transform.height,
+            }
             return {
-                view: adapter.camera({ map, viewport, minimumElevationMeters }),
-                size: viewport,
+                view: adapter.camera({ map, referenceViewport, minimumElevationMeters }),
+                presentationSize,
             }
         },
     })
@@ -187,7 +191,7 @@ export function mapLibrePlanarViewAdapter(
                 clipFromRelativeWorld: camera.clipFromRelativeWorld,
                 cameraHigh: camera.cameraHigh,
                 cameraLow: camera.cameraLow,
-                viewport: camera.viewport,
+                referenceViewport: camera.referenceViewport,
                 verticalFovRadians: camera.verticalFovRadians,
                 cameraLatitudeRadians: camera.cameraLatitudeRadians,
                 cameraPitchRadians: camera.cameraPitchRadians,
@@ -211,18 +215,19 @@ function readMapLibrePlanarCamera(
 ): MapLibrePlanarCameraState {
 
     const map = input?.map
-    const viewport = input?.viewport
+    const referenceViewport = input?.referenceViewport
     const minimumElevationMeters = input?.minimumElevationMeters
     if (map?.transform === undefined || typeof map.getZoom !== 'function' ||
         typeof map.getCenter !== 'function' || typeof map.getPitch !== 'function' ||
         typeof map.getBearing !== 'function' ||
-        !positiveFinite(viewport?.width) || !positiveFinite(viewport?.height) ||
+        !positiveFinite(referenceViewport?.width) ||
+        !positiveFinite(referenceViewport?.height) ||
         !Number.isFinite(minimumElevationMeters)) {
         return invalidMapLibreView(
-            'A MapLibre camera read requires a compatible map, positive viewport, and finite minimum elevation.',
+            'A MapLibre camera read requires a compatible map, positive reference viewport, and finite minimum elevation.',
             {
                 map: 'MapLibre-compatible planar map',
-                viewport: 'positive finite width and height',
+                referenceViewport: 'positive finite width and height',
                 minimumElevationMeters: 'finite number',
             },
             input,
@@ -268,7 +273,10 @@ function readMapLibrePlanarCamera(
         clipFromRelativeWorld: Object.freeze(Array.from(matrixFacts.matrix)),
         cameraHigh,
         cameraLow,
-        viewport: Object.freeze([ viewport.width, viewport.height ]) as readonly [number, number],
+        referenceViewport: Object.freeze([
+            referenceViewport.width,
+            referenceViewport.height,
+        ]) as readonly [number, number],
         verticalFovRadians,
         cameraLatitudeRadians: cameraPosition.lngLat.lat * Math.PI / 180,
         cameraPitchRadians: pitchDegrees * Math.PI / 180,
@@ -442,12 +450,13 @@ function assertCamera(
         ...Array.from(value?.clipFromRelativeWorld ?? []),
         ...Array.from(value?.cameraHigh ?? []),
         ...Array.from(value?.cameraLow ?? []),
-        ...Array.from(value?.viewport ?? []),
+        ...Array.from(value?.referenceViewport ?? []),
     ]
     if (value === undefined || values.some(entry => !Number.isFinite(entry)) ||
         value.clipFromRelativeWorld.length !== 16 ||
         value.cameraHigh.length !== 3 || value.cameraLow.length !== 3 ||
-        value.viewport.length !== 2 || value.viewport.some(entry => entry <= 0) ||
+        value.referenceViewport.length !== 2 ||
+        value.referenceViewport.some(entry => entry <= 0) ||
         value.verticalFovRadians <= 0 || value.verticalFovRadians >= Math.PI ||
         Math.abs(value.cameraLatitudeRadians) > Math.PI / 2 ||
         value.cameraPitchRadians < 0 || value.cameraPitchRadians > Math.PI / 2) {
@@ -456,7 +465,7 @@ function assertCamera(
             {
                 matrixLength: 16,
                 cameraLength: 3,
-                viewport: 'positive pair',
+                referenceViewport: 'positive pair',
                 pitchRadians: '[0, PI/2]',
             },
             value,

@@ -237,7 +237,7 @@ fn coverProjectedAxisCellDeltaPixels(clip: vec4f, delta: vec4f) -> vec2f {
     let ndcDelta = (
         delta.xy - clip.xy * reciprocalW * delta.w
     ) * reciprocalW;
-    return ndcDelta * mapMeta.viewport * 0.5f;
+    return ndcDelta * mapMeta.referenceViewport * 0.5f;
 }
 
 fn coverProjectedCellAreaScalePixels(
@@ -249,7 +249,7 @@ fn coverProjectedCellAreaScalePixels(
         abs(xDelta.w) + abs(yDelta.w)
     );
     if (minimumCellW <= 1e-5f) {
-        return max(mapMeta.viewport.x, mapMeta.viewport.y);
+        return max(mapMeta.referenceViewport.x, mapMeta.referenceViewport.y);
     }
     let xPixels = coverProjectedAxisCellDeltaPixels(clip, xDelta);
     let yPixels = coverProjectedAxisCellDeltaPixels(clip, yDelta);
@@ -402,7 +402,7 @@ fn coverInvalidWindow() -> GpuWebMercatorQuadCoverWindow {
 }
 
 fn coverProjectedSearchRadiusTiles() -> i32 {
-    let focalPixels = mapMeta.viewport.y * 0.5f /
+    let focalPixels = mapMeta.referenceViewport.y * 0.5f /
         tan(mapMeta.verticalFovRadians * 0.5f);
     return max(2i, i32(ceil(
         focalPixels /

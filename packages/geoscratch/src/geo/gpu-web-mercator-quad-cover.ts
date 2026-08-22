@@ -1208,7 +1208,7 @@ function mapMetaRecord(
         cameraLow: view.cameraLow,
         cameraFixedLow: camera.low,
         cameraFixedHigh: camera.high,
-        viewport: view.viewport,
+        referenceViewport: view.referenceViewport,
         verticalFovRadians: view.verticalFovRadians,
         cameraLatitudeRadians: view.cameraLatitudeRadians,
         zoomHint: view.zoomHint,

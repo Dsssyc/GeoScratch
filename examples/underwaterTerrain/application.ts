@@ -182,7 +182,7 @@ export async function startUnderwaterTerrainApplication(
         id: 'underwater-terrain-maplibre-view-source',
         adapter: underwaterTerrainViewAdapter,
         map,
-        viewport: () => canvasPixelSize(canvas),
+        presentationSize: () => canvasPixelSize(canvas),
         minimumElevationMeters: elevationRangeMeters[0] * TERRAIN_EXAGGERATION,
     })
     const frameController = createGeoFrameController({

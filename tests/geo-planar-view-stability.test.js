@@ -57,7 +57,7 @@ describe('Geo planar view stability', () => {
             const map = fakeMap(center)
             const camera = viewAdapter.camera({
                 map,
-                viewport: VIEWPORT,
+                referenceViewport: VIEWPORT,
                 minimumElevationMeters: -100,
             })
             const cameraMeters = camera.cameraHigh.map(
@@ -84,7 +84,7 @@ describe('Geo planar view stability', () => {
 
         const input = {
             map: fakeMap(CENTER),
-            viewport: VIEWPORT,
+            referenceViewport: VIEWPORT,
             minimumElevationMeters: -100,
         }
         const camera = viewAdapter.camera(input)
@@ -105,31 +105,57 @@ describe('Geo planar view stability', () => {
         expect(Object.isFrozen(view)).to.equal(true)
     })
 
-    it('captures the same camera and viewport through one MapLibre view source', () => {
+    it('captures the same camera and presentation through one MapLibre view source', () => {
 
         const map = fakeMap(CENTER)
         const viewport = { ...VIEWPORT }
         const direct = viewAdapter.camera({
             map,
-            viewport,
+            referenceViewport: viewport,
             minimumElevationMeters: -100,
         })
         const descriptor = {
             id: 'camera-stability-source',
             adapter: viewAdapter,
             map,
-            viewport: () => viewport,
+            presentationSize: () => viewport,
             minimumElevationMeters: -100,
         }
         const source = mapLibrePlanarViewSource(descriptor)
-        descriptor.viewport = () => ({ width: 1, height: 1 })
+        descriptor.presentationSize = () => ({ width: 1, height: 1 })
         const captured = source.capture()
         viewport.width = 1
 
         expect(captured.view).to.deep.equal(direct)
-        expect(captured.size).to.deep.equal(VIEWPORT)
+        expect(captured.presentationSize).to.deep.equal(VIEWPORT)
         expect(Object.isFrozen(captured.view)).to.equal(true)
-        expect(Object.isFrozen(captured.size)).to.equal(true)
+        expect(Object.isFrozen(captured.presentationSize)).to.equal(true)
+    })
+
+    it('separates MapLibre reference pixels from physical presentation pixels', () => {
+
+        const map = fakeMap(CENTER)
+        const presentationSize = {
+            width: VIEWPORT.width * 2,
+            height: VIEWPORT.height * 2,
+        }
+        const source = mapLibrePlanarViewSource({
+            id: 'camera-stability-reference-pixel-source',
+            adapter: viewAdapter,
+            map,
+            presentationSize: () => presentationSize,
+            minimumElevationMeters: -100,
+        })
+        const captured = source.capture()
+
+        expect(captured.view.referenceViewport).to.deep.equal([
+            VIEWPORT.width,
+            VIEWPORT.height,
+        ])
+        expect(captured.presentationSize).to.deep.equal(presentationSize)
+        expect(captured).not.to.have.property('size')
+        expect(captured.view).not.to.have.property('viewport')
+        expect(Object.isFrozen(captured.presentationSize)).to.equal(true)
     })
 })
 

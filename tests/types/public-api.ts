@@ -353,7 +353,7 @@ const typedViewAdapter: GeoViewAdapter<{ frameEpoch: number }> = createGeoViewAd
         clipFromRelativeWorld: new Float32Array(16),
         cameraHigh: [ 0, 0, 0 ],
         cameraLow: [ 0, 0, 0 ],
-        viewport: [ 1920, 1080 ],
+        referenceViewport: [ 1920, 1080 ],
         verticalFovRadians: 1,
         cameraLatitudeRadians: 0,
         cameraPitchRadians: 0,
@@ -370,7 +370,7 @@ const typedViewSource: GeoViewSource<{ frameEpoch: number }> = createGeoViewSour
     id: 'typed-view-source',
     capture: () => ({
         view: { frameEpoch: 1 },
-        size: typedSurfaceSize,
+        presentationSize: typedSurfaceSize,
     }),
 })
 const typedViewSourceCapture: GeoViewSourceCapture<{ frameEpoch: number }> =
@@ -389,7 +389,7 @@ const typedMapLibreViewSource: MapLibrePlanarViewSource = mapLibrePlanarViewSour
     id: 'typed-maplibre-view-source',
     adapter: typedMapLibreViewAdapter,
     map: typedMapLibreCameraInput.map,
-    viewport: () => typedMapLibreCameraInput.viewport,
+    presentationSize: () => typedSurfaceSize,
     minimumElevationMeters: typedMapLibreCameraInput.minimumElevationMeters,
 })
 const typedViewDemandProducer = new ViewDemandProducer({
@@ -546,7 +546,7 @@ declare const typedTerrainRenderer: geoApi.WebMercatorTerrainRenderer<
 >
 const typedTerrainRenderResult = typedTerrainRenderer.render({
     view: { frameEpoch: 1 },
-    size: { width: 1920, height: 1080 },
+    presentationSize: { width: 1920, height: 1080 },
 })
 // @ts-expect-error Terrain rendering is one GeoFrameResult path.
 typedTerrainRenderer.renderFrame({ frameEpoch: 1 })
@@ -611,7 +611,7 @@ const typedCoverView: GeoViewSnapshot = createGeoViewSnapshot({
     clipFromRelativeWorld: new Float32Array(16),
     cameraHigh: [ 0, 0, 0 ],
     cameraLow: [ 0, 0, 0 ],
-    viewport: [ 1920, 1080 ],
+    referenceViewport: [ 1920, 1080 ],
     verticalFovRadians: 1,
     cameraLatitudeRadians: 0,
     cameraPitchRadians: 0,
