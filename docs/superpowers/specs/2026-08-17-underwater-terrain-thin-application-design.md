@@ -6,6 +6,8 @@ Approved for implementation on 2026-08-17.
 
 ADR-084 supersedes the capture field names and pixel semantics: current captures use
 `{ view, presentationSize }`, while the view owns a separate `referenceViewport`.
+ADR-085 further moves initial MapLibre style readiness into the frame driver and keeps
+decoded elevation range inside the DEM source adapter.
 
 ## Goal
 

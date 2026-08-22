@@ -137,4 +137,6 @@ atomic presentation.
 Related decisions: `docs/decisions/ADR-080-geo-view-source-terrain-frame-composition.md`
 defines view-source and frame composition;
 `docs/decisions/ADR-084-reference-pixel-terrain-lod.md` separates logical reference
-pixels from physical presentation pixels.
+pixels from physical presentation pixels;
+`docs/decisions/ADR-085-maplibre-readiness-and-raster-source-boundaries.md` assigns
+initial style readiness to the frame driver.

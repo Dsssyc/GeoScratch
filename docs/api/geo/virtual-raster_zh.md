@@ -2,7 +2,7 @@
 docId: geo.virtual-raster.zh
 canonical: false
 translationOf: ./virtual-raster.md
-canonicalDigest: b6f67c4083863d3db4b7c4bfb469fd05c1ed03dae9e315e40844db501294b16b
+canonicalDigest: 599516f46c9aa47144a2aae965cb25f7d7e0a6ae4f584503add6a7bd31b56fe1
 ---
 # Virtual Raster
 
@@ -74,3 +74,4 @@ grid 或 editable raster，而无需让 shader 与 tile neighbor 或 atlas coord
 - `docs/decisions/ADR-056-generic-worker-webmercator-virtual-raster-cache.md`
 - `docs/decisions/ADR-072-worker-context-pool-and-typed-protocols.md`
 - `docs/decisions/ADR-073-virtual-raster-executor-authority.md`
+- `docs/decisions/ADR-085-maplibre-readiness-and-raster-source-boundaries.md`

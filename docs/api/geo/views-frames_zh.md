@@ -2,7 +2,7 @@
 docId: geo.views-frames.zh
 canonical: false
 translationOf: ./views-frames.md
-canonicalDigest: 9d66a712097256ba792c44e40548c0ededcade18ff76d9236ec95801b9d56e0f
+canonicalDigest: f8c91ada93768c1513ee73c0038fa6d9f33b2c76e38b9a7e102d31652ba5e531
 ---
 # 视图与帧控制
 
@@ -124,4 +124,6 @@ MapLibre 的 WebGL context、render pass、depth buffer 或 atomic presentation 
 相关决策：`docs/decisions/ADR-080-geo-view-source-terrain-frame-composition.md`
 定义 view source 与 frame composition；
 `docs/decisions/ADR-084-reference-pixel-terrain-lod.md` 区分逻辑 reference pixel
-与物理 presentation pixel。
+与物理 presentation pixel；
+`docs/decisions/ADR-085-maplibre-readiness-and-raster-source-boundaries.md` 将首次
+style readiness 归属 frame driver。

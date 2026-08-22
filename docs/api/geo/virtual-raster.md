@@ -90,3 +90,4 @@ their shaders to tile neighbors or atlas coordinates.
 - `docs/decisions/ADR-056-generic-worker-webmercator-virtual-raster-cache.md`
 - `docs/decisions/ADR-072-worker-context-pool-and-typed-protocols.md`
 - `docs/decisions/ADR-073-virtual-raster-executor-authority.md`
+- `docs/decisions/ADR-085-maplibre-readiness-and-raster-source-boundaries.md`
