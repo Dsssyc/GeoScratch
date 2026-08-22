@@ -11,7 +11,6 @@ import {
 import {
     createUnderwaterTerrainMap,
     underwaterTerrainViewAdapter,
-    waitForUnderwaterTerrainMap,
 } from './map.ts'
 import type { UnderwaterTerrainMap } from './map.ts'
 import {
@@ -73,7 +72,7 @@ export async function startUnderwaterTerrainApplication(
     proof?.mapAcquired()
     proof?.reach('after-map-acquisition')
 
-    const [ runtime, , source, workerModules ] = await Promise.all([
+    const [ runtime, source, workerModules ] = await Promise.all([
         lifetime.acquire(GPURuntime.create({
             label: 'Underwater Terrain runtime',
             powerPreference: 'high-performance',
@@ -88,7 +87,6 @@ export async function startUnderwaterTerrainApplication(
             label: 'scratch-runtime',
             release: value => value.dispose(),
         }),
-        waitForUnderwaterTerrainMap(map, lifetime.signal),
         lifetime.track(fetchDemTileSource(tileServerUrl, lifetime.signal), 'dem-tile-source'),
         lifetime.track(
             WorkerModuleCatalog.load(workerModuleManifestUrl, { signal: lifetime.signal }),

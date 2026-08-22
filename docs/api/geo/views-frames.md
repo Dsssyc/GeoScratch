@@ -118,8 +118,12 @@ map contract, installs one `renderingMode: '2d'` custom layer, and performs no W
 `move` and `resize` advance one monotonic host revision. Controller requests call
 `map.triggerRepaint()`, and the pending callback executes inside the custom-layer `render`
 callback. Multiple changes before that callback retain only the newest revision; application
-capture is cached once per revision. A `style.load` event reattaches the layer when absent.
-Driver stop removes only its own layer, listeners, captures, and callbacks.
+capture is cached once per revision. At startup the driver reads `map.isStyleLoaded()`; an
+unready style receives listeners but no custom layer or ineffective repaint. Invalidations
+remain coalesced until `style.load` attaches the layer and requests the pending host frame.
+Later `style.load` events reattach the layer when absent. Driver stop removes only its own
+layer, listeners, captures, and callbacks, including when it stops before initial readiness.
+An application using this driver does not need a separate full-map `load` wait.
 
 The shape is compatible with the example's pinned MapLibre GL JS 4.7.1 callback
 `render(gl, matrix, options)` because the no-draw layer intentionally ignores all callback

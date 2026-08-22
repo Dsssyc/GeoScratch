@@ -730,7 +730,7 @@ type MapFieldLayerDescriptor<Input = unknown> = Readonly<{ demandProducer: ViewD
 
 Kind: `Function`.
 
-Creates a no-draw MapLibre custom-layer driver with revisioned host capture.
+Creates a readiness-aware no-draw MapLibre custom-layer driver with revisioned capture.
 
 ```ts
 Function mapLibreFrameDriver
@@ -774,10 +774,10 @@ type MapLibreFrameLayer = Readonly<{ id: string; renderingMode: "2d"; type: "cus
 
 Kind: `Type Alias`.
 
-MapLibre-compatible host methods required by the frame driver.
+MapLibre-compatible style readiness and host methods required by the frame driver.
 
 ```ts
-type MapLibreFrameMap = Readonly<{ addLayer: any; getLayer: any; off: any; on: any; removeLayer: any; triggerRepaint: any }>
+type MapLibreFrameMap = Readonly<{ addLayer: any; getLayer: any; isStyleLoaded: any; off: any; on: any; removeLayer: any; triggerRepaint: any }>
 ```
 
 ## `packages/geoscratch/src/geo/maplibre-planar-view.ts`

@@ -347,6 +347,8 @@ describe('Underwater Terrain clean cut', () => {
         expect(exists('examples', 'underwaterTerrain', 'terrain-selection.ts')).to.equal(false)
         expect(application).to.include('driver: mapLibreFrameDriver({')
         expect(application).to.include('const viewSource = mapLibrePlanarViewSource({')
+        expect(application).not.to.include('waitForUnderwaterTerrainMap')
+        expect(map).not.to.include('waitForUnderwaterTerrainMap')
         expect(application).not.to.match(/map\.on\(['"](?:move|render|resize)/)
         expect(map).to.include('mapLibrePlanarViewAdapter')
     })

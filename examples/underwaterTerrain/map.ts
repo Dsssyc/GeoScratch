@@ -34,9 +34,6 @@ type MapStyle = {
 }
 
 export type UnderwaterTerrainMap = MapLibrePlanarMap & MapLibreFrameMap & Readonly<{
-    loaded(): boolean
-    once(event: 'load', listener: () => void): void
-    off(event: 'load', listener: () => void): void
     jumpTo(options: {
         center?: readonly [number, number]
         zoom?: number
@@ -143,24 +140,6 @@ export function createUnderwaterTerrainMap(canvas: HTMLCanvasElement, options: U
         container: mapContainer,
         antialias: true,
         ...mapOptions,
-    })
-}
-
-export function waitForUnderwaterTerrainMap(map: UnderwaterTerrainMap, signal?: AbortSignal): Promise<UnderwaterTerrainMap> {
-
-    if (signal?.aborted) return Promise.reject(signal.reason)
-    if (map.loaded()) return Promise.resolve(map)
-    return new Promise<UnderwaterTerrainMap>((resolve, reject) => {
-        const onLoad = () => {
-            signal?.removeEventListener('abort', onAbort)
-            resolve(map)
-        }
-        const onAbort = () => {
-            map.off('load', onLoad)
-            reject(signal!.reason)
-        }
-        map.once('load', onLoad)
-        signal?.addEventListener('abort', onAbort, { once: true })
     })
 }
 

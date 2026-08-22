@@ -96,6 +96,73 @@ describe('MapLibre frame driver', () => {
         expect(controller.snapshot().cancelledFrameCount).to.equal(1)
     })
 
+    it('defers attachment and delivers the latest invalidation after initial style load', async() => {
+
+        const map = fakeMapLibreMap({ styleLoaded: false })
+        const captures = []
+        const submissions = []
+        let camera = 1
+        const controller = createGeoFrameController({
+            driver: mapLibreFrameDriver({
+                id: 'terrain-frames',
+                map,
+                capture() {
+                    captures.push(camera)
+                    return Object.freeze({ camera })
+                },
+            }),
+            render(_frameNumber, capture) {
+                submissions.push(capture.camera)
+                return Promise.resolve({
+                    observation: Promise.resolve(),
+                    needsFollowUp: false,
+                    value: capture.camera,
+                })
+            },
+        })
+
+        expect(map.layerIds).to.deep.equal([])
+        expect(map.repaintCount).to.equal(0)
+        camera = 2
+        controller.invalidate()
+        camera = 3
+        controller.invalidate()
+        expect(captures).to.deep.equal([])
+
+        map.setStyleLoaded(true)
+        map.emit('style.load')
+        expect(map.layerIds).to.deep.equal([ 'terrain-frames' ])
+        expect(map.repaintCount).to.equal(1)
+        await map.renderLayer('terrain-frames')
+        expect(captures).to.deep.equal([ 3 ])
+        expect(submissions).to.deep.equal([ 3 ])
+    })
+
+    it('does not attach after stopping before initial style load', () => {
+
+        const map = fakeMapLibreMap({ styleLoaded: false })
+        const controller = createGeoFrameController({
+            driver: mapLibreFrameDriver({
+                id: 'terrain-frames',
+                map,
+                capture: () => Object.freeze({ camera: 1 }),
+            }),
+            render: async() => ({
+                observation: Promise.resolve(),
+                needsFollowUp: false,
+                value: undefined,
+            }),
+        })
+
+        controller.invalidate()
+        expect(controller.stop()).to.equal(true)
+        map.setStyleLoaded(true)
+        map.emit('style.load')
+        expect(map.layerIds).to.deep.equal([])
+        expect(map.repaintCount).to.equal(0)
+        expect(map.listenerCount('style.load')).to.equal(0)
+    })
+
     it('reports invalid hosts and preserves a conflicting host layer', () => {
 
         expect(() => mapLibreFrameDriver({
@@ -133,10 +200,11 @@ describe('MapLibre frame driver', () => {
     })
 })
 
-function fakeMapLibreMap() {
+function fakeMapLibreMap(options = {}) {
 
     const listeners = new Map()
     const layers = new Map()
+    let styleLoaded = options.styleLoaded ?? true
     let repaintCount = 0
     let pendingLayerFrameCount = 0
     return {
@@ -163,6 +231,10 @@ function fakeMapLibreMap() {
             layer.onRemove?.(this, {})
         },
         getLayer: id => layers.get(id),
+        isStyleLoaded: () => styleLoaded,
+        setStyleLoaded(value) {
+            styleLoaded = value
+        },
         triggerRepaint() {
             repaintCount++
             pendingLayerFrameCount = 1

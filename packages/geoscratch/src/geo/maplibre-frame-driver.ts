@@ -15,10 +15,11 @@ export type MapLibreFrameLayer = Readonly<{
     render(...arguments_: unknown[]): void
 }>
 
-/** MapLibre-compatible host methods required by the frame driver. */
+/** MapLibre-compatible style readiness and host methods required by the frame driver. */
 export type MapLibreFrameMap = Readonly<{
     on(event: MapLibreFrameEvent, listener: () => void): void
     off(event: MapLibreFrameEvent, listener: () => void): void
+    isStyleLoaded(): boolean
     addLayer(layer: MapLibreFrameLayer): unknown
     removeLayer(id: string): unknown
     getLayer(id: string): unknown
@@ -37,7 +38,7 @@ export type MapLibreFrameDriver<Capture> = GeoFrameDriver<Capture>
 
 type DriverState = 'idle' | 'running' | 'stopped'
 
-/** Creates a no-draw MapLibre custom-layer driver with revisioned host capture. */
+/** Creates a readiness-aware no-draw MapLibre custom-layer driver with revisioned capture. */
 export function mapLibreFrameDriver<Capture>(
     descriptor: MapLibreFrameDriverDescriptor<Capture>
 ): MapLibreFrameDriver<Capture> {
@@ -66,6 +67,7 @@ export function mapLibreFrameDriver<Capture>(
             assertRunning()
             const handle = nextSchedulerHandle()
             scheduled.set(handle, callback)
+            if (!ownsLayer) return handle
             try {
                 map.triggerRepaint()
             } catch (error) {
@@ -102,8 +104,7 @@ export function mapLibreFrameDriver<Capture>(
             map.on('move', handleViewChange)
             map.on('resize', handleViewChange)
             map.on('style.load', handleStyleLoad)
-            addOwnedLayer()
-            invalidate()
+            if (map.isStyleLoaded()) attachOwnedLayer()
         } catch (error) {
             releaseHostState()
             state = 'stopped'
@@ -135,14 +136,16 @@ export function mapLibreFrameDriver<Capture>(
         if (state !== 'running') return
         ownsLayer = false
         if (map.getLayer(id) !== undefined) return layerConflict(id)
-        addOwnedLayer()
-        invalidate?.()
+        attachOwnedLayer()
     }
 
-    function addOwnedLayer(): void {
+    function attachOwnedLayer(): void {
 
+        const hadScheduledWork = scheduled.size > 0
         map.addLayer(layer)
         ownsLayer = true
+        invalidate?.()
+        if (hadScheduledWork) map.triggerRepaint()
     }
 
     function flushScheduledFrame(): void {
@@ -196,6 +199,7 @@ function validateDescriptor<Capture>(descriptor: MapLibreFrameDriverDescriptor<C
     if (typeof id !== 'string' || id.length === 0 ||
         typeof capture !== 'function' ||
         typeof map?.on !== 'function' || typeof map.off !== 'function' ||
+        typeof map.isStyleLoaded !== 'function' ||
         typeof map.addLayer !== 'function' || typeof map.removeLayer !== 'function' ||
         typeof map.getLayer !== 'function' || typeof map.triggerRepaint !== 'function') {
         return throwGeoDiagnostic({
@@ -206,7 +210,7 @@ function validateDescriptor<Capture>(descriptor: MapLibreFrameDriverDescriptor<C
             expected: {
                 id: 'non-empty string',
                 capture: 'function',
-                map: 'on/off/addLayer/removeLayer/getLayer/triggerRepaint methods',
+                map: 'on/off/isStyleLoaded/addLayer/removeLayer/getLayer/triggerRepaint methods',
             },
             actual: descriptor,
         })
@@ -216,6 +220,7 @@ function validateDescriptor<Capture>(descriptor: MapLibreFrameDriverDescriptor<C
         map: Object.freeze({
             on: map.on.bind(map),
             off: map.off.bind(map),
+            isStyleLoaded: map.isStyleLoaded.bind(map),
             addLayer: map.addLayer.bind(map),
             removeLayer: map.removeLayer.bind(map),
             getLayer: map.getLayer.bind(map),

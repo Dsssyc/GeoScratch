@@ -35,6 +35,10 @@ application-owned MapLibre `move`/`render` revision state, renderer host-mode fl
 frame controller, public terrain `renderFrame`/`resize` paths, or settlement field translation.
 A driver synchronizes frame admission but never claims shared WebGL/WebGPU
 context, depth, render-pass, or presentation ownership.
+`mapLibreFrameDriver()` owns initial style readiness for its custom layer: it must defer
+attachment and repaint until `isStyleLoaded()` or `style.load`, preserve coalesced pending work,
+and remain removable before readiness. Do not add a second application-level full-map load wait
+around a driver-owned integration.
 Treat `maximumInFlightFrames` as measured application policy. Underwater Terrain uses two because
 its 120 Hz proof shows one slot suppresses half of host-frame submissions; do not increase the
 bound or restore single-flight without rerunning camera-transition, stale-state, lag, and cleanup

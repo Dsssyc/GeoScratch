@@ -2,7 +2,7 @@
 docId: geo.views-frames.zh
 canonical: false
 translationOf: ./views-frames.md
-canonicalDigest: e056efd9b9153c512101194eafaaffa40d566ff8125ed8bb1d878b6512f86e08
+canonicalDigest: 9d66a712097256ba792c44e40548c0ededcade18ff76d9236ec95801b9d56e0f
 ---
 # 视图与帧控制
 
@@ -107,8 +107,11 @@ contract，安装一个 `renderingMode: '2d'` custom layer，并且不执行任�
 `move` 与 `resize` 推进单调 host revision。Controller request 调用
 `map.triggerRepaint()`，pending callback 在 custom-layer `render` callback 内执行。同一
 callback 前发生多个 host change 时只保留最新 revision；application capture 每个 revision
-只读取一次。`style.load` 会在 driver layer 缺失时重新挂载。Driver stop 只移除自己拥有的
-layer、listener、capture 与 callback。
+只读取一次。启动时 driver 读取 `map.isStyleLoaded()`；style 未就绪时只安装 listener，
+不会挂 custom layer 或触发无效 repaint。Invalidation 保持合并，直到 `style.load` 挂载
+layer 并请求待处理 host frame；后续 `style.load` 仍会在 layer 缺失时重新挂载。
+Driver stop 只移除自己拥有的 layer、listener、capture 与 callback，包括在首次就绪前停止
+的情况。使用该 driver 的应用无需额外等待完整 map `load`。
 
 这个结构兼容 example 固定使用的 MapLibre GL JS 4.7.1 callback
 `render(gl, matrix, options)`，因为 no-draw layer 会有意忽略所有 callback argument。参见

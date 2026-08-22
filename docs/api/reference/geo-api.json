@@ -1519,9 +1519,9 @@
           "packages/geoscratch/src/geo/maplibre-frame-driver.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/geo/maplibre-frame-driver.ts:41"
+          "packages/geoscratch/src/geo/maplibre-frame-driver.ts:42"
         ],
-        "summary": "Creates a no-draw MapLibre custom-layer driver with revisioned host capture.",
+        "summary": "Creates a readiness-aware no-draw MapLibre custom-layer driver with revisioned capture.",
         "declaration": "Function mapLibreFrameDriver",
         "signatures": [
           "mapLibreFrameDriver<Capture>(descriptor: MapLibreFrameDriverDescriptor<Capture>): MapLibreFrameDriver<Capture>"
@@ -1536,7 +1536,7 @@
           "packages/geoscratch/src/geo/maplibre-frame-driver.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/geo/maplibre-frame-driver.ts:36"
+          "packages/geoscratch/src/geo/maplibre-frame-driver.ts:37"
         ],
         "summary": "Geo frame driver synchronized to a MapLibre-compatible custom-layer callback.",
         "declaration": "type MapLibreFrameDriver<Capture> = GeoFrameDriver<Capture>"
@@ -1550,7 +1550,7 @@
           "packages/geoscratch/src/geo/maplibre-frame-driver.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/geo/maplibre-frame-driver.ts:29"
+          "packages/geoscratch/src/geo/maplibre-frame-driver.ts:30"
         ],
         "summary": "Map host, stable layer id, and application capture read by a MapLibre driver.",
         "declaration": "type MapLibreFrameDriverDescriptor<Capture> = Readonly<{ id: string; map: MapLibreFrameMap; capture: any }>"
@@ -1580,8 +1580,8 @@
         "locations": [
           "packages/geoscratch/src/geo/maplibre-frame-driver.ts:19"
         ],
-        "summary": "MapLibre-compatible host methods required by the frame driver.",
-        "declaration": "type MapLibreFrameMap = Readonly<{ addLayer: any; getLayer: any; off: any; on: any; removeLayer: any; triggerRepaint: any }>"
+        "summary": "MapLibre-compatible style readiness and host methods required by the frame driver.",
+        "declaration": "type MapLibreFrameMap = Readonly<{ addLayer: any; getLayer: any; isStyleLoaded: any; off: any; on: any; removeLayer: any; triggerRepaint: any }>"
       },
       {
         "id": "geoscratch/geo#MapLibreLngLat",
