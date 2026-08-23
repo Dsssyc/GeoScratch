@@ -2,7 +2,7 @@
 docId: geo.view-cover.zh
 canonical: false
 translationOf: ./view-cover.md
-canonicalDigest: 171e01ebe8e3fe63ca57151c1e7aca77cab75f7d189032d5959104f48220b1ed
+canonicalDigest: 79c8ea77ef1849819e7a4a3cffc67b735a0b485aa4eeee367a1e548e91b07709
 ---
 # WebMercatorQuad 视图覆盖
 
@@ -41,8 +41,8 @@ Kernel 从声明的最小几何窗口开始，探查有限 parent window，把�
 层级时使用 `verticalRangeMeters`。缓存、请求和驻留状态不能改变这些 bounds。
 
 `GpuWebMercatorQuadCoverTemplate` 为下游 GPU component 暴露借用的 parity
-resource：map metadata、patches、lookup、完整 state 和精确 patch-count region。
-`writeView()` 拥有临时 upload，`frame()` 选择 parity，`encode()` 提交一次自适应
+resource：map metadata、patches、lookup 和完整 state。`writeView()` 拥有临时
+upload，`frame()` 选择 parity，`encode()` 提交一次自适应
 compute，`capture()` 只读取几何 state。反馈包含 candidate/patch 数、level range、
 邻接、projected-cell span 和 overflow fact，不包含 demand 或 selection mode。
 

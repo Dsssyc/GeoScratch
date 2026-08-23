@@ -51,8 +51,8 @@ An omitted hierarchy uses `verticalRangeMeters`. Cache, request, and residency s
 cannot change these bounds.
 
 `GpuWebMercatorQuadCoverTemplate` exposes borrowed parity resources for downstream
-GPU components: map metadata, patches, lookup, full state, and an exact patch-count
-region. `writeView()` owns one ephemeral upload, `frame()` selects parity,
+GPU components: map metadata, patches, lookup, and full state. `writeView()` owns one
+ephemeral upload, `frame()` selects parity,
 `encode()` submits one adaptive compute, and `capture()` reads only geometry state.
 Feedback reports candidate/patch counts, level range, adjacency, projected-cell span,
 and overflow facts. It contains no demand records or selection mode.

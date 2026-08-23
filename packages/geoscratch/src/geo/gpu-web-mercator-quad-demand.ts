@@ -20,10 +20,10 @@ import {
     gpuWebMercatorQuadCoverSharedWgslModule,
     gpuWebMercatorQuadCoverStateCodec,
 } from './gpu-web-mercator-quad-cover-layout.js'
-import type {
-    GpuWebMercatorQuadCover,
-    GpuWebMercatorQuadCoverFrame,
-    GpuWebMercatorQuadCoverTemplate,
+import {
+    assertGpuWebMercatorQuadCoverFrameEncoded,
+    type GpuWebMercatorQuadCover,
+    type GpuWebMercatorQuadCoverFrame,
 } from './gpu-web-mercator-quad-cover.js'
 import {
     gpuWebMercatorQuadDemandCodec,
@@ -123,7 +123,6 @@ type ParityResources = Readonly<{
 
 type ParityTemplate = Readonly<{
     resources: ParityResources
-    coverTemplate: GpuWebMercatorQuadCoverTemplate
     bindSet: BindSet
     commands: GpuWebMercatorQuadDemandProjectionCommands
 }>
@@ -226,7 +225,6 @@ export class GpuWebMercatorQuadDemandProjection {
                     minimumSourceMatrixLevel,
                     sourceMaximumMatrixLevel,
                     maximumDemands: descriptor.maximumDemands,
-                    sourceLimitCount: limits.length,
                     coordinateBits: descriptor.cover.descriptor.spatialProfile.coordinateBits,
                 }),
             }))
@@ -387,7 +385,6 @@ export class GpuWebMercatorQuadDemandProjection {
                 }))
                 return Object.freeze({
                     resources,
-                    coverTemplate,
                     bindSet,
                     commands: Object.freeze({ project, stateFeedback, demandFeedback }),
                 })
@@ -449,6 +446,7 @@ export class GpuWebMercatorQuadDemandProjection {
     frame(coverFrame: GpuWebMercatorQuadCoverFrame): GpuWebMercatorQuadDemandProjectionFrame {
 
         this.#assertActive()
+        this.descriptor.cover.commandsFor(coverFrame)
         if (coverFrame?.coverId !== this.descriptor.cover.id ||
             (coverFrame.parity !== 0 && coverFrame.parity !== 1)) {
             return invalidProjection(this, 'Demand projection requires one frame from its cover.',
@@ -484,6 +482,11 @@ export class GpuWebMercatorQuadDemandProjection {
                 { runtimeId: this.runtime.id, submitted: false },
                 { runtimeId: builder?.runtime?.id, submitted: builder?.isSubmitted })
         }
+        assertGpuWebMercatorQuadCoverFrameEncoded(
+            this.descriptor.cover,
+            builder,
+            record.coverFrame
+        )
         builder.compute(this.#pass, [ record.template.commands.project ])
         encodedBuilders.set(builder, frame)
         return builder
@@ -667,6 +670,24 @@ export function decodeGpuWebMercatorQuadDemandProjectionFeedback(
             residencySnapshotEpoch: view.getUint32(base + 28, true),
         })
     })
+    const identities = new Set<string>()
+    for (const [ index, demand ] of demands.entries()) {
+        const matrixWidth = 2 ** demand.requestMatrixLevel
+        const identity = `${demand.requestMatrixLevel}/${demand.tileRow}/${demand.tileCol}`
+        if (demand.desiredSampleLevel > 24 || demand.requestMatrixLevel > 24 ||
+            demand.desiredSampleLevel < demand.requestMatrixLevel ||
+            demand.sourceLevelCeiling !== options.sourceLevelCeiling ||
+            demand.requestMatrixLevel > demand.sourceLevelCeiling ||
+            demand.tileRow >= matrixWidth || demand.tileCol >= matrixWidth ||
+            demand.decisionFrameEpoch !== options.expectedFrameEpoch ||
+            identities.has(identity)) {
+            throw new RangeError(
+                `GPU WebMercatorQuad demand record ${index} is inconsistent: ` +
+                JSON.stringify(demand)
+            )
+        }
+        identities.add(identity)
+    }
     return Object.freeze({
         frameEpoch,
         demandCount,
@@ -700,11 +721,16 @@ function snapshotDescriptor(
         Number(limit.matrixId) === minimum + index
     )
     const maximum = Number(limits.at(-1)!.matrixId)
-    if (!contiguous || minimum < 0 || maximum >= cover.descriptor.spatialProfile.coordinateBits) {
+    if (!contiguous || minimum < 0 ||
+        minimum > cover.descriptor.policy.minimumMatrixLevel ||
+        maximum >= cover.descriptor.spatialProfile.coordinateBits) {
         return invalidProjection(
             { id: 'uninitialized' },
             'Demand source coverage must contain contiguous supported matrix levels.',
-            { coordinateBits: cover.descriptor.spatialProfile.coordinateBits },
+            {
+                maximumMinimumLevel: cover.descriptor.policy.minimumMatrixLevel,
+                coordinateBits: cover.descriptor.spatialProfile.coordinateBits,
+            },
             limits
         )
     }

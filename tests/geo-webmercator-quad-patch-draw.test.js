@@ -93,6 +93,8 @@ describe('GPU WebMercatorQuad patch draw preparation', () => {
         const token = cover.writeView(snapshot)
         const coverFrame = cover.frame(token)
         const drawFrame = patchDraw.frame(coverFrame)
+        expect(() => patchDraw.frame({ ...coverFrame })).to.throw()
+        expect(() => patchDraw.encode(runtime.submission(), drawFrame)).to.throw()
         const builder = runtime.submission()
         cover.initialize(builder)
         patchDraw.initialize(builder)

@@ -84,7 +84,7 @@ fn demandEmit(candidate: GpuWebMercatorQuadCoverPatch) {
     var tileCol = candidate.tileCol >> shift;
     loop {
         if (demandSourceContains(requestLevel, tileRow, tileCol)) { break; }
-        if (requestLevel == demandPolicy.minimumSourceMatrixLevel) { return; }
+        if (requestLevel <= demandPolicy.minimumSourceMatrixLevel) { return; }
         requestLevel -= 1u;
         shift += 1u;
         tileRow = candidate.tileRow >> shift;

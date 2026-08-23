@@ -576,7 +576,7 @@ Members:
   - `initialize(builder: SubmissionBuilder): SubmissionBuilder`
 - `runtime`: `runtime: GPURuntime` (readonly)
 - `templates`: `Method templates`
-  - `templates(): readonly [Readonly<{ coverId: string; coverLookup: BufferResource; mapMeta: BufferResource; parity: 0 | 1; patchCount: BufferRegion; patches: BufferResource; state: BufferResource }>, Readonly<{ coverId: string; coverLookup: BufferResource; mapMeta: BufferResource; parity: 0 | 1; patchCount: BufferRegion; patches: BufferResource; state: BufferResource }>]`
+  - `templates(): readonly [Readonly<{ coverId: string; coverLookup: BufferResource; mapMeta: BufferResource; parity: 0 | 1; patches: BufferResource; state: BufferResource }>, Readonly<{ coverId: string; coverLookup: BufferResource; mapMeta: BufferResource; parity: 0 | 1; patches: BufferResource; state: BufferResource }>]`
 - `writeView`: `Method writeView`
   - `writeView(view: GeoViewSnapshot): GpuWebMercatorQuadCoverViewToken`
 
@@ -663,7 +663,7 @@ type GpuWebMercatorQuadCoverSelectionFacts = Readonly<{ candidateCount: number; 
 Kind: `Type Alias`.
 
 ```ts
-type GpuWebMercatorQuadCoverTemplate = Readonly<{ coverId: string; coverLookup: BufferResource; mapMeta: BufferResource; parity: 0 | 1; patchCount: BufferRegion; patches: BufferResource; state: BufferResource }>
+type GpuWebMercatorQuadCoverTemplate = Readonly<{ coverId: string; coverLookup: BufferResource; mapMeta: BufferResource; parity: 0 | 1; patches: BufferResource; state: BufferResource }>
 ```
 
 ### `GpuWebMercatorQuadCoverViewToken`

@@ -596,8 +596,7 @@ describe('GPU WebMercatorQuad inverse cover lowering', () => {
         expect(templates.map(template => template.parity)).to.deep.equal([ 0, 1 ])
         expect(templates.every(template =>
             template.patches !== undefined &&
-            template.patchCount.offset === 8 &&
-            template.patchCount.size === 4 &&
+            template.state !== undefined &&
             !('drawArgument' in template)
         )).to.equal(true)
 

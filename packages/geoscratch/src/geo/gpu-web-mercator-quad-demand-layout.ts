@@ -6,7 +6,6 @@ export const gpuWebMercatorQuadDemandPolicyCodec = layoutCodec({
         { name: 'minimumSourceMatrixLevel', type: 'u32' },
         { name: 'sourceMaximumMatrixLevel', type: 'u32' },
         { name: 'maximumDemands', type: 'u32' },
-        { name: 'sourceLimitCount', type: 'u32' },
         { name: 'coordinateBits', type: 'u32' },
     ],
 }, { usage: [ 'uniform', 'storage', 'readback' ] })

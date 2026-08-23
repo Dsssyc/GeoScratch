@@ -13,7 +13,6 @@ export const gpuWebMercatorQuadCoverMapMetaCodec = layoutCodec({
         { name: 'cameraFixedHigh', type: 'vec2u' },
         { name: 'referenceViewport', type: 'vec2f' },
         { name: 'verticalFovRadians', type: 'f32' },
-        { name: 'cameraLatitudeRadians', type: 'f32' },
         { name: 'frameEpoch', type: 'u32' },
         { name: 'residencySnapshotEpoch', type: 'u32' },
     ],

@@ -15,9 +15,10 @@ import {
 } from '../scratch/index.js'
 import { throwGeoDiagnostic } from './diagnostics.js'
 import { gpuWebMercatorQuadCoverStateCodec } from './gpu-web-mercator-quad-cover-layout.js'
-import type {
-    GpuWebMercatorQuadCover,
-    GpuWebMercatorQuadCoverFrame,
+import {
+    assertGpuWebMercatorQuadCoverFrameEncoded,
+    type GpuWebMercatorQuadCover,
+    type GpuWebMercatorQuadCoverFrame,
 } from './gpu-web-mercator-quad-cover.js'
 
 const BUFFER_COPY_DST = 0x08
@@ -335,6 +336,7 @@ export class GpuWebMercatorQuadPatchDraw {
     frame(coverFrame: GpuWebMercatorQuadCoverFrame): GpuWebMercatorQuadPatchDrawFrame {
 
         this.#assertActive()
+        this.descriptor.cover.commandsFor(coverFrame)
         if (coverFrame?.coverId !== this.descriptor.cover.id ||
             (coverFrame.parity !== 0 && coverFrame.parity !== 1)) {
             return invalidPatchDraw(this, 'Patch draw requires one frame from its cover.',
@@ -367,6 +369,11 @@ export class GpuWebMercatorQuadPatchDraw {
                 { runtimeId: this.runtime.id, submitted: false },
                 { runtimeId: builder?.runtime?.id, submitted: builder?.isSubmitted })
         }
+        assertGpuWebMercatorQuadCoverFrameEncoded(
+            this.descriptor.cover,
+            builder,
+            record.coverFrame
+        )
         builder.compute(this.#pass, [ record.template.command ])
         encodedBuilders.set(builder, frame)
         return builder

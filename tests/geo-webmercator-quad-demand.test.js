@@ -137,6 +137,46 @@ describe('GPU WebMercatorQuad demand projection', () => {
                 },
             ],
         })
+
+        const invalidWords = demandWords.slice()
+        invalidWords[1] = 9
+        expect(() => decodeGpuWebMercatorQuadDemandProjectionFeedback(
+            new Uint8Array(state.buffer),
+            new Uint8Array(invalidWords.buffer),
+            { expectedFrameEpoch: 7, maximumDemands: 4, sourceLevelCeiling: 10 }
+        )).to.throw()
+    })
+
+    it('rejects a source whose minimum level cannot cover coarse geometry patches', async() => {
+
+        const setup = await fixture()
+        const incompatibleCoverage = tileMatrixCoverage({
+            tileMatrixSet: WebMercatorQuad,
+            limits: [ {
+                matrixId: '1',
+                minTileRow: 0,
+                maxTileRow: 1,
+                minTileCol: 0,
+                maxTileCol: 1,
+            } ],
+        })
+        let created
+        let failure
+        try {
+            created = await GpuWebMercatorQuadDemandProjection.create(setup.runtime, {
+                cover: setup.cover,
+                sourceCoverage: incompatibleCoverage,
+                maximumDemands: 64,
+            })
+        } catch (error) {
+            failure = error
+        }
+
+        expect(failure).to.be.instanceOf(Error)
+        created?.dispose()
+        setup.projection.dispose()
+        setup.cover.dispose()
+        await setup.runtime.dispose()
     })
 
     it('composes after cover compute and owns only projection resources', async() => {
@@ -145,6 +185,11 @@ describe('GPU WebMercatorQuad demand projection', () => {
         const token = setup.cover.writeView(view())
         const coverFrame = setup.cover.frame(token)
         const demandFrame = setup.projection.frame(coverFrame)
+        expect(() => setup.projection.frame({ ...coverFrame })).to.throw()
+        expect(() => setup.projection.encode(
+            setup.runtime.submission(),
+            demandFrame
+        )).to.throw()
         const builder = setup.runtime.submission()
         setup.cover.initialize(builder)
         setup.projection.initialize(builder)

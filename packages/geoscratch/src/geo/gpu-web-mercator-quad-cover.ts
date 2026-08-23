@@ -2,7 +2,6 @@ import {
     type BindLayout,
     type BindLayoutEntry,
     type BindSet,
-    type BufferRegion,
     type BufferResource,
     type ClearBufferCommand,
     type ComputePassSpec,
@@ -93,7 +92,6 @@ export type GpuWebMercatorQuadCoverTemplate = Readonly<{
     patches: BufferResource
     coverLookup: BufferResource
     state: BufferResource
-    patchCount: BufferRegion
 }>
 
 export type GpuWebMercatorQuadCoverSelectionFacts = Readonly<{
@@ -589,10 +587,6 @@ export class GpuWebMercatorQuadCover {
                         patches: resources.patches,
                         coverLookup: resources.lookup,
                         state: resources.state,
-                        patchCount: resources.state.region({
-                            offset: 8,
-                            size: 4,
-                        }),
                     } as GpuWebMercatorQuadCoverTemplate
                     return Object.freeze({
                         resources,
@@ -960,6 +954,30 @@ export class GpuWebMercatorQuadCover {
 
 Object.freeze(GpuWebMercatorQuadCover.prototype)
 
+/** @internal Validates one same-builder downstream consumer of an encoded cover frame. */
+export function assertGpuWebMercatorQuadCoverFrameEncoded(
+    cover: GpuWebMercatorQuadCover,
+    builder: SubmissionBuilder,
+    frame: GpuWebMercatorQuadCoverFrame
+): void {
+
+    const record = frameRecords.get(frame)
+    if (record?.owner !== cover || builder?.runtime !== cover.runtime ||
+        builder.isSubmitted || encodedBuilders.get(builder) !== frame) {
+        return invalidCover(
+            cover,
+            'A cover consumer requires its matching frame encoded in the same live builder.',
+            { coverId: cover.id, runtimeId: cover.runtime.id, encoded: true },
+            {
+                coverId: frame?.coverId,
+                runtimeId: builder?.runtime?.id,
+                submitted: builder?.isSubmitted,
+                encodedCoverId: encodedBuilders.get(builder)?.coverId,
+            }
+        )
+    }
+}
+
 /** Decodes and validates bounded inverse-cover geometry feedback. */
 export function decodeGpuWebMercatorQuadCoverFeedback(
     stateBytes: Uint8Array,
@@ -1185,7 +1203,6 @@ function mapMetaRecord(
         cameraFixedHigh: camera.high,
         referenceViewport: view.referenceViewport,
         verticalFovRadians: view.verticalFovRadians,
-        cameraLatitudeRadians: view.cameraLatitudeRadians,
         frameEpoch: view.frameEpoch,
         residencySnapshotEpoch: view.residencySnapshotEpoch,
     }

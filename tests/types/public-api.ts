@@ -675,7 +675,6 @@ const typedCoverSelection: GpuWebMercatorQuadCoverSelectionFacts =
 const typedCoverPatchBuffer: scr.BufferResource = typedCoverTemplates[0].patches
 const typedCoverMapMetaBuffer: scr.BufferResource = typedCoverTemplates[0].mapMeta
 const typedCoverStateBuffer: scr.BufferResource = typedCoverTemplates[0].state
-const typedCoverPatchCountRegion: scr.BufferRegion = typedCoverTemplates[0].patchCount
 const typedDemandProjectionCreation = GpuWebMercatorQuadDemandProjection.create(
     typedCoverRuntime,
     {
@@ -716,7 +715,6 @@ void typedCoverSelection
 void typedCoverPatchBuffer
 void typedCoverMapMetaBuffer
 void typedCoverStateBuffer
-void typedCoverPatchCountRegion
 void typedDemandProjectionCreation
 void typedDemandFeedback
 void typedProjectedDemand
