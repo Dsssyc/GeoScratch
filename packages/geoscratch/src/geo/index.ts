@@ -114,23 +114,43 @@ export {
 } from './gpu-web-mercator-quad-cover.js'
 export type {
     GpuWebMercatorQuadCoverCommands,
-    GpuWebMercatorQuadCoverDemand,
     GpuWebMercatorQuadCoverDescriptor,
     GpuWebMercatorQuadCoverFacts,
     GpuWebMercatorQuadCoverFeedback,
     GpuWebMercatorQuadCoverFrame,
     GpuWebMercatorQuadCoverIdentityObjects,
     GpuWebMercatorQuadCoverPolicy,
-    GpuWebMercatorQuadCoverRenderTemplate,
+    GpuWebMercatorQuadCoverTemplate,
     GpuWebMercatorQuadCoverSelectionFacts,
     GpuWebMercatorQuadCoverViewToken,
-    WebMercatorTileElevationBounds,
+    WebMercatorTileVerticalBounds,
 } from './gpu-web-mercator-quad-cover.js'
 export { gpuWebMercatorQuadCoverReadWgslModule } from './gpu-web-mercator-quad-cover-layout.js'
 export type {
     GpuWebMercatorQuadCoverReadWgslModule,
     GpuWebMercatorQuadCoverReadWgslOptions,
 } from './gpu-web-mercator-quad-cover-layout.js'
+export {
+    GpuWebMercatorQuadDemandProjection,
+    decodeGpuWebMercatorQuadDemandProjectionFeedback,
+} from './gpu-web-mercator-quad-demand.js'
+export { GpuWebMercatorQuadPatchDraw } from './gpu-web-mercator-quad-patch-draw.js'
+export type {
+    GpuWebMercatorQuadPatchDrawDescriptor,
+    GpuWebMercatorQuadPatchDrawFacts,
+    GpuWebMercatorQuadPatchDrawFrame,
+    GpuWebMercatorQuadPatchDrawIdentityObjects,
+    GpuWebMercatorQuadPatchDrawTemplate,
+} from './gpu-web-mercator-quad-patch-draw.js'
+export type {
+    GpuWebMercatorQuadDemandProjectionCommands,
+    GpuWebMercatorQuadDemandProjectionDescriptor,
+    GpuWebMercatorQuadDemandProjectionFacts,
+    GpuWebMercatorQuadDemandProjectionFeedback,
+    GpuWebMercatorQuadDemandProjectionFrame,
+    GpuWebMercatorQuadDemandProjectionIdentityObjects,
+    GpuWebMercatorQuadProjectedDemand,
+} from './gpu-web-mercator-quad-demand.js'
 export {
     WEB_MERCATOR_TERRAIN_TILE_WIREFRAME_FRAGMENT_ENTRY_POINT,
     webMercatorTerrainWgslModule,
@@ -142,6 +162,7 @@ export type {
 export { createWebMercatorTerrainRenderer } from './web-mercator-terrain-renderer.js'
 export type {
     WebMercatorTerrainContractFacts,
+    WebMercatorTerrainElevationBounds,
     WebMercatorTerrainFrame,
     WebMercatorTerrainFrameValue,
     WebMercatorTerrainFrameSettlement,

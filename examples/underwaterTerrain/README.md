@@ -60,47 +60,33 @@ the page, alter cache query parameters, or rebuild the virtual raster.
 Current library contracts are documented in [Views and frame control](../../docs/api/geo/views-frames.md),
 [WebMercatorQuad view cover](../../docs/api/geo/view-cover.md), and
 [Terrain rendering](../../docs/api/geo/terrain-rendering.md). The pixel-domain and
-quality rationale is recorded in [ADR-084](../../docs/decisions/ADR-084-reference-pixel-terrain-lod.md).
+quality rationale is recorded in [ADR-084](../../docs/decisions/ADR-084-reference-pixel-terrain-lod.md),
+with unified selection and ownership in
+[ADR-086](../../docs/decisions/ADR-086-unified-adaptive-webmercator-cover.md).
 
 The manifest declares source pages through z10. `GpuWebMercatorQuadCover` independently
 selects geometry through z14, but every output remains a standard
 `(tileMatrix, tileRow, tileCol)` identity. Camera/view-derived windows select from the
-fixed global matrix; they are not a moving clipmap grid. Below 60 degrees pitch, the
-GPU anchors a 128-cell patch mesh to the 512-reference-pixel WebMercator zoom, evaluates
-projected geometry-cell span over the complete reference viewport footprint, and uses one
-uniform level. At and above 60 degrees it probes standard parent candidates
-directly and refines only where the rotation-invariant local projective Jacobian
-exceeds the eight-reference-pixel cell threshold plus the explicit numerical tolerance.
-Both paths conservatively reject invisible
-candidates, perform local 2:1 closure, build the full-identity neighbor lookup, and
-write indirect draw arguments in one bounded dispatch.
+fixed global matrix; they are not a moving clipmap grid. The GPU always probes bounded
+standard parent candidates directly and refines only where
+the rotation-invariant local projective Jacobian exceeds the calibrated four-reference-
+pixel cell threshold plus explicit numerical tolerance. Pitch and FOV participate in
+projection but never switch algorithms. The one path conservatively rejects invisible
+candidates, performs local 2:1 closure, and builds the full-identity neighbor lookup.
 
 The COG manifest contains a complete immutable min/max elevation record for every declared
-source tile. Geometry above z10 uses the z10 ancestor bound. These records tighten culling and
+source tile. The terrain renderer converts them to generic vertical bounds; geometry
+above z10 uses the z10 ancestor. These records tighten culling and
 projected quality without allowing cache, network, residency, or atlas state to influence LoD.
 
-The boundary can be configured before Vite starts:
-
-```text
-VITE_UNDERWATER_TERRAIN_VARIABLE_LOD_PITCH_DEGREES=55 npm run dev
-```
-
-Missing or blank input uses 60. Values must be finite degrees from 0 through 90;
-invalid input fails before GPU initialization. This environment variable is example
-composition only. Geo receives normalized radians and never reads Vite or process
-environment state.
-
-This is a hard quality/performance boundary. A camera immediately below the threshold
-keeps one level over the full footprint and can draw substantially more geometry than
-the variable cut at the boundary. Lower the environment value when sustained tilted
-interaction matters more than uniform pre-boundary detail.
-
-The cover also emits desired raster facts. A z14 geometry patch retains
-`desiredSampleLevel = 14` while lowering its executable request to the corresponding
-z10 source ancestor. `VirtualRasterRuntime.reconcileViewDemands()` consumes those
-explicit pages. The scheduler marks exact-resident pages used and requests only missing
-pages within the runtime-owned demand budget. Virtual Raster never inspects zoom or
-selects geometry LoD.
+Source demand and draw-count preparation are separate GPU components. A z14 geometry
+patch retains `desiredSampleLevel = 14` while lowering its executable request to the corresponding
+z10 source ancestor in `GpuWebMercatorQuadDemandProjection`.
+`GpuWebMercatorQuadPatchDraw` combines the consumer vertex count with the GPU patch
+count without making either fact part of the cover. `VirtualRasterRuntime.reconcileViewDemands()`
+consumes the explicit pages. The scheduler marks exact-resident pages used and requests
+only missing pages within the runtime-owned demand budget. Virtual Raster never inspects
+zoom or selects geometry LoD.
 
 Terrain samples by global fixed coordinate. Until an exact source page is resident,
 the page table resolves a lower ancestor without changing geometry topology. Mesh

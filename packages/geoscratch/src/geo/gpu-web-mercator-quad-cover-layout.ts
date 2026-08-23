@@ -14,10 +14,8 @@ export const gpuWebMercatorQuadCoverMapMetaCodec = layoutCodec({
         { name: 'referenceViewport', type: 'vec2f' },
         { name: 'verticalFovRadians', type: 'f32' },
         { name: 'cameraLatitudeRadians', type: 'f32' },
-        { name: 'zoomHint', type: 'f32' },
         { name: 'frameEpoch', type: 'u32' },
         { name: 'residencySnapshotEpoch', type: 'u32' },
-        { name: 'cameraPitchRadians', type: 'f32' },
     ],
 }, { usage: [ 'uniform', 'storage', 'readback' ] })
 
@@ -26,21 +24,17 @@ export const gpuWebMercatorQuadCoverPolicyCodec = layoutCodec({
     fields: [
         { name: 'minimumMatrixLevel', type: 'u32' },
         { name: 'maximumMatrixLevel', type: 'u32' },
-        { name: 'sourceMaximumMatrixLevel', type: 'u32' },
         { name: 'maximumPatches', type: 'u32' },
-        { name: 'demandCapacity', type: 'u32' },
         { name: 'coverageLimitCount', type: 'u32' },
         { name: 'coordinateBits', type: 'u32' },
-        { name: 'vertexCount', type: 'u32' },
         { name: 'lookupCapacity', type: 'u32' },
-        { name: 'minimumElevationMeters', type: 'f32' },
-        { name: 'maximumElevationMeters', type: 'f32' },
+        { name: 'boundsMaximumMatrixLevel', type: 'u32' },
+        { name: 'verticalBoundsMode', type: 'u32' },
         { name: 'cellsPerPatchEdge', type: 'u32' },
-        { name: 'referenceTileSizePixels', type: 'f32' },
         { name: 'maximumCellSpanReferencePixels', type: 'f32' },
         { name: 'refinementTolerance', type: 'f32' },
-        { name: 'variableLodPitchThresholdRadians', type: 'f32' },
-        { name: 'elevationBoundsMode', type: 'u32' },
+        { name: 'minimumVerticalMeters', type: 'f32' },
+        { name: 'maximumVerticalMeters', type: 'f32' },
     ],
 }, { usage: [ 'uniform', 'storage', 'readback' ] })
 
@@ -52,15 +46,15 @@ export const gpuWebMercatorQuadCoverLimitCodec = layoutCodec({
         { name: 'maxTileRow', type: 'u32' },
         { name: 'minTileCol', type: 'u32' },
         { name: 'maxTileCol', type: 'u32' },
-        { name: 'elevationBoundsOffset', type: 'u32' },
+        { name: 'verticalBoundsOffset', type: 'u32' },
     ],
 }, { usage: [ 'storage', 'readback' ] })
 
-export const gpuWebMercatorQuadCoverElevationBoundsCodec = layoutCodec({
-    name: 'GpuWebMercatorQuadCoverElevationBounds',
+export const gpuWebMercatorQuadCoverVerticalBoundsCodec = layoutCodec({
+    name: 'GpuWebMercatorQuadCoverVerticalBounds',
     fields: [
-        { name: 'minimumElevationMeters', type: 'f32' },
-        { name: 'maximumElevationMeters', type: 'f32' },
+        { name: 'minimumVerticalMeters', type: 'f32' },
+        { name: 'maximumVerticalMeters', type: 'f32' },
     ],
 }, { usage: [ 'storage', 'readback' ] })
 
@@ -84,46 +78,32 @@ export const gpuWebMercatorQuadCoverLookupEntryCodec = layoutCodec({
     ],
 }, { usage: [ 'storage', 'readback' ] })
 
-export const gpuWebMercatorQuadCoverDemandCodec = layoutCodec({
-    name: 'GpuWebMercatorQuadCoverDemand',
-    fields: [
-        { name: 'desiredSampleLevel', type: 'u32' },
-        { name: 'sourceLevelCeiling', type: 'u32' },
-        { name: 'requestMatrixLevel', type: 'u32' },
-        { name: 'tileRow', type: 'u32' },
-        { name: 'tileCol', type: 'u32' },
-        { name: 'priority', type: 'u32' },
-        { name: 'decisionFrameEpoch', type: 'u32' },
-        { name: 'residencySnapshotEpoch', type: 'u32' },
-    ],
-}, { usage: [ 'storage', 'readback' ] })
-
 export const gpuWebMercatorQuadCoverStateCodec = layoutCodec({
     name: 'GpuWebMercatorQuadCoverState',
     fields: [
         { name: 'frameEpoch', type: 'u32' },
         { name: 'candidateCount', type: 'u32' },
         { name: 'patchCount', type: 'u32' },
-        { name: 'demandCount', type: 'u32' },
         { name: 'descriptorOverflowCount', type: 'u32' },
         { name: 'lookupOverflowCount', type: 'u32' },
-        { name: 'demandOverflowCount', type: 'u32' },
         { name: 'minimumMatrixLevel', type: 'u32' },
         { name: 'maximumMatrixLevel', type: 'u32' },
         { name: 'maximumAdjacentLevelDelta', type: 'u32' },
         { name: 'finestMatrixLevel', type: 'u32' },
-        { name: 'sourceLevelCeiling', type: 'u32' },
-        { name: 'selectionMode', type: 'u32' },
         { name: 'minimumCellSpanQ8', type: 'u32' },
         { name: 'maximumCellSpanQ8', type: 'u32' },
+        { name: 'reserved0', type: 'u32' },
+        { name: 'reserved1', type: 'u32' },
+        { name: 'reserved2', type: 'u32' },
         { name: 'reserved3', type: 'u32' },
+        { name: 'reserved4', type: 'u32' },
     ],
 }, { usage: [ 'storage', 'readback' ] })
 
 export type GpuWebMercatorQuadCoverReadWgslOptions = Readonly<{
     namespace?: string
     group: number
-    visibleInstancesBinding: number
+    patchesBinding: number
     lookupEntriesBinding: number
 }>
 
@@ -134,7 +114,7 @@ export type GpuWebMercatorQuadCoverReadWgslModule = Readonly<{
     layoutDependencies: readonly LayoutArtifact[]
     bindings: Readonly<{
         group: number
-        visibleInstances: number
+        patches: number
         lookupEntries: number
     }>
 }>
@@ -146,15 +126,15 @@ export function gpuWebMercatorQuadCoverReadWgslModule(
 
     const namespace = wgslIdentifier(options?.namespace ?? 'GpuWebMercatorQuadCoverRead')
     const group = nonNegativeBinding(options?.group, 'group')
-    const visibleInstances = nonNegativeBinding(
-        options?.visibleInstancesBinding,
-        'visibleInstancesBinding'
+    const patches = nonNegativeBinding(
+        options?.patchesBinding,
+        'patchesBinding'
     )
     const lookupEntries = nonNegativeBinding(
         options?.lookupEntriesBinding,
         'lookupEntriesBinding'
     )
-    if (visibleInstances === lookupEntries) {
+    if (patches === lookupEntries) {
         throw new TypeError('WebMercatorQuad cover read bindings must be distinct')
     }
     const shared = sharedWgsl()
@@ -169,8 +149,8 @@ struct ${namespace}Neighbor {
     patchIndex: u32,
 };
 
-@group(${group}) @binding(${visibleInstances})
-var<storage, read> ${namespace}_visible_instances: array<GpuWebMercatorQuadCoverPatch>;
+@group(${group}) @binding(${patches})
+var<storage, read> ${namespace}_patches: array<GpuWebMercatorQuadCoverPatch>;
 @group(${group}) @binding(${lookupEntries})
 var<storage, read> ${namespace}_lookup_entries:
     array<GpuWebMercatorQuadCoverLookupEntry>;
@@ -286,7 +266,7 @@ fn ${namespace}_snap_edge_coordinate(
             ...shared.layoutDependencies,
             gpuWebMercatorQuadCoverLookupEntryCodec.artifact,
         ]),
-        bindings: Object.freeze({ group, visibleInstances, lookupEntries }),
+        bindings: Object.freeze({ group, patches, lookupEntries }),
     })
 }
 

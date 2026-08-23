@@ -10,7 +10,7 @@ import type {
     TileMatrixLimits,
     VirtualRasterPageIdentity,
     VirtualRasterRuntime,
-    WebMercatorTileElevationBounds,
+    WebMercatorTerrainElevationBounds,
 } from 'geoscratch/geo'
 import {
     createDemWorkerRequestExecutor,
@@ -49,7 +49,7 @@ type DemVirtualRasterManifest = Readonly<{
         tileMatrixIds: readonly string[]
         limits: readonly TileMatrixLimits[]
     }>
-    tileElevationBounds: readonly WebMercatorTileElevationBounds[]
+    tileElevationBounds: readonly WebMercatorTerrainElevationBounds[]
     nativeResolution: Readonly<{
         closestTileMatrix: string
         tileMatrixCellSizeMeters: number
@@ -100,7 +100,7 @@ export type DemTileSource = Readonly<{
     id: string
     manifest: DemVirtualRasterManifest
     elevationRangeMeters: readonly [number, number]
-    elevationBounds: readonly WebMercatorTileElevationBounds[]
+    elevationBounds: readonly WebMercatorTerrainElevationBounds[]
     model: DemVirtualRasterModel
     facts: DemTileSourceFacts
     tileUrl(page: VirtualRasterPageIdentity): string

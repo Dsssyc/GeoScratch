@@ -4,80 +4,75 @@ canonical: true
 apiSources:
   - packages/geoscratch/src/geo/gpu-web-mercator-quad-cover-layout.ts
   - packages/geoscratch/src/geo/gpu-web-mercator-quad-cover.ts
+  - packages/geoscratch/src/geo/gpu-web-mercator-quad-demand.ts
+  - packages/geoscratch/src/geo/gpu-web-mercator-quad-patch-draw.ts
 ---
 # WebMercatorQuad View Cover
 
 [简体中文](./view-cover_zh.md) | [Geo overview](./README.md)
 
-`GpuWebMercatorQuadCover` is Geo's single geometry-LoD authority for planar
-`WebMercatorQuad` rendering. It consumes immutable `GeoViewSnapshot` facts and emits a
-bounded standard-tile cover, full-identity neighbor lookup, desired raster-page
-feedback, and indirect draw arguments. CPU frame work uploads view facts and submits
-the persistent graph; it does not materialize a selected tile list.
+`GpuWebMercatorQuadCover` is Geo's geometry-LoD authority for planar
+`WebMercatorQuad` patch rendering. It consumes one immutable `GeoViewSnapshot` and
+emits a bounded standard-tile cut, full-identity neighbor lookup, GPU patch count, and
+geometry feedback. It does not own a tiled source, raster demand, atlas residency,
+mesh vertex count, or draw arguments.
 
-Every emitted patch is an OGC tile identity `(tileMatrix, tileRow, tileCol)`.
-Camera/view-derived level windows select from the fixed global matrix and never create
-a moving game-style grid. The kernel evaluates the area-equivalent projected span of
-one geometry cell with a rotation-invariant local projective Jacobian. The metric
-uses `referenceViewport` pixels and includes perspective, foreshortening, and exact
-immutable tile elevation bounds. DPR and physical presentation size never change the
-cover; a cell that can cross the camera plane still refines conservatively.
+Every patch is an OGC identity `(tileMatrix, tileRow, tileCol)`. Camera-derived level
+windows address the fixed global matrix and never create a moving game-style grid. At
+every pitch, one adaptive kernel probes bounded standard parents around the precise
+fixed-point camera position and creates nested child windows only where the
+area-equivalent projected span of one geometry cell exceeds
+`maximumCellSpanReferencePixels` plus `refinementTolerance`. Pitch and FOV affect the
+projection naturally; they never select a uniform/variable algorithm mode.
 
-`variableLodPitchThresholdRadians` divides two deterministic modes. A pitch strictly
-below the threshold anchors the complete footprint at the 512-reference-pixel
-WebMercator zoom and emits one uniform geometry level, refining the whole footprint
-only when projected quality requires it. A pitch equal to or above the threshold
-directly probes bounded standard parents around the precise camera coordinate at every
-possible level and creates nested child windows only where projected cell span exceeds
-the threshold. Both modes conservatively reject invisible candidates and finish with
-the same prefix-free emission and local 2:1 closure. Candidate work scales with the
-bounded visible footprint and hard patch capacity; there is no constant candidate
-claim independent of viewport size. The kernel does not start at world roots, traverse
-a root-to-leaf quadtree, count trial cuts, or retain previous-frame topology as
-selection authority.
+The projected metric uses `GeoViewSnapshot.referenceViewport`, a rotation-invariant
+local projective Jacobian, perspective, foreshortening, and immutable vertical bounds.
+Physical presentation size and DPR never change cover identities. A cell that can
+cross the camera plane refines conservatively.
 
-`GpuWebMercatorQuadCoverPolicy` declares ordered geometry/source levels, one hard
-patch capacity, `referenceTileSizePixels`, `cellsPerPatchEdge`,
-`maximumCellSpanReferencePixels`, `refinementTolerance`, and
-`variableLodPitchThresholdRadians` in `[0, PI / 2]`. Invalid quality or threshold facts
-fail before resource creation. Complete demand capacity is derived from the patch bound
-because one patch emits at most one demand. `sourceMaximumMatrixLevel` is a source fact,
-not a geometry ceiling. Geometry patches may continue to z14 while raster demand lowers
-to a standard z10 ancestor. Feedback retains `desiredSampleLevel`,
-`sourceLevelCeiling`, and the executable request tile as separate facts.
-Demand priority orders desired precision first, then wrapped standard-tile distance
-to the camera anchor, so a tight residency budget does not fall back to row/column key order.
+`GpuWebMercatorQuadCoverPolicy` declares ordered geometry levels, hard patch capacity,
+`cellsPerPatchEdge`, `maximumCellSpanReferencePixels`, and numerical tolerance. Invalid
+facts fail before resource creation. The built-in terrain consumer uses 128 cells and
+a calibrated four-reference-pixel threshold. The public cover policy contains no
+source ceiling or pitch boundary.
 
-Selection feedback reports `selectionMode`, final minimum/maximum geometry levels,
-and Q8-decoded `minimumCellSpanReferencePixels` /
-`maximumCellSpanReferencePixels`. These facts are observation-only;
-they never feed the next frame. Descriptor, lookup, demand, or capacity overflow is a
-hard diagnostic and never silently coarsens the requested cut.
+The kernel seeds the declared minimum geometry window, probes bounded parent windows,
+nests standard children through their ancestors, emits a prefix-free visible cut, and
+performs local 2:1 closure. It does not start at world roots, traverse a root-to-leaf
+quadtree, count trial cuts, inspect atlas slots, or retain previous-frame topology as
+selection authority. Descriptor, lookup, or patch-capacity overflow is a hard
+diagnostic; no path silently coarsens the cut.
 
-`gpuWebMercatorQuadCoverReadWgslModule()` exposes bounded full-identity lookup,
-covering-neighbor resolution, and edge-coordinate snapping. Lookup entries store the
-complete level, row, and column rather than a collision-prone compact z14 key, so the
-contract remains valid through the WebMercatorQuad level range.
+`WebMercatorTileVerticalBounds` is a geometry fact rather than terrain identity. A
+flat consumer can use `[0, 0]`; terrain can convert source elevation metadata; an
+extruded consumer can provide conservative feature heights. A supplied hierarchy must
+exactly match the spatial profile. Geometry above its highest level uses that ancestor.
+An omitted hierarchy uses `verticalRangeMeters`. Cache, request, and residency state
+cannot change these bounds.
 
-The cover owns two parity resource sets for bounded double-flight. `writeView()` creates
-one ephemeral view upload, `frame()` selects parity from submission-sequence authority,
-`encode()` appends the upload and one cover compute dispatch, and `capture()` appends
-bounded state/demand readbacks. Feedback rejects overflow, stale frame epochs, and
-final edge-adjacent level deltas greater than one. Root/trial counters are not retained
-as constant compatibility vocabulary; structural gates prove those paths are absent.
+`GpuWebMercatorQuadCoverTemplate` exposes borrowed parity resources for downstream
+GPU components: map metadata, patches, lookup, full state, and an exact patch-count
+region. `writeView()` owns one ephemeral upload, `frame()` selects parity,
+`encode()` submits one adaptive compute, and `capture()` reads only geometry state.
+Feedback reports candidate/patch counts, level range, adjacency, projected-cell span,
+and overflow facts. It contains no demand records or selection mode.
 
-Virtual Raster is downstream. The cover chooses geometry and desired sample precision;
-Virtual Raster only schedules explicit page demand, manages residency, and resolves
-exact or ancestor data.
+`gpuWebMercatorQuadCoverReadWgslModule()` exposes full-identity lookup,
+covering-neighbor resolution, and edge-coordinate snapping for patch consumers.
+Entries store complete level, row, and column facts rather than a compact z14 key.
 
-An optional complete `WebMercatorTileElevationBounds` hierarchy supplies one immutable
-minimum/maximum pair for every source tile. Geometry above the source ceiling uses the
-source-ceiling ancestor. Partial hierarchies are invalid; an omitted hierarchy uses the
-global descriptor range. Cover facts expose hierarchy/global mode and record count.
-Residency, request completion, cache hits, and atlas contents cannot alter these bounds.
+`GpuWebMercatorQuadDemandProjection` is the separate source-lowering stage. It borrows
+a cover frame, owns one source coverage and its own parity resources, deduplicates
+executable source tiles, and preserves `desiredSampleLevel`, `sourceLevelCeiling`,
+request identity, wrapped camera-distance priority, frame epoch, and residency epoch as
+separate facts. Its bounded feedback can be converted to `ViewTileDemandSet`; Virtual
+Raster remains downstream and passive.
 
-Related decisions:
-`docs/decisions/ADR-083-webmercator-inverse-cover-passive-virtual-raster.md`
-establishes inverse cover and passive Virtual Raster authority;
-`docs/decisions/ADR-084-reference-pixel-terrain-lod.md` defines the reference-pixel
-quality model and immutable elevation hierarchy.
+`GpuWebMercatorQuadPatchDraw` is the separate draw-count adapter. It borrows cover
+state, owns one consumer vertex count plus parity draw-indirect buffers, and uses one
+persistent compute dispatch to write `[vertexCount, patchCount, 0, 0]`. The cover owns
+neither those buffers nor the consumer mesh.
+
+Related decisions: ADR-083 establishes inverse-cover and passive Virtual Raster;
+ADR-084 establishes reference-pixel quality; ADR-086 supersedes their pitch-gated
+parts and separates cover, source demand, and patch draw ownership.

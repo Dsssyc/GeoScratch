@@ -23,9 +23,6 @@ const proofMode = parameters.get('proof') === '1'
 const tileServerUrl = parameters.get('tileServer') ?? 'http://127.0.0.1:8787'
 const cachePolicy = readUnderwaterTerrainCachePolicy(parameters)
 const maxPhysicalPages = boundedIntegerParameter(parameters.get('atlasPages'), 64, 2, 64)
-const variableLodPitchThresholdRadians = readVariableLodPitchThreshold(
-    import.meta.env.VITE_UNDERWATER_TERRAIN_VARIABLE_LOD_PITCH_DEGREES
-)
 let tileWireframeEnabled = preparedControlPanel.renderingPreference.tileWireframe
 let application: UnderwaterTerrainApplication | undefined
 let proof: UnderwaterTerrainProof | undefined
@@ -67,7 +64,6 @@ async function initializePage() {
         cachePolicy,
         maxPhysicalPages,
         tileWireframeEnabled,
-        variableLodPitchThresholdRadians,
         ...(proof === undefined ? {} : { proof }),
         fail: error => { void failPage(error) },
         dispose: disposePage,
@@ -132,18 +128,6 @@ function boundedIntegerParameter(
         )
     }
     return parsed
-}
-
-function readVariableLodPitchThreshold(value: string | undefined): number {
-
-    if (value === undefined || value.trim().length === 0) return Math.PI / 3
-    const degrees = Number(value)
-    if (!Number.isFinite(degrees) || degrees < 0 || degrees > 90) {
-        throw new RangeError(
-            'VITE_UNDERWATER_TERRAIN_VARIABLE_LOD_PITCH_DEGREES must be between 0 and 90'
-        )
-    }
-    return degrees * Math.PI / 180
 }
 
 function setStatus(status: string) {

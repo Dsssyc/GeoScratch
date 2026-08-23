@@ -220,8 +220,8 @@ describe('Underwater Terrain clean cut', () => {
         expect(application).to.include('source.elevationRangeMeters')
         expect(application).not.to.include('source.manifest.offset')
         expect(application).not.to.include('source.manifest.scale')
-        expect(main).to.include('VITE_UNDERWATER_TERRAIN_VARIABLE_LOD_PITCH_DEGREES')
-        expect(application).to.include('variableLodPitchThresholdRadians:')
+        expect(main).not.to.include('VITE_UNDERWATER_TERRAIN_VARIABLE_LOD_PITCH_DEGREES')
+        expect(application).not.to.include('variableLodPitchThresholdRadians')
         expect(application).not.to.match(/URLSearchParams|localStorage|tweakpane|Pane/)
     })
 
@@ -236,6 +236,13 @@ describe('Underwater Terrain clean cut', () => {
         const wgsl = read(
             'packages', 'geoscratch', 'src', 'geo', 'gpu-web-mercator-quad-cover-wgsl.ts'
         )
+        const demand = read(
+            'packages', 'geoscratch', 'src', 'geo', 'gpu-web-mercator-quad-demand.ts'
+        )
+        const patchDraw = read(
+            'packages', 'geoscratch', 'src', 'geo',
+            'gpu-web-mercator-quad-patch-draw.ts'
+        )
         const terrain = read(
             'packages', 'geoscratch', 'src', 'geo', 'web-mercator-terrain-wgsl.ts'
         )
@@ -243,20 +250,27 @@ describe('Underwater Terrain clean cut', () => {
         expect(renderer).to.include('GpuWebMercatorQuadCover.create(runtime')
         expect(renderer).to.include('cover.encode(builder, frame)')
         expect(renderer).to.include('cover.capture(builder, frame)')
+        expect(renderer).to.include('demandProjection.encode(builder, demandFrame)')
+        expect(renderer).to.include('patchDraw.encode(builder, patchDrawFrame)')
         expect(renderer).to.include("'inverse-cover-compute'")
+        expect(renderer).to.include("'source-demand-compute'")
+        expect(renderer).to.include("'patch-draw-compute'")
         expect(renderer).to.include('virtualRaster.reconcileViewDemands(')
         expect(cover).to.include('export class GpuWebMercatorQuadCover')
-        expect(cover).to.include('desiredSampleLevel')
-        expect(cover).to.include('sourceLevelCeiling')
-        expect(cover).to.include('referenceTileSizePixels')
+        expect(cover).not.to.include('desiredSampleLevel')
+        expect(cover).not.to.include('sourceLevelCeiling')
+        expect(cover).not.to.include('referenceTileSizePixels')
         expect(cover).to.include('maximumCellSpanReferencePixels')
         expect(cover).to.include('refinementTolerance')
-        expect(cover).to.include('variableLodPitchThresholdRadians')
+        expect(cover).not.to.include('variableLodPitchThresholdRadians')
+        expect(cover).not.to.include('selectionMode')
+        expect(demand).to.include('desiredSampleLevel')
+        expect(demand).to.include('sourceLevelCeiling')
+        expect(patchDraw).to.include('drawArgument')
         expect(wgsl).to.include('fn generateWebMercatorQuadCover()')
         expect(wgsl).to.include('coverCameraTileIndex')
         expect(wgsl).to.include('coverAlignToParentGroups')
         expect(wgsl).to.include('fn coverProjectedCellSpanPixels(')
-        expect(wgsl).to.include('fn coverUniformWindow(')
         expect(wgsl).to.include('fn coverVariableRefinementWindow(')
         expect(wgsl).to.include('fn coverUnionWindow(')
         expect(wgsl).to.include('coverBalancePatches')
@@ -277,7 +291,8 @@ describe('Underwater Terrain clean cut', () => {
             'gpu-render-patch-frontier-wgsl.ts',
             'virtual-raster-gpu-feedback.ts',
         ]) expect(exists('packages', 'geoscratch', 'src', 'geo', removed)).to.equal(false)
-        const active = [ renderer, cover, wgsl, terrain ].join('\n')
+        expect(wgsl).not.to.include('fn coverUniformWindow(')
+        const active = [ renderer, cover, demand, patchDraw, wgsl, terrain ].join('\n')
         for (const forbidden of [
             'renderRoots',
             'countRenderPatchTrials',
@@ -357,6 +372,8 @@ describe('Underwater Terrain clean cut', () => {
         }
         expect(frame).to.include('cover.writeView(view)')
         expect(frame).to.include('cover.encode(builder, frame)')
+        expect(frame).to.include('demandProjection.encode(builder, demandFrame)')
+        expect(frame).to.include('patchDraw.encode(builder, patchDrawFrame)')
         expect(frame).to.include('.render(passes.terrain')
         expect(renderer).to.include("contentEpoch: 'current-at-step'")
         expect(renderer.match(/count: \{ indirect:/g)).to.have.length(1)
@@ -434,9 +451,9 @@ describe('Underwater Terrain clean cut', () => {
         expect(observedFailure).to.equal(provenanceFailure)
         expect(result.value.frame.provenance.map(fact => fact.name)).to.deep.equal([
             'cover-map-meta-to-cover-compute',
-            'cover-visible-to-terrain-draw',
+            'cover-patches-to-terrain-draw',
             'cover-lookup-to-terrain-draw',
-            'cover-indirect-to-terrain-draw',
+            'patch-draw-indirect-to-terrain-draw',
         ])
         expect(fake.calls.queueSubmissions.length).to.be.greaterThan(0)
 

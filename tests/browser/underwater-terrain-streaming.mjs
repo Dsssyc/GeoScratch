@@ -527,22 +527,23 @@ function cameraMatches(facts, camera) {
 function coverSignature(facts) {
 
     const cover = parseJson(facts.coverFeedback)
+    const demand = parseJson(facts.demandFeedback)
     return JSON.stringify({
         candidateCount: cover?.candidateCount,
         patchCount: cover?.patchCount,
-        demandCount: cover?.demandCount,
+        demandCount: demand?.demandCount,
         minimumMatrixLevel: cover?.minimumMatrixLevel,
         maximumMatrixLevel: cover?.maximumMatrixLevel,
         maximumAdjacentLevelDelta: cover?.maximumAdjacentLevelDelta,
         finestMatrixLevel: cover?.finestMatrixLevel,
-        sourceLevelCeiling: cover?.sourceLevelCeiling,
-        demands: cover?.demands?.map(demand => ({
-            desiredSampleLevel: demand.desiredSampleLevel,
-            sourceLevelCeiling: demand.sourceLevelCeiling,
-            requestMatrixLevel: demand.requestMatrixLevel,
-            tileRow: demand.tileRow,
-            tileCol: demand.tileCol,
-            priority: demand.priority,
+        sourceLevelCeiling: demand?.sourceLevelCeiling,
+        demands: demand?.demands?.map(entry => ({
+            desiredSampleLevel: entry.desiredSampleLevel,
+            sourceLevelCeiling: entry.sourceLevelCeiling,
+            requestMatrixLevel: entry.requestMatrixLevel,
+            tileRow: entry.tileRow,
+            tileCol: entry.tileCol,
+            priority: entry.priority,
         })),
     })
 }
@@ -559,10 +560,11 @@ async function waitForStableFacts(page, additional = () => true) {
         }
         const virtualRaster = parseJson(facts.virtualRaster)
         const cover = parseJson(facts.coverFeedback)
+        const demand = parseJson(facts.demandFeedback)
         if (facts.status === 'ready' && Number(facts.frames) === Number(facts.observedFrames) &&
             facts.coverConverged === 'true' && facts.convergenceState === 'converged' &&
             cover?.patchCount > 0 && cover?.descriptorOverflowCount === 0 &&
-            cover?.lookupOverflowCount === 0 && cover?.demandOverflowCount === 0 &&
+            cover?.lookupOverflowCount === 0 && demand?.overflowCount === 0 &&
             cover?.maximumAdjacentLevelDelta <= 1 &&
             virtualRaster?.residency?.stagedCount === 0 &&
             virtualRaster?.residency?.stagingBytes === 0 &&
@@ -587,6 +589,7 @@ async function waitForStableFacts(page, additional = () => true) {
         observedFrames: lastFacts?.observedFrames,
         virtualRequestedPageCount: lastFacts?.virtualRequestedPageCount,
         cover: parseJson(lastFacts?.coverFeedback),
+        demand: parseJson(lastFacts?.demandFeedback),
         residency: virtualRaster?.residency,
         scheduler: virtualRaster?.scheduler,
         worker: virtualRaster?.worker,
@@ -735,19 +738,21 @@ function validateProof(value, processState) {
         const phaseBudget = worker?.phaseBudget
         const gpu = virtualRaster?.gpu
         const cover = parseJson(facts.coverFeedback)
+        const demand = parseJson(facts.demandFeedback)
         if (facts.selectionPath !== 'gpu-camera-inverse-webmercatorquad-cover' ||
             facts.countPath !== 'gpu-produced-indirect-arguments' ||
             facts.cpuSelectionUploadCount !== '0' ||
             facts.coverConverged !== 'true' || facts.convergenceState !== 'converged' ||
             cover?.patchCount !== Number(facts.coverPatchCount) ||
             cover?.candidateCount < cover?.patchCount ||
-            cover?.demandCount !== Number(facts.coverDemandCount) ||
             cover?.descriptorOverflowCount !== 0 || cover?.lookupOverflowCount !== 0 ||
-            cover?.demandOverflowCount !== 0 || cover?.maximumAdjacentLevelDelta > 1 ||
-            cover?.sourceLevelCeiling !== 10 ||
-            !Array.isArray(cover?.demands) || cover.demands.some(demand => (
-                demand.requestMatrixLevel > demand.sourceLevelCeiling ||
-                demand.desiredSampleLevel < demand.requestMatrixLevel
+            cover?.maximumAdjacentLevelDelta > 1 ||
+            demand?.demandCount !== Number(facts.sourceDemandCount) ||
+            demand?.overflowCount !== 0 || demand?.sourceLevelCeiling !== 10 ||
+            demand?.frameEpoch !== cover?.frameEpoch ||
+            !Array.isArray(demand?.demands) || demand.demands.some(entry => (
+                entry.requestMatrixLevel > entry.sourceLevelCeiling ||
+                entry.desiredSampleLevel < entry.requestMatrixLevel
             ))) {
             failures.push(`${name} frame violated the GPU inverse-cover terminal contract`)
         }
@@ -808,8 +813,9 @@ function validateProof(value, processState) {
     const budgetFirst = value.budget?.first
     const budgetRepeated = value.budget?.repeated
     const budgetCover = parseJson(budgetFirst?.coverFeedback)
+    const budgetDemand = parseJson(budgetFirst?.demandFeedback)
     const budgetVirtual = parseJson(budgetFirst?.virtualRaster)
-    const prioritizedDemand = [ ...(budgetCover?.demands ?? []) ].sort((left, right) =>
+    const prioritizedDemand = [ ...(budgetDemand?.demands ?? []) ].sort((left, right) =>
         right.priority - left.priority ||
         left.requestMatrixLevel - right.requestMatrixLevel ||
         left.tileRow - right.tileRow ||
@@ -827,8 +833,8 @@ function validateProof(value, processState) {
     )
     if (budgetFirst?.status !== 'ready' || !cameraMatches(budgetFirst, zoomedOutCamera) ||
         budgetFirst?.convergenceState !== 'converged' ||
-        budgetCover?.patchCount < 1 || budgetCover?.demandCount <= tightAtlasPages ||
-        budgetCover?.descriptorOverflowCount !== 0 || budgetCover?.demandOverflowCount !== 0 ||
+        budgetCover?.patchCount < 1 || budgetDemand?.demandCount <= tightAtlasPages ||
+        budgetCover?.descriptorOverflowCount !== 0 || budgetDemand?.overflowCount !== 0 ||
         budgetVirtual?.residency?.maxPhysicalPages !== tightAtlasPages ||
         budgetVirtual?.residency?.residentCount < 1 ||
         budgetVirtual?.residency?.residentCount > tightAtlasPages ||
@@ -845,6 +851,7 @@ function validateProof(value, processState) {
 
     const terminalFacts = value.terminalFailure?.facts
     const terminalCover = parseJson(terminalFacts?.coverFeedback)
+    const terminalDemand = parseJson(terminalFacts?.demandFeedback)
     const failedVirtual = parseJson(terminalFacts?.virtualRaster)
     const terminalHistory = failedVirtual?.scheduler?.history ?? []
     const failedRequestOccurrences = value.terminalFailure?.events?.tileRequests?.filter(url => (
@@ -856,7 +863,7 @@ function validateProof(value, processState) {
         failedVirtual?.scheduler?.failedRequestCount !== 1 ||
         terminalFacts?.convergenceState !== 'converged' ||
         terminalCover?.patchCount < 1 || terminalCover?.descriptorOverflowCount !== 0 ||
-        terminalCover?.demandOverflowCount !== 0 ||
+        terminalDemand?.overflowCount !== 0 ||
         failedVirtual?.residency?.fallbackCount < 1 || failedRequestOccurrences !== 1) {
         failures.push(`terminal child 404 did not publish one failed page and retain parent cover: ${JSON.stringify({
             failedTileUrl: value.terminalFailure?.failedTileUrl,
@@ -1162,6 +1169,7 @@ function summarizeProof(value) {
     const summarizeFacts = facts => {
         const virtualRaster = parseJson(facts.virtualRaster)
         const cover = parseJson(facts.coverFeedback)
+        const demand = parseJson(facts.demandFeedback)
         const camera = parseJson(facts.cameraView)
         return {
             status: facts.status,
@@ -1171,14 +1179,14 @@ function summarizeProof(value) {
             cover: cover == null ? undefined : {
                 candidateCount: cover.candidateCount,
                 patchCount: cover.patchCount,
-                demandCount: cover.demandCount,
+                demandCount: demand?.demandCount,
                 levelRange: [
                     cover.minimumMatrixLevel,
                     cover.maximumMatrixLevel,
                 ],
                 finestMatrixLevel: cover.finestMatrixLevel,
                 maximumAdjacentLevelDelta: cover.maximumAdjacentLevelDelta,
-                sourceLevelCeiling: cover.sourceLevelCeiling,
+                sourceLevelCeiling: demand?.sourceLevelCeiling,
             },
             snapshotEpoch: virtualRaster?.residency?.snapshotEpoch,
             residentCount: virtualRaster?.residency?.residentCount,

@@ -21,8 +21,6 @@ import {
 import { throwGeoDiagnostic } from './diagnostics.js'
 import type { GeoViewSnapshot } from './geo-view.js'
 import {
-    gpuWebMercatorQuadCoverDemandCodec,
-    gpuWebMercatorQuadCoverElevationBoundsCodec,
     gpuWebMercatorQuadCoverLimitCodec,
     gpuWebMercatorQuadCoverLookupEntryCodec,
     gpuWebMercatorQuadCoverMapMetaCodec,
@@ -30,6 +28,7 @@ import {
     gpuWebMercatorQuadCoverPolicyCodec,
     gpuWebMercatorQuadCoverSharedWgslModule,
     gpuWebMercatorQuadCoverStateCodec,
+    gpuWebMercatorQuadCoverVerticalBoundsCodec,
 } from './gpu-web-mercator-quad-cover-layout.js'
 import { GPU_WEB_MERCATOR_QUAD_COVER_WGSL } from './gpu-web-mercator-quad-cover-wgsl.js'
 import type { WebMercatorPlanarTileSpatialProfile } from './tile-spatial-profile.js'
@@ -39,39 +38,33 @@ const BUFFER_COPY_DST = 0x08
 const BUFFER_COPY_SRC = 0x04
 const BUFFER_UNIFORM = 0x40
 const BUFFER_STORAGE = 0x80
-const BUFFER_INDIRECT = 0x100
-const DRAW_ARGUMENT_BYTES = 16
 
 type Disposable = { dispose(): void }
 type BufferBindingType = 'uniform' | 'read-storage' | 'storage'
 
-/** Immutable source-metadata elevation range for one standard WebMercatorQuad tile. */
-export type WebMercatorTileElevationBounds = Readonly<{
+/** Immutable conservative vertical range for one standard WebMercatorQuad tile. */
+export type WebMercatorTileVerticalBounds = Readonly<{
     matrixLevel: number
     tileRow: number
     tileCol: number
-    minimumElevationMeters: number
-    maximumElevationMeters: number
+    minimumVerticalMeters: number
+    maximumVerticalMeters: number
 }>
 
 export type GpuWebMercatorQuadCoverPolicy = Readonly<{
     minimumMatrixLevel: number
     maximumMatrixLevel: number
-    sourceMaximumMatrixLevel: number
     maximumPatches: number
-    referenceTileSizePixels: number
     cellsPerPatchEdge: number
     maximumCellSpanReferencePixels: number
     refinementTolerance: number
-    variableLodPitchThresholdRadians: number
 }>
 
 export type GpuWebMercatorQuadCoverDescriptor = Readonly<{
     spatialProfile: WebMercatorPlanarTileSpatialProfile
     policy: GpuWebMercatorQuadCoverPolicy
-    elevationRangeMeters: readonly [number, number]
-    elevationBounds?: readonly WebMercatorTileElevationBounds[]
-    vertexCount: number
+    verticalRangeMeters: readonly [number, number]
+    verticalBounds?: readonly WebMercatorTileVerticalBounds[]
 }>
 
 export type GpuWebMercatorQuadCoverViewToken = Readonly<{
@@ -90,49 +83,29 @@ export type GpuWebMercatorQuadCoverFrame = Readonly<{
     frameEpoch: number
     residencySnapshotEpoch: number
     parity: 0 | 1
-    visibleInstances: BufferResource
+    patches: BufferResource
 }>
 
-export type GpuWebMercatorQuadCoverRenderTemplate = Readonly<{
+export type GpuWebMercatorQuadCoverTemplate = Readonly<{
     coverId: string
     parity: 0 | 1
-    templateId: 'patch-mesh'
     mapMeta: BufferResource
-    visibleInstances: BufferResource
+    patches: BufferResource
     coverLookup: BufferResource
-    drawArgument: Readonly<{
-        resource: BufferResource
-        region: BufferRegion
-        offset: 0
-        size: 16
-    }>
-}>
-
-export type GpuWebMercatorQuadCoverDemand = Readonly<{
-    desiredSampleLevel: number
-    sourceLevelCeiling: number
-    requestMatrixLevel: number
-    tileRow: number
-    tileCol: number
-    priority: number
-    decisionFrameEpoch: number
-    residencySnapshotEpoch: number
+    state: BufferResource
+    patchCount: BufferRegion
 }>
 
 export type GpuWebMercatorQuadCoverSelectionFacts = Readonly<{
     frameEpoch: number
     candidateCount: number
     patchCount: number
-    demandCount: number
     descriptorOverflowCount: number
     lookupOverflowCount: number
-    demandOverflowCount: number
     minimumMatrixLevel?: number
     maximumMatrixLevel?: number
     maximumAdjacentLevelDelta: number
     finestMatrixLevel: number
-    sourceLevelCeiling: number
-    selectionMode: 'uniform' | 'variable'
     minimumCellSpanReferencePixels?: number
     maximumCellSpanReferencePixels?: number
 }>
@@ -142,13 +115,11 @@ export type GpuWebMercatorQuadCoverFeedback =
         kind: 'gpu-web-mercator-quad-cover-feedback'
         coverId: string
         submissionId: string
-        demands: readonly GpuWebMercatorQuadCoverDemand[]
     }>
 
 export type GpuWebMercatorQuadCoverCommands = Readonly<{
     generate: DispatchCommand
     stateFeedback: ReadbackCommand
-    demandFeedback: ReadbackCommand
 }>
 
 export type GpuWebMercatorQuadCoverFacts = Readonly<{
@@ -159,17 +130,15 @@ export type GpuWebMercatorQuadCoverFacts = Readonly<{
     policy: GpuWebMercatorQuadCoverPolicy
     lookupCapacity: number
     coverageLimitCount: number
-    elevationBoundsMode: 'global' | 'hierarchy'
-    elevationBoundCount: number
-    elevationBoundsBufferId: string
+    verticalBoundsMode: 'global' | 'hierarchy'
+    verticalBoundCount: number
+    verticalBoundsBufferId: string
     parity: readonly Readonly<{
         parity: 0 | 1
         mapMetaBufferId: string
         patchBufferId: string
         lookupBufferId: string
         stateBufferId: string
-        demandBufferId: string
-        drawArgumentBufferId: string
         commandIds: readonly string[]
     }>[]
 }>
@@ -191,15 +160,13 @@ type ParityResources = Readonly<{
     patches: BufferResource
     lookup: BufferResource
     state: BufferResource
-    demands: BufferResource
-    drawArguments: BufferResource
 }>
 
 type ParityTemplate = Readonly<{
     resources: ParityResources
     bindSet: BindSet
     commands: GpuWebMercatorQuadCoverCommands
-    renderTemplate: GpuWebMercatorQuadCoverRenderTemplate
+    template: GpuWebMercatorQuadCoverTemplate
 }>
 
 type ViewRecord = {
@@ -224,8 +191,8 @@ const capturedBuilders = new WeakSet<SubmissionBuilder>()
 let nextCoverId = 1
 
 /**
- * Validates immutable projected-cell quality, pitch boundary, source-ceiling,
- * and capacity facts for one camera-derived standard WebMercatorQuad cover.
+ * Validates immutable projected-cell quality and capacity facts for one
+ * camera-derived standard WebMercatorQuad cover.
  */
 export function gpuWebMercatorQuadCoverPolicy(
     input: GpuWebMercatorQuadCoverPolicy
@@ -233,31 +200,23 @@ export function gpuWebMercatorQuadCoverPolicy(
 
     if (!level(input?.minimumMatrixLevel) ||
         !level(input?.maximumMatrixLevel) ||
-        !level(input?.sourceMaximumMatrixLevel) ||
-        input.minimumMatrixLevel > input.sourceMaximumMatrixLevel ||
-        input.sourceMaximumMatrixLevel > input.maximumMatrixLevel ||
+        input.minimumMatrixLevel > input.maximumMatrixLevel ||
         !positiveSafeInteger(input.maximumPatches) ||
-        !positiveFinite(input.referenceTileSizePixels) ||
         !positiveSafeInteger(input.cellsPerPatchEdge) ||
         !positiveFinite(input.maximumCellSpanReferencePixels) ||
         !Number.isFinite(input.refinementTolerance) ||
-        input.refinementTolerance < 0 || input.refinementTolerance > 0.1 ||
-        !Number.isFinite(input.variableLodPitchThresholdRadians) ||
-        input.variableLodPitchThresholdRadians < 0 ||
-        input.variableLodPitchThresholdRadians > Math.PI / 2) {
+        input.refinementTolerance < 0 || input.refinementTolerance > 0.1) {
         return throwGeoDiagnostic({
             code: 'GEO_WEB_MERCATOR_COVER_POLICY_INVALID',
             phase: 'selection',
             subject: { kind: 'web-mercator-quad-cover' },
-            message: 'A WebMercatorQuad cover policy requires ordered levels, projected-cell quality, a pitch boundary, and a positive patch capacity.',
+            message: 'A WebMercatorQuad cover policy requires ordered levels, projected-cell quality, and a positive patch capacity.',
             expected: {
-                levels: '0 <= minimum <= sourceMaximum <= maximum <= 24',
+                levels: '0 <= minimum <= maximum <= 24',
                 maximumPatches: 'positive safe integer',
-                referenceTileSizePixels: 'positive finite number',
                 cellsPerPatchEdge: 'positive safe integer',
                 maximumCellSpanReferencePixels: 'positive finite number',
                 refinementTolerance: '[0, 0.1]',
-                variableLodPitchThresholdRadians: '[0, PI / 2]',
             },
             actual: input,
         })
@@ -293,7 +252,7 @@ export class GpuWebMercatorQuadCover {
     readonly descriptor: GpuWebMercatorQuadCoverDescriptor
     readonly #policy: BufferResource
     readonly #coverageLimits: BufferResource
-    readonly #elevationBounds: BufferResource
+    readonly #verticalBounds: BufferResource
     readonly #pass: ComputePassSpec
     readonly #templates: readonly [ParityTemplate, ParityTemplate]
     readonly #initializationClears: readonly ClearBufferCommand[]
@@ -312,7 +271,7 @@ export class GpuWebMercatorQuadCover {
         state: Readonly<{
             policy: BufferResource
             coverageLimits: BufferResource
-            elevationBounds: BufferResource
+            verticalBounds: BufferResource
             pass: ComputePassSpec
             templates: readonly [ParityTemplate, ParityTemplate]
             initializationClears: readonly ClearBufferCommand[]
@@ -328,7 +287,7 @@ export class GpuWebMercatorQuadCover {
         this.descriptor = descriptor
         this.#policy = state.policy
         this.#coverageLimits = state.coverageLimits
-        this.#elevationBounds = state.elevationBounds
+        this.#verticalBounds = state.verticalBounds
         this.#pass = state.pass
         this.#templates = state.templates
         this.#initializationClears = state.initializationClears
@@ -352,7 +311,7 @@ export class GpuWebMercatorQuadCover {
 
         const descriptor = snapshotDescriptor(runtime, input)
         const lookupCapacity = nextPowerOfTwo(descriptor.policy.maximumPatches * 2)
-        let elevationBoundsOffset = 0
+        let verticalBoundsOffset = 0
         const limits = descriptor.spatialProfile.coverage.limits.map(limit => {
             const record = {
                 matrixLevel: Number(limit.matrixId),
@@ -360,21 +319,21 @@ export class GpuWebMercatorQuadCover {
                 maxTileRow: limit.maxTileRow,
                 minTileCol: limit.minTileCol,
                 maxTileCol: limit.maxTileCol,
-                elevationBoundsOffset,
+                verticalBoundsOffset,
             }
-            elevationBoundsOffset += (limit.maxTileRow - limit.minTileRow + 1) *
+            verticalBoundsOffset += (limit.maxTileRow - limit.minTileRow + 1) *
                 (limit.maxTileCol - limit.minTileCol + 1)
             return record
         })
-        const elevationBoundsMode = descriptor.elevationBounds === undefined
+        const verticalBoundsMode = descriptor.verticalBounds === undefined
             ? 'global' as const
             : 'hierarchy' as const
-        const elevationBoundRecords = descriptor.elevationBounds?.map(bounds => ({
-            minimumElevationMeters: bounds.minimumElevationMeters,
-            maximumElevationMeters: bounds.maximumElevationMeters,
+        const verticalBoundRecords = descriptor.verticalBounds?.map(bounds => ({
+            minimumVerticalMeters: bounds.minimumVerticalMeters,
+            maximumVerticalMeters: bounds.maximumVerticalMeters,
         })) ?? [ {
-            minimumElevationMeters: descriptor.elevationRangeMeters[0],
-            maximumElevationMeters: descriptor.elevationRangeMeters[1],
+            minimumVerticalMeters: descriptor.verticalRangeMeters[0],
+            maximumVerticalMeters: descriptor.verticalRangeMeters[1],
         } ]
         const patchBytes = checkedProduct(
             descriptor.policy.maximumPatches,
@@ -383,10 +342,6 @@ export class GpuWebMercatorQuadCover {
         const lookupBytes = checkedProduct(
             lookupCapacity,
             gpuWebMercatorQuadCoverLookupEntryCodec.byteLength()
-        )
-        const demandBytes = checkedProduct(
-            descriptor.policy.maximumPatches,
-            gpuWebMercatorQuadCoverDemandCodec.byteLength()
         )
         const owned: Disposable[] = []
         const own = <Value extends Disposable>(value: Value): Value => {
@@ -400,14 +355,14 @@ export class GpuWebMercatorQuadCover {
                 usage: BUFFER_COPY_DST | BUFFER_UNIFORM,
             }))
             const coverageLimits = own(await runtime.createBuffer({
-                label: 'GPU WebMercatorQuad source coverage limits',
+                label: 'GPU WebMercatorQuad geometry coverage limits',
                 size: limits.length * gpuWebMercatorQuadCoverLimitCodec.byteLength(),
                 usage: BUFFER_COPY_DST | BUFFER_STORAGE,
             }))
-            const elevationBoundsBuffer = own(await runtime.createBuffer({
-                label: 'GPU WebMercatorQuad elevation bounds',
-                size: elevationBoundRecords.length *
-                    gpuWebMercatorQuadCoverElevationBoundsCodec.byteLength(),
+            const verticalBoundsBuffer = own(await runtime.createBuffer({
+                label: 'GPU WebMercatorQuad vertical bounds',
+                size: verticalBoundRecords.length *
+                    gpuWebMercatorQuadCoverVerticalBoundsCodec.byteLength(),
                 usage: BUFFER_COPY_DST | BUFFER_STORAGE,
             }))
             const policyUpload = own(runtime.createUploadCommand({
@@ -417,37 +372,33 @@ export class GpuWebMercatorQuadCover {
                 }),
                 data: gpuWebMercatorQuadCoverPolicyCodec.pack({
                     ...descriptor.policy,
-                    demandCapacity: descriptor.policy.maximumPatches,
                     coverageLimitCount: limits.length,
                     coordinateBits: descriptor.spatialProfile.coordinateBits,
-                    vertexCount: descriptor.vertexCount,
                     lookupCapacity,
-                    minimumElevationMeters: descriptor.elevationRangeMeters[0],
-                    maximumElevationMeters: descriptor.elevationRangeMeters[1],
+                    boundsMaximumMatrixLevel: limits.at(-1)!.matrixLevel,
+                    verticalBoundsMode: verticalBoundsMode === 'hierarchy' ? 1 : 0,
                     cellsPerPatchEdge: descriptor.policy.cellsPerPatchEdge,
-                    referenceTileSizePixels: descriptor.policy.referenceTileSizePixels,
                     maximumCellSpanReferencePixels:
                         descriptor.policy.maximumCellSpanReferencePixels,
                     refinementTolerance: descriptor.policy.refinementTolerance,
-                    variableLodPitchThresholdRadians:
-                        descriptor.policy.variableLodPitchThresholdRadians,
-                    elevationBoundsMode: elevationBoundsMode === 'hierarchy' ? 1 : 0,
+                    minimumVerticalMeters: descriptor.verticalRangeMeters[0],
+                    maximumVerticalMeters: descriptor.verticalRangeMeters[1],
                 }),
             }))
             const limitsUpload = own(runtime.createUploadCommand({
-                label: 'Upload GPU WebMercatorQuad source coverage limits',
+                label: 'Upload GPU WebMercatorQuad geometry coverage limits',
                 target: coverageLimits.region({
                     layout: gpuWebMercatorQuadCoverLimitCodec.artifact,
                 }),
                 data: gpuWebMercatorQuadCoverLimitCodec.uploadView(limits),
             }))
-            const elevationBoundsUpload = own(runtime.createUploadCommand({
-                label: 'Upload GPU WebMercatorQuad elevation bounds',
-                target: elevationBoundsBuffer.region({
-                    layout: gpuWebMercatorQuadCoverElevationBoundsCodec.artifact,
+            const verticalBoundsUpload = own(runtime.createUploadCommand({
+                label: 'Upload GPU WebMercatorQuad vertical bounds',
+                target: verticalBoundsBuffer.region({
+                    layout: gpuWebMercatorQuadCoverVerticalBoundsCodec.artifact,
                 }),
-                data: gpuWebMercatorQuadCoverElevationBoundsCodec.uploadView(
-                    elevationBoundRecords
+                data: gpuWebMercatorQuadCoverVerticalBoundsCodec.uploadView(
+                    verticalBoundRecords
                 ),
             }))
             const parityResources = await Promise.all([ 0, 1 ].map(
@@ -475,16 +426,6 @@ export class GpuWebMercatorQuadCover {
                             size: gpuWebMercatorQuadCoverStateCodec.byteLength(),
                             usage: BUFFER_COPY_DST | BUFFER_COPY_SRC | BUFFER_STORAGE,
                         })),
-                        demands: own(await runtime.createBuffer({
-                            label: `GPU WebMercatorQuad cover demands ${parity}`,
-                            size: demandBytes,
-                            usage: BUFFER_COPY_DST | BUFFER_COPY_SRC | BUFFER_STORAGE,
-                        })),
-                        drawArguments: own(await runtime.createBuffer({
-                            label: `GPU WebMercatorQuad cover draw arguments ${parity}`,
-                            size: DRAW_ARGUMENT_BYTES,
-                            usage: BUFFER_COPY_DST | BUFFER_STORAGE | BUFFER_INDIRECT,
-                        })),
                     }) satisfies ParityResources
                 }
             )) as unknown as readonly [ParityResources, ParityResources]
@@ -492,8 +433,6 @@ export class GpuWebMercatorQuadCover {
                 resources.patches,
                 resources.lookup,
                 resources.state,
-                resources.demands,
-                resources.drawArguments,
             ].map((resource, index) => own(runtime.createClearBufferCommand({
                 label: `Clear GPU WebMercatorQuad cover ${resources.parity} resource ${index}`,
                 target: resource.region(),
@@ -512,8 +451,8 @@ export class GpuWebMercatorQuadCover {
                             gpuWebMercatorQuadCoverLimitCodec.wgslAccessors({
                                 namespace: 'GpuWebMercatorQuadCoverLimit',
                             }),
-                            gpuWebMercatorQuadCoverElevationBoundsCodec.wgslAccessors({
-                                namespace: 'GpuWebMercatorQuadCoverElevationBounds',
+                            gpuWebMercatorQuadCoverVerticalBoundsCodec.wgslAccessors({
+                                namespace: 'GpuWebMercatorQuadCoverVerticalBounds',
                             }),
                             gpuWebMercatorQuadCoverLookupEntryCodec.wgslAccessors({
                                 namespace: 'GpuWebMercatorQuadCoverLookupEntry',
@@ -521,18 +460,14 @@ export class GpuWebMercatorQuadCover {
                             gpuWebMercatorQuadCoverStateCodec.wgslAccessors({
                                 namespace: 'GpuWebMercatorQuadCoverState',
                             }),
-                            gpuWebMercatorQuadCoverDemandCodec.wgslAccessors({
-                                namespace: 'GpuWebMercatorQuadCoverDemand',
-                            }),
                         ].join('\n'),
                         layoutDependencies: [
                             ...shared.layoutDependencies,
                             gpuWebMercatorQuadCoverPolicyCodec.artifact,
                             gpuWebMercatorQuadCoverLimitCodec.artifact,
-                            gpuWebMercatorQuadCoverElevationBoundsCodec.artifact,
+                            gpuWebMercatorQuadCoverVerticalBoundsCodec.artifact,
                             gpuWebMercatorQuadCoverLookupEntryCodec.artifact,
                             gpuWebMercatorQuadCoverStateCodec.artifact,
-                            gpuWebMercatorQuadCoverDemandCodec.artifact,
                         ],
                     },
                     {
@@ -560,9 +495,9 @@ export class GpuWebMercatorQuadCover {
                     binding(2, 'coverageLimits', 'read-storage', coverageLimits.size),
                     binding(
                         3,
-                        'elevationBounds',
+                        'verticalBounds',
                         'read-storage',
-                        elevationBoundsBuffer.size
+                        verticalBoundsBuffer.size
                     ),
                     binding(4, 'coverPatches', 'storage', patchBytes),
                     binding(5, 'coverLookup', 'storage', lookupBytes),
@@ -572,8 +507,6 @@ export class GpuWebMercatorQuadCover {
                         'storage',
                         gpuWebMercatorQuadCoverStateCodec.byteLength()
                     ),
-                    binding(7, 'coverDemands', 'storage', demandBytes),
-                    binding(8, 'drawArguments', 'storage', DRAW_ARGUMENT_BYTES),
                 ],
             }))
             const program = own(runtime.createProgram({
@@ -603,8 +536,8 @@ export class GpuWebMercatorQuadCover {
                         coverageLimits: coverageLimits.region({
                             layout: gpuWebMercatorQuadCoverLimitCodec.artifact,
                         }),
-                        elevationBounds: elevationBoundsBuffer.region({
-                            layout: gpuWebMercatorQuadCoverElevationBoundsCodec.artifact,
+                        verticalBounds: verticalBoundsBuffer.region({
+                            layout: gpuWebMercatorQuadCoverVerticalBoundsCodec.artifact,
                         }),
                         coverPatches: resources.patches.region({
                             layout: gpuWebMercatorQuadCoverPatchCodec.artifact,
@@ -615,10 +548,6 @@ export class GpuWebMercatorQuadCover {
                         coverState: resources.state.region({
                             layout: gpuWebMercatorQuadCoverStateCodec.artifact,
                         }),
-                        coverDemands: resources.demands.region({
-                            layout: gpuWebMercatorQuadCoverDemandCodec.artifact,
-                        }),
-                        drawArguments: resources.drawArguments.region(),
                     }, {
                         label: `GPU WebMercatorQuad inverse-cover bindings ${resources.parity}`,
                     }))
@@ -631,18 +560,14 @@ export class GpuWebMercatorQuadCover {
                             resources.mapMeta,
                             policy,
                             coverageLimits,
-                            elevationBoundsBuffer,
+                            verticalBoundsBuffer,
                             resources.patches,
                             resources.lookup,
                             resources.state,
-                            resources.demands,
-                            resources.drawArguments,
                         ], [
                             resources.patches,
                             resources.lookup,
                             resources.state,
-                            resources.demands,
-                            resources.drawArguments,
                         ]),
                         whenMissing: 'throw',
                     }))
@@ -657,63 +582,44 @@ export class GpuWebMercatorQuadCover {
                         retain: 'consume-on-read',
                         whenMissing: 'throw',
                     }))
-                    const demandFeedback = own(await runtime.createReadbackCommand({
-                        label: `Read GPU WebMercatorQuad cover demands ${resources.parity}`,
-                        source: {
-                            region: resources.demands.region({
-                                layout: gpuWebMercatorQuadCoverDemandCodec.artifact,
-                            }),
-                            contentEpoch: 'current-at-step',
-                        },
-                        retain: 'consume-on-read',
-                        whenMissing: 'throw',
-                    }))
-                    const renderTemplate = {
+                    const template = {
                         coverId: '',
                         parity: resources.parity,
-                        templateId: 'patch-mesh' as const,
                         mapMeta: resources.mapMeta,
-                        visibleInstances: resources.patches,
+                        patches: resources.patches,
                         coverLookup: resources.lookup,
-                        drawArgument: Object.freeze({
-                            resource: resources.drawArguments,
-                            region: resources.drawArguments.region({
-                                offset: 0,
-                                size: DRAW_ARGUMENT_BYTES,
-                            }),
-                            offset: 0 as const,
-                            size: DRAW_ARGUMENT_BYTES as 16,
+                        state: resources.state,
+                        patchCount: resources.state.region({
+                            offset: 8,
+                            size: 4,
                         }),
-                    } as GpuWebMercatorQuadCoverRenderTemplate
+                    } as GpuWebMercatorQuadCoverTemplate
                     return Object.freeze({
                         resources,
                         bindSet,
                         commands: Object.freeze({
                             generate,
                             stateFeedback,
-                            demandFeedback,
                         }),
-                        renderTemplate,
+                        template,
                     })
                 }
             )) as unknown as readonly [ParityTemplate, ParityTemplate]
             const initializationUploads = Object.freeze([
                 policyUpload,
                 limitsUpload,
-                elevationBoundsUpload,
+                verticalBoundsUpload,
             ])
             const identity: GpuWebMercatorQuadCoverIdentityObjects = Object.freeze({
                 resources: Object.freeze([
                     policy,
                     coverageLimits,
-                    elevationBoundsBuffer,
+                    verticalBoundsBuffer,
                     ...parityResources.flatMap(resources => [
                         resources.mapMeta,
                         resources.patches,
                         resources.lookup,
                         resources.state,
-                        resources.demands,
-                        resources.drawArguments,
                     ]),
                 ]),
                 uploads: initializationUploads,
@@ -727,14 +633,13 @@ export class GpuWebMercatorQuadCover {
                     ...templates.flatMap(template => [
                         template.commands.generate,
                         template.commands.stateFeedback,
-                        template.commands.demandFeedback,
                     ]),
                 ]),
             })
             const cover = new GpuWebMercatorQuadCover(runtime, descriptor, {
                 policy,
                 coverageLimits,
-                elevationBounds: elevationBoundsBuffer,
+                verticalBounds: verticalBoundsBuffer,
                 pass,
                 templates,
                 initializationClears,
@@ -744,8 +649,8 @@ export class GpuWebMercatorQuadCover {
                 lookupCapacity,
             })
             for (const template of templates) {
-                ;(template.renderTemplate as { coverId: string }).coverId = cover.id
-                Object.freeze(template.renderTemplate)
+                ;(template.template as { coverId: string }).coverId = cover.id
+                Object.freeze(template.template)
             }
             return cover
         } catch (error) {
@@ -851,7 +756,7 @@ export class GpuWebMercatorQuadCover {
             frameEpoch: token.frameEpoch,
             residencySnapshotEpoch: token.residencySnapshotEpoch,
             parity: record.parity,
-            visibleInstances: template.resources.patches,
+            patches: template.resources.patches,
         })
         frameRecords.set(frame, Object.freeze({
             owner: this,
@@ -920,7 +825,6 @@ export class GpuWebMercatorQuadCover {
         }
         capturedBuilders.add(builder)
         builder.readback(record.template.commands.stateFeedback)
-        builder.readback(record.template.commands.demandFeedback)
         return builder
     }
 
@@ -941,24 +845,19 @@ export class GpuWebMercatorQuadCover {
             )
         }
         const commands = record.template.commands
-        for (const command of [ commands.stateFeedback, commands.demandFeedback ]) {
-            if (!submitted.readbacks.some(link => link.commandId === command.id)) {
-                return invalidCover(
-                    this,
-                    'Cover feedback submission is missing a required readback.',
-                    { commandId: command.id },
-                    { readbackCommandIds: submitted.readbacks.map(link => link.commandId) }
-                )
-            }
+        if (!submitted.readbacks.some(link => link.commandId === commands.stateFeedback.id)) {
+            return invalidCover(
+                this,
+                'Cover feedback submission is missing its state readback.',
+                { commandId: commands.stateFeedback.id },
+                { readbackCommandIds: submitted.readbacks.map(link => link.commandId) }
+            )
         }
-        const [ stateBytes, demandBytes ] = await Promise.all([
-            commands.stateFeedback.result({ after: submitted }).toBytes(),
-            commands.demandFeedback.result({ after: submitted }).toBytes(),
-        ])
-        const decoded = decodeGpuWebMercatorQuadCoverFeedback(stateBytes, demandBytes, {
+        const stateBytes = await commands.stateFeedback
+            .result({ after: submitted }).toBytes()
+        const decoded = decodeGpuWebMercatorQuadCoverFeedback(stateBytes, {
             expectedFrameEpoch: frame.frameEpoch,
             maximumPatches: this.descriptor.policy.maximumPatches,
-            sourceLevelCeiling: this.descriptor.policy.sourceMaximumMatrixLevel,
         })
         return Object.freeze({
             kind: 'gpu-web-mercator-quad-cover-feedback' as const,
@@ -968,17 +867,17 @@ export class GpuWebMercatorQuadCover {
         })
     }
 
-    renderTemplates(): readonly [
-        GpuWebMercatorQuadCoverRenderTemplate,
-        GpuWebMercatorQuadCoverRenderTemplate,
+    templates(): readonly [
+        GpuWebMercatorQuadCoverTemplate,
+        GpuWebMercatorQuadCoverTemplate,
     ] {
 
         this.#assertActive()
         return Object.freeze(this.#templates.map(template =>
-            template.renderTemplate
+            template.template
         )) as unknown as readonly [
-            GpuWebMercatorQuadCoverRenderTemplate,
-            GpuWebMercatorQuadCoverRenderTemplate,
+            GpuWebMercatorQuadCoverTemplate,
+            GpuWebMercatorQuadCoverTemplate,
         ]
     }
 
@@ -1007,23 +906,20 @@ export class GpuWebMercatorQuadCover {
             policy: this.descriptor.policy,
             lookupCapacity: this.#lookupCapacity,
             coverageLimitCount: this.descriptor.spatialProfile.coverage.limits.length,
-            elevationBoundsMode: this.descriptor.elevationBounds === undefined
+            verticalBoundsMode: this.descriptor.verticalBounds === undefined
                 ? 'global' as const
                 : 'hierarchy' as const,
-            elevationBoundCount: this.descriptor.elevationBounds?.length ?? 0,
-            elevationBoundsBufferId: this.#elevationBounds.id,
+            verticalBoundCount: this.descriptor.verticalBounds?.length ?? 0,
+            verticalBoundsBufferId: this.#verticalBounds.id,
             parity: Object.freeze(this.#templates.map(template => Object.freeze({
                 parity: template.resources.parity,
                 mapMetaBufferId: template.resources.mapMeta.id,
                 patchBufferId: template.resources.patches.id,
                 lookupBufferId: template.resources.lookup.id,
                 stateBufferId: template.resources.state.id,
-                demandBufferId: template.resources.demands.id,
-                drawArgumentBufferId: template.resources.drawArguments.id,
                 commandIds: Object.freeze([
                     template.commands.generate.id,
                     template.commands.stateFeedback.id,
-                    template.commands.demandFeedback.id,
                 ]),
             }))),
         })
@@ -1064,27 +960,19 @@ export class GpuWebMercatorQuadCover {
 
 Object.freeze(GpuWebMercatorQuadCover.prototype)
 
-/** Decodes and validates bounded inverse-cover state and desired-page feedback. */
+/** Decodes and validates bounded inverse-cover geometry feedback. */
 export function decodeGpuWebMercatorQuadCoverFeedback(
     stateBytes: Uint8Array,
-    demandBytes: Uint8Array,
     options: Readonly<{
         expectedFrameEpoch: number
         maximumPatches: number
-        sourceLevelCeiling: number
     }>
-): Readonly<GpuWebMercatorQuadCoverSelectionFacts & {
-    demands: readonly GpuWebMercatorQuadCoverDemand[]
-}> {
+): GpuWebMercatorQuadCoverSelectionFacts {
 
     const stateSize = gpuWebMercatorQuadCoverStateCodec.byteLength()
-    const demandStride = gpuWebMercatorQuadCoverDemandCodec.byteLength()
-    if (!(stateBytes instanceof Uint8Array) || stateBytes.byteLength !== stateSize ||
-        !(demandBytes instanceof Uint8Array) ||
-        demandBytes.byteLength % demandStride !== 0) {
-        throw new TypeError('GPU WebMercatorQuad cover feedback byte lengths are invalid')
+    if (!(stateBytes instanceof Uint8Array) || stateBytes.byteLength !== stateSize) {
+        throw new TypeError('GPU WebMercatorQuad cover feedback byte length is invalid')
     }
-    const demandCapacity = demandBytes.byteLength / demandStride
     const state = new DataView(
         stateBytes.buffer,
         stateBytes.byteOffset,
@@ -1094,33 +982,20 @@ export function decodeGpuWebMercatorQuadCoverFeedback(
     const frameEpoch = word(0)
     const candidateCount = word(1)
     const patchCount = word(2)
-    const demandCount = word(3)
-    const descriptorOverflowCount = word(4)
-    const lookupOverflowCount = word(5)
-    const demandOverflowCount = word(6)
-    const minimumMatrixLevel = word(7)
-    const maximumMatrixLevel = word(8)
-    const maximumAdjacentLevelDelta = word(9)
-    const finestMatrixLevel = word(10)
-    const sourceLevelCeiling = word(11)
-    const selectionModeWord = word(12)
-    const minimumCellSpanQ8 = word(13)
-    const maximumCellSpanQ8 = word(14)
-    const selectionMode = selectionModeWord === 0
-        ? 'uniform' as const
-        : selectionModeWord === 1
-            ? 'variable' as const
-            : undefined
+    const descriptorOverflowCount = word(3)
+    const lookupOverflowCount = word(4)
+    const minimumMatrixLevel = word(5)
+    const maximumMatrixLevel = word(6)
+    const maximumAdjacentLevelDelta = word(7)
+    const finestMatrixLevel = word(8)
+    const minimumCellSpanQ8 = word(9)
+    const maximumCellSpanQ8 = word(10)
     if (frameEpoch !== options.expectedFrameEpoch ||
         patchCount > options.maximumPatches ||
-        demandCount > demandCapacity ||
         descriptorOverflowCount !== 0 ||
         lookupOverflowCount !== 0 ||
-        demandOverflowCount !== 0 ||
         maximumAdjacentLevelDelta > 1 ||
-        selectionMode === undefined ||
         minimumCellSpanQ8 > maximumCellSpanQ8 ||
-        sourceLevelCeiling !== options.sourceLevelCeiling ||
         (patchCount > 0 && (
             minimumMatrixLevel === 0xffff_ffff ||
             minimumMatrixLevel > maximumMatrixLevel ||
@@ -1130,50 +1005,24 @@ export function decodeGpuWebMercatorQuadCoverFeedback(
             frameEpoch,
             candidateCount,
             patchCount,
-            demandCount,
             descriptorOverflowCount,
             lookupOverflowCount,
-            demandOverflowCount,
             minimumMatrixLevel,
             maximumMatrixLevel,
             maximumAdjacentLevelDelta,
             finestMatrixLevel,
-            sourceLevelCeiling,
-            selectionModeWord,
             minimumCellSpanQ8,
             maximumCellSpanQ8,
         })}`)
     }
-    const demandView = new DataView(
-        demandBytes.buffer,
-        demandBytes.byteOffset,
-        demandBytes.byteLength
-    )
-    const demands = Array.from({ length: demandCount }, (_, index) => {
-        const base = index * demandStride
-        return Object.freeze({
-            desiredSampleLevel: demandView.getUint32(base, true),
-            sourceLevelCeiling: demandView.getUint32(base + 4, true),
-            requestMatrixLevel: demandView.getUint32(base + 8, true),
-            tileRow: demandView.getUint32(base + 12, true),
-            tileCol: demandView.getUint32(base + 16, true),
-            priority: demandView.getUint32(base + 20, true),
-            decisionFrameEpoch: demandView.getUint32(base + 24, true),
-            residencySnapshotEpoch: demandView.getUint32(base + 28, true),
-        })
-    })
     const facts: {
         frameEpoch: number
         candidateCount: number
         patchCount: number
-        demandCount: number
         descriptorOverflowCount: number
         lookupOverflowCount: number
-        demandOverflowCount: number
         maximumAdjacentLevelDelta: number
         finestMatrixLevel: number
-        sourceLevelCeiling: number
-        selectionMode: 'uniform' | 'variable'
         minimumMatrixLevel?: number
         maximumMatrixLevel?: number
         minimumCellSpanReferencePixels?: number
@@ -1182,14 +1031,10 @@ export function decodeGpuWebMercatorQuadCoverFeedback(
         frameEpoch,
         candidateCount,
         patchCount,
-        demandCount,
         descriptorOverflowCount,
         lookupOverflowCount,
-        demandOverflowCount,
         maximumAdjacentLevelDelta,
         finestMatrixLevel,
-        sourceLevelCeiling,
-        selectionMode,
     }
     if (patchCount > 0) {
         facts.minimumMatrixLevel = minimumMatrixLevel
@@ -1197,10 +1042,7 @@ export function decodeGpuWebMercatorQuadCoverFeedback(
         facts.minimumCellSpanReferencePixels = minimumCellSpanQ8 / 256
         facts.maximumCellSpanReferencePixels = maximumCellSpanQ8 / 256
     }
-    return Object.freeze({
-        ...facts,
-        demands: Object.freeze(demands),
-    })
+    return Object.freeze(facts)
 }
 
 function snapshotDescriptor(
@@ -1228,19 +1070,18 @@ function snapshotDescriptor(
         })
     }
     const policy = gpuWebMercatorQuadCoverPolicy(input.policy)
-    const expectedLimitCount =
-        policy.sourceMaximumMatrixLevel - policy.minimumMatrixLevel + 1
     const limits = spatialProfile.coverage.limits
+    const boundsMaximumMatrixLevel = Number(limits.at(-1)?.matrixId)
+    const expectedLimitCount = boundsMaximumMatrixLevel - policy.minimumMatrixLevel + 1
     const contiguousLimits = limits.length === expectedLimitCount &&
         limits.every((limit, index) =>
             Number(limit.matrixId) === policy.minimumMatrixLevel + index
         )
     if (!contiguousLimits ||
         policy.maximumMatrixLevel >= spatialProfile.coordinateBits ||
-        input.elevationRangeMeters?.length !== 2 ||
-        input.elevationRangeMeters.some(value => !Number.isFinite(value)) ||
-        input.elevationRangeMeters[0] > input.elevationRangeMeters[1] ||
-        !positiveSafeInteger(input.vertexCount)) {
+        input.verticalRangeMeters?.length !== 2 ||
+        input.verticalRangeMeters.some(value => !Number.isFinite(value)) ||
+        input.verticalRangeMeters[0] > input.verticalRangeMeters[1]) {
         return throwGeoDiagnostic({
             code: 'GEO_WEB_MERCATOR_COVER_DESCRIPTOR_INVALID',
             phase: 'selection',
@@ -1249,38 +1090,36 @@ function snapshotDescriptor(
             expected: {
                 contiguousCoverageLevels: [
                     policy.minimumMatrixLevel,
-                    policy.sourceMaximumMatrixLevel,
+                    boundsMaximumMatrixLevel,
                 ],
                 maximumMatrixLevel: `< coordinateBits ${spatialProfile.coordinateBits}`,
-                elevationRangeMeters: 'ordered finite pair',
-                vertexCount: 'positive safe integer',
+                verticalRangeMeters: 'ordered finite pair',
             },
             actual: input,
         })
     }
-    const elevationRangeMeters = Object.freeze([
-        input.elevationRangeMeters[0],
-        input.elevationRangeMeters[1],
+    const verticalRangeMeters = Object.freeze([
+        input.verticalRangeMeters[0],
+        input.verticalRangeMeters[1],
     ]) as readonly [number, number]
-    const elevationBounds = snapshotElevationBounds(
-        input.elevationBounds,
+    const verticalBounds = snapshotVerticalBounds(
+        input.verticalBounds,
         limits,
-        elevationRangeMeters
+        verticalRangeMeters
     )
     return Object.freeze({
         spatialProfile,
         policy,
-        elevationRangeMeters,
-        ...(elevationBounds === undefined ? {} : { elevationBounds }),
-        vertexCount: input.vertexCount,
+        verticalRangeMeters,
+        ...(verticalBounds === undefined ? {} : { verticalBounds }),
     })
 }
 
-function snapshotElevationBounds(
-    input: readonly WebMercatorTileElevationBounds[] | undefined,
+function snapshotVerticalBounds(
+    input: readonly WebMercatorTileVerticalBounds[] | undefined,
     limits: WebMercatorPlanarTileSpatialProfile['coverage']['limits'],
     globalRange: readonly [number, number]
-): readonly WebMercatorTileElevationBounds[] | undefined {
+): readonly WebMercatorTileVerticalBounds[] | undefined {
 
     if (input === undefined) return undefined
     const expected = limits.flatMap(limit =>
@@ -1297,18 +1136,18 @@ function snapshotElevationBounds(
         level(entry?.matrixLevel) && nonNegativeSafeInteger(entry?.tileRow) &&
         nonNegativeSafeInteger(entry?.tileCol) &&
         `${entry.matrixLevel}/${entry.tileRow}/${entry.tileCol}` === expected[index] &&
-        Number.isFinite(entry.minimumElevationMeters) &&
-        Number.isFinite(entry.maximumElevationMeters) &&
-        entry.minimumElevationMeters <= entry.maximumElevationMeters &&
-        entry.minimumElevationMeters >= globalRange[0] &&
-        entry.maximumElevationMeters <= globalRange[1]
+        Number.isFinite(entry.minimumVerticalMeters) &&
+        Number.isFinite(entry.maximumVerticalMeters) &&
+        entry.minimumVerticalMeters <= entry.maximumVerticalMeters &&
+        entry.minimumVerticalMeters >= globalRange[0] &&
+        entry.maximumVerticalMeters <= globalRange[1]
     )
     if (!valid) {
         return throwGeoDiagnostic({
-            code: 'GEO_WEB_MERCATOR_COVER_ELEVATION_BOUNDS_INVALID',
+            code: 'GEO_WEB_MERCATOR_COVER_VERTICAL_BOUNDS_INVALID',
             phase: 'selection',
             subject: { kind: 'web-mercator-quad-cover' },
-            message: 'WebMercatorQuad elevation bounds must exactly cover declared source tiles.',
+            message: 'WebMercatorQuad vertical bounds must exactly cover declared tiles.',
             expected: { tileKeys: expected, globalRange },
             actual: input,
         })
@@ -1347,10 +1186,8 @@ function mapMetaRecord(
         referenceViewport: view.referenceViewport,
         verticalFovRadians: view.verticalFovRadians,
         cameraLatitudeRadians: view.cameraLatitudeRadians,
-        zoomHint: view.zoomHint,
         frameEpoch: view.frameEpoch,
         residencySnapshotEpoch: view.residencySnapshotEpoch,
-        cameraPitchRadians: view.cameraPitchRadians,
     }
 }
 

@@ -41,6 +41,8 @@ describe('WebMercatorQuad inverse-cover clean cut', () => {
 
         const index = read('packages', 'geoscratch', 'src', 'geo', 'index.ts')
         expect(index).to.include('GpuWebMercatorQuadCover')
+        expect(index).to.include('GpuWebMercatorQuadDemandProjection')
+        expect(index).to.include('GpuWebMercatorQuadPatchDraw')
         expect(index).to.include('gpuWebMercatorQuadCoverPolicy')
         expect(index).not.to.include('GpuTileFrontier')
         expect(index).not.to.include('GpuRenderPatchFrontier')
@@ -94,7 +96,6 @@ describe('WebMercatorQuad inverse-cover clean cut', () => {
             'trialCounts',
             'rootTraversalCount',
             'trialCount',
-            'maximumDemands',
             'createGpuRenderPatchFrontier',
             'GpuTileFrontier',
             'frontierDecisionKey',
@@ -102,6 +103,10 @@ describe('WebMercatorQuad inverse-cover clean cut', () => {
         ]) {
             expect(sources, forbidden).not.to.include(forbidden)
         }
+        expect(cover).not.to.include('maximumDemands')
+        expect(cover).not.to.include('sourceMaximumMatrixLevel')
+        expect(wgsl).not.to.include('selectionMode')
+        expect(wgsl).not.to.include('coverUniformWindow')
     })
 
     it('keeps desired sample precision observable before passive residency lowering', () => {
@@ -113,6 +118,13 @@ describe('WebMercatorQuad inverse-cover clean cut', () => {
             'geo',
             'gpu-web-mercator-quad-cover.ts'
         )
+        const projection = read(
+            'packages',
+            'geoscratch',
+            'src',
+            'geo',
+            'gpu-web-mercator-quad-demand.ts'
+        )
         const demand = read(
             'packages',
             'geoscratch',
@@ -121,8 +133,10 @@ describe('WebMercatorQuad inverse-cover clean cut', () => {
             'view-tile-demand.ts'
         )
 
-        expect(cover).to.include('desiredSampleLevel')
-        expect(cover).to.include('sourceLevelCeiling')
+        expect(cover).not.to.include('desiredSampleLevel')
+        expect(cover).not.to.include('sourceLevelCeiling')
+        expect(projection).to.include('desiredSampleLevel')
+        expect(projection).to.include('sourceLevelCeiling')
         expect(demand).to.include('desiredSampleLevel')
         expect(demand).to.include('sourceLevelCeiling')
     })

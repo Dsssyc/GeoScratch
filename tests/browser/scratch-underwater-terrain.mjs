@@ -36,13 +36,15 @@ const tilePort = process.env.UNDERWATER_TERRAIN_TILE_PORT === undefined
 const tileBaseUrl = `http://127.0.0.1:${tilePort}`
 const expectedStageOrder = Object.freeze([
     'inverse-cover-compute',
+    'source-demand-compute',
+    'patch-draw-compute',
     'terrain',
 ])
 const requiredProvenanceNames = Object.freeze([
     'cover-map-meta-to-cover-compute',
-    'cover-visible-to-terrain-draw',
+    'cover-patches-to-terrain-draw',
     'cover-lookup-to-terrain-draw',
-    'cover-indirect-to-terrain-draw',
+    'patch-draw-indirect-to-terrain-draw',
 ])
 const cameraCenter = Object.freeze([ 120.980697, 31.684162 ])
 const cameraScenarios = Object.freeze([
@@ -445,6 +447,7 @@ async function waitForConvergedFacts(page, additional = () => true) {
 
     return await waitForUnderwaterTerrainFacts(page, facts => {
         const cover = parseJsonOrUndefined(facts.coverFeedback)
+        const demand = parseJsonOrUndefined(facts.demandFeedback)
         const virtualRaster = parseJsonOrUndefined(facts.virtualRaster)
         return facts.status === 'ready' &&
             facts.coverConverged === 'true' &&
@@ -452,7 +455,7 @@ async function waitForConvergedFacts(page, additional = () => true) {
             cover?.patchCount > 0 &&
             cover?.descriptorOverflowCount === 0 &&
             cover?.lookupOverflowCount === 0 &&
-            cover?.demandOverflowCount === 0 &&
+            demand?.overflowCount === 0 &&
             cover?.maximumAdjacentLevelDelta <= 1 &&
             Number(facts.frames) === Number(facts.observedFrames) &&
             Number(facts.currentPendingNativeObservations) === 0 &&
@@ -495,23 +498,24 @@ function bearingDistance(left, right) {
 function coverSignature(facts) {
 
     const cover = parseJsonOrUndefined(facts.coverFeedback)
+    const demand = parseJsonOrUndefined(facts.demandFeedback)
     const camera = parseJsonOrUndefined(facts.cameraView)
     return JSON.stringify({
         candidateCount: cover?.candidateCount,
         patchCount: cover?.patchCount,
-        demandCount: cover?.demandCount,
+        demandCount: demand?.demandCount,
         minimumMatrixLevel: cover?.minimumMatrixLevel,
         maximumMatrixLevel: cover?.maximumMatrixLevel,
         maximumAdjacentLevelDelta: cover?.maximumAdjacentLevelDelta,
         finestMatrixLevel: cover?.finestMatrixLevel,
-        sourceLevelCeiling: cover?.sourceLevelCeiling,
-        demands: cover?.demands?.map(demand => ({
-            desiredSampleLevel: demand.desiredSampleLevel,
-            sourceLevelCeiling: demand.sourceLevelCeiling,
-            requestMatrixLevel: demand.requestMatrixLevel,
-            tileRow: demand.tileRow,
-            tileCol: demand.tileCol,
-            priority: demand.priority,
+        sourceLevelCeiling: demand?.sourceLevelCeiling,
+        demands: demand?.demands?.map(entry => ({
+            desiredSampleLevel: entry.desiredSampleLevel,
+            sourceLevelCeiling: entry.sourceLevelCeiling,
+            requestMatrixLevel: entry.requestMatrixLevel,
+            tileRow: entry.tileRow,
+            tileCol: entry.tileCol,
+            priority: entry.priority,
         })),
         camera,
     })
@@ -1222,49 +1226,57 @@ function validateUnderwaterTerrainFacts(label, facts, failures, expectedStatus =
         contract?.coverMaximumMatrixLevel !== 14 ||
         contract?.cover?.selectionPath !==
             'gpu-camera-inverse-webmercatorquad-cover' ||
-        contract?.cover?.policy?.sourceMaximumMatrixLevel !== 10 ||
         contract?.cover?.policy?.maximumMatrixLevel !== 14 ||
-        contract?.cover?.policy?.referenceTileSizePixels !== 512 ||
         contract?.cover?.policy?.cellsPerPatchEdge !== 128 ||
-        contract?.cover?.policy?.maximumCellSpanReferencePixels !== 8 ||
+        contract?.cover?.policy?.maximumCellSpanReferencePixels !== 4 ||
         contract?.cover?.policy?.refinementTolerance !== 0.005 ||
         contract?.cover?.policy?.maximumPatches < count ||
         contract?.cover?.lookupCapacity <= contract?.cover?.policy?.maximumPatches ||
         contract?.cover?.coverageLimitCount < 1 ||
-        contract?.cover?.elevationBoundsMode !== 'hierarchy' ||
-        contract?.cover?.elevationBoundCount !== 49 ||
+        contract?.cover?.verticalBoundsMode !== 'hierarchy' ||
+        contract?.cover?.verticalBoundCount !== 49 ||
+        contract?.demandProjection?.sourceMaximumMatrixLevel !== 10 ||
+        contract?.demandProjection?.maximumDemands < count ||
+        contract?.patchDraw?.vertexCount !== 98_304 ||
         contract?.terrainVertexCount !== 98_304 ||
         JSON.stringify(contract?.stageOrder) !== JSON.stringify(expectedStageOrder)) {
         failures.push(`${label} persistent graph contract drifted`)
     }
     parseJson(facts.cameraView, `${label} camera view`, failures)
     const cover = parseJson(facts.coverFeedback, `${label} cover feedback`, failures)
+    const demandFeedback = parseJson(
+        facts.demandFeedback,
+        `${label} demand feedback`,
+        failures
+    )
     const coverLevelRange = parseJson(
         facts.coverLevelRange,
         `${label} cover level range`,
         failures
     )
-    const demandLevelsAreValid = Array.isArray(cover?.demands) && cover.demands.every(
+    const demandLevelsAreValid = Array.isArray(demandFeedback?.demands) &&
+        demandFeedback.demands.every(
         demand => demand?.sourceLevelCeiling === 10 &&
             demand?.requestMatrixLevel <= demand.sourceLevelCeiling &&
             demand?.desiredSampleLevel >= demand.requestMatrixLevel &&
             demand?.desiredSampleLevel <= 14 &&
-            demand?.decisionFrameEpoch === cover.frameEpoch
+            demand?.decisionFrameEpoch === demandFeedback.frameEpoch
     )
     if (cover?.patchCount !== count ||
         cover?.candidateCount < cover?.patchCount ||
-        cover?.demandCount !== Number(facts.coverDemandCount) ||
-        cover?.demands?.length !== cover?.demandCount ||
         cover?.descriptorOverflowCount !== 0 ||
         cover?.lookupOverflowCount !== 0 ||
-        cover?.demandOverflowCount !== 0 ||
         cover?.maximumAdjacentLevelDelta > 1 ||
-        cover?.sourceLevelCeiling !== 10 ||
         cover?.finestMatrixLevel > 14 ||
         cover?.frameEpoch !== Number(facts.coverFrameEpoch) ||
         !Array.isArray(coverLevelRange) ||
         coverLevelRange[0] !== cover?.minimumMatrixLevel ||
         coverLevelRange[1] !== cover?.maximumMatrixLevel ||
+        demandFeedback?.demandCount !== Number(facts.sourceDemandCount) ||
+        demandFeedback?.demands?.length !== demandFeedback?.demandCount ||
+        demandFeedback?.overflowCount !== 0 ||
+        demandFeedback?.sourceLevelCeiling !== 10 ||
+        demandFeedback?.frameEpoch !== cover?.frameEpoch ||
         !demandLevelsAreValid) {
         failures.push(`${label} inverse-cover feedback was inconsistent`)
     }
@@ -1512,10 +1524,11 @@ function summarizeFacts(facts) {
         observedFrames: Number(facts.observedFrames),
         coverPatchCount: Number(facts.coverPatchCount),
         coverCandidateCount: Number(facts.coverCandidateCount),
-        coverDemandCount: Number(facts.coverDemandCount),
+        sourceDemandCount: Number(facts.sourceDemandCount),
         coverLevelRange: parseJsonOrUndefined(facts.coverLevelRange),
         convergenceState: facts.convergenceState,
         coverFeedback,
+        demandFeedback: parseJsonOrUndefined(facts.demandFeedback),
         cameraView: parseJsonOrUndefined(facts.cameraView),
         stableIdentityCount: Number(facts.currentStableIdentityCount),
         stableIdentityHash: facts.currentStableIdentityHash,

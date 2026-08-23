@@ -422,13 +422,13 @@ function publishFrameFacts({
     canvas.dataset.resizeGeneration = String(state.resizeGeneration)
     canvas.dataset.coverCandidateCount = String(state.coverCandidateCount)
     canvas.dataset.coverPatchCount = String(state.coverPatchCount)
-    canvas.dataset.coverDemandCount = String(state.coverDemandCount)
+    canvas.dataset.sourceDemandCount = String(state.sourceDemandCount)
     canvas.dataset.coverLevelRange = JSON.stringify(state.coverLevelRange)
     canvas.dataset.coverDescriptorOverflowCount = String(
         state.coverDescriptorOverflowCount
     )
     canvas.dataset.coverLookupOverflowCount = String(state.coverLookupOverflowCount)
-    canvas.dataset.coverDemandOverflowCount = String(state.coverDemandOverflowCount)
+    canvas.dataset.sourceDemandOverflowCount = String(state.sourceDemandOverflowCount)
     canvas.dataset.coverMaximumAdjacentLevelDelta = String(
         state.coverMaximumAdjacentLevelDelta
     )
@@ -436,6 +436,7 @@ function publishFrameFacts({
     canvas.dataset.sourceLevelCeiling = String(state.sourceLevelCeiling ?? '')
     canvas.dataset.coverFrameEpoch = String(state.coverFrameEpoch ?? '')
     canvas.dataset.coverFeedback = JSON.stringify(state.coverFeedback ?? null)
+    canvas.dataset.demandFeedback = JSON.stringify(state.demandFeedback ?? null)
     canvas.dataset.convergenceState = state.convergenceState
     canvas.dataset.readbackInFlightCount = String(state.readbackInFlightCount)
     canvas.dataset.staleFeedbackCount = String(state.staleFeedbackCount)

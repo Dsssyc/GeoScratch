@@ -27,12 +27,12 @@ const WORLD_WIDTH = HALF_WORLD * 2
 function fixture(options = {}) {
 
     const minimumMatrixLevel = options.minimumMatrixLevel ?? 0
-    const sourceMaximumMatrixLevel = options.sourceMaximumMatrixLevel ?? 10
+    const coverageMaximumMatrixLevel = options.coverageMaximumMatrixLevel ?? 10
     const maximumMatrixLevel = options.maximumMatrixLevel ?? 14
     const coverage = tileMatrixCoverage({
         tileMatrixSet: WebMercatorQuad,
         limits: Array.from(
-            { length: sourceMaximumMatrixLevel - minimumMatrixLevel + 1 },
+            { length: coverageMaximumMatrixLevel - minimumMatrixLevel + 1 },
             (_, index) => minimumMatrixLevel + index
         ).map(level => ({
             matrixId: String(level),
@@ -45,20 +45,16 @@ function fixture(options = {}) {
     const spatialProfile = webMercatorPlanarTileSpatialProfile({
         addressCodec: webMercatorQuadAddressCodec({ coverage }),
     })
-    const elevationRangeMeters = options.elevationRangeMeters ?? [ -120, 30 ]
-    const elevationBounds = options.elevationBounds
+    const verticalRangeMeters = options.verticalRangeMeters ?? [ -120, 30 ]
+    const verticalBounds = options.verticalBounds
     const policy = gpuWebMercatorQuadCoverPolicy({
         minimumMatrixLevel,
         maximumMatrixLevel,
-        sourceMaximumMatrixLevel,
         maximumPatches: options.maximumPatches ?? 256,
-        referenceTileSizePixels: options.referenceTileSizePixels ?? 512,
         cellsPerPatchEdge: options.cellsPerPatchEdge ?? 128,
         maximumCellSpanReferencePixels:
-            options.maximumCellSpanReferencePixels ?? 8,
+            options.maximumCellSpanReferencePixels ?? 4,
         refinementTolerance: options.refinementTolerance ?? 0.005,
-        variableLodPitchThresholdRadians:
-            options.variableLodPitchThresholdRadians ?? Math.PI / 3,
     })
 
     function view({
@@ -110,15 +106,15 @@ function fixture(options = {}) {
             policy,
             view: currentView,
             visibleBounds,
-            elevationRangeMeters,
-            ...(elevationBounds === undefined ? {} : { elevationBounds }),
+            verticalRangeMeters,
+            ...(verticalBounds === undefined ? {} : { verticalBounds }),
         })
     }
 
-    return { spatialProfile, policy, elevationRangeMeters, elevationBounds, view, evaluate }
+    return { spatialProfile, policy, verticalRangeMeters, verticalBounds, view, evaluate }
 }
 
-function flatElevationBounds(setup, elevation = 0) {
+function flatVerticalBounds(setup, vertical = 0) {
 
     return setup.spatialProfile.coverage.limits.flatMap(limit => {
         const matrixLevel = Number(limit.matrixId)
@@ -130,8 +126,8 @@ function flatElevationBounds(setup, elevation = 0) {
                     matrixLevel,
                     tileRow: limit.minTileRow + rowOffset,
                     tileCol: limit.minTileCol + colOffset,
-                    minimumElevationMeters: elevation,
-                    maximumElevationMeters: elevation,
+                    minimumVerticalMeters: vertical,
+                    maximumVerticalMeters: vertical,
                 })
             )
         ).flat()
@@ -236,28 +232,17 @@ function expectStandardBalancedCover(result, maximumLevel) {
 
 describe('GPU WebMercatorQuad inverse cover reference', () => {
 
-    it('validates reference-pixel policy and assigns the exact threshold to variable mode', () => {
+    it('validates one source-neutral projected-cell policy for every pitch', () => {
 
-        const threshold = Math.PI / 3
-        const setup = fixture({ variableLodPitchThresholdRadians: threshold })
+        const setup = fixture()
 
         expect(setup.policy).to.deep.include({
-            referenceTileSizePixels: 512,
             cellsPerPatchEdge: 128,
-            maximumCellSpanReferencePixels: 8,
+            maximumCellSpanReferencePixels: 4,
             refinementTolerance: 0.005,
-            variableLodPitchThresholdRadians: threshold,
         })
-        for (const variableLodPitchThresholdRadians of [
-            -Number.EPSILON,
-            Math.PI / 2 + Number.EPSILON,
-            Number.NaN,
-        ]) {
-            expect(() => fixture({ variableLodPitchThresholdRadians })).to.throw()
-        }
-        for (const referenceTileSizePixels of [ 0, Number.NaN ]) {
-            expect(() => fixture({ referenceTileSizePixels })).to.throw()
-        }
+        expect(setup.policy).not.to.have.property('sourceMaximumMatrixLevel')
+        expect(setup.policy).not.to.have.property('variableLodPitchThresholdRadians')
         for (const maximumCellSpanReferencePixels of [ 0, Number.NaN ]) {
             expect(() => fixture({ maximumCellSpanReferencePixels })).to.throw()
         }
@@ -268,12 +253,11 @@ describe('GPU WebMercatorQuad inverse cover reference', () => {
         ]) {
             expect(() => fixture({ refinementTolerance })).to.throw()
         }
-        expect(setup.evaluate({
-            currentView: setup.view({ pitch: threshold - 1e-6 }),
-        }).facts.selectionMode).to.equal('uniform')
-        expect(setup.evaluate({
-            currentView: setup.view({ pitch: threshold }),
-        }).facts.selectionMode).to.equal('variable')
+        for (const pitch of [ 0, Math.PI / 6, Math.PI / 3, Math.PI * 0.44 ]) {
+            const result = setup.evaluate({ currentView: setup.view({ pitch }) })
+            expect(result.facts).not.to.have.property('selectionMode')
+            expectStandardBalancedCover(result, setup.policy.maximumMatrixLevel)
+        }
     })
 
     it('emits one deterministic standard prefix-free and 2:1-balanced cover', () => {
@@ -308,11 +292,11 @@ describe('GPU WebMercatorQuad inverse cover reference', () => {
         }
     })
 
-    it('uses one projected-cell level across a wide top-down visible footprint', () => {
+    it('keeps a wide top-down footprint symmetric and locally balanced', () => {
 
         const setup = fixture({
             minimumMatrixLevel: 10,
-            sourceMaximumMatrixLevel: 10,
+            coverageMaximumMatrixLevel: 10,
             maximumMatrixLevel: 14,
             maximumPatches: 512,
         })
@@ -334,38 +318,39 @@ describe('GPU WebMercatorQuad inverse cover reference', () => {
         })
         const levels = new Set(result.patches.map(patch => patch.matrixLevel))
 
-        expect(result.facts.selectionMode).to.equal('uniform')
-        expect(levels.size).to.equal(1)
+        expect(Math.max(...levels) - Math.min(...levels)).to.be.at.most(1)
         expect(result.patches.length).to.be.greaterThan(16)
         expectStandardBalancedCover(result, setup.policy.maximumMatrixLevel)
     })
 
-    it('anchors ordinary top-down geometry to the 512-reference-pixel zoom level', () => {
+    it('advances ordinary top-down geometry monotonically with map zoom', () => {
 
         const setup = fixture({ maximumPatches: 512 })
+        let previousLevel = -1
         for (const zoom of [ 8, 9, 10, 11, 12, 13, 14 ]) {
             const result = setup.evaluate({
                 currentView: setup.view({ zoom, pitch: 0 }),
             })
 
-            expect(result.facts.selectionMode).to.equal('uniform')
-            expect(result.facts.minimumMatrixLevel).to.equal(zoom)
-            expect(result.facts.maximumMatrixLevel).to.equal(zoom)
+            expect(result.facts.minimumMatrixLevel).to.be.at.least(previousLevel)
+            expect(result.facts.maximumMatrixLevel).to.be.at.least(previousLevel)
+            expect(result.facts.maximumMatrixLevel).to.be.at.most(zoom)
+            previousLevel = result.facts.minimumMatrixLevel
         }
     })
 
     it('uses complete immutable tile bounds instead of unrelated global extremes', () => {
 
         const globalSetup = fixture({
-            sourceMaximumMatrixLevel: 2,
+            coverageMaximumMatrixLevel: 2,
             maximumMatrixLevel: 4,
-            elevationRangeMeters: [ 0, 10_000_000 ],
+            verticalRangeMeters: [ 0, 10_000_000 ],
         })
         const hierarchySetup = fixture({
-            sourceMaximumMatrixLevel: 2,
+            coverageMaximumMatrixLevel: 2,
             maximumMatrixLevel: 4,
-            elevationRangeMeters: [ 0, 10_000_000 ],
-            elevationBounds: flatElevationBounds(globalSetup),
+            verticalRangeMeters: [ 0, 10_000_000 ],
+            verticalBounds: flatVerticalBounds(globalSetup),
         })
         const globalResult = globalSetup.evaluate({
             currentView: globalSetup.view({ zoom: 2, pitch: 0 }),
@@ -374,10 +359,10 @@ describe('GPU WebMercatorQuad inverse cover reference', () => {
             currentView: hierarchySetup.view({ zoom: 2, pitch: 0 }),
         })
 
-        expect(globalResult.facts.elevationBoundsMode).to.equal('global')
+        expect(globalResult.facts.verticalBoundsMode).to.equal('global')
         expect(hierarchyResult.facts).to.deep.include({
-            elevationBoundsMode: 'hierarchy',
-            elevationBoundCount: 21,
+            verticalBoundsMode: 'hierarchy',
+            verticalBoundCount: 21,
             minimumMatrixLevel: 2,
             maximumMatrixLevel: 2,
         })
@@ -504,61 +489,6 @@ describe('GPU WebMercatorQuad inverse cover reference', () => {
         expect(near.matrixLevel).to.be.at.least(far.matrixLevel)
     })
 
-    it('prioritizes equal-precision demand by wrapped distance to the camera tile', () => {
-
-        const setup = fixture()
-        const result = setup.evaluate({
-            currentView: setup.view({ x: 0, y: 0, zoom: 10, pitch: 0 }),
-            visibleBounds: { west: 0.496, north: 0.497, east: 0.504, south: 0.503 },
-        })
-        const desiredLevel = Math.max(...result.demands.map(demand =>
-            demand.desiredSampleLevel
-        ))
-        const equallyDetailed = result.demands.filter(demand =>
-            demand.desiredSampleLevel === desiredLevel
-        )
-        const distances = equallyDetailed.map(demand => {
-            const page = demand.requestPage
-            const size = 2 ** page.matrixLevel
-            const cameraRow = Math.floor(0.5 * size)
-            const cameraCol = Math.floor(0.5 * size)
-            const rowDistance = Math.abs(page.tileRow - cameraRow)
-            const rawColDistance = Math.abs(page.tileCol - cameraCol)
-            return rowDistance + Math.min(rawColDistance, size - rawColDistance)
-        })
-
-        expect(equallyDetailed.length).to.be.greaterThan(1)
-        expect(distances).to.deep.equal([ ...distances ].sort((left, right) => left - right))
-        expect(equallyDetailed.map(demand => demand.priority)).to.deep.equal(
-            [ ...equallyDetailed ].map(demand => demand.priority).sort((left, right) =>
-                right - left
-            )
-        )
-    })
-
-    it('keeps desired sample precision separate from the executable source page', () => {
-
-        const setup = fixture({ sourceMaximumMatrixLevel: 10, maximumMatrixLevel: 14 })
-        const result = setup.evaluate({
-            currentView: setup.view({ zoom: 14 }),
-            visibleBounds: {
-                west: 0.5 - 3 / 2 ** 14,
-                north: 0.5 - 2 / 2 ** 14,
-                east: 0.5 + 3 / 2 ** 14,
-                south: 0.5 + 2 / 2 ** 14,
-            },
-        })
-
-        expect(result.patches.some(patch => patch.matrixLevel === 14)).to.equal(true)
-        expect(result.demands.some(demand =>
-            demand.desiredSampleLevel === 14 &&
-            demand.requestPage.matrixLevel === 10
-        )).to.equal(true)
-        expect(result.demands.every(demand =>
-            demand.requestPage.matrixLevel <= setup.policy.sourceMaximumMatrixLevel
-        )).to.equal(true)
-        expect(result.facts.sourceLevelCeiling).to.equal(10)
-    })
 })
 
 describe('GPU WebMercatorQuad inverse cover lowering', () => {
@@ -568,7 +498,7 @@ describe('GPU WebMercatorQuad inverse cover lowering', () => {
         const module = gpuWebMercatorQuadCoverReadWgslModule({
             namespace: 'TerrainCover',
             group: 1,
-            visibleInstancesBinding: 2,
+            patchesBinding: 2,
             lookupEntriesBinding: 3,
         })
 
@@ -586,37 +516,32 @@ describe('GPU WebMercatorQuad inverse cover lowering', () => {
         expect(module.code).not.to.include('matrixLevel << 28u')
     })
 
-    it('decodes bounded cover and desired/source-level feedback facts', () => {
+    it('decodes bounded geometry-cut feedback without source or draw facts', () => {
 
         const state = new Uint32Array([
             42,
             88,
             24,
-            2,
-            0,
             0,
             0,
             8,
             11,
             1,
             11,
-            10,
-            1,
             2 * 256,
             15 * 128,
             0,
+            0,
+            0,
+            0,
+            0,
         ])
-        const demandWords = new Uint32Array(4 * 8)
-        demandWords.set([ 11, 10, 10, 416, 855, 11_000_000, 42, 7 ], 0)
-        demandWords.set([ 10, 10, 10, 416, 856, 10_000_000, 42, 7 ], 8)
 
         const decoded = decodeGpuWebMercatorQuadCoverFeedback(
             new Uint8Array(state.buffer),
-            new Uint8Array(demandWords.buffer),
             {
                 expectedFrameEpoch: 42,
                 maximumPatches: 64,
-                sourceLevelCeiling: 10,
             }
         )
 
@@ -624,40 +549,14 @@ describe('GPU WebMercatorQuad inverse cover lowering', () => {
             frameEpoch: 42,
             candidateCount: 88,
             patchCount: 24,
-            demandCount: 2,
             descriptorOverflowCount: 0,
             lookupOverflowCount: 0,
-            demandOverflowCount: 0,
             minimumMatrixLevel: 8,
             maximumMatrixLevel: 11,
             maximumAdjacentLevelDelta: 1,
             finestMatrixLevel: 11,
-            sourceLevelCeiling: 10,
-            selectionMode: 'variable',
             minimumCellSpanReferencePixels: 2,
             maximumCellSpanReferencePixels: 7.5,
-            demands: [
-                {
-                    desiredSampleLevel: 11,
-                    sourceLevelCeiling: 10,
-                    requestMatrixLevel: 10,
-                    tileRow: 416,
-                    tileCol: 855,
-                    priority: 11_000_000,
-                    decisionFrameEpoch: 42,
-                    residencySnapshotEpoch: 7,
-                },
-                {
-                    desiredSampleLevel: 10,
-                    sourceLevelCeiling: 10,
-                    requestMatrixLevel: 10,
-                    tileRow: 416,
-                    tileCol: 856,
-                    priority: 10_000_000,
-                    decisionFrameEpoch: 42,
-                    residencySnapshotEpoch: 7,
-                },
-            ],
         })
     })
 
@@ -665,7 +564,7 @@ describe('GPU WebMercatorQuad inverse cover lowering', () => {
 
         const setup = fixture({
             minimumMatrixLevel: 0,
-            sourceMaximumMatrixLevel: 10,
+            coverageMaximumMatrixLevel: 10,
             maximumMatrixLevel: 14,
             maximumPatches: 64,
         })
@@ -674,8 +573,7 @@ describe('GPU WebMercatorQuad inverse cover lowering', () => {
         const cover = await GpuWebMercatorQuadCover.create(runtime, {
             spatialProfile: setup.spatialProfile,
             policy: setup.policy,
-            elevationRangeMeters: [ -120, 30 ],
-            vertexCount: 24_576,
+            verticalRangeMeters: [ -120, 30 ],
         })
 
         expect(cover.facts()).to.deep.include({
@@ -685,14 +583,23 @@ describe('GPU WebMercatorQuad inverse cover lowering', () => {
         })
         expect(cover.facts().parity).to.have.length(2)
         expect(cover.facts().parity.every(parity =>
-            parity.commandIds.length === 3
+            parity.commandIds.length === 2
         )).to.equal(true)
-        const templates = cover.renderTemplates()
+        expect(cover.facts().parity.every(parity =>
+            !('demandBufferId' in parity) && !('drawArgumentBufferId' in parity)
+        )).to.equal(true)
+        const templates = cover.templates()
         expect(templates.map(template => template.coverId)).to.deep.equal([
             cover.id,
             cover.id,
         ])
         expect(templates.map(template => template.parity)).to.deep.equal([ 0, 1 ])
+        expect(templates.every(template =>
+            template.patches !== undefined &&
+            template.patchCount.offset === 8 &&
+            template.patchCount.size === 4 &&
+            !('drawArgument' in template)
+        )).to.equal(true)
 
         const view = setup.view({ zoom: 10, frameEpoch: 42 })
         const token = cover.writeView(view)
@@ -702,7 +609,7 @@ describe('GPU WebMercatorQuad inverse cover lowering', () => {
         cover.encode(builder, frame)
         cover.capture(builder, frame)
         const submitted = builder.submit()
-        expect(submitted.readbacks.map(link => link.commandId)).to.have.length(2)
+        expect(submitted.readbacks.map(link => link.commandId)).to.have.length(1)
         expect(fake.calls.dispatchCalls).to.have.length(1)
 
         token.dispose()
@@ -710,30 +617,29 @@ describe('GPU WebMercatorQuad inverse cover lowering', () => {
         await runtime.dispose()
     })
 
-    it('owns one complete immutable elevation hierarchy and rejects partial metadata', async() => {
+    it('owns one complete immutable vertical hierarchy and rejects partial metadata', async() => {
 
         const base = fixture({
-            sourceMaximumMatrixLevel: 2,
+            coverageMaximumMatrixLevel: 2,
             maximumMatrixLevel: 4,
             maximumPatches: 64,
         })
-        const elevationBounds = flatElevationBounds(base)
+        const verticalBounds = flatVerticalBounds(base)
         const fake = createFakeGpu()
         const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const cover = await GpuWebMercatorQuadCover.create(runtime, {
             spatialProfile: base.spatialProfile,
             policy: base.policy,
-            elevationRangeMeters: base.elevationRangeMeters,
-            elevationBounds,
-            vertexCount: 98_304,
+            verticalRangeMeters: base.verticalRangeMeters,
+            verticalBounds,
         })
 
         expect(cover.facts()).to.deep.include({
-            elevationBoundsMode: 'hierarchy',
-            elevationBoundCount: elevationBounds.length,
+            verticalBoundsMode: 'hierarchy',
+            verticalBoundCount: verticalBounds.length,
         })
         expect(cover.identityObjects().resources.some(resource =>
-            resource.label === 'GPU WebMercatorQuad elevation bounds'
+            resource.label === 'GPU WebMercatorQuad vertical bounds'
         )).to.equal(true)
 
         let partialFailure
@@ -741,9 +647,8 @@ describe('GPU WebMercatorQuad inverse cover lowering', () => {
             await GpuWebMercatorQuadCover.create(runtime, {
                 spatialProfile: base.spatialProfile,
                 policy: base.policy,
-                elevationRangeMeters: base.elevationRangeMeters,
-                elevationBounds: elevationBounds.slice(1),
-                vertexCount: 98_304,
+                verticalRangeMeters: base.verticalRangeMeters,
+                verticalBounds: verticalBounds.slice(1),
             })
         } catch (error) {
             partialFailure = error

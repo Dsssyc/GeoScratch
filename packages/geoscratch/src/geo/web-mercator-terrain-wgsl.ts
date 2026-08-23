@@ -16,7 +16,7 @@ export type WebMercatorTerrainWgslOptions = Readonly<{
     dataGroup: number
     indicesBinding: number
     gridPositionsBinding: number
-    visibleInstancesBinding: number
+    patchesBinding: number
     lookupEntriesBinding: number
 }>
 
@@ -34,7 +34,7 @@ export type WebMercatorTerrainWgslModule = Readonly<{
         dataGroup: number
         indices: number
         gridPositions: number
-        visibleInstances: number
+        patches: number
         lookupEntries: number
     }>
 }>
@@ -75,9 +75,9 @@ export function webMercatorTerrainWgslModule(
             options?.gridPositionsBinding,
             'gridPositionsBinding'
         ),
-        visibleInstances: nonNegativeInteger(
-            options?.visibleInstancesBinding,
-            'visibleInstancesBinding'
+        patches: nonNegativeInteger(
+            options?.patchesBinding,
+            'patchesBinding'
         ),
         lookupEntries: nonNegativeInteger(
             options?.lookupEntriesBinding,
@@ -90,7 +90,7 @@ export function webMercatorTerrainWgslModule(
     const patch = gpuWebMercatorQuadCoverReadWgslModule({
         namespace: patchNamespace,
         group: bindings.dataGroup,
-        visibleInstancesBinding: bindings.visibleInstances,
+        patchesBinding: bindings.patches,
         lookupEntriesBinding: bindings.lookupEntries,
     })
     const vertexEntryPoint = `${namespace}_vertex`
@@ -226,7 +226,7 @@ fn ${namespace}_position_cs(position: ${fixedNamespace}Position, elevation: f32)
 
 @vertex
 fn ${vertexEntryPoint}(input: ${namespace}VertexInput) -> ${namespace}VertexOutput {
-    let instance = ${patchNamespace}_visible_instances[input.instanceIndex];
+    let instance = ${patchNamespace}_patches[input.instanceIndex];
     let triangle_id = input.vertexIndex / 3u;
     var grid = ${namespace}_grid_position(${indices}[input.vertexIndex]);
     let matrix_level = instance.matrixLevel;
@@ -348,7 +348,7 @@ function assertDistinctBindings(bindings: WebMercatorTerrainWgslModule['bindings
     const data = [
         bindings.indices,
         bindings.gridPositions,
-        bindings.visibleInstances,
+        bindings.patches,
         bindings.lookupEntries,
     ]
     if (new Set(scene).size !== scene.length || new Set(data).size !== data.length ||

@@ -6,6 +6,8 @@ import {
     CellLocalF32Codec,
     GeoDiagnosticError,
     GpuWebMercatorQuadCover,
+    GpuWebMercatorQuadDemandProjection,
+    GpuWebMercatorQuadPatchDraw,
     MercatorCoordinate,
     TileMatrixCoverage,
     ViewDemandProducer,
@@ -47,16 +49,19 @@ import {
     type GeoViewSource,
     type GeoViewSourceCapture,
     type GeoViewSnapshot,
-    type GpuWebMercatorQuadCoverDemand,
     type GpuWebMercatorQuadCoverDescriptor,
     type GpuWebMercatorQuadCoverFacts,
     type GpuWebMercatorQuadCoverFeedback,
     type GpuWebMercatorQuadCoverFrame,
     type GpuWebMercatorQuadCoverPolicy,
     type GpuWebMercatorQuadCoverReadWgslModule,
-    type GpuWebMercatorQuadCoverRenderTemplate,
+    type GpuWebMercatorQuadCoverTemplate,
     type GpuWebMercatorQuadCoverSelectionFacts,
     type GpuWebMercatorQuadCoverViewToken,
+    type GpuWebMercatorQuadDemandProjectionFeedback,
+    type GpuWebMercatorQuadDemandProjectionFrame,
+    type GpuWebMercatorQuadPatchDrawFrame,
+    type GpuWebMercatorQuadProjectedDemand,
     type MapFieldLayer,
     type MapLibrePlanarCameraInput,
     type MapLibrePlanarViewAdapter,
@@ -65,7 +70,8 @@ import {
     type TiledFieldRepresentation,
     type WideFixedPosition,
     type WebMercatorQuadPosition,
-    type WebMercatorTileElevationBounds,
+    type WebMercatorTerrainElevationBounds,
+    type WebMercatorTileVerticalBounds,
     type WebMercatorVirtualRasterField,
     type WebMercatorVirtualRasterFieldDescriptor,
     type WebMercatorVirtualRasterWgslModule,
@@ -578,15 +584,19 @@ const typedCoverPolicy: GpuWebMercatorQuadCoverPolicy =
     gpuWebMercatorQuadCoverPolicy({
         minimumMatrixLevel: 0,
         maximumMatrixLevel: 14,
-        sourceMaximumMatrixLevel: 0,
         maximumPatches: 256,
-        referenceTileSizePixels: 512,
         cellsPerPatchEdge: 128,
-        maximumCellSpanReferencePixels: 8,
+        maximumCellSpanReferencePixels: 4,
         refinementTolerance: 0.005,
-        variableLodPitchThresholdRadians: Math.PI / 3,
     })
-const typedElevationBounds: readonly WebMercatorTileElevationBounds[] = [ {
+const typedVerticalBounds: readonly WebMercatorTileVerticalBounds[] = [ {
+    matrixLevel: 0,
+    tileRow: 0,
+    tileCol: 0,
+    minimumVerticalMeters: -100,
+    maximumVerticalMeters: 8_000,
+} ]
+const typedTerrainElevationBounds: readonly WebMercatorTerrainElevationBounds[] = [ {
     matrixLevel: 0,
     tileRow: 0,
     tileCol: 0,
@@ -596,9 +606,8 @@ const typedElevationBounds: readonly WebMercatorTileElevationBounds[] = [ {
 const typedCoverDescriptor: GpuWebMercatorQuadCoverDescriptor = {
     spatialProfile: typedFrontierSpatialProfile,
     policy: typedCoverPolicy,
-    elevationRangeMeters: [ -100, 8_000 ],
-    elevationBounds: typedElevationBounds,
-    vertexCount: 24_576,
+    verticalRangeMeters: [ -100, 8_000 ],
+    verticalBounds: typedVerticalBounds,
 }
 declare const typedCoverRuntime: scr.GPURuntime
 declare const typedGpuCover: GpuWebMercatorQuadCover
@@ -649,27 +658,48 @@ const typedCoverFeedback: Promise<GpuWebMercatorQuadCoverFeedback> = typedGpuCov
 // @ts-expect-error Package-owned opaque-step composition is not a public Scratch export.
 scr.appendSubmissionBuilderOpaqueSteps
 const typedCoverTemplates: readonly [
-    GpuWebMercatorQuadCoverRenderTemplate,
-    GpuWebMercatorQuadCoverRenderTemplate,
-] = typedGpuCover.renderTemplates()
+    GpuWebMercatorQuadCoverTemplate,
+    GpuWebMercatorQuadCoverTemplate,
+] = typedGpuCover.templates()
 const typedCoverReadWgsl: GpuWebMercatorQuadCoverReadWgslModule =
     gpuWebMercatorQuadCoverReadWgslModule({
         namespace: 'TypedCover',
         group: 1,
-        visibleInstancesBinding: 2,
+        patchesBinding: 2,
         lookupEntriesBinding: 3,
     })
 const typedCoverFacts: GpuWebMercatorQuadCoverFacts = typedGpuCover.facts()
 declare const typedCoverFeedbackValue: GpuWebMercatorQuadCoverFeedback
-const typedCoverDemand: GpuWebMercatorQuadCoverDemand | undefined =
-    typedCoverFeedbackValue.demands[0]
 const typedCoverSelection: GpuWebMercatorQuadCoverSelectionFacts =
     typedCoverFeedbackValue
-const typedCoverVisibleBuffer: scr.BufferResource =
-    typedCoverTemplates[0].visibleInstances
+const typedCoverPatchBuffer: scr.BufferResource = typedCoverTemplates[0].patches
 const typedCoverMapMetaBuffer: scr.BufferResource = typedCoverTemplates[0].mapMeta
-const typedCoverIndirectRegion: scr.BufferRegion =
-    typedCoverTemplates[0].drawArgument.region
+const typedCoverStateBuffer: scr.BufferResource = typedCoverTemplates[0].state
+const typedCoverPatchCountRegion: scr.BufferRegion = typedCoverTemplates[0].patchCount
+const typedDemandProjectionCreation = GpuWebMercatorQuadDemandProjection.create(
+    typedCoverRuntime,
+    {
+        cover: typedGpuCover,
+        sourceCoverage: typedFrontierSpatialProfile.coverage,
+        maximumDemands: 256,
+    }
+)
+declare const typedDemandProjection: GpuWebMercatorQuadDemandProjection
+const typedDemandFrame: GpuWebMercatorQuadDemandProjectionFrame =
+    typedDemandProjection.frame(typedCoverFrame)
+const typedDemandFeedback: Promise<GpuWebMercatorQuadDemandProjectionFeedback> =
+    typedDemandProjection.feedback(typedDemandFrame, typedCoverSubmittedWork)
+declare const typedDemandFeedbackValue: GpuWebMercatorQuadDemandProjectionFeedback
+const typedProjectedDemand: GpuWebMercatorQuadProjectedDemand | undefined =
+    typedDemandFeedbackValue.demands[0]
+const typedPatchDrawCreation = GpuWebMercatorQuadPatchDraw.create(
+    typedCoverRuntime,
+    { cover: typedGpuCover, vertexCount: 24_576 }
+)
+declare const typedPatchDraw: GpuWebMercatorQuadPatchDraw
+const typedPatchDrawFrame: GpuWebMercatorQuadPatchDrawFrame =
+    typedPatchDraw.frame(typedCoverFrame)
+const typedPatchDrawRegion: scr.BufferRegion = typedPatchDrawFrame.drawArgument.region
 // @ts-expect-error View upload commands remain private to cover.encode().
 typedCoverUpload.command
 // @ts-expect-error Persistent compute commands remain private to cover.encode().
@@ -682,11 +712,17 @@ void typedCapturedCoverSubmission
 void typedCoverFeedback
 void typedCoverReadWgsl
 void typedCoverFacts
-void typedCoverDemand
 void typedCoverSelection
-void typedCoverVisibleBuffer
+void typedCoverPatchBuffer
 void typedCoverMapMetaBuffer
-void typedCoverIndirectRegion
+void typedCoverStateBuffer
+void typedCoverPatchCountRegion
+void typedDemandProjectionCreation
+void typedDemandFeedback
+void typedProjectedDemand
+void typedPatchDrawCreation
+void typedPatchDrawRegion
+void typedTerrainElevationBounds
 // @ts-expect-error Current acknowledged snapshot identity is package-internal
 geoApi.virtualRasterGpuAcknowledgedSnapshot
 // @ts-expect-error Coordinate dimensions are limited to one, two, or three

@@ -30,12 +30,6 @@ const viewportHeight = positiveInteger(
     process.env.UNDERWATER_TERRAIN_TILE_WIREFRAME_VIEWPORT_HEIGHT,
     800
 )
-const configuredPitchThresholdDegrees = finiteRange(
-    process.env.VITE_UNDERWATER_TERRAIN_VARIABLE_LOD_PITCH_DEGREES,
-    60,
-    0,
-    90
-)
 const outputDirectory = resolve(
     process.env.UNDERWATER_TERRAIN_TILE_WIREFRAME_OUTPUT ??
         '/tmp/geoscratch-underwater-terrain-inverse-cover'
@@ -61,23 +55,12 @@ const oddParityPitchedCamera = Object.freeze({
     ...oddParityTopDownCamera,
     pitch: 70,
 })
-const pitchBoundaryCameras = Object.freeze({
+const pitchSweepCameras = Object.freeze({
     topDown: Object.freeze({ ...oddParityTopDownCamera, bearing: 0, pitch: 0 }),
-    below: Object.freeze({
-        ...oddParityTopDownCamera,
-        bearing: 0,
-        pitch: Math.max(0, configuredPitchThresholdDegrees - 0.1),
-    }),
-    boundary: Object.freeze({
-        ...oddParityTopDownCamera,
-        bearing: 0,
-        pitch: configuredPitchThresholdDegrees,
-    }),
-    high: Object.freeze({
-        ...oddParityTopDownCamera,
-        bearing: 0,
-        pitch: Math.max(configuredPitchThresholdDegrees, 70),
-    }),
+    before60: Object.freeze({ ...oddParityTopDownCamera, bearing: 0, pitch: 59.9 }),
+    at60: Object.freeze({ ...oddParityTopDownCamera, bearing: 0, pitch: 60 }),
+    after60: Object.freeze({ ...oddParityTopDownCamera, bearing: 0, pitch: 60.1 }),
+    high: Object.freeze({ ...oddParityTopDownCamera, bearing: 0, pitch: 70 }),
 })
 const vitePort = await findAvailablePort()
 let tilePort = await findAvailablePort()
@@ -254,15 +237,15 @@ async function runProof(activeBrowser) {
             zoomSamples.push(previous)
         }
 
-        const pitchBoundary = {}
-        for (const [ label, pitchCamera ] of Object.entries(pitchBoundaryCameras)) {
+        const pitchSweep = {}
+        for (const [ label, pitchCamera ] of Object.entries(pitchSweepCameras)) {
             previous = await settle(
                 page,
                 'tile-wireframe',
                 previous.observedFrames,
                 pitchCamera
             )
-            pitchBoundary[label] = Object.freeze({
+            pitchSweep[label] = Object.freeze({
                 ...previous,
                 ...(label === 'topDown' ? {
                     capture: await capture(page, 'wide-top-down'),
@@ -327,7 +310,7 @@ async function runProof(activeBrowser) {
             wireframe: Object.freeze({ ...wireframe, capture: wireframeCapture }),
             canonical: Object.freeze(canonical),
             zoomSamples: Object.freeze(zoomSamples),
-            pitchBoundary: Object.freeze(pitchBoundary),
+            pitchSweep: Object.freeze(pitchSweep),
             oddParityTopDown,
             shadedTracking,
             wireframeTracking,
@@ -376,6 +359,7 @@ async function runDprInvariance(activeBrowser) {
                 }
             })
             const feedback = settled.coverFeedback
+            const demandFeedback = settled.demandFeedback
             samples.push(Object.freeze({
                 requestedDeviceScaleFactor: deviceScaleFactor,
                 ...dimensions,
@@ -387,7 +371,7 @@ async function runDprInvariance(activeBrowser) {
                     maximumMatrixLevel: feedback?.maximumMatrixLevel,
                     finestMatrixLevel: feedback?.finestMatrixLevel,
                     maximumAdjacentLevelDelta: feedback?.maximumAdjacentLevelDelta,
-                    demands: feedback?.demands?.map(demand => [
+                    demands: demandFeedback?.demands?.map(demand => [
                         demand.desiredSampleLevel,
                         demand.requestMatrixLevel,
                         demand.tileRow,
@@ -417,6 +401,7 @@ async function settle(page, presentation, afterObservedFrames, nextCamera) {
             try { return JSON.parse(value ?? 'null') } catch { return null }
         }
         const cover = parse(data.coverFeedback)
+        const demand = parse(data.demandFeedback)
         const raster = parse(data.virtualRaster)
         const observedCamera = parse(data.cameraView)
         const cameraMatches = observedCamera !== null &&
@@ -438,7 +423,7 @@ async function settle(page, presentation, afterObservedFrames, nextCamera) {
             cover?.patchCount > 0 &&
             cover?.descriptorOverflowCount === 0 &&
             cover?.lookupOverflowCount === 0 &&
-            cover?.demandOverflowCount === 0 &&
+            demand?.overflowCount === 0 &&
             cover?.maximumAdjacentLevelDelta <= 1 &&
             data.uncapturedErrors === '0' &&
             data.deviceLosses === '0' &&
@@ -474,8 +459,10 @@ async function readFacts(page) {
             persistentFacts: parse(data.persistentFacts),
             graphContract: parse(data.graphContract),
             coverFeedback: parse(data.coverFeedback),
+            demandFeedback: parse(data.demandFeedback),
             coverLevelRange: parse(data.coverLevelRange),
             coverPatchCount: Number(data.coverPatchCount),
+            sourceDemandCount: Number(data.sourceDemandCount),
             convergenceState: data.convergenceState,
             cameraView: parse(data.cameraView),
             virtualRaster: virtualRaster === null ? null : {
@@ -667,7 +654,7 @@ function validateProof(value, processState) {
         wireframe,
         canonical = [],
         zoomSamples = [],
-        pitchBoundary,
+        pitchSweep,
         oddParityTopDown,
         shadedTracking,
         wireframeTracking,
@@ -692,7 +679,10 @@ function validateProof(value, processState) {
         baseline.graphContract.sourceMaximumMatrixLevel === 10 &&
         baseline.graphContract.coverMaximumMatrixLevel === 14 &&
         baseline.graphContract.commandIds?.cover?.length === 2 &&
-        baseline.graphContract.commandIds.cover.every(ids => ids.length === 3),
+        baseline.graphContract.commandIds.cover.every(ids => ids.length === 2) &&
+        baseline.graphContract.commandIds?.demandProjection?.length === 2 &&
+        baseline.graphContract.commandIds.demandProjection.every(ids => ids.length === 3) &&
+        baseline.graphContract.commandIds?.patchDraw?.length === 2,
     'graph contract does not expose the inverse-cover authority')
 
     const samples = [
@@ -701,10 +691,7 @@ function validateProof(value, processState) {
         wireframe,
         ...canonical,
         ...zoomSamples,
-        pitchBoundary?.topDown,
-        pitchBoundary?.below,
-        pitchBoundary?.boundary,
-        pitchBoundary?.high,
+        ...Object.values(pitchSweep ?? {}),
         oddParityTopDown?.bearingZero,
         oddParityTopDown?.direct,
         oddParityTopDown?.returned,
@@ -712,15 +699,18 @@ function validateProof(value, processState) {
     ]
     for (const [ index, sample ] of samples.entries()) {
         const feedback = sample?.coverFeedback
+        const demandFeedback = sample?.demandFeedback
         expect(failures,
             feedback?.patchCount > 0 &&
             feedback.patchCount === sample.coverPatchCount &&
             feedback.descriptorOverflowCount === 0 &&
             feedback.lookupOverflowCount === 0 &&
-            feedback.demandOverflowCount === 0 &&
             feedback.maximumAdjacentLevelDelta <= 1 &&
-            feedback.sourceLevelCeiling === 10 &&
-            feedback.demands.every(demand =>
+            demandFeedback?.overflowCount === 0 &&
+            demandFeedback.sourceLevelCeiling === 10 &&
+            demandFeedback.frameEpoch === feedback.frameEpoch &&
+            demandFeedback.demandCount === sample.sourceDemandCount &&
+            demandFeedback.demands.every(demand =>
                 demand.requestMatrixLevel <= demand.sourceLevelCeiling
             ),
         `cover sample ${index} violated bounded standard-cover facts`)
@@ -756,32 +746,22 @@ function validateProof(value, processState) {
     expect(failures,
         zoomSamples.length === 5 && zoomRegressions.length === 0,
     `zoom-in coarsened the inverse cover: ${JSON.stringify(zoomRegressions)}`)
-    const thresholdRadians = configuredPitchThresholdDegrees * Math.PI / 180
+    const nearSixty = [
+        pitchSweep?.before60,
+        pitchSweep?.at60,
+        pitchSweep?.after60,
+    ]
+    const nearSixtyCounts = nearSixty.map(sample => sample?.coverPatchCount)
+    const minimumNearSixtyCount = Math.min(...nearSixtyCounts)
+    const maximumNearSixtyCount = Math.max(...nearSixtyCounts)
     expect(failures,
-        Math.abs(
-            baseline?.graphContract?.cover?.policy?.variableLodPitchThresholdRadians -
-            thresholdRadians
-        ) < 1e-6,
-    'terrain graph did not expose the configured variable-LoD pitch threshold')
-    for (const [ label, sample ] of [
-        [ 'top-down', pitchBoundary?.topDown ],
-        [ 'below-threshold', pitchBoundary?.below ],
-    ]) {
-        expect(failures,
-            sample?.coverFeedback?.selectionMode === 'uniform' &&
-            sample.coverFeedback.minimumMatrixLevel ===
-                sample.coverFeedback.maximumMatrixLevel,
-        `${label} footprint did not settle to one uniform projected-cell level`)
-    }
-    for (const [ label, sample ] of [
-        [ 'threshold', pitchBoundary?.boundary ],
-        [ 'high-pitch', pitchBoundary?.high ],
-    ]) {
-        expect(failures,
-            sample?.coverFeedback?.selectionMode === 'variable' &&
-            sample.coverFeedback.maximumAdjacentLevelDelta <= 1,
-        `${label} footprint did not use the variable projected-cell cover`)
-    }
+        nearSixty.every(sample =>
+            sample?.coverFeedback?.selectionMode === undefined &&
+            sample?.coverFeedback?.maximumAdjacentLevelDelta <= 1
+        ) &&
+        maximumNearSixtyCount - minimumNearSixtyCount <=
+            Math.max(8, Math.ceil(minimumNearSixtyCount * 0.5)),
+    `60-degree pitch sweep retained a mode cliff: ${JSON.stringify(nearSixtyCounts)}`)
     const oddBearingZero = oddParityTopDown?.bearingZero
     const oddDirect = oddParityTopDown?.direct
     const oddReturned = oddParityTopDown?.returned
@@ -1021,16 +1001,6 @@ function positiveInteger(value, fallback) {
 
     const parsed = Number(value)
     return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback
-}
-
-function finiteRange(value, fallback, minimum, maximum) {
-
-    if (value === undefined || String(value).trim().length === 0) return fallback
-    const parsed = Number(value)
-    if (!Number.isFinite(parsed) || parsed < minimum || parsed > maximum) {
-        throw new RangeError(`Expected a finite value in [${minimum}, ${maximum}]`)
-    }
-    return parsed
 }
 
 function serializeError(error) {

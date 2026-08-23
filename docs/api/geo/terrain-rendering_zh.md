@@ -2,69 +2,69 @@
 docId: geo.terrain-rendering.zh
 canonical: false
 translationOf: ./terrain-rendering.md
-canonicalDigest: da11d953723b4570b68aea3a190ea1a987ac36ea034ede7c41a4fc7ca5dbdf84
+canonicalDigest: 1f5b19c7a4e95e183bedf0d3c89c48e7112f5728addaba9f93735b7e2100564d
 ---
 # 地形渲染
 
 [English](./terrain-rendering.md) | [Geo 概览](./README_zh.md)
 
-`createWebMercatorTerrainRenderer` 是 Geo 的 OGC `WebMercatorQuad` 地形编排器。
-它组合一个 `MapFieldLayer`、一个已准备的 Virtual Raster runtime、一个
-`GpuWebMercatorQuadCover`、生成式 terrain WGSL、indirect draw、按 capture resize、
-延迟 demand settlement 与 dispose。名称有意限定投影；不存在假定 planar 与 globe
-selection 等价的通用 terrain alias。
+`createWebMercatorTerrainRenderer` 是 Geo 的 OGC `WebMercatorQuad` terrain 编排器。
+它组合 `MapFieldLayer`、已准备的 Virtual Raster runtime、
+`GpuWebMercatorQuadCover`、`GpuWebMercatorQuadDemandProjection`、
+`GpuWebMercatorQuadPatchDraw`、生成的 terrain WGSL、随 capture 调整的 attachment、
+延迟反馈和显式释放。不存在假装 planar 与 globe 选择等价的通用 terrain alias。
 
-每帧顺序为：
+帧顺序是：
 
 ```text
-view upload -> inverse-cover compute -> terrain drawIndirect
+view upload
+    -> adaptive inverse-cover compute
+    -> source-demand projection compute
+    -> patch-draw indirect preparation compute
+    -> terrain drawIndirect
 ```
 
-Cover 是唯一 geometry LoD authority。它从当前 camera fact 反向生成 prefix-free 标准
-瓦片 cover，不遍历 root，也不依赖 atlas residency。输出包含完整
-`tileMatrix/tileRow/tileCol` identity、neighbor lookup、desired-page feedback 与 indirect
-instance count。最终 cover 在 terrain render 前满足边相邻 2:1。
+这些阶段权限分离。Cover 只选择标准几何 patch 和邻接；demand projection 将 patch
+映射到 Virtual Raster source ceiling；patch draw 把 consumer vertex count 与 GPU
+patch count 组合；Virtual Raster 随后只调度显式 `ViewTileDemandSet` page，并解析
+exact 或 ancestor 数据，驻留状态不改变几何拓扑。
 
-内建 terrain policy 使用512 reference-pixel zoom convention、每个标准 patch 128 cells、
-八 reference-pixel 的面积等价 projected-cell 最大跨度、0.005数值 refinement tolerance，
-以及60度 variable-LoD pitch threshold。Renderer descriptor 可通过
-`variableLodPitchThresholdRadians` 覆盖该值。低于阈值时完整可见足迹使用一个 geometry
-level；等于或高于阈值时，projected-cell 证据生成近处较细、远处较粗的 patch。Cover
-capacity 同时根据 reference viewport size 与配置的 uniform-pitch 范围分配，容量不足仍显式失败，
-不会隐藏为质量退化。
-物理 presentation size 与 DPR 不参与 LoD。
-该阈值是显式质量/性能开关：刚低于阈值的视图可能比边界处的 variable cut 绘制显著更多
-geometry。优先保证持续高俯仰交互性能的应用应配置更低阈值。
+内建 terrain consumer 使用 128-cell 标准 patch、四 reference-pixel 最大 area-
+equivalent projected cell span 和 0.005 数值容差。所有 pitch 使用同一自适应 selector。
+不存在 60 度边界、mode feedback、renderer override 或 example 环境变量。物理
+presentation size 与 DPR 不参与质量度量。
 
-Raster demand 明确位于下游。Cover feedback 分别保留 desired precision 与 source ceiling，
-renderer 再创建 `ViewTileDemandSet`。`VirtualRasterRuntime.reconcileViewDemands()` 只调度
-可执行 source page；已经 exact-resident 的页面不占并发请求预算。Exact page 缺失时通过
-page-table ancestor fallback 继续渲染；residency 时序不会改变 geometry topology。
+`elevationRangeMeters` 和可选 `WebMercatorTerrainElevationBounds` 仍然是 terrain
+source fact。Renderer 应用 exaggeration，再把它们转换为通用
+`WebMercatorTileVerticalBounds` 后构造 cover。Hierarchy 必须完整匹配 source
+coverage；省略时使用全局范围。cache hit、atlas page 和请求完成不能提供或改变 bounds。
 
-`elevationBounds` 可提供与 source coverage 完全匹配的不可变 bounds hierarchy。Renderer
-按 exaggeration 缩放每条记录，cover 使用 exact 或 source-ceiling-ancestor bounds。省略
-metadata 时使用 global elevation range；部分 metadata 会在创建GPU resource前失败。
+Demand feedback 保持期望几何精度、source ceiling 和可执行请求瓦片互相独立。
+`VirtualRasterRuntime.reconcileViewDemands()` 只调度这些显式请求。exact-resident
+page 不消耗 request budget；缺少 exact page 时通过 page-table ancestor fallback
+继续渲染，同时保持同一几何 cut。
 
-`webMercatorTerrainWgslModule` 拥有完整 vertex 路径：它重建 wide-fixed 标准瓦片位置，
-在转成 f32 前减去 camera，解析 cover neighbor，snap 混合 LoD 边，根据全局 field
-coordinate 采样高程并完成投影。内置
-`WEB_MERCATOR_TERRAIN_TILE_WIREFRAME_FRAGMENT_ENTRY_POINT` 用稳定瓦片颜色展示
-post-stitch mesh。应用 presentation WGSL 只提供 fragment shading。
+`webMercatorTerrainWgslModule` 拥有完整 vertex 路径：重建 wide-fixed 标准瓦片
+位置、在 f32 转换前减去相机、解析 cover neighbor、吸附混合 LoD 边缘、按全局 field
+坐标采样高度并投影。内建 wireframe entry point 用稳定瓦片颜色显示 stitching 后
+mesh；应用只提供 fragment presentation WGSL。
 
-`render(capture)` 消费一个 `GeoViewSourceCapture<ViewInput>`，从 `presentationSize` resize
-物理 attachment，提交匹配的 reference-pixel view，并返回
-`GeoFrameResult<WebMercatorTerrainFrameValue>`。Submission/native observation、延迟 cover
-readback、raster request settlement 与后续 publication 保持为独立 promise。被 supersede
-的 cover feedback 不能协调 demand 或覆盖当前 fact。最新 camera decision 完成结算前，
-该 decision 的每个更新 frame 都保留 `needsFollowUp`；latest-only frame controller 因此
-不会抑制消费 one-frame-lagged feedback 所需的额外 frame。Renderer 拥有两套
-map-meta/cover parity；Underwater Terrain 应用使用经过测量的两帧 in-flight 上限。
+`render(capture)` 消费一个 `GeoViewSourceCapture<ViewInput>`，根据
+`presentationSize` 调整物理 attachment，并返回
+`GeoFrameResult<WebMercatorTerrainFrameValue>`。submission/native observation、cover
+feedback、demand feedback、raster settlement 和后续 publication 保持不同 promise
+与 fact。被 supersede 的反馈不能 reconcile demand 或覆盖当前状态。最新相机决策
+完成两个有限 readback 前，同决策帧保持 `needsFollowUp`，避免 latest-only admission
+遗失收敛。
 
-Renderer 不拥有 map host、controller、source manifest、URL policy、Worker system、
-decoder 或 persistent cache 选择；这些继续由应用显式组合。
+Renderer 在三个组合 GPU component 中分别拥有两套 parity resource。Underwater
+Terrain 使用测量得到的双 in-flight bound。Renderer 不拥有 map host、controller、
+source manifest、URL policy、Worker system、decoder 或 persistent-cache 选择。
 
-相关决策：`docs/decisions/ADR-074-webmercator-terrain-wgsl-ownership.md`
-规定 terrain vertex 与 stitching 的归属；
-`docs/decisions/ADR-083-webmercator-inverse-cover-passive-virtual-raster.md`
-定义 inverse-cover composition；`docs/decisions/ADR-084-reference-pixel-terrain-lod.md`
-定义 reference-pixel 质量与不可变高程 bounds。
+未来 feature-to-surface conformance 不属于该 renderer。独立 Geo preprocess product
+可以消费其 surface geometry 或一致 field sampler，但 feature 身份和 source tiling
+不能变成 terrain tile render-to-texture 状态。
+
+相关决策：ADR-074 分配 terrain WGSL 权限；ADR-083 定义 inverse cover 与被动
+Virtual Raster；ADR-084 定义 reference pixel；ADR-086 统一 selector，并分开几何、
+source demand 与 draw-count 权限。

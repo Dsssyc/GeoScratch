@@ -39,7 +39,6 @@ type UnderwaterTerrainApplicationOptions = Readonly<{
     cachePolicy: UnderwaterTerrainCachePolicy
     maxPhysicalPages: number
     tileWireframeEnabled: boolean
-    variableLodPitchThresholdRadians: number
     proof?: UnderwaterTerrainProof
     fail(error: unknown): void
     dispose(): Promise<unknown>
@@ -150,7 +149,6 @@ export async function startUnderwaterTerrainApplication(
             elevationRangeMeters,
             elevationBounds: source.elevationBounds,
             exaggeration: TERRAIN_EXAGGERATION,
-            variableLodPitchThresholdRadians: options.variableLodPitchThresholdRadians,
             presentations: [
                 {
                     id: 'shaded',

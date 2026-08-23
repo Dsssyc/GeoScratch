@@ -73,7 +73,7 @@
 - Modify: `tests/types/public-api.ts`
 
 - [ ] Add a failing test proving cover identity has no draw buffer while patch draw owns one indirect buffer per parity.
-- [ ] Implement initialization of consumer vertex count and current-step GPU copy of cover patch count.
+- [ ] Implement a persistent one-workgroup compute adapter that reads current-step cover state and writes consumer-owned indirect arguments; do not weaken exact-epoch `CopyCommand` semantics.
 - [ ] Validate runtime/frame ownership and expose stable identity facts.
 - [ ] Run focused tests/typecheck and commit patch draw preparation.
 
