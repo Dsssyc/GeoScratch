@@ -57,7 +57,10 @@ The built-in terrain policy uses a 512-reference-pixel zoom convention, 128 cell
 one calibrated reference-pixel projected-cell threshold, and explicit numerical tolerance.
 Every pitch uses the same adaptive projected-cell selector; pitch and FOV affect projection facts
 but never choose a uniform/variable algorithm mode. There is no pitch threshold or application
-environment override. A complete immutable tile-vertical-bounds hierarchy may tighten patch
+environment override. Preserve each exact parent tile's sparse refinement decision through
+materialization: replace a selected parent only with its own four children, and never union
+independent decisions into one level-wide rectangular refinement window. A complete immutable
+tile-vertical-bounds hierarchy may tighten patch
 bounds; partial metadata is invalid and residency cannot supply missing bounds. Cover geometry,
 tiled source-demand projection, and patch-mesh indirect arguments have separate owners. Do not
 put source ceilings, raster request identities, mesh vertex counts, or draw-argument buffers back
