@@ -62,17 +62,23 @@ Current library contracts are documented in [Views and frame control](../../docs
 [Terrain rendering](../../docs/api/geo/terrain-rendering.md). The pixel-domain and
 quality rationale is recorded in [ADR-084](../../docs/decisions/ADR-084-reference-pixel-terrain-lod.md),
 with unified selection and ownership in
-[ADR-086](../../docs/decisions/ADR-086-unified-adaptive-webmercator-cover.md).
+[ADR-086](../../docs/decisions/ADR-086-unified-adaptive-webmercator-cover.md), sparse
+parent refinement in
+[ADR-087](../../docs/decisions/ADR-087-sparse-webmercator-refinement.md), and projected
+maximum-stretch quality in
+[ADR-088](../../docs/decisions/ADR-088-bound-maximum-projected-cell-stretch.md), and indexed
+terrain execution in
+[ADR-089](../../docs/decisions/ADR-089-index-webmercator-terrain-draws.md).
 
 The manifest declares source pages through z10. `GpuWebMercatorQuadCover` independently
 selects geometry through z14, but every output remains a standard
-`(tileMatrix, tileRow, tileCol)` identity. Camera/view-derived windows select from the
-fixed global matrix; they are not a moving clipmap grid. The GPU always probes bounded
-standard parent candidates directly and refines only where
-the rotation-invariant local projective Jacobian exceeds the calibrated four-reference-
-pixel cell threshold plus explicit numerical tolerance. Pitch and FOV participate in
-projection but never switch algorithms. The one path conservatively rejects invisible
-candidates, performs local 2:1 closure, and builds the full-identity neighbor lookup.
+`(tileMatrix, tileRow, tileCol)` identity. Camera-derived bounded probing addresses the
+fixed global matrix; it is not a moving clipmap grid. The GPU preserves exact sparse
+parent decisions and refines only where the rotation-invariant local projective
+Jacobian's maximum singular stretch exceeds the calibrated five-reference-pixel cell
+threshold plus explicit numerical tolerance. Pitch and FOV participate in projection
+but never switch algorithms. The one path conservatively rejects invisible candidates,
+performs local 2:1 closure, and builds the full-identity neighbor lookup.
 
 The COG manifest contains a complete immutable min/max elevation record for every declared
 source tile. The terrain renderer converts them to generic vertical bounds; geometry
@@ -82,8 +88,10 @@ projected quality without allowing cache, network, residency, or atlas state to 
 Source demand and draw-count preparation are separate GPU components. A z14 geometry
 patch retains `desiredSampleLevel = 14` while lowering its executable request to the corresponding
 z10 source ancestor in `GpuWebMercatorQuadDemandProjection`.
-`GpuWebMercatorQuadPatchDraw` combines the consumer vertex count with the GPU patch
-count without making either fact part of the cover. `VirtualRasterRuntime.reconcileViewDemands()`
+`GpuWebMercatorQuadPatchDraw` combines the consumer element count with the GPU patch
+count without making either fact part of the cover. Terrain consumes the resulting
+indexed-indirect record and reuses logical grid vertices across triangle corners.
+`VirtualRasterRuntime.reconcileViewDemands()`
 consumes the explicit pages. The scheduler marks exact-resident pages used and requests
 only missing pages within the runtime-owned demand budget. Virtual Raster never inspects
 zoom or selects geometry LoD.

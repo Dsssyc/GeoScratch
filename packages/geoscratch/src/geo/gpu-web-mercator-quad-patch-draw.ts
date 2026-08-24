@@ -25,11 +25,11 @@ const BUFFER_COPY_DST = 0x08
 const BUFFER_UNIFORM = 0x40
 const BUFFER_STORAGE = 0x80
 const BUFFER_INDIRECT = 0x100
-const DRAW_ARGUMENT_BYTES = 16
+const DRAW_ARGUMENT_BYTES = 20
 
 const patchDrawPolicyCodec = layoutCodec({
     name: 'GpuWebMercatorQuadPatchDrawPolicy',
-    fields: [ { name: 'vertexCount', type: 'u32' } ],
+    fields: [ { name: 'elementCount', type: 'u32' } ],
 }, { usage: [ 'uniform', 'storage', 'readback' ] })
 
 const PATCH_DRAW_WGSL = String.raw`
@@ -42,10 +42,11 @@ var<storage, read_write> drawArguments: array<u32>;
 
 @compute @workgroup_size(1)
 fn prepareWebMercatorQuadPatchDraw() {
-    drawArguments[0] = patchDrawPolicy.vertexCount;
+    drawArguments[0] = patchDrawPolicy.elementCount;
     drawArguments[1] = coverState.patchCount;
     drawArguments[2] = 0u;
     drawArguments[3] = 0u;
+    drawArguments[4] = 0u;
 }
 `
 
@@ -53,7 +54,7 @@ type Disposable = { dispose(): void }
 
 export type GpuWebMercatorQuadPatchDrawDescriptor = Readonly<{
     cover: GpuWebMercatorQuadCover
-    vertexCount: number
+    elementCount: number
 }>
 
 export type GpuWebMercatorQuadPatchDrawFrame = Readonly<{
@@ -66,7 +67,7 @@ export type GpuWebMercatorQuadPatchDrawFrame = Readonly<{
         resource: BufferResource
         region: BufferRegion
         offset: 0
-        size: 16
+        size: 20
     }>
 }>
 
@@ -79,7 +80,7 @@ export type GpuWebMercatorQuadPatchDrawFacts = Readonly<{
     id: string
     runtimeId: string
     coverId: string
-    vertexCount: number
+    elementCount: number
     disposed: boolean
     parity: readonly Readonly<{
         parity: 0 | 1
@@ -117,7 +118,7 @@ const frameRecords = new WeakMap<GpuWebMercatorQuadPatchDrawFrame, FrameRecord>(
 const encodedBuilders = new WeakMap<SubmissionBuilder, GpuWebMercatorQuadPatchDrawFrame>()
 let nextPatchDrawId = 1
 
-/** Prepares consumer-owned draw-indirect arguments from one GPU cover patch count. */
+/** Prepares indexed- or non-indexed draw-indirect arguments from one GPU cover patch count. */
 export class GpuWebMercatorQuadPatchDraw {
 
     readonly runtime: GPURuntime
@@ -176,7 +177,7 @@ export class GpuWebMercatorQuadPatchDraw {
             const policyUpload = own(runtime.createUploadCommand({
                 label: 'Upload GPU WebMercatorQuad patch draw policy',
                 target: policy.region({ layout: patchDrawPolicyCodec.artifact }),
-                data: patchDrawPolicyCodec.pack({ vertexCount: descriptor.vertexCount }),
+                data: patchDrawPolicyCodec.pack({ elementCount: descriptor.elementCount }),
             }))
             const coverTemplates = descriptor.cover.templates()
             const drawArguments = await Promise.all([ 0, 1 ].map(async parity =>
@@ -282,7 +283,7 @@ export class GpuWebMercatorQuadPatchDraw {
                         resource,
                         region: resource.region({ offset: 0, size: DRAW_ARGUMENT_BYTES }),
                         offset: 0 as const,
-                        size: DRAW_ARGUMENT_BYTES as 16,
+                        size: DRAW_ARGUMENT_BYTES as 20,
                     })
                     return Object.freeze({
                         parity,
@@ -400,7 +401,7 @@ export class GpuWebMercatorQuadPatchDraw {
             id: this.id,
             runtimeId: this.runtime.id,
             coverId: this.descriptor.cover.id,
-            vertexCount: this.descriptor.vertexCount,
+            elementCount: this.descriptor.elementCount,
             disposed: this.#disposed,
             parity: Object.freeze(this.#templates.map(template => Object.freeze({
                 parity: template.parity,
@@ -439,16 +440,16 @@ function snapshotDescriptor(
     input: GpuWebMercatorQuadPatchDrawDescriptor
 ): GpuWebMercatorQuadPatchDrawDescriptor {
 
-    if (input?.cover?.runtime !== runtime || !positiveSafeInteger(input.vertexCount) ||
-        input.vertexCount > 0xffff_ffff) {
+    if (input?.cover?.runtime !== runtime || !positiveSafeInteger(input.elementCount) ||
+        input.elementCount > 0xffff_ffff) {
         return invalidPatchDraw(
             { id: 'uninitialized' },
-            'Patch draw requires one owning cover and a positive u32 vertex count.',
-            { runtimeId: runtime?.id, vertexCount: 'positive u32' },
+            'Patch draw requires one owning cover and a positive u32 element count.',
+            { runtimeId: runtime?.id, elementCount: 'positive u32' },
             input
         )
     }
-    return Object.freeze({ cover: input.cover, vertexCount: input.vertexCount })
+    return Object.freeze({ cover: input.cover, elementCount: input.elementCount })
 }
 
 function currentRead(resource: BufferResource) {

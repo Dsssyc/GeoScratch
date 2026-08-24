@@ -34,7 +34,7 @@ describe('GPU WebMercatorQuad patch draw preparation', () => {
         expect(contents).to.include('export class GpuWebMercatorQuadPatchDraw')
         expect(contents).to.include('createDispatchCommand')
         expect(contents).to.include("contentEpoch: 'current-at-step'")
-        expect(contents).to.include('vertexCount')
+        expect(contents).to.include('elementCount')
         expect(contents).to.include('patchCount')
         expect(contents).to.not.include('maximumCellSpanReferencePixels')
         expect(contents).to.not.include('sourceMaximumMatrixLevel')
@@ -70,7 +70,7 @@ describe('GPU WebMercatorQuad patch draw preparation', () => {
         })
         const patchDraw = await GpuWebMercatorQuadPatchDraw.create(runtime, {
             cover,
-            vertexCount: 98_304,
+            elementCount: 98_304,
         })
         const snapshot = createGeoViewSnapshot({
             id: 'patch-draw-view',
@@ -103,10 +103,10 @@ describe('GPU WebMercatorQuad patch draw preparation', () => {
         builder.submit()
 
         expect(fake.calls.dispatchCalls).to.have.length(2)
-        expect(drawFrame.drawArgument.size).to.equal(16)
+        expect(drawFrame.drawArgument.size).to.equal(20)
         expect(patchDraw.facts()).to.deep.include({
             coverId: cover.id,
-            vertexCount: 98_304,
+            elementCount: 98_304,
         })
         const coverResourceIds = new Set(
             cover.identityObjects().resources.map(resource => resource.id)

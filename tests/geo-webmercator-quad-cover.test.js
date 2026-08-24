@@ -323,6 +323,45 @@ describe('GPU WebMercatorQuad inverse cover reference', () => {
         expectStandardBalancedCover(result, setup.policy.maximumMatrixLevel)
     })
 
+    it('bounds anisotropic cells by maximum projected stretch rather than area', () => {
+
+        const setup = fixture({ maximumPatches: 512 })
+        const baseView = setup.view({ zoom: 10, pitch: 0 })
+        const anisotropicMatrix = [ ...baseView.clipFromRelativeWorld ]
+        for (const index of [ 0, 4, 8, 12 ]) anisotropicMatrix[index] *= 4
+        for (const index of [ 1, 5, 9, 13 ]) anisotropicMatrix[index] *= 0.25
+        const anisotropicView = createGeoViewSnapshot({
+            id: 'cover-view-anisotropic',
+            clipFromRelativeWorld: anisotropicMatrix,
+            cameraHigh: baseView.cameraHigh,
+            cameraLow: baseView.cameraLow,
+            referenceViewport: baseView.referenceViewport,
+            verticalFovRadians: baseView.verticalFovRadians,
+            cameraLatitudeRadians: baseView.cameraLatitudeRadians,
+            cameraPitchRadians: baseView.cameraPitchRadians,
+            zoomHint: baseView.zoomHint,
+            frameEpoch: baseView.frameEpoch,
+            residencySnapshotEpoch: baseView.residencySnapshotEpoch,
+        })
+        const visibleBounds = {
+            west: 0.498,
+            north: 0.498,
+            east: 0.502,
+            south: 0.502,
+        }
+        const isotropic = setup.evaluate({ currentView: baseView, visibleBounds })
+        const anisotropic = setup.evaluate({
+            currentView: anisotropicView,
+            visibleBounds,
+        })
+
+        expect(anisotropic.facts.maximumMatrixLevel).to.be.at.least(
+            isotropic.facts.maximumMatrixLevel + 2
+        )
+        expect(anisotropic.facts.patchCount).to.be.greaterThan(isotropic.facts.patchCount)
+        expectStandardBalancedCover(anisotropic, setup.policy.maximumMatrixLevel)
+    })
+
     it('advances ordinary top-down geometry monotonically with map zoom', () => {
 
         const setup = fixture({ maximumPatches: 512 })

@@ -693,7 +693,7 @@ const typedProjectedDemand: GpuWebMercatorQuadProjectedDemand | undefined =
     typedDemandFeedbackValue.demands[0]
 const typedPatchDrawCreation = GpuWebMercatorQuadPatchDraw.create(
     typedCoverRuntime,
-    { cover: typedGpuCover, vertexCount: 24_576 }
+    { cover: typedGpuCover, elementCount: 24_576 }
 )
 declare const typedPatchDraw: GpuWebMercatorQuadPatchDraw
 const typedPatchDrawFrame: GpuWebMercatorQuadPatchDrawFrame =

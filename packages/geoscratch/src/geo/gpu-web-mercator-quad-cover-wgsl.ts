@@ -267,7 +267,7 @@ fn coverProjectedAxisCellDeltaPixels(clip: vec4f, delta: vec4f) -> vec2f {
     return ndcDelta * mapMeta.referenceViewport * 0.5f;
 }
 
-fn coverProjectedCellAreaScalePixels(
+fn coverProjectedCellMaximumStretchPixels(
     clip: vec4f,
     xDelta: vec4f,
     yDelta: vec4f,
@@ -280,7 +280,18 @@ fn coverProjectedCellAreaScalePixels(
     }
     let xPixels = coverProjectedAxisCellDeltaPixels(clip, xDelta);
     let yPixels = coverProjectedAxisCellDeltaPixels(clip, yDelta);
-    return sqrt(abs(xPixels.x * yPixels.y - xPixels.y * yPixels.x));
+    let xx = dot(xPixels, xPixels);
+    let xy = dot(xPixels, yPixels);
+    let yy = dot(yPixels, yPixels);
+    let discriminant = sqrt(max(
+        0.0f,
+        (xx - yy) * (xx - yy) + 4.0f * xy * xy,
+    ));
+    let maximumStretch = sqrt(max(
+        0.0f,
+        0.5f * (xx + yy + discriminant),
+    ));
+    return maximumStretch;
 }
 
 fn coverProjectedPlaneCellSpanPixels(
@@ -316,7 +327,7 @@ fn coverProjectedPlaneCellSpanPixels(
     for (var index = 0u; index < polygon.count; index += 1u) {
         maximumSpan = max(
             maximumSpan,
-            coverProjectedCellAreaScalePixels(
+            coverProjectedCellMaximumStretchPixels(
                 polygon.vertices[index],
                 xDelta,
                 yDelta,

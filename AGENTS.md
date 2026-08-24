@@ -49,12 +49,13 @@ prefix-free, deterministic, and edge-adjacent by at most one level. Virtual Rast
 explicit `ViewTileDemandSet` pages and owns no camera, zoom, SSE, or adjacency policy; keep
 geometry level, desired sample level, resolved sample level, and source ceiling distinct. Do not
 restore `GpuTileFrontier`, `GpuRenderPatchFrontier`, render roots, trial cuts, atlas-driven geometry,
-or a moving clipmap grid. Geometry quality uses the rotation-invariant local projected-cell
-Jacobian in logical reference pixels. `GeoViewSnapshot.referenceViewport` owns camera, cover,
+or a moving clipmap grid. Geometry quality uses the rotation-invariant maximum singular stretch
+of the local projected-cell Jacobian in logical reference pixels; do not restore determinant-only
+area scale. `GeoViewSnapshot.referenceViewport` owns camera, cover,
 quality, and picking pixels; `GeoViewSourceCapture.presentationSize` owns physical Surface and
 attachment dimensions. DPR must not change cover identities, levels, counts, or raster demand.
 The built-in terrain policy uses a 512-reference-pixel zoom convention, 128 cells per patch,
-one calibrated reference-pixel projected-cell threshold, and explicit numerical tolerance.
+a calibrated five-reference-pixel maximum-stretch threshold, and explicit numerical tolerance.
 Every pitch uses the same adaptive projected-cell selector; pitch and FOV affect projection facts
 but never choose a uniform/variable algorithm mode. There is no pitch threshold or application
 environment override. Preserve each exact parent tile's sparse refinement decision through
@@ -65,6 +66,10 @@ bounds; partial metadata is invalid and residency cannot supply missing bounds. 
 tiled source-demand projection, and patch-mesh indirect arguments have separate owners. Do not
 put source ceilings, raster request identities, mesh vertex counts, or draw-argument buffers back
 inside `GpuWebMercatorQuadCover`.
+WebMercator terrain uses indexed indirect drawing over its immutable grid. Preserve the generic
+20-byte `[elementCount, patchCount, 0, 0, 0]` patch-draw ABI, INDEX plus STORAGE index-buffer
+usage, logical vertex reuse, and the core-WGSL grid/parity wireframe. Do not restore unindexed
+triangle-corner sampling or depend on an experimental fragment `primitive_index` extension.
 Until a camera decision has settled its delayed cover feedback, every newer same-decision
 terrain frame must retain bounded `needsFollowUp`; latest-only frame admission must not strand
 the final one-frame-lagged readback.

@@ -2,7 +2,7 @@
 docId: geo.terrain-rendering.zh
 canonical: false
 translationOf: ./terrain-rendering.md
-canonicalDigest: 1f5b19c7a4e95e183bedf0d3c89c48e7112f5728addaba9f93735b7e2100564d
+canonicalDigest: ec2486f08b61fc49ddd0e1ff37b5b81df70b12cd29a4f8cd6c245fbfb528b2ff
 ---
 # 地形渲染
 
@@ -29,8 +29,8 @@ view upload
 patch count 组合；Virtual Raster 随后只调度显式 `ViewTileDemandSet` page，并解析
 exact 或 ancestor 数据，驻留状态不改变几何拓扑。
 
-内建 terrain consumer 使用 128-cell 标准 patch、四 reference-pixel 最大 area-
-equivalent projected cell span 和 0.005 数值容差。所有 pitch 使用同一自适应 selector。
+内建 terrain consumer 使用 128-cell 标准 patch、五 reference-pixel 最大奇异投影
+cell 拉伸和 0.005 数值容差。所有 pitch 使用同一自适应 selector。
 不存在 60 度边界、mode feedback、renderer override 或 example 环境变量。物理
 presentation size 与 DPR 不参与质量度量。
 
@@ -46,8 +46,10 @@ page 不消耗 request budget；缺少 exact page 时通过 page-table ancestor 
 
 `webMercatorTerrainWgslModule` 拥有完整 vertex 路径：重建 wide-fixed 标准瓦片
 位置、在 f32 转换前减去相机、解析 cover neighbor、吸附混合 LoD 边缘、按全局 field
-坐标采样高度并投影。内建 wireframe entry point 用稳定瓦片颜色显示 stitching 后
-mesh；应用只提供 fragment presentation WGSL。
+坐标采样高度并投影。Terrain 使用 indexed indirect draw，让每个逻辑网格顶点在每个
+patch 中只执行一次 vertex shading，而不是按每个三角形角重复执行。内建 wireframe
+entry point 从 snapped grid coordinate 重建规则网格边与棋盘式对角线，并以稳定瓦片
+颜色显示 stitching 后 mesh；应用只提供 fragment presentation WGSL。
 
 `render(capture)` 消费一个 `GeoViewSourceCapture<ViewInput>`，根据
 `presentationSize` 调整物理 attachment，并返回
@@ -67,4 +69,5 @@ source manifest、URL policy、Worker system、decoder 或 persistent-cache 选�
 
 相关决策：ADR-074 分配 terrain WGSL 权限；ADR-083 定义 inverse cover 与被动
 Virtual Raster；ADR-084 定义 reference pixel；ADR-086 统一 selector，并分开几何、
-source demand 与 draw-count 权限。
+source demand 与 draw-count 权限；ADR-087 与 ADR-088 分别定义稀疏 parent 细分和
+投影最大拉伸；ADR-089 定义 indexed terrain execution。

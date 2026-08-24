@@ -521,7 +521,7 @@ function projectedPlaneCellSpanPixels(
         matrix[6]! * cellMeters,
         matrix[7]! * cellMeters,
     ]
-    return Math.max(...polygon.map(point => projectedCellAreaScalePixels(
+    return Math.max(...polygon.map(point => projectedCellMaximumStretchPixels(
         input.view.referenceViewport,
         point,
         xDelta,
@@ -574,7 +574,7 @@ function clipPlaneDistance(point: ClipPoint, plane: number): number {
     }
 }
 
-function projectedCellAreaScalePixels(
+function projectedCellMaximumStretchPixels(
     viewport: readonly [number, number],
     clip: ClipPoint,
     xDelta: ClipPoint,
@@ -585,9 +585,18 @@ function projectedCellAreaScalePixels(
     if (minimumCellW <= 1e-5) return Math.max(...viewport)
     const xPixels = projectedAxisCellDeltaPixels(viewport, clip, xDelta)
     const yPixels = projectedAxisCellDeltaPixels(viewport, clip, yDelta)
-    return Math.sqrt(Math.abs(
-        xPixels[0] * yPixels[1] - xPixels[1] * yPixels[0]
+    const xx = xPixels[0] ** 2 + xPixels[1] ** 2
+    const xy = xPixels[0] * yPixels[0] + xPixels[1] * yPixels[1]
+    const yy = yPixels[0] ** 2 + yPixels[1] ** 2
+    const discriminant = Math.sqrt(Math.max(
+        0,
+        (xx - yy) ** 2 + 4 * xy ** 2
     ))
+    const maximumStretch = Math.sqrt(Math.max(
+        0,
+        0.5 * (xx + yy + discriminant)
+    ))
+    return maximumStretch
 }
 
 function projectedAxisCellDeltaPixels(

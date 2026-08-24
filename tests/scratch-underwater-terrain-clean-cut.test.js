@@ -2,7 +2,7 @@ import { expect } from 'chai'
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
-import { GPURuntime } from 'geoscratch/scratch'
+import { GPURuntime, plane } from 'geoscratch/scratch'
 import {
     ViewDemandProducer,
     VirtualRasterResidency,
@@ -193,6 +193,30 @@ function createTestTerrainRenderer({ runtime, surface, virtualRaster, size, obse
 
 describe('Underwater Terrain clean cut', () => {
 
+    it('keeps indexed plane diagonals aligned with analytic wireframe parity', () => {
+
+        const edgeCells = 8
+        const geometry = plane(Math.log2(edgeCells))
+        for (let offset = 0; offset < geometry.indices.length; offset += 3) {
+            const triangle = geometry.indices.slice(offset, offset + 3).map(index => [
+                Math.round(geometry.positions[index * 2] * edgeCells),
+                Math.round(geometry.positions[index * 2 + 1] * edgeCells),
+            ])
+            const minimumX = Math.min(...triangle.map(point => point[0]))
+            const maximumX = Math.max(...triangle.map(point => point[0]))
+            const minimumY = Math.min(...triangle.map(point => point[1]))
+            const maximumY = Math.max(...triangle.map(point => point[1]))
+            const corners = new Set(triangle.map(point => point.join('/')))
+            const diagonal = (minimumX + minimumY) % 2 === 0
+                ? [ `${minimumX}/${minimumY}`, `${maximumX}/${maximumY}` ]
+                : [ `${minimumX}/${maximumY}`, `${maximumX}/${minimumY}` ]
+
+            expect(maximumX - minimumX).to.equal(1)
+            expect(maximumY - minimumY).to.equal(1)
+            expect(diagonal.every(corner => corners.has(corner))).to.equal(true)
+        }
+    })
+
     it('keeps page bootstrap and explicit terrain application assembly context-bounded', () => {
 
         const main = read('examples', 'underwaterTerrain', 'main.ts')
@@ -267,9 +291,20 @@ describe('Underwater Terrain clean cut', () => {
         expect(demand).to.include('desiredSampleLevel')
         expect(demand).to.include('sourceLevelCeiling')
         expect(patchDraw).to.include('drawArgument')
+        expect(patchDraw).to.include('elementCount')
+        expect(patchDraw).to.include('const DRAW_ARGUMENT_BYTES = 20')
+        expect(renderer).to.include(
+            "indexBuffer: { region: buffers.indices.region, format: 'uint32' }"
+        )
+        expect(terrain).to.include('input.gridPosition')
+        expect(terrain).to.include('((cell.x + cell.y) & 1u) != 0u')
+        expect(terrain).not.to.include('@builtin(primitive_index)')
         expect(wgsl).to.include('fn generateWebMercatorQuadCover()')
         expect(wgsl).to.include('coverCameraTileIndex')
         expect(wgsl).to.include('fn coverProjectedCellSpanPixels(')
+        expect(wgsl).to.include('fn coverProjectedCellMaximumStretchPixels(')
+        expect(wgsl).to.include('(xx - yy) * (xx - yy) + 4.0f * xy * xy')
+        expect(wgsl).not.to.include('fn coverProjectedCellAreaScalePixels(')
         expect(wgsl).to.include('fn coverMarkSparseRefinements(')
         expect(wgsl).to.include('fn coverRefinementContains(')
         expect(wgsl).to.include('fn coverMaterializeSparseRefinements(')

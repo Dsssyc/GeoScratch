@@ -798,7 +798,7 @@ type GpuWebMercatorQuadProjectedDemand = Readonly<{ decisionFrameEpoch: number; 
 
 Kind: `Class`.
 
-Prepares consumer-owned draw-indirect arguments from one GPU cover patch count.
+Prepares indexed- or non-indexed draw-indirect arguments from one GPU cover patch count.
 
 ```ts
 class GpuWebMercatorQuadPatchDraw
@@ -824,14 +824,14 @@ Members:
   - `initialize(builder: SubmissionBuilder): SubmissionBuilder`
 - `runtime`: `runtime: GPURuntime` (readonly)
 - `templates`: `Method templates`
-  - `templates(): readonly [Readonly<{ drawArgument: Readonly<{ offset: 0; region: BufferRegion; resource: BufferResource; size: 16 }>; parity: 0 | 1 }>, Readonly<{ drawArgument: Readonly<{ offset: 0; region: BufferRegion; resource: BufferResource; size: 16 }>; parity: 0 | 1 }>]`
+  - `templates(): readonly [Readonly<{ drawArgument: Readonly<{ offset: 0; region: BufferRegion; resource: BufferResource; size: 20 }>; parity: 0 | 1 }>, Readonly<{ drawArgument: Readonly<{ offset: 0; region: BufferRegion; resource: BufferResource; size: 20 }>; parity: 0 | 1 }>]`
 
 ### `GpuWebMercatorQuadPatchDrawDescriptor`
 
 Kind: `Type Alias`.
 
 ```ts
-type GpuWebMercatorQuadPatchDrawDescriptor = Readonly<{ cover: GpuWebMercatorQuadCover; vertexCount: number }>
+type GpuWebMercatorQuadPatchDrawDescriptor = Readonly<{ cover: GpuWebMercatorQuadCover; elementCount: number }>
 ```
 
 ### `GpuWebMercatorQuadPatchDrawFacts`
@@ -839,7 +839,7 @@ type GpuWebMercatorQuadPatchDrawDescriptor = Readonly<{ cover: GpuWebMercatorQua
 Kind: `Type Alias`.
 
 ```ts
-type GpuWebMercatorQuadPatchDrawFacts = Readonly<{ coverId: string; disposed: boolean; id: string; parity: readonly Readonly<{ commandId: string; drawArgumentBufferId: string; parity: 0 | 1 }>[]; runtimeId: string; vertexCount: number }>
+type GpuWebMercatorQuadPatchDrawFacts = Readonly<{ coverId: string; disposed: boolean; elementCount: number; id: string; parity: readonly Readonly<{ commandId: string; drawArgumentBufferId: string; parity: 0 | 1 }>[]; runtimeId: string }>
 ```
 
 ### `GpuWebMercatorQuadPatchDrawFrame`
@@ -847,7 +847,7 @@ type GpuWebMercatorQuadPatchDrawFacts = Readonly<{ coverId: string; disposed: bo
 Kind: `Type Alias`.
 
 ```ts
-type GpuWebMercatorQuadPatchDrawFrame = Readonly<{ coverId: string; drawArgument: Readonly<{ offset: 0; region: BufferRegion; resource: BufferResource; size: 16 }>; frameEpoch: number; kind: "gpu-web-mercator-quad-patch-draw-frame"; parity: 0 | 1; patchDrawId: string }>
+type GpuWebMercatorQuadPatchDrawFrame = Readonly<{ coverId: string; drawArgument: Readonly<{ offset: 0; region: BufferRegion; resource: BufferResource; size: 20 }>; frameEpoch: number; kind: "gpu-web-mercator-quad-patch-draw-frame"; parity: 0 | 1; patchDrawId: string }>
 ```
 
 ### `GpuWebMercatorQuadPatchDrawIdentityObjects`
@@ -3012,7 +3012,7 @@ createWebMercatorTerrainRenderer<ViewInput, Presentation extends string>(__named
 Kind: `Type Alias`.
 
 ```ts
-type WebMercatorTerrainContractFacts = Readonly<{ commandIds: Readonly<{ cover: readonly (readonly string[])[]; demandProjection: readonly (readonly string[])[]; drawTerrain: Readonly<Record<string, readonly string[]>>; patchDraw: readonly string[] }>; countPath: "gpu-produced-indirect-arguments"; cover: ReturnType<GpuWebMercatorQuadCover["facts"]>; coverMaximumMatrixLevel: number; demandProjection: ReturnType<GpuWebMercatorQuadDemandProjection["facts"]>; fieldLayer: Readonly<{ demandProducerId: string; fieldId: string; id: string; representationId: string; spatialProfileId: string; viewAdapterId: string }>; passIds: Readonly<{ cover: string; demandProjection: string; patchDraw: string; terrain: string }>; patchDraw: ReturnType<GpuWebMercatorQuadPatchDraw["facts"]>; persistentIdentityCount: number; selectionPath: "gpu-camera-inverse-webmercatorquad-cover"; sourceMaximumMatrixLevel: number; stageOrder: readonly string[]; terrainVertexCount: number; virtualRaster: Readonly<{ completeImageUpload: false; coordinateEncoding: WebMercatorVirtualRasterField["addressCodec"]["positionCodec"]["facts"]["encoding"]; crossPageFiltering: "logical-bilinear"; levelCount: number; maxPhysicalPages: number; pageSize: readonly number[]; sourceRevision: string }> }>
+type WebMercatorTerrainContractFacts = Readonly<{ commandIds: Readonly<{ cover: readonly (readonly string[])[]; demandProjection: readonly (readonly string[])[]; drawTerrain: Readonly<Record<string, readonly string[]>>; patchDraw: readonly string[] }>; countPath: "gpu-produced-indirect-arguments"; cover: ReturnType<GpuWebMercatorQuadCover["facts"]>; coverMaximumMatrixLevel: number; demandProjection: ReturnType<GpuWebMercatorQuadDemandProjection["facts"]>; fieldLayer: Readonly<{ demandProducerId: string; fieldId: string; id: string; representationId: string; spatialProfileId: string; viewAdapterId: string }>; passIds: Readonly<{ cover: string; demandProjection: string; patchDraw: string; terrain: string }>; patchDraw: ReturnType<GpuWebMercatorQuadPatchDraw["facts"]>; persistentIdentityCount: number; selectionPath: "gpu-camera-inverse-webmercatorquad-cover"; sourceMaximumMatrixLevel: number; stageOrder: readonly string[]; terrainElementCount: number; virtualRaster: Readonly<{ completeImageUpload: false; coordinateEncoding: WebMercatorVirtualRasterField["addressCodec"]["positionCodec"]["facts"]["encoding"]; crossPageFiltering: "logical-bilinear"; levelCount: number; maxPhysicalPages: number; pageSize: readonly number[]; sourceRevision: string }> }>
 ```
 
 ### `WebMercatorTerrainElevationBounds`

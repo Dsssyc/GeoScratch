@@ -252,6 +252,25 @@ async function runProof(activeBrowser) {
                 } : {}),
             })
         }
+        const continuousPitchSweep = []
+        for (let pitch = 0; pitch <= 85; pitch++) {
+            previous = await settle(
+                page,
+                'tile-wireframe',
+                previous.observedFrames,
+                Object.freeze({ ...camera, pitch })
+            )
+            continuousPitchSweep.push(Object.freeze({
+                pitch,
+                patchCount: previous.coverPatchCount,
+                levelRange: previous.coverLevelRange,
+                descriptorOverflowCount:
+                    previous.coverFeedback?.descriptorOverflowCount,
+                lookupOverflowCount: previous.coverFeedback?.lookupOverflowCount,
+                maximumAdjacentLevelDelta:
+                    previous.coverFeedback?.maximumAdjacentLevelDelta,
+            }))
+        }
         previous = await settle(
             page,
             'tile-wireframe',
@@ -311,6 +330,7 @@ async function runProof(activeBrowser) {
             canonical: Object.freeze(canonical),
             zoomSamples: Object.freeze(zoomSamples),
             pitchSweep: Object.freeze(pitchSweep),
+            continuousPitchSweep: Object.freeze(continuousPitchSweep),
             oddParityTopDown,
             shadedTracking,
             wireframeTracking,
@@ -655,6 +675,7 @@ function validateProof(value, processState) {
         canonical = [],
         zoomSamples = [],
         pitchSweep,
+        continuousPitchSweep = [],
         oddParityTopDown,
         shadedTracking,
         wireframeTracking,
@@ -762,6 +783,26 @@ function validateProof(value, processState) {
         maximumNearSixtyCount - minimumNearSixtyCount <=
             Math.max(8, Math.ceil(minimumNearSixtyCount * 0.5)),
     `60-degree pitch sweep retained a mode cliff: ${JSON.stringify(nearSixtyCounts)}`)
+    const continuousPitchRegressions = continuousPitchSweep.slice(1).flatMap(
+        (sample, index) => sample.patchCount >= continuousPitchSweep[index].patchCount
+            ? []
+            : [ {
+                previous: continuousPitchSweep[index],
+                current: sample,
+            } ]
+    )
+    expect(failures,
+        continuousPitchSweep.length === 86 &&
+        continuousPitchRegressions.length === 0 &&
+        continuousPitchSweep.every(sample =>
+            sample.patchCount > 0 && sample.patchCount <= 96 &&
+            sample.descriptorOverflowCount === 0 &&
+            sample.lookupOverflowCount === 0 &&
+            sample.maximumAdjacentLevelDelta <= 1
+        ),
+    `continuous pitch coarsened or overflowed the cover: ${JSON.stringify(
+        continuousPitchRegressions
+    )}`)
     const oddBearingZero = oddParityTopDown?.bearingZero
     const oddDirect = oddParityTopDown?.direct
     const oddReturned = oddParityTopDown?.returned

@@ -166,7 +166,7 @@ export type WebMercatorTerrainContractFacts = Readonly<{
         viewAdapterId: string
         demandProducerId: string
     }>
-    terrainVertexCount: number
+    terrainElementCount: number
     cover: ReturnType<GpuWebMercatorQuadCover['facts']>
     demandProjection: ReturnType<GpuWebMercatorQuadDemandProjection['facts']>
     patchDraw: ReturnType<GpuWebMercatorQuadPatchDraw['facts']>
@@ -371,9 +371,10 @@ const WEB_MERCATOR_TERRAIN_STAGE_ORDER = Object.freeze([
 ])
 const TERRAIN_SECTOR_SIZE = 128
 const TERRAIN_COVER_MAXIMUM_MATRIX_LEVEL = 14
-const TERRAIN_MAXIMUM_CELL_SPAN_REFERENCE_PIXELS = 4
+const TERRAIN_MAXIMUM_CELL_SPAN_REFERENCE_PIXELS = 5
 const TERRAIN_REFINEMENT_TOLERANCE = 0.005
 const BUFFER_COPY_DST = 0x08
+const BUFFER_INDEX = 0x10
 const BUFFER_UNIFORM = 0x40
 const BUFFER_STORAGE = 0x80
 const TEXTURE_RENDER_ATTACHMENT = 0x10
@@ -466,7 +467,7 @@ export async function createWebMercatorTerrainRenderer<
     })
     const patchDraw = await GpuWebMercatorQuadPatchDraw.create(runtime, {
         cover,
-        vertexCount: geometry.vertexCount,
+        elementCount: geometry.elementCount,
     })
     const renderTemplates = createRenderTemplates(cover, patchDraw)
     const uniforms = await createUniformResources(
@@ -962,7 +963,7 @@ function createTerrainGeometry() {
             Math.round(value * TERRAIN_SECTOR_SIZE)
         ),
         indices: new Uint32Array(generated.indices),
-        vertexCount: generated.indices.length,
+        elementCount: generated.indices.length,
     })
 }
 
@@ -979,7 +980,7 @@ async function createBufferResources(runtime: GPURuntime, geometry: TerrainGeome
             runtime,
             'Web Mercator terrain grid indices',
             geometry.indices,
-            BUFFER_COPY_DST | BUFFER_STORAGE
+            BUFFER_COPY_DST | BUFFER_INDEX | BUFFER_STORAGE
         ),
     }
 }
@@ -1284,6 +1285,7 @@ function createCommands(
             { set: bindSets.terrainData[parity]! },
             { set: bindSets.terrainTextures },
         ],
+        indexBuffer: { region: buffers.indices.region, format: 'uint32' },
         count: { indirect: template.drawArgument.region },
         resources: {
             read: currentReads([
@@ -1633,7 +1635,7 @@ function graphContractSnapshot(graph: WebMercatorTerrainGraph): WebMercatorTerra
             viewAdapterId: graph.fieldLayer.viewAdapter.id,
             demandProducerId: graph.fieldLayer.demandProducer.id,
         }),
-        terrainVertexCount: graph.geometry.vertexCount,
+        terrainElementCount: graph.geometry.elementCount,
         cover: graph.cover.facts(),
         demandProjection: graph.demandProjection.facts(),
         patchDraw: graph.patchDraw.facts(),

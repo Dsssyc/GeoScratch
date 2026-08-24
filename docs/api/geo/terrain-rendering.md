@@ -33,8 +33,8 @@ ceiling. Patch draw combines consumer vertex count with GPU patch count. Virtual
 then schedules explicit `ViewTileDemandSet` pages and resolves exact or ancestor data;
 residency never changes geometry topology.
 
-The built-in terrain consumer uses a 128-cell standard patch, a four-reference-pixel
-maximum area-equivalent projected cell span, and 0.005 numerical tolerance. Every pitch
+The built-in terrain consumer uses a 128-cell standard patch, a five-reference-pixel
+maximum singular projected-cell stretch, and 0.005 numerical tolerance. Every pitch
 uses the same adaptive selector. There is no 60-degree boundary, mode feedback, renderer
 override, or example environment variable. Physical presentation size and DPR do not
 participate in the quality metric.
@@ -54,8 +54,11 @@ cut remains active.
 `webMercatorTerrainWgslModule` owns the complete vertex path. It reconstructs wide-
 fixed standard-tile positions, subtracts the camera before f32 conversion, resolves
 cover neighbors, snaps mixed-LoD edges, samples height by global field coordinate, and
-projects the result. The built-in wireframe entry point displays the post-stitch mesh
-with stable tile colors. Application presentation WGSL supplies fragment shading only.
+projects the result. Terrain uses indexed indirect drawing so one logical grid vertex is
+shaded once per patch instead of once per triangle corner. The built-in wireframe entry
+point reconstructs the regular mesh's grid and checkerboard diagonal edges from snapped
+grid coordinates and displays the post-stitch mesh with stable tile colors. Application
+presentation WGSL supplies fragment shading only.
 
 `render(capture)` consumes one `GeoViewSourceCapture<ViewInput>`, resizes physical
 attachments from `presentationSize`, and returns
@@ -76,4 +79,6 @@ feature identity and source tiling must not become terrain-tile render-to-textur
 
 Related decisions: ADR-074 assigns terrain WGSL ownership; ADR-083 defines inverse
 cover and passive Virtual Raster; ADR-084 defines reference pixels; ADR-086 unifies the
-selector and separates geometry, source demand, and draw-count ownership.
+selector and separates geometry, source demand, and draw-count ownership; ADR-087 and
+ADR-088 define sparse parent refinement and maximum projected stretch; ADR-089 defines
+indexed terrain execution.

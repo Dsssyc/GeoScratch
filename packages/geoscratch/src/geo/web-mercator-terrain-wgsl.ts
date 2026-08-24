@@ -113,7 +113,7 @@ struct ${namespace}VertexInput {
 struct ${namespace}VertexOutput {
     @builtin(position) position: vec4f,
     @location(0) normalizedElevation: f32,
-    @location(1) barycentric: vec3f,
+    @location(1) gridPosition: vec2f,
     @location(2) @interpolate(flat) tileColor: vec3f,
 }
 
@@ -150,22 +150,6 @@ fn ${namespace}_logical_tile_color(instance: GpuWebMercatorQuadCoverPatch) -> ve
         0.35f + 0.65f * f32((hash >> 8u) & 255u) / 255.0f,
         0.35f + 0.65f * f32((hash >> 16u) & 255u) / 255.0f,
     );
-}
-
-fn ${namespace}_barycentric_for_vertex(vertex_index: u32) -> vec3f {
-    let corner = vertex_index % 3u;
-    return vec3f(
-        select(0.0f, 1.0f, corner == 0u),
-        select(0.0f, 1.0f, corner == 1u),
-        select(0.0f, 1.0f, corner == 2u),
-    );
-}
-
-fn ${namespace}_triangle_centroid(triangle_id: u32) -> vec2f {
-    let first = vec2f(${namespace}_grid_position(${indices}[triangle_id * 3u]));
-    let second = vec2f(${namespace}_grid_position(${indices}[triangle_id * 3u + 1u]));
-    let third = vec2f(${namespace}_grid_position(${indices}[triangle_id * 3u + 2u]));
-    return (first + second + third) / (3.0f * f32(${namespace}_cells_per_patch_edge));
 }
 
 fn ${namespace}_fixed_position(
@@ -227,11 +211,10 @@ fn ${namespace}_position_cs(position: ${fixedNamespace}Position, elevation: f32)
 @vertex
 fn ${vertexEntryPoint}(input: ${namespace}VertexInput) -> ${namespace}VertexOutput {
     let instance = ${patchNamespace}_patches[input.instanceIndex];
-    let triangle_id = input.vertexIndex / 3u;
-    var grid = ${namespace}_grid_position(${indices}[input.vertexIndex]);
+    var grid = ${namespace}_grid_position(input.vertexIndex);
     let matrix_level = instance.matrixLevel;
     let sampling_level = 0u;
-    let centroid = ${namespace}_triangle_centroid(triangle_id);
+    let centroid = vec2f(grid) / f32(${namespace}_cells_per_patch_edge);
 
     if (grid.x == 0u) {
         let neighbor = ${patchNamespace}_neighbor(instance, 0u, centroid,
@@ -285,7 +268,7 @@ fn ${vertexEntryPoint}(input: ${namespace}VertexInput) -> ${namespace}VertexOutp
         output.position = vec4f(${namespace}_nan());
         output.normalizedElevation = 0.0f;
     }
-    output.barycentric = ${namespace}_barycentric_for_vertex(input.vertexIndex);
+    output.gridPosition = vec2f(grid);
     output.tileColor = ${namespace}_logical_tile_color(instance);
     return output;
 }
@@ -294,9 +277,20 @@ fn ${vertexEntryPoint}(input: ${namespace}VertexInput) -> ${namespace}VertexOutp
 fn ${tileWireframeFragmentEntryPoint}(
     input: ${namespace}VertexOutput,
 ) -> @location(0) vec4f {
-    let width = max(fwidth(input.barycentric), vec3f(1e-5f));
-    let interior = smoothstep(vec3f(0.0f), width * 1.35f, input.barycentric);
-    let coverage = 1.0f - min(min(interior.x, interior.y), interior.z);
+    let cell = vec2u(floor(input.gridPosition));
+    let withinCell = fract(input.gridPosition);
+    let gridDistance = min(
+        min(withinCell.x, 1.0f - withinCell.x),
+        min(withinCell.y, 1.0f - withinCell.y),
+    );
+    let diagonalDistance = select(
+        abs(withinCell.x - withinCell.y),
+        abs(withinCell.x + withinCell.y - 1.0f),
+        ((cell.x + cell.y) & 1u) != 0u,
+    );
+    let edgeDistance = min(gridDistance, diagonalDistance * 0.5f);
+    let width = max(fwidth(edgeDistance), 1e-5f);
+    let coverage = 1.0f - smoothstep(0.0f, width * 1.35f, edgeDistance);
     if (coverage <= 0.01f) { discard; }
     return vec4f(input.tileColor * coverage, coverage);
 }

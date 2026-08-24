@@ -17,28 +17,31 @@ emits a bounded standard-tile cut, full-identity neighbor lookup, GPU patch coun
 geometry feedback. It does not own a tiled source, raster demand, atlas residency,
 mesh vertex count, or draw arguments.
 
-Every patch is an OGC identity `(tileMatrix, tileRow, tileCol)`. Camera-derived level
-windows address the fixed global matrix and never create a moving game-style grid. At
-every pitch, one adaptive kernel probes bounded standard parents around the precise
-fixed-point camera position and creates nested child windows only where the
-area-equivalent projected span of one geometry cell exceeds
+Every patch is an OGC identity `(tileMatrix, tileRow, tileCol)`. Camera-derived probing
+addresses the fixed global matrix and never creates a moving game-style grid. At every
+pitch, one adaptive kernel probes bounded standard parents around the precise fixed-point
+camera position and records an exact sparse parent identity only where the maximum
+singular stretch of one projected geometry cell exceeds
 `maximumCellSpanReferencePixels` plus `refinementTolerance`. Pitch and FOV affect the
 projection naturally; they never select a uniform/variable algorithm mode.
 
 The projected metric uses `GeoViewSnapshot.referenceViewport`, a rotation-invariant
 local projective Jacobian, perspective, foreshortening, and immutable vertical bounds.
-Physical presentation size and DPR never change cover identities. A cell that can
-cross the camera plane refines conservatively.
+Its largest singular value constrains the longest screen direction instead of hiding a
+long, thin cell behind small projected area. Physical presentation size and DPR never
+change cover identities. A cell that can cross the camera plane refines conservatively.
 
 `GpuWebMercatorQuadCoverPolicy` declares ordered geometry levels, hard patch capacity,
 `cellsPerPatchEdge`, `maximumCellSpanReferencePixels`, and numerical tolerance. Invalid
 facts fail before resource creation. The built-in terrain consumer uses 128 cells and
-a calibrated four-reference-pixel threshold. The public cover policy contains no
+a calibrated five-reference-pixel threshold. The public cover policy contains no
 source ceiling or pitch boundary.
 
-The kernel seeds the declared minimum geometry window, probes bounded parent windows,
-nests standard children through their ancestors, emits a prefix-free visible cut, and
-performs local 2:1 closure. It does not start at world roots, traverse a root-to-leaf
+The kernel seeds the declared minimum geometry window, probes bounded parents, preserves
+each exact ancestor decision, replaces a selected parent only with its own four standard
+children, emits a prefix-free visible cut, and performs local 2:1 closure. Independent
+parents are never unioned into a level-wide rectangle. It does not start at world roots,
+traverse a root-to-leaf
 quadtree, count trial cuts, inspect atlas slots, or retain previous-frame topology as
 selection authority. Descriptor, lookup, or patch-capacity overflow is a hard
 diagnostic; no path silently coarsens the cut.
@@ -69,10 +72,13 @@ separate facts. Its bounded feedback can be converted to `ViewTileDemandSet`; Vi
 Raster remains downstream and passive.
 
 `GpuWebMercatorQuadPatchDraw` is the separate draw-count adapter. It borrows cover
-state, owns one consumer vertex count plus parity draw-indirect buffers, and uses one
-persistent compute dispatch to write `[vertexCount, patchCount, 0, 0]`. The cover owns
-neither those buffers nor the consumer mesh.
+state, owns one consumer element count plus parity draw-indirect buffers, and uses one
+persistent compute dispatch to write `[elementCount, patchCount, 0, 0, 0]`. The 20-byte
+record is valid for indexed draw and its first 16 bytes remain valid for non-indexed draw.
+The cover owns neither those buffers nor the consumer mesh.
 
 Related decisions: ADR-083 establishes inverse-cover and passive Virtual Raster;
 ADR-084 establishes reference-pixel quality; ADR-086 supersedes their pitch-gated
-parts and separates cover, source demand, and patch draw ownership.
+parts and separates cover, source demand, and patch draw ownership; ADR-087 preserves
+sparse parent decisions; ADR-088 defines maximum projected stretch; ADR-089 defines the
+consumer-neutral indexed/non-indexed indirect ABI.
