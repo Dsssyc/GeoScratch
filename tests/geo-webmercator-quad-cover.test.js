@@ -371,6 +371,69 @@ describe('GPU WebMercatorQuad inverse cover reference', () => {
         )
     })
 
+    it('preserves sparse parent decisions instead of filling their bounding rectangle', () => {
+
+        const base = fixture({
+            coverageMaximumMatrixLevel: 2,
+            maximumMatrixLevel: 3,
+            maximumPatches: 128,
+            maximumCellSpanReferencePixels: 8,
+        })
+        const currentView = base.view({ zoom: 2, pitch: 0 })
+        const altitude = currentView.cameraHigh[2] + currentView.cameraLow[2]
+        const elevation = altitude * 0.8
+        const elevated = [ [ 1, 1 ], [ 2, 2 ] ]
+        const verticalBounds = base.spatialProfile.coverage.limits.flatMap(limit => {
+            const matrixLevel = Number(limit.matrixId)
+            return Array.from(
+                { length: limit.maxTileRow - limit.minTileRow + 1 },
+                (_, rowOffset) => Array.from(
+                    { length: limit.maxTileCol - limit.minTileCol + 1 },
+                    (_, colOffset) => {
+                        const tileRow = limit.minTileRow + rowOffset
+                        const tileCol = limit.minTileCol + colOffset
+                        const descendants = elevated.filter(([ row, col ]) =>
+                            row >> (2 - matrixLevel) === tileRow &&
+                            col >> (2 - matrixLevel) === tileCol
+                        )
+                        const exact = matrixLevel === 2 && descendants.length > 0
+                        return {
+                            matrixLevel,
+                            tileRow,
+                            tileCol,
+                            minimumVerticalMeters: exact ? elevation : 0,
+                            maximumVerticalMeters: descendants.length > 0 ? elevation : 0,
+                        }
+                    }
+                )
+            ).flat()
+        })
+        const setup = fixture({
+            coverageMaximumMatrixLevel: 2,
+            maximumMatrixLevel: 3,
+            maximumPatches: 128,
+            maximumCellSpanReferencePixels: 8,
+            verticalRangeMeters: [ 0, elevation ],
+            verticalBounds,
+        })
+        const result = setup.evaluate({
+            currentView: setup.view({ zoom: 2, pitch: 0 }),
+            visibleBounds: { west: 0, north: 0, east: 1, south: 1 },
+        })
+        const refinedParents = new Set(result.patches
+            .filter(patch => patch.matrixLevel === 3)
+            .map(patch => `2/${patch.tileRow >> 1}/${patch.tileCol >> 1}`))
+        const keys = new Set(result.patches.map(patch => patch.key))
+
+        expect([ ...refinedParents ].sort()).to.deep.equal([
+            '2/1/1',
+            '2/2/2',
+        ])
+        expect(keys.has('2/1/2')).to.equal(true)
+        expect(keys.has('2/2/1')).to.equal(true)
+        expectStandardBalancedCover(result, setup.policy.maximumMatrixLevel)
+    })
+
     it('keeps equal-distance samples symmetric at odd camera tile indices', () => {
 
         const setup = fixture()

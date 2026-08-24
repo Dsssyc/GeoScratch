@@ -100,37 +100,132 @@ function generateVariable(
     fixedCamera: readonly [bigint, bigint]
 ) {
 
-    const windows = variableWindows(input, fixedCamera)
-    const patches: GpuWebMercatorQuadCoverReferencePatch[] = []
+    const refinements = sparseRefinements(input, fixedCamera)
+    let candidateCount = refinements.candidateCount
+    const seeded = seedMinimumPatches(input)
+    candidateCount += seeded.candidateCount
+    let materialized = seeded.patches
+    for (let matrixLevel = input.policy.minimumMatrixLevel;
+        matrixLevel < input.policy.maximumMatrixLevel;
+        matrixLevel++) {
+        const next: GpuWebMercatorQuadCoverReferencePatch[] = []
+        for (const patch of materialized) {
+            if (patch.matrixLevel !== matrixLevel ||
+                !refinements.parents.has(patch.key)) {
+                next.push(patch)
+                continue
+            }
+            const children = childPatches(patch)
+            candidateCount += children.length
+            next.push(...children)
+        }
+        if (next.length > input.policy.maximumPatches) {
+            return invalidCover(
+                'The sparse standard cover exceeds its declared patch capacity.',
+                { maximumPatches: input.policy.maximumPatches },
+                { patchCount: next.length }
+            )
+        }
+        materialized = next.filter(patch =>
+            intersectsVisible(patch, input.visibleBounds)
+        )
+    }
+    const patchesOutput = materialized
+    candidateCount += balancePatches(input, patchesOutput)
+    patchesOutput.sort(comparePatch)
+    return {
+        patches: patchesOutput,
+        candidateCount,
+        cellSpans: patchesOutput.map(patch => projectedCellSpanPixels(input, patch)),
+        finestMatrixLevel: refinements.finestMatrixLevel,
+    }
+}
+
+function sparseRefinements(
+    input: GpuWebMercatorQuadCoverReferenceInput,
+    fixedCamera: readonly [bigint, bigint]
+): Readonly<{
+    parents: ReadonlySet<string>
+    candidateCount: number
+    finestMatrixLevel: number
+}> {
+
+    const parents = new Set<string>()
+    const radius = projectedSearchRadius(input)
     let candidateCount = 0
-    const finestMatrixLevel = Math.max(...windows.keys())
-    for (let matrixLevel = finestMatrixLevel;
-        matrixLevel >= input.policy.minimumMatrixLevel;
-        matrixLevel--) {
-        const window = windows.get(matrixLevel)
-        if (window === undefined) continue
-        const finer = windows.get(matrixLevel + 1)
-        for (let tileRow = window.minTileRow; tileRow <= window.maxTileRow; tileRow++) {
-            for (let tileCol = window.minTileCol; tileCol <= window.maxTileCol; tileCol++) {
+    let finestMatrixLevel = input.policy.minimumMatrixLevel
+    for (let parentLevel = input.policy.minimumMatrixLevel;
+        parentLevel < input.policy.maximumMatrixLevel;
+        parentLevel++) {
+        const parentLimit = geometryLimit(input, parentLevel)
+        const cameraRow = cameraTileIndex(
+            fixedCamera[1],
+            parentLevel,
+            input.spatialProfile.coordinateBits
+        )
+        const cameraCol = cameraTileIndex(
+            fixedCamera[0],
+            parentLevel,
+            input.spatialProfile.coordinateBits
+        )
+        const search = fitWindow({
+            minTileRow: cameraRow - radius,
+            maxTileRow: cameraRow + radius,
+            minTileCol: cameraCol - radius,
+            maxTileCol: cameraCol + radius,
+        }, parentLimit)
+        for (let tileRow = search.minTileRow; tileRow <= search.maxTileRow; tileRow++) {
+            for (let tileCol = search.minTileCol; tileCol <= search.maxTileCol; tileCol++) {
                 candidateCount++
-                if (finer !== undefined && fullyCoveredByFiner(
-                    tileRow,
-                    tileCol,
-                    finer
+                if (parentLevel > input.policy.minimumMatrixLevel && !parents.has(
+                    `${parentLevel - 1}/${Math.floor(tileRow / 2)}/${Math.floor(tileCol / 2)}`
                 )) continue
-                const patch = referencePatch(matrixLevel, tileRow, tileCol)
-                if (intersectsVisible(patch, input.visibleBounds)) patches.push(patch)
+                const parent = referencePatch(parentLevel, tileRow, tileCol)
+                if (!intersectsVisible(parent, input.visibleBounds) ||
+                    projectedCellSpanPixels(input, parent) <=
+                        effectiveCellSpanThreshold(input)) continue
+                parents.add(parent.key)
+                finestMatrixLevel = Math.max(finestMatrixLevel, parentLevel + 1)
             }
         }
     }
-    candidateCount += balancePatches(input, patches)
-    patches.sort(comparePatch)
-    return {
-        patches,
-        candidateCount,
-        cellSpans: patches.map(patch => projectedCellSpanPixels(input, patch)),
-        finestMatrixLevel,
+    return Object.freeze({ parents, candidateCount, finestMatrixLevel })
+}
+
+function seedMinimumPatches(
+    input: GpuWebMercatorQuadCoverReferenceInput
+): Readonly<{
+    patches: GpuWebMercatorQuadCoverReferencePatch[]
+    candidateCount: number
+}> {
+
+    const matrixLevel = input.policy.minimumMatrixLevel
+    const window = geometryLimit(input, matrixLevel)
+    const patches: GpuWebMercatorQuadCoverReferencePatch[] = []
+    let candidateCount = 0
+    for (let tileRow = window.minTileRow; tileRow <= window.maxTileRow; tileRow++) {
+        for (let tileCol = window.minTileCol; tileCol <= window.maxTileCol; tileCol++) {
+            candidateCount++
+            const patch = referencePatch(matrixLevel, tileRow, tileCol)
+            if (intersectsVisible(patch, input.visibleBounds)) patches.push(patch)
+        }
     }
+    return Object.freeze({ patches, candidateCount })
+}
+
+function childPatches(
+    parent: GpuWebMercatorQuadCoverReferencePatch
+): readonly GpuWebMercatorQuadCoverReferencePatch[] {
+
+    const matrixLevel = parent.matrixLevel + 1
+    const tileRow = parent.tileRow * 2
+    const tileCol = parent.tileCol * 2
+    return Object.freeze([
+        referencePatch(matrixLevel, tileRow, tileCol),
+        referencePatch(matrixLevel, tileRow, tileCol + 1),
+        referencePatch(matrixLevel, tileRow + 1, tileCol),
+        referencePatch(matrixLevel, tileRow + 1, tileCol + 1),
+    ])
 }
 
 function balancePatches(
@@ -153,27 +248,27 @@ function balancePatches(
                     input.policy.maximumMatrixLevel
                 )
             )) continue
-            if (patches.length + 3 > input.policy.maximumPatches) {
+            const children = childPatches(candidate)
+            const patchCount = patches.length + 3
+            if (patchCount > input.policy.maximumPatches) {
                 return invalidCover(
                     'The balanced standard cover exceeds its declared patch capacity.',
                     { maximumPatches: input.policy.maximumPatches },
-                    { patchCount: patches.length + 3 }
+                    { patchCount }
                 )
             }
-            const childLevel = candidate.matrixLevel + 1
-            const firstRow = candidate.tileRow * 2
-            const firstCol = candidate.tileCol * 2
-            patches[patchIndex] = referencePatch(childLevel, firstRow, firstCol)
-            patches.push(
-                referencePatch(childLevel, firstRow, firstCol + 1),
-                referencePatch(childLevel, firstRow + 1, firstCol),
-                referencePatch(childLevel, firstRow + 1, firstCol + 1)
-            )
             candidateCount += 4
+            if (children.length === 0) continue
+            patches[patchIndex] = children[0]!
+            patches.push(...children.slice(1))
             changed = true
         }
         if (!changed) break
     }
+    const visible = patches.filter(patch =>
+        intersectsVisible(patch, input.visibleBounds)
+    )
+    patches.splice(0, patches.length, ...visible)
     return candidateCount
 }
 
@@ -199,83 +294,6 @@ function edgeAdjacentAtLevel(
     const vertical = (a.south === b.north || b.south === a.north) &&
         Math.max(a.west, b.west) < Math.min(a.east, b.east)
     return horizontal || vertical
-}
-
-function variableWindows(
-    input: GpuWebMercatorQuadCoverReferenceInput,
-    fixedCamera: readonly [bigint, bigint]
-): ReadonlyMap<number, IntegerBounds> {
-
-    const windows = new Map<number, IntegerBounds>()
-    windows.set(input.policy.minimumMatrixLevel, geometryLimit(
-        input,
-        input.policy.minimumMatrixLevel
-    ))
-    const radius = projectedSearchRadius(input)
-    for (let childLevel = input.policy.minimumMatrixLevel + 1;
-        childLevel <= input.policy.maximumMatrixLevel;
-        childLevel++) {
-        const parentLevel = childLevel - 1
-        const parentLimit = geometryLimit(input, parentLevel)
-        const cameraRow = cameraTileIndex(
-            fixedCamera[1],
-            parentLevel,
-            input.spatialProfile.coordinateBits
-        )
-        const cameraCol = cameraTileIndex(
-            fixedCamera[0],
-            parentLevel,
-            input.spatialProfile.coordinateBits
-        )
-        const search = fitWindow({
-            minTileRow: cameraRow - radius,
-            maxTileRow: cameraRow + radius,
-            minTileCol: cameraCol - radius,
-            maxTileCol: cameraCol + radius,
-        }, parentLimit)
-        let childWindow: IntegerBounds | undefined
-        for (let tileRow = search.minTileRow; tileRow <= search.maxTileRow; tileRow++) {
-            for (let tileCol = search.minTileCol; tileCol <= search.maxTileCol; tileCol++) {
-                const parent = referencePatch(parentLevel, tileRow, tileCol)
-                if (!intersectsVisible(parent, input.visibleBounds) ||
-                    projectedCellSpanPixels(input, parent) <=
-                        effectiveCellSpanThreshold(input)) continue
-                const children = {
-                    minTileRow: tileRow * 2,
-                    maxTileRow: tileRow * 2 + 1,
-                    minTileCol: tileCol * 2,
-                    maxTileCol: tileCol * 2 + 1,
-                }
-                childWindow = childWindow === undefined
-                    ? children
-                    : unionBounds(childWindow, children)
-            }
-        }
-        if (childWindow !== undefined) {
-            windows.set(childLevel, fitWindow(
-                alignToParentGroups(childWindow),
-                geometryLimit(input, childLevel)
-            ))
-        }
-    }
-    for (let matrixLevel = input.policy.maximumMatrixLevel - 1;
-        matrixLevel > input.policy.minimumMatrixLevel;
-        matrixLevel--) {
-        const finer = windows.get(matrixLevel + 1)
-        if (finer === undefined) continue
-        const parent = {
-            minTileRow: Math.floor(finer.minTileRow / 2),
-            maxTileRow: Math.floor(finer.maxTileRow / 2),
-            minTileCol: Math.floor(finer.minTileCol / 2),
-            maxTileCol: Math.floor(finer.maxTileCol / 2),
-        }
-        const current = windows.get(matrixLevel)
-        windows.set(matrixLevel, fitWindow(
-            alignToParentGroups(current === undefined ? parent : unionBounds(current, parent)),
-            geometryLimit(input, matrixLevel)
-        ))
-    }
-    return windows
 }
 
 function cameraFixedPosition(
@@ -318,16 +336,6 @@ function effectiveCellSpanThreshold(
 
     return input.policy.maximumCellSpanReferencePixels *
         (1 + input.policy.refinementTolerance)
-}
-
-function unionBounds(left: IntegerBounds, right: IntegerBounds): IntegerBounds {
-
-    return Object.freeze({
-        minTileRow: Math.min(left.minTileRow, right.minTileRow),
-        maxTileRow: Math.max(left.maxTileRow, right.maxTileRow),
-        minTileCol: Math.min(left.minTileCol, right.minTileCol),
-        maxTileCol: Math.max(left.maxTileCol, right.maxTileCol),
-    })
 }
 
 function geometryLimit(
@@ -405,31 +413,9 @@ function fitWindow(bounds: IntegerBounds, limit: IntegerBounds): IntegerBounds {
     })
 }
 
-function alignToParentGroups(bounds: IntegerBounds): IntegerBounds {
-
-    return Object.freeze({
-        minTileRow: Math.floor(bounds.minTileRow / 2) * 2,
-        maxTileRow: Math.ceil((bounds.maxTileRow + 1) / 2) * 2 - 1,
-        minTileCol: Math.floor(bounds.minTileCol / 2) * 2,
-        maxTileCol: Math.ceil((bounds.maxTileCol + 1) / 2) * 2 - 1,
-    })
-}
-
 function fitStart(value: number, span: number, minimum: number, maximum: number): number {
 
     return clamp(value, minimum, maximum - span + 1)
-}
-
-function fullyCoveredByFiner(
-    tileRow: number,
-    tileCol: number,
-    finer: IntegerBounds
-): boolean {
-
-    return tileRow * 2 >= finer.minTileRow &&
-        tileRow * 2 + 1 <= finer.maxTileRow &&
-        tileCol * 2 >= finer.minTileCol &&
-        tileCol * 2 + 1 <= finer.maxTileCol
 }
 
 function intersectsVisible(

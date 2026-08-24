@@ -269,11 +269,18 @@ describe('Underwater Terrain clean cut', () => {
         expect(patchDraw).to.include('drawArgument')
         expect(wgsl).to.include('fn generateWebMercatorQuadCover()')
         expect(wgsl).to.include('coverCameraTileIndex')
-        expect(wgsl).to.include('coverAlignToParentGroups')
         expect(wgsl).to.include('fn coverProjectedCellSpanPixels(')
-        expect(wgsl).to.include('fn coverVariableRefinementWindow(')
-        expect(wgsl).to.include('fn coverUnionWindow(')
+        expect(wgsl).to.include('fn coverMarkSparseRefinements(')
+        expect(wgsl).to.include('fn coverRefinementContains(')
+        expect(wgsl).to.include('fn coverMaterializeSparseRefinements(')
+        expect(wgsl).to.include('fn coverCompactVisiblePatches(')
         expect(wgsl).to.include('coverBalancePatches')
+        expect(wgsl).not.to.include('fn coverVariableRefinementWindow(')
+        expect(wgsl).not.to.include('fn coverUnionWindow(')
+        expect(wgsl).not.to.include('fn coverFullyCoveredByFiner(')
+        expect(wgsl).not.to.include(
+            'var windows: array<GpuWebMercatorQuadCoverWindow'
+        )
         expect(wgsl).not.to.include(
             '((focusRow - COVER_FINE_WINDOW_SPAN / 2i) / 2i) * 2i'
         )
