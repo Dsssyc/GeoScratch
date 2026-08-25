@@ -57,9 +57,9 @@ import {
     realizeRenderBundleForAttempt,
     renderBundleDrawCommands,
     renderBundleDrawProducesDeclaredWrites,
-    renderBundleDrawSource,
     snapshotAttemptRenderBundleImmediates,
 } from './render-bundle.js'
+
 import { advanceResourceContentEpoch, setResourceContentState } from './resource.js'
 import { assertGPURuntimeActive } from './runtime-authority.js'
 import { diagnosticsControllerFor } from './runtime-diagnostics.js'

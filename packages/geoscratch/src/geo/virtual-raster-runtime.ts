@@ -756,8 +756,3 @@ function positiveInteger(value: number): boolean {
 
     return Number.isSafeInteger(value) && value > 0
 }
-
-function nonNegativeInteger(value: number): boolean {
-
-    return Number.isSafeInteger(value) && value >= 0
-}

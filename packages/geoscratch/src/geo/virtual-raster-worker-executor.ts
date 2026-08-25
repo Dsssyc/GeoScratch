@@ -9,6 +9,7 @@ import {
     type WorkerContextPoolFacts,
     type WorkerContextPoolSystem,
     type WorkerContextProtocol,
+    type WorkerModuleContract,
     type WorkerModuleReference,
     type WorkerModuleProtocol,
     type WorkerNoOperations,
@@ -86,7 +87,9 @@ export type VirtualRasterWorkerExecutorDescriptor<
 > = Readonly<{
     id: string
     system: WorkerContextPoolSystem
-    module: WorkerModuleReference
+    module: WorkerModuleReference | WorkerModuleContract<
+        VirtualRasterWorkerModuleProtocol<Candidate, Init, WorkerFacts>
+    >
     workerCount: number
     maxRequests: number
     phaseLimits: Readonly<Record<VirtualRasterWorkerPhase, number>>

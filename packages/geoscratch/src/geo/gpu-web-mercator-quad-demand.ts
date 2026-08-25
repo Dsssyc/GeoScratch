@@ -190,14 +190,17 @@ export class GpuWebMercatorQuadDemandProjection {
 
         const descriptor = snapshotDescriptor(runtime, input)
         const limits = descriptor.sourceCoverage.limits.map(limit => ({
-            matrixLevel: Number(limit.matrixId),
             minTileRow: limit.minTileRow,
             maxTileRow: limit.maxTileRow,
             minTileCol: limit.minTileCol,
             maxTileCol: limit.maxTileCol,
         }))
-        const minimumSourceMatrixLevel = limits[0]!.matrixLevel
-        const sourceMaximumMatrixLevel = limits.at(-1)!.matrixLevel
+        const minimumSourceMatrixLevel = Number(
+            descriptor.sourceCoverage.limits[0]!.matrixId
+        )
+        const sourceMaximumMatrixLevel = Number(
+            descriptor.sourceCoverage.limits.at(-1)!.matrixId
+        )
         const demandBytes = checkedProduct(
             descriptor.maximumDemands,
             gpuWebMercatorQuadDemandCodec.byteLength()

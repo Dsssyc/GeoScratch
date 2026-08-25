@@ -142,7 +142,7 @@ function createCandidate(
     })
 }
 
-export function demCacheConfigurationForShard(
+function demCacheConfigurationForShard(
     policy: UnderwaterTerrainCachePolicy,
     shard: number,
     count: number

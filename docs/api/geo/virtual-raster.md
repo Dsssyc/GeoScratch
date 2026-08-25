@@ -32,7 +32,9 @@ second identity. `createVirtualRasterWorkerExecutor` adapts one fixed seven-oper
 context protocol (`lookup`, `fetch`, `decode`, `transfer`, `accept`, `discard`, and
 `facts`) over `WorkerContextPool` and independently bounded network/decode phases.
 `VirtualRasterWorkerModuleProtocol` gives source implementations the same typed
-protocol. The descriptor states `borrowed` or `owned` WorkerSystem authority; Geo
+protocol. Its descriptor accepts either that typed contract, preserving candidate/init/
+Worker-facts inference, or one deployment `WorkerModuleReference`. The descriptor states
+`borrowed` or `owned` WorkerSystem authority; Geo
 does not infer ownership, accept operation-name aliases, or fabricate initial and
 disposed Worker facts. Facts are queried from live contexts, and pool terminal state
 records whether remote Worker finalizers completed or lifecycle authority forced

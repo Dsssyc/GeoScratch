@@ -106,7 +106,7 @@ export type DemTileSource = Readonly<{
     tileUrl(page: VirtualRasterPageIdentity): string
 }>
 
-export type DemVirtualRaster = VirtualRasterRuntime<DemVirtualRasterModel> & Readonly<{
+type DemVirtualRaster = VirtualRasterRuntime<DemVirtualRasterModel> & Readonly<{
     source: DemTileSource
     workerFacts(): ReturnType<DemWorkerRequestExecutor['inspect']>
 }>

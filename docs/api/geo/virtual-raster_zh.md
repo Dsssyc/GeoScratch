@@ -2,7 +2,7 @@
 docId: geo.virtual-raster.zh
 canonical: false
 translationOf: ./virtual-raster.md
-canonicalDigest: 599516f46c9aa47144a2aae965cb25f7d7e0a6ae4f584503add6a7bd31b56fe1
+canonicalDigest: f1b61478fa27c98c7a3ee645b8e3e7bd636d1d1a7b3e06101d50c703b2b4fd16
 ---
 # Virtual Raster
 
@@ -23,7 +23,9 @@ alias 表达。Worker
 `createVirtualRasterWorkerExecutor` 在 `WorkerContextPool` 之上适配固定的七步 context
 protocol（`lookup`、`fetch`、`decode`、`transfer`、`accept`、`discard` 与 `facts`），并独立
 限制 network/decode phase。`VirtualRasterWorkerModuleProtocol` 让源码 implementation
-使用同一份类型协议。Descriptor 显式声明 `borrowed` 或 `owned` WorkerSystem 权威；Geo
+使用同一份类型协议。Descriptor 可接收保留 candidate/init/Worker-facts 推断的 typed
+contract，或一个 deployment `WorkerModuleReference`。Descriptor 显式声明 `borrowed`
+或 `owned` WorkerSystem 权威；Geo
 不会推断 ownership、接受 operation-name alias，也不会虚构 initial/disposed Worker facts。
 Facts 来自 live context 查询，pool 的 terminal state 会记录远端 Worker finalizer 正常完成，
 还是 lifecycle authority 执行了有界强制终止。Executor facts 会把 Worker 业务快照标记为

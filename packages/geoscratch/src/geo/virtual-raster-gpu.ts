@@ -2,7 +2,6 @@ import type {
     BufferResource,
     GPURuntime,
     SubmissionBuilder,
-    SubmissionAuthorityStamp,
     SubmittedWork,
     TextureResource,
     TextureUploadCommand,
@@ -59,7 +58,6 @@ const residencySubmissionAuthorities = new WeakMap<
     VirtualRasterGpuState,
     ReturnType<GPURuntime['createSubmissionAuthority']>
 >()
-const acknowledgedSnapshots = new WeakMap<VirtualRasterGpuState, VirtualRasterSnapshot>()
 const updateOwners = new WeakMap<VirtualRasterGpuUpdate, VirtualRasterGpuState>()
 const encodedUpdates = new WeakMap<
     SubmissionBuilder,
@@ -466,7 +464,6 @@ export class VirtualRasterGpuState {
             this.#clearStagedPublication()
             this.#acknowledgedSnapshotEpoch = snapshot.epoch
             this.#acknowledgedSnapshot = snapshot
-            acknowledgedSnapshots.set(this, snapshot)
             this.#acknowledgementSerial++
             this.#uploadedSlotGenerations = uploadedSlotGenerations
         } catch (error) {
@@ -565,7 +562,6 @@ export class VirtualRasterGpuState {
         this.#settlingPublication = undefined
         this.#stagedPublication = undefined
         this.#acknowledgedSnapshot = undefined
-        acknowledgedSnapshots.delete(this)
         this.#releaseStagedAtlasUploads()
         residencySubmissionAuthorityFor(this).dispose()
     }
@@ -658,39 +654,6 @@ export class VirtualRasterGpuState {
         for (const upload of this.#stagedAtlasUploads) upload.dispose()
         this.#stagedAtlasUploads.length = 0
     }
-}
-
-/** @internal */
-export function virtualRasterResidencySubmissionStamp(
-    gpuState: VirtualRasterGpuState
-): SubmissionAuthorityStamp {
-
-    return residencySubmissionAuthorityFor(gpuState).stamp()
-}
-
-/** @internal Current acknowledged snapshot for generation-safe Geo adapters. */
-export function virtualRasterGpuAcknowledgedSnapshot(
-    gpuState: VirtualRasterGpuState
-): VirtualRasterSnapshot | undefined {
-
-    return acknowledgedSnapshots.get(gpuState)
-}
-
-/** @internal Reports the staged snapshot explicitly encoded before a dependent Geo command. */
-export function virtualRasterGpuEncodedSnapshotEpoch(
-    gpuState: VirtualRasterGpuState,
-    builder: SubmissionBuilder
-): number | undefined {
-
-    return encodedUpdates.get(builder)?.get(gpuState)
-}
-
-/** @internal Reports a staged snapshot whose update already precedes later queue submissions. */
-export function virtualRasterGpuSubmittedSnapshotEpoch(
-    gpuState: VirtualRasterGpuState
-): number | undefined {
-
-    return submittedUpdates.get(gpuState)?.snapshotEpoch
 }
 
 function residencySubmissionAuthorityFor(

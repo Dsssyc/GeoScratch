@@ -1457,7 +1457,6 @@ function bindSetLifecycleFailures(bindSet: BindSet): BindSetPreparationFailure[]
 
     if (bindSet.runtime.isDisposed) {
         failures.push(lifecyclePreparationFailure(
-            bindSet,
             'runtime-disposed',
             'SCRATCH_RUNTIME_DISPOSED',
             bindSet.runtime.subject
@@ -1465,7 +1464,6 @@ function bindSetLifecycleFailures(bindSet: BindSet): BindSetPreparationFailure[]
     }
     if (bindSet.runtime.isDeviceLost) {
         failures.push(lifecyclePreparationFailure(
-            bindSet,
             'device-lost',
             'SCRATCH_RUNTIME_DEVICE_LOST_DURING_GPU_OPERATION',
             bindSet.runtime.subject
@@ -1473,7 +1471,6 @@ function bindSetLifecycleFailures(bindSet: BindSet): BindSetPreparationFailure[]
     }
     if (bindSet.isDisposed) {
         failures.push(lifecyclePreparationFailure(
-            bindSet,
             'bind-set-disposed',
             'SCRATCH_BIND_DISPOSED',
             bindSet.subject
@@ -1481,7 +1478,6 @@ function bindSetLifecycleFailures(bindSet: BindSet): BindSetPreparationFailure[]
     }
     if (bindSet.layout.isDisposed) {
         failures.push(lifecyclePreparationFailure(
-            bindSet,
             'bind-layout-disposed',
             'SCRATCH_BIND_DISPOSED',
             bindSet.layout.subject
@@ -1493,7 +1489,6 @@ function bindSetLifecycleFailures(bindSet: BindSet): BindSetPreparationFailure[]
         if (seenResources.has(binding.resource)) continue
         seenResources.add(binding.resource)
         failures.push(lifecyclePreparationFailure(
-            bindSet,
             'bound-resource-disposed',
             'SCRATCH_RESOURCE_DISPOSED',
             bindingResourceSubject(binding.resource),
@@ -1504,7 +1499,6 @@ function bindSetLifecycleFailures(bindSet: BindSet): BindSetPreparationFailure[]
 }
 
 function lifecyclePreparationFailure(
-    bindSet: BindSet,
     kind: BindSetPreparationFailure['kind'],
     code: string,
     subject: ScratchDiagnosticSubject,

@@ -442,7 +442,6 @@ type PipelineDiagnosticCode =
     | 'SCRATCH_PIPELINE_CREATION_SHADER_MODULE_DISPOSED'
     | 'SCRATCH_PIPELINE_COMPUTE_STAGE_MISSING'
     | 'SCRATCH_PIPELINE_DISPOSED'
-    | 'SCRATCH_PIPELINE_CONSTANTS_INVALID'
     | 'SCRATCH_PIPELINE_FRAGMENT_FIELDS_FORBIDDEN'
     | 'SCRATCH_PIPELINE_IMMEDIATE_SIZE_INVALID'
     | 'SCRATCH_PIPELINE_LAYOUT_DERIVATION_DESCRIPTOR_MISMATCH'
@@ -501,9 +500,10 @@ type PassDiagnosticCode =
     | 'SCRATCH_PASS_WRONG_RUNTIME'
 ```
 
-Render-stage override constants and nullable pipeline slots remain pipeline
-construction facts. Invalid constants use `SCRATCH_PIPELINE_CONSTANTS_INVALID`;
-holes, `undefined`, or invalid non-null target states use
+Programmable-stage override constants are immutable `ProgramStage` facts and
+are validated as part of the Program descriptor with
+`SCRATCH_PROGRAM_DESCRIPTOR_INVALID`. Nullable pipeline slots remain pipeline
+construction facts; holes, `undefined`, or invalid non-null target states use
 `SCRATCH_PIPELINE_TARGET_STATE_INVALID`. Pipeline/pass null-slot incompatibility
 continues to use `SCRATCH_PIPELINE_TARGET_FORMAT_MISMATCH`.
 

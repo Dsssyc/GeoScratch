@@ -373,10 +373,10 @@ export function assertSurfaceTextureLeaseForSubmission(
             actual: { submissionBuilderId: owner.id },
         })
     }
-    if (state.state === 'expired') throwStaleSurfaceTextureLease(lease, state, 'expired')
+    if (state.state === 'expired') throwStaleSurfaceTextureLease(state, 'expired')
     const facts = surfaceFactsForState(state)
     if (facts.configurationVersion !== state.configurationVersion) {
-        throwStaleSurfaceTextureLease(lease, state, 'surface-reconfigured')
+        throwStaleSurfaceTextureLease(state, 'surface-reconfigured')
     }
     if (requiredUsage !== undefined && (facts.usage & requiredUsage) !== requiredUsage) {
         throwGPUDiagnostic({
@@ -407,10 +407,10 @@ export function assertSurfaceTextureLeaseUsable(lease: SurfaceTextureLease): voi
 
     const state = surfaceTextureLeaseStateFor(lease)
     assertGPURuntimeActive(state.runtime)
-    if (state.state === 'expired') throwStaleSurfaceTextureLease(lease, state, 'expired')
+    if (state.state === 'expired') throwStaleSurfaceTextureLease(state, 'expired')
     const facts = surfaceFactsForState(state)
     if (facts.configurationVersion !== state.configurationVersion) {
-        throwStaleSurfaceTextureLease(lease, state, 'surface-reconfigured')
+        throwStaleSurfaceTextureLease(state, 'surface-reconfigured')
     }
 }
 
@@ -444,7 +444,7 @@ function activateSurfaceTextureLeaseForOwner(
             actual: { submissionBuilderId: owner.id },
         })
     }
-    if (state.state === 'expired') throwStaleSurfaceTextureLease(lease, state, 'expired')
+    if (state.state === 'expired') throwStaleSurfaceTextureLease(state, 'expired')
     assertPreparedSurfaceFactsCurrent(state.surface, state.surfaceFacts)
     state.state = 'active'
 }
@@ -888,16 +888,15 @@ function assertSurfaceTextureLeasePending(
 
     const state = surfaceTextureLeaseStateFor(lease)
     assertGPURuntimeActive(state.runtime)
-    if (state.state !== 'pending') throwStaleSurfaceTextureLease(lease, state, state.state)
+    if (state.state !== 'pending') throwStaleSurfaceTextureLease(state, state.state)
     const facts = surfaceFactsForState(state)
     if (facts.configurationVersion !== state.configurationVersion) {
-        throwStaleSurfaceTextureLease(lease, state, 'surface-reconfigured')
+        throwStaleSurfaceTextureLease(state, 'surface-reconfigured')
     }
     return state
 }
 
 function throwStaleSurfaceTextureLease(
-    lease: SurfaceTextureLease,
     state: SurfaceTextureLeaseInternalState,
     reason: string
 ): never {

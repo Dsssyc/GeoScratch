@@ -270,6 +270,8 @@ export class GpuWebMercatorQuadPatchDraw {
                         bindSets: [ { set: bindSet } ],
                         count: { workgroups: [ 1, 1, 1 ] },
                         resources: {
+                            // Writable WGSL storage is read_write, so Scratch must establish
+                            // readable content even though this kernel overwrites every word.
                             read: [
                                 coverTemplate.state,
                                 policy,

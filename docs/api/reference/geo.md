@@ -2440,7 +2440,7 @@ type VirtualRasterWorkerExecutor<WorkerFacts> = VirtualRasterRequestExecutor & R
 Kind: `Type Alias`.
 
 ```ts
-type VirtualRasterWorkerExecutorDescriptor<Candidate extends VirtualRasterWorkerCandidate, Init, WorkerFacts> = Readonly<{ disposeGraceMs?: number; id: string; idleTimeoutMs?: number; maxRequests: number; module: WorkerModuleReference; phaseLimits: Readonly<Record<VirtualRasterWorkerPhase, number>>; system: WorkerContextPoolSystem; workerCount: number; candidate: any; classifyFailure?: any; context: any; staleKey?: any }>
+type VirtualRasterWorkerExecutorDescriptor<Candidate extends VirtualRasterWorkerCandidate, Init, WorkerFacts> = Readonly<{ disposeGraceMs?: number; id: string; idleTimeoutMs?: number; maxRequests: number; module: WorkerModuleReference | WorkerModuleContract<VirtualRasterWorkerModuleProtocol<Candidate, Init, WorkerFacts>>; phaseLimits: Readonly<Record<VirtualRasterWorkerPhase, number>>; system: WorkerContextPoolSystem; workerCount: number; candidate: any; classifyFailure?: any; context: any; staleKey?: any }>
 ```
 
 ### `VirtualRasterWorkerExecutorFacts`

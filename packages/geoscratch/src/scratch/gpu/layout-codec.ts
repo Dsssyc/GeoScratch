@@ -17,16 +17,13 @@ import { describeValue, isRecord } from './type-utils.js'
 import type { ScratchDiagnosticSubject, ScratchDiagnosticReport } from './diagnostics.js'
 import type {
     LayoutArtifact,
-    LayoutAtomicTypeArtifact,
     LayoutBufferViewContract,
     LayoutBufferViewDescriptor,
     LayoutCanonicalSpec,
     LayoutCodecOptions,
-    LayoutFieldArtifact,
     LayoutRuntimeExtent,
     LayoutScalarType,
     LayoutSpec,
-    LayoutStructTypeDescriptor,
     LayoutTypeArtifact,
 } from './layout-artifact.js'
 

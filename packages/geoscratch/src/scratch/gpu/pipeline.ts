@@ -47,7 +47,6 @@ import type {
     GPUPipelineNativeLabelEvidence,
 } from './gpu-operation.js'
 import type {
-    PipelineCreationIssueResult,
     PipelineCreationObservedFailure,
     PipelineNativeLabels,
 } from './pipeline-creation.js'
@@ -377,7 +376,6 @@ export async function createRenderPipeline(
         throwPipelineCreationFailure(
             plan,
             operation,
-            issue,
             failures,
             nativeLabels
         )
@@ -721,7 +719,6 @@ function lifecycleFailure(
 function throwPipelineCreationFailure(
     plan: PipelineCreationPlan,
     operation: GPUPendingOperation,
-    issue: PipelineCreationIssueResult,
     observedFailures: readonly PipelineCreationObservedFailure[],
     nativeLabels: PipelineNativeLabels
 ): never {
@@ -1122,7 +1119,6 @@ export async function createComputePipeline(
         throwPipelineCreationFailure(
             plan,
             operation,
-            issue,
             failures,
             nativeLabels
         )
@@ -1583,70 +1579,6 @@ function normalizeVertexBuffers(
     return normalizedLayouts
 }
 
-function normalizeRenderConstants(
-    pipeline: PipelineValidationContext,
-    constants: Readonly<Record<string, number>> | undefined,
-    stage: 'vertex' | 'fragment'
-): Readonly<Record<string, number>> | undefined {
-
-    if (constants === undefined) return undefined
-
-    let entries: [string, unknown][]
-    try {
-        const prototype = constants !== null && typeof constants === 'object'
-            ? Object.getPrototypeOf(constants)
-            : undefined
-        if (
-            constants === null ||
-            typeof constants !== 'object' ||
-            Array.isArray(constants) ||
-            (prototype !== Object.prototype && prototype !== null)
-        ) {
-            throwRenderConstantsDiagnostic(pipeline, stage, 'record', constants)
-        }
-        entries = Object.entries(constants)
-    } catch (error) {
-        if (error instanceof Error && error.name === 'ScratchDiagnosticError') throw error
-        throwRenderConstantsDiagnostic(pipeline, stage, 'record', constants)
-    }
-
-    for (const [ name, value ] of entries) {
-        if (typeof value !== 'number' || !Number.isFinite(value)) {
-            throwRenderConstantsDiagnostic(pipeline, stage, 'value', value, name)
-        }
-    }
-
-    return Object.freeze(Object.fromEntries(entries) as Record<string, number>)
-}
-
-function throwRenderConstantsDiagnostic(
-    pipeline: PipelineValidationContext,
-    stage: 'vertex' | 'fragment',
-    reason: 'record' | 'value',
-    value: unknown,
-    name?: string
-): never {
-
-    throwGPUDiagnostic({
-        code: 'SCRATCH_PIPELINE_CONSTANTS_INVALID',
-        severity: 'error',
-        phase: 'pipeline',
-        subject: pipeline.subject,
-        related: [ pipeline.program.subject ],
-        message: 'RenderPipeline stage constants must be a plain record of finite numbers.',
-        expected: {
-            stage,
-            constants: 'Readonly<Record<string, finite number>>',
-        },
-        actual: {
-            stage,
-            reason,
-            ...(name !== undefined ? { name } : {}),
-            value: describeValue(value),
-        },
-    })
-}
-
 function normalizeVertexAttribute(pipeline: PipelineValidationContext, attribute: GPUVertexAttribute, slot: number, attributeIndex: number): GPUVertexAttribute {
 
     if (!attribute || typeof attribute !== 'object') {
@@ -2054,7 +1986,7 @@ function validateProgramLayoutRequirements(pipeline: PipelineValidationContext):
     for (const requirement of pipeline.layoutRequirements) {
         const bindLayout = pipeline.bindLayoutsByGroup.get(requirement.group)
         if (bindLayout === undefined) {
-            throwProgramLayoutMismatch(pipeline, requirement, {
+            throwProgramLayoutMismatch(requirement, {
                 related: [ pipeline.program.subject, pipeline.subject ],
                 actual: { group: undefined },
             })
@@ -2062,7 +1994,7 @@ function validateProgramLayoutRequirements(pipeline: PipelineValidationContext):
 
         const entry = bindLayout.entries.find(candidate => candidate.binding === requirement.binding)
         if (entry === undefined) {
-            throwProgramLayoutMismatch(pipeline, requirement, {
+            throwProgramLayoutMismatch(requirement, {
                 related: [
                     pipeline.program.subject,
                     pipeline.subject,
@@ -2076,7 +2008,7 @@ function validateProgramLayoutRequirements(pipeline: PipelineValidationContext):
         }
 
         if (requirement.name !== undefined && entry.name !== requirement.name) {
-            throwProgramLayoutMismatch(pipeline, requirement, {
+            throwProgramLayoutMismatch(requirement, {
                 related: [
                     pipeline.program.subject,
                     pipeline.subject,
@@ -2088,7 +2020,7 @@ function validateProgramLayoutRequirements(pipeline: PipelineValidationContext):
         }
 
         if (entry.type !== requirement.type) {
-            throwProgramLayoutMismatch(pipeline, requirement, {
+            throwProgramLayoutMismatch(requirement, {
                 related: [
                     pipeline.program.subject,
                     pipeline.subject,
@@ -2100,7 +2032,7 @@ function validateProgramLayoutRequirements(pipeline: PipelineValidationContext):
         }
 
         if (requirement.visibility !== undefined && !requirement.visibility.every(stage => entry.visibility.includes(stage))) {
-            throwProgramLayoutMismatch(pipeline, requirement, {
+            throwProgramLayoutMismatch(requirement, {
                 related: [
                     pipeline.program.subject,
                     pipeline.subject,
@@ -2115,7 +2047,7 @@ function validateProgramLayoutRequirements(pipeline: PipelineValidationContext):
             (entry.type === 'uniform' || entry.type === 'read-storage' || entry.type === 'storage') &&
             entry.hasDynamicOffset !== requirement.hasDynamicOffset
         ) {
-            throwProgramLayoutMismatch(pipeline, requirement, {
+            throwProgramLayoutMismatch(requirement, {
                 related: [
                     pipeline.program.subject,
                     pipeline.subject,
@@ -2132,7 +2064,7 @@ function validateProgramLayoutRequirements(pipeline: PipelineValidationContext):
             entry.minBindingSize <
                 programLayoutRequirementMinimumBindingSize(requirement)
         ) {
-            throwProgramLayoutMismatch(pipeline, requirement, {
+            throwProgramLayoutMismatch(requirement, {
                 related: [
                     pipeline.program.subject,
                     pipeline.subject,
@@ -2146,7 +2078,6 @@ function validateProgramLayoutRequirements(pipeline: PipelineValidationContext):
 }
 
 function throwProgramLayoutMismatch(
-    pipeline: PipelineValidationContext,
     requirement: ProgramBufferLayoutRequirement,
     details: {
         actual: unknown

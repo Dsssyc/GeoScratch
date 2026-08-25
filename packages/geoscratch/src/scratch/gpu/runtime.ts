@@ -39,7 +39,7 @@ import {
 import { runtimePipelineSnapshot } from './pipeline-ownership.js'
 import { Program } from './program.js'
 import { createQuerySetResource, QuerySetResource } from './query-set.js'
-import { createReadbackOperation, ReadbackOperation } from './readback.js'
+import { createReadbackOperation } from './readback.js'
 import {
     createBundleDrawCommand as createScratchBundleDrawCommand,
     createExecuteRenderBundlesCommand as createScratchExecuteRenderBundlesCommand,
@@ -99,7 +99,7 @@ import type {
 } from './pipeline.js'
 import type { ProgramDescriptor } from './program.js'
 import type { QuerySetResourceDescriptor } from './query-set.js'
-import type { ReadbackOperationDescriptor } from './readback.js'
+import type { ReadbackOperation, ReadbackOperationDescriptor } from './readback.js'
 import type {
     BundleDrawCommandDescriptor,
     ExecuteRenderBundlesCommandDescriptor,
@@ -708,13 +708,13 @@ export class GPURuntime {
         return this.createComputePass(descriptor)
     }
 
-    createReadback(descriptor: ReadbackOperationDescriptor) {
+    createReadback(descriptor: ReadbackOperationDescriptor): ReadbackOperation {
 
         assertGPURuntimeActive(this)
         return createReadbackOperation(this, descriptor)
     }
 
-    readback(descriptor: ReadbackOperationDescriptor) {
+    readback(descriptor: ReadbackOperationDescriptor): ReadbackOperation {
 
         return this.createReadback(descriptor)
     }

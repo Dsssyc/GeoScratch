@@ -2228,8 +2228,8 @@
           "packages/geoscratch/src/scratch/gpu/pipeline.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/gpu/pipeline.ts:924",
-          "packages/geoscratch/src/scratch/gpu/pipeline.ts:942"
+          "packages/geoscratch/src/scratch/gpu/pipeline.ts:921",
+          "packages/geoscratch/src/scratch/gpu/pipeline.ts:939"
         ],
         "summary": "Owns an asynchronously created compute pipeline and its derived layout provenance.",
         "declaration": "class ComputePipeline",
@@ -2425,7 +2425,7 @@
           "packages/geoscratch/src/scratch/gpu/pipeline.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/gpu/pipeline.ts:102"
+          "packages/geoscratch/src/scratch/gpu/pipeline.ts:101"
         ],
         "summary": "",
         "declaration": "type ComputePipelineDescriptor = unknown",
@@ -2780,7 +2780,7 @@
           "packages/geoscratch/src/scratch/gpu/layout-codec.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/gpu/layout-codec.ts:269"
+          "packages/geoscratch/src/scratch/gpu/layout-codec.ts:266"
         ],
         "summary": "Creates a read-only structured decoder over caller-owned readback bytes.",
         "declaration": "Function createLayoutReadbackView",
@@ -4678,7 +4678,7 @@
           "packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts:496"
+          "packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts:493"
         ],
         "summary": "",
         "declaration": "type GPUDeviceLostInfo = Readonly<{ message: \"[native device-loss message omitted]\"; nativeMessageOmitted: true; reason: GPUDeviceLostReason }>"
@@ -4706,7 +4706,7 @@
           "packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts:590"
+          "packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts:587"
         ],
         "summary": "Defines an explicit bounded interval for collecting one runtime's diagnostic evidence.",
         "declaration": "class GPUDiagnosticCapture",
@@ -4752,7 +4752,7 @@
           "packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts:387"
+          "packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts:384"
         ],
         "summary": "",
         "declaration": "type GPUDiagnosticCaptureOptions = Readonly<{ includeDescriptors?: boolean; includeStacks?: boolean; maxDurationMs?: number; maxEvidenceBytes?: number; maxOperations?: number; nativeSubmissionDetail?: \"step\" }>"
@@ -4766,7 +4766,7 @@
           "packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts:412"
+          "packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts:409"
         ],
         "summary": "",
         "declaration": "type GPUDiagnosticCaptureReport = Readonly<{ id: string; omittedOperations: number; operations: readonly GPUOperationRecord[]; retainedEvidenceBytes: number; runtimeId: string; startedAtMs: number; stoppedAtMs: number; stopReason: GPUDiagnosticCaptureStopReason; version: 5 }>"
@@ -4780,7 +4780,7 @@
           "packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts:405"
+          "packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts:402"
         ],
         "summary": "",
         "declaration": "type GPUDiagnosticCaptureStopReason = \"explicit\" | \"operation-limit\" | \"duration-limit\" | \"evidence-limit\" | \"runtime-disposed\""
@@ -4878,7 +4878,7 @@
           "packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts:365"
+          "packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts:362"
         ],
         "summary": "",
         "declaration": "type GPUIncidentQuery = Readonly<{ bindLayoutId?: string; bindSetId?: string; commandId?: string; incidentId?: string; kind?: GPUIncidentKind; nativeLocationKind?: GPUSubmissionNativeLocation[\"kind\"]; nativeStage?: GPUSubmissionNativeStage; operationId?: string; pipelineId?: string; preparationStage?: GPUBindSetPreparationStage; readbackId?: string; renderBundleId?: string; resourceId?: string; resourceKind?: GPUResourceOperationTarget[\"resourceKind\"]; sequenceFrom?: number; sequenceTo?: number; shaderModuleId?: string; submissionId?: string; targetKind?: GPUOperationTarget[\"kind\"] | \"runtime\" }>"
@@ -4962,7 +4962,7 @@
           "packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts:342"
+          "packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts:339"
         ],
         "summary": "",
         "declaration": "type GPUOperationQuery = Readonly<{ bindLayoutId?: string; bindSetId?: string; commandId?: string; kind?: GPUOperationKind; nativeLocationKind?: GPUSubmissionNativeLocation[\"kind\"]; nativeOutcomeStatus?: GPUSubmissionNativeOutcomeStatus; nativeStage?: GPUSubmissionNativeStage; operationId?: string; pipelineId?: string; preparationStage?: GPUBindSetPreparationStage; readbackId?: string; renderBundleId?: string; resourceId?: string; resourceKind?: GPUResourceOperationTarget[\"resourceKind\"]; sequenceFrom?: number; sequenceTo?: number; shaderModuleId?: string; status?: GPUOperationStatus; submissionId?: string; targetKind?: GPUOperationTarget[\"kind\"] }>"
@@ -5018,7 +5018,7 @@
           "packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts:135"
+          "packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts:132"
         ],
         "summary": "",
         "declaration": "type GPUPendingOperationFact = Readonly<{ descriptorHash: string; id: string; kind: GPUPendingOperationKind; sequence: number; startedAtMs: number; target: GPUOperationTarget }>"
@@ -5158,7 +5158,7 @@
           "packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts:185"
+          "packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts:182"
         ],
         "summary": "",
         "declaration": "type GPUReadbackCommandState = \"allocating\" | \"idle\" | \"claimed\" | \"submitted\" | \"mapping\" | \"releasing\" | \"disposed\" | \"failed\""
@@ -6321,7 +6321,7 @@
           "packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts:161"
+          "packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts:158"
         ],
         "summary": "",
         "declaration": "type GPURuntimeBindLayoutFact = Readonly<{ acknowledgementState: \"acknowledged\"; entries: readonly NormalizedBindLayoutEntry[]; group: number; id: string; label?: string; lastAllocationOperationId: string; origin: BindLayout[\"origin\"]; sourcePipelineId?: string; validationConfidence: BindLayout[\"validationConfidence\"] }>"
@@ -6335,7 +6335,7 @@
           "packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts:173"
+          "packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts:170"
         ],
         "summary": "",
         "declaration": "type GPURuntimeBindSetFact = Readonly<{ bindLayoutId: string; id: string; inFlightOperationId?: string; label?: string; lastIncidentId?: string; lastPreparationOperationId?: string; preparationState: BindSetPreparationState; preparedSnapshotHash?: string; prepareGeneration: number }>"
@@ -6349,7 +6349,7 @@
           "packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts:235"
+          "packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts:232"
         ],
         "summary": "",
         "declaration": "type GPURuntimeBufferMappingFact = Readonly<{ allocationVersion: number; contentEpoch: number; id: string; mode: \"read\" | \"write\"; offset: number; operationId: string; resourceId: string; size: number; state: \"pending\" | \"mapped\" }>"
@@ -6363,7 +6363,7 @@
           "packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts:111"
+          "packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts:108"
         ],
         "summary": "",
         "declaration": "type GPURuntimeContentResourceFact = GPURuntimeResourceFactBase & Readonly<{ contentEpoch: number; logicalFootprintBytes: number; logicalFootprintKnown: boolean; resourceKind: \"BufferResource\" | \"TextureResource\"; state: ResourceState }>"
@@ -6506,7 +6506,7 @@
           "packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts:542"
+          "packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts:539"
         ],
         "summary": "Exposes bounded, read-only operation and incident evidence owned by one GPU runtime.",
         "declaration": "class GPURuntimeDiagnostics",
@@ -6592,7 +6592,7 @@
           "packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts:335"
+          "packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts:332"
         ],
         "summary": "",
         "declaration": "type GPURuntimeDiagnosticsEvidence = Readonly<{ incidents: readonly GPUIncidentReport[]; operations: readonly GPUOperationRecord[]; snapshot: GPURuntimeDiagnosticsSnapshot; version: 5 }>"
@@ -6606,7 +6606,7 @@
           "packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts:80"
+          "packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts:77"
         ],
         "summary": "",
         "declaration": "type GPURuntimeDiagnosticsOptions = Readonly<{ contributorLimit?: number; evidenceByteCapacity?: number; incidentCapacity?: number; maxActiveCaptures?: number; maxPendingNativeObservations?: number; operationCapacity?: number; recentOperationLimit?: number; submissionScopes?: GPUSubmissionScopeMode }>"
@@ -6620,7 +6620,7 @@
           "packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts:254"
+          "packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts:251"
         ],
         "summary": "",
         "declaration": "type GPURuntimeDiagnosticsSnapshot = Readonly<{ aggregates: Readonly<{ allocationAttempts: number; cancelledAllocations: number; cancelledPipelineCreations: number; cancelledReadbackOperations: number; deviceLosses: number; failedPipelineCreations: number; failedReadbackOperations: number; nativeFailures: number; outOfMemoryFailures: number; pipelineCreationAttempts: number; pipelineDisposals: number; readbackOperationAttempts: number; scopeFailures: number; successfulAllocations: number; successfulPipelineCreations: number; successfulReadbackOperations: number; uncapturedErrors: number; validationFailures: number }>; bindLayouts: readonly GPURuntimeBindLayoutFact[]; bindSets: readonly GPURuntimeBindSetFact[]; bufferMapping: Readonly<{ currentMappings: number; currentSelectedBytes: number; peakMappings: number; peakSelectedBytes: number }>; bufferMappings: readonly GPURuntimeBufferMappingFact[]; capture: Readonly<{ activeCount: number; maxActiveCaptures: number }>; pendingOperations: readonly GPUPendingOperationFact[]; pipelines: readonly GPURuntimePipelineFact[]; pressure: Readonly<{ currentScratchLogicalFootprintBytes: number; liveResourceCounts: Readonly<Record<string, number>>; peakScratchLogicalFootprintBytes: number }>; readbackCommands: readonly GPURuntimeReadbackCommandFact[]; readbackMemory: Readonly<{ activeMappings: number; currentRetainedHostBytes: number; currentStagingBytes: number; maxPendingOperations: number; maxStagingBytes: number; peakActiveMappings: number; peakRetainedHostBytes: number; peakStagingBytes: number }>; readbacks: readonly GPURuntimeReadbackOperationFact[]; recorder: Readonly<{ evidenceByteCapacity: number; incidentCapacity: number; omittedRecords: number; operationCapacity: number; overwrittenIncidents: number; overwrittenOperations: number; retainedEvidenceBytes: number; retainedIncidentCount: number; retainedOperationCount: number }>; resources: readonly GPURuntimeResourceFact[]; runtime: Readonly<{ id: string; isDeviceLost: boolean; isDisposed: boolean; label?: string }>; submissionNative: Readonly<{ currentEffectfulSubmittedWork: number; currentPendingNativeObservations: number; maxPendingNativeObservations: number; peakPendingNativeObservations: number; submissionScopes: GPUSubmissionScopeMode }>; version: 5 }>"
@@ -6648,7 +6648,7 @@
           "packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts:144"
+          "packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts:141"
         ],
         "summary": "",
         "declaration": "type GPURuntimePipelineFact = Readonly<{ descriptorHash: string; id: string; label?: string; lastCreationOperationId: string; pipelineKind: PipelineKind; programContractHash: string; programId: string; stages: PipelineCreationReport[\"stages\"]; state: \"ready\" }>"
@@ -6662,7 +6662,7 @@
           "packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts:123"
+          "packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts:120"
         ],
         "summary": "",
         "declaration": "type GPURuntimeQuerySetResourceFact = GPURuntimeResourceFactBase & Readonly<{ count: number; queryType: QuerySetType; resourceKind: \"QuerySetResource\"; slots: readonly QuerySetSlotSnapshot[] }>"
@@ -6676,7 +6676,7 @@
           "packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts:195"
+          "packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts:192"
         ],
         "summary": "",
         "declaration": "type GPURuntimeReadbackCommandFact = Readonly<{ allocationVersion: number; byteLength: number; contentEpoch: CommandResourceReadEpoch; id: string; label?: string; sourceResourceId: string; stagingAllocationOperationId?: string; state: GPUReadbackCommandState }>"
@@ -6690,7 +6690,7 @@
           "packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts:206"
+          "packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts:203"
         ],
         "summary": "",
         "declaration": "type GPURuntimeReadbackOperationFact = Readonly<{ allocationVersion: number; byteLength: number; commandId?: string; contentEpoch: number; id: string; isMapping: boolean; label?: string; lastMappingOperationId?: string; lastStagingOperationId?: string; path: \"direct\" | \"ordered\"; retain: \"consume-on-read\" | \"until-dispose\"; retainedHostBytes: number; sourceKind?: \"buffer\" | \"texture\"; sourceResourceId: string; stagingByteLength?: number; stagingBytes: number; state: string; stepIndex?: number; submissionId?: string; textureSubresource?: Readonly<{ aspect: GPUTextureAspect; format: GPUTextureFormat; mipLevel: number; origin: Readonly<{ x: number; y: number; z: number }>; size: Readonly<{ depthOrArrayLayers: number; height: number; width: number }> }> }>"
@@ -6718,7 +6718,7 @@
           "packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts:130"
+          "packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts:127"
         ],
         "summary": "",
         "declaration": "type GPURuntimeResourceFact = GPURuntimeContentResourceFact | GPURuntimeSamplerResourceFact | GPURuntimeQuerySetResourceFact"
@@ -6732,7 +6732,7 @@
           "packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts:119"
+          "packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts:116"
         ],
         "summary": "",
         "declaration": "type GPURuntimeSamplerResourceFact = GPURuntimeResourceFactBase & Readonly<{ resourceKind: \"SamplerResource\" }>"
@@ -7072,7 +7072,7 @@
           "packages/geoscratch/src/scratch/gpu/layout-codec.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/gpu/layout-codec.ts:237"
+          "packages/geoscratch/src/scratch/gpu/layout-codec.ts:234"
         ],
         "summary": "Recognizes LayoutCodec instances created by the current Scratch implementation.",
         "declaration": "Function isLayoutCodec",
@@ -7089,7 +7089,7 @@
           "packages/geoscratch/src/scratch/gpu/layout-codec.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/gpu/layout-codec.ts:255"
+          "packages/geoscratch/src/scratch/gpu/layout-codec.ts:252"
         ],
         "summary": "Checks whether a value is a validated byte view paired with a layout artifact.",
         "declaration": "Function isLayoutUploadView",
@@ -7589,7 +7589,7 @@
           "packages/geoscratch/src/scratch/gpu/layout-codec.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/gpu/layout-codec.ts:246"
+          "packages/geoscratch/src/scratch/gpu/layout-codec.ts:243"
         ],
         "summary": "Creates a layout codec from a declarative fixed or runtime-sized WGSL schema.",
         "declaration": "Function layoutCodec",
@@ -7606,7 +7606,7 @@
           "packages/geoscratch/src/scratch/gpu/layout-codec.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/gpu/layout-codec.ts:88"
+          "packages/geoscratch/src/scratch/gpu/layout-codec.ts:85"
         ],
         "summary": "Couples an immutable WGSL layout artifact with validated CPU packing and readback operations.",
         "declaration": "class LayoutCodec",
@@ -7959,7 +7959,7 @@
           "packages/geoscratch/src/scratch/gpu/layout-codec.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/gpu/layout-codec.ts:74"
+          "packages/geoscratch/src/scratch/gpu/layout-codec.ts:71"
         ],
         "summary": "",
         "declaration": "type LayoutPackOptions = LayoutRuntimeExtent"
@@ -7973,7 +7973,7 @@
           "packages/geoscratch/src/scratch/gpu/layout-codec.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/gpu/layout-codec.ts:57"
+          "packages/geoscratch/src/scratch/gpu/layout-codec.ts:54"
         ],
         "summary": "",
         "declaration": "type LayoutReadbackView = Readonly<{ artifact: LayoutArtifact; byteLength: number; bytes: Uint8Array; count: number; dataView: DataView; runtimeElementCount?: number; toArray: any; toObject: any; toValue: any }>"
@@ -8253,7 +8253,7 @@
           "packages/geoscratch/src/scratch/gpu/layout-codec.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/gpu/layout-codec.ts:50"
+          "packages/geoscratch/src/scratch/gpu/layout-codec.ts:47"
         ],
         "summary": "",
         "declaration": "type LayoutUploadView = Readonly<{ artifact: LayoutArtifact; byteLength: number; byteOffset: number; bytes: Uint8Array }>"
@@ -8295,7 +8295,7 @@
           "packages/geoscratch/src/scratch/gpu/layout-codec.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/gpu/layout-codec.ts:47"
+          "packages/geoscratch/src/scratch/gpu/layout-codec.ts:44"
         ],
         "summary": "",
         "declaration": "type LayoutValue = unknown"
@@ -8309,7 +8309,7 @@
           "packages/geoscratch/src/scratch/gpu/layout-codec.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/gpu/layout-codec.ts:48"
+          "packages/geoscratch/src/scratch/gpu/layout-codec.ts:45"
         ],
         "summary": "",
         "declaration": "type LayoutValues = Record<string, unknown>"
@@ -8379,7 +8379,7 @@
           "packages/geoscratch/src/scratch/gpu/layout-codec.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/gpu/layout-codec.ts:76"
+          "packages/geoscratch/src/scratch/gpu/layout-codec.ts:73"
         ],
         "summary": "",
         "declaration": "type LayoutWgslAccessorOptions = Readonly<{ namespace?: string }>"
@@ -8393,7 +8393,7 @@
           "packages/geoscratch/src/scratch/gpu/layout-codec.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/gpu/layout-codec.ts:80"
+          "packages/geoscratch/src/scratch/gpu/layout-codec.ts:77"
         ],
         "summary": "",
         "declaration": "type LayoutWgslBufferViewOptions = Readonly<{ namespace?: string }>"
@@ -8407,7 +8407,7 @@
           "packages/geoscratch/src/scratch/gpu/layout-codec.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/gpu/layout-codec.ts:69"
+          "packages/geoscratch/src/scratch/gpu/layout-codec.ts:66"
         ],
         "summary": "",
         "declaration": "type LayoutWriteOptions = Readonly<{ byteOffset?: number; runtimeElementCount?: number }>"
@@ -11245,8 +11245,8 @@
           "packages/geoscratch/src/scratch/gpu/pipeline.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/gpu/pipeline.ts:118",
-          "packages/geoscratch/src/scratch/gpu/pipeline.ts:143"
+          "packages/geoscratch/src/scratch/gpu/pipeline.ts:117",
+          "packages/geoscratch/src/scratch/gpu/pipeline.ts:142"
         ],
         "summary": "Owns an asynchronously created render pipeline and its derived layout provenance.",
         "declaration": "class RenderPipeline",
@@ -11508,7 +11508,7 @@
           "packages/geoscratch/src/scratch/gpu/pipeline.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/scratch/gpu/pipeline.ts:90"
+          "packages/geoscratch/src/scratch/gpu/pipeline.ts:89"
         ],
         "summary": "",
         "declaration": "type RenderPipelineDescriptor = unknown",

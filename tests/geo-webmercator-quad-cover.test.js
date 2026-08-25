@@ -632,11 +632,6 @@ describe('GPU WebMercatorQuad inverse cover lowering', () => {
             11,
             2 * 256,
             15 * 128,
-            0,
-            0,
-            0,
-            0,
-            0,
         ])
 
         const decoded = decodeGpuWebMercatorQuadCoverFeedback(

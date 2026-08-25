@@ -13,7 +13,6 @@ export const gpuWebMercatorQuadDemandPolicyCodec = layoutCodec({
 export const gpuWebMercatorQuadDemandLimitCodec = layoutCodec({
     name: 'GpuWebMercatorQuadDemandLimit',
     fields: [
-        { name: 'matrixLevel', type: 'u32' },
         { name: 'minTileRow', type: 'u32' },
         { name: 'maxTileRow', type: 'u32' },
         { name: 'minTileCol', type: 'u32' },

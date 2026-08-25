@@ -309,13 +309,6 @@ type WebMercatorTerrainGraph = {
     commands: Commands
 }
 
-type ProvenanceVerifier = (
-    submitted: SubmittedWork,
-    graph: WebMercatorTerrainGraph,
-    frame: GpuWebMercatorQuadCoverFrame,
-    terrainPresentation: string
-) => readonly WebMercatorTerrainProvenanceFact[]
-
 type WebMercatorTerrainState<Presentation extends string = string> = {
     initialized: boolean
     disposed: boolean
@@ -754,7 +747,7 @@ export async function createWebMercatorTerrainRenderer<
                 ready.coverFrame.frameEpoch >= latestIssuedFrameEpoch) return
             pendingFeedback.shift()
             try {
-                const consumed = await consumeFeedback(graph, ready, state)
+                const consumed = await consumeFeedback(graph, ready)
                 if (state.disposed) {
                     settleDeferred(ready.settlement, emptyFrameSettlement())
                 } else {
@@ -961,10 +954,23 @@ async function createUniform(
 function createTerrainGeometry() {
 
     const generated = plane(Math.log2(TERRAIN_SECTOR_SIZE))
-    const positions = Uint32Array.from(generated.positions, value =>
-        Math.round(value * TERRAIN_SECTOR_SIZE)
-    )
-    const indices = new Uint32Array(generated.indices)
+    const compactPositions: number[] = []
+    const compactIndices = new Map<string, number>()
+    const indices = Uint32Array.from(generated.indices, sourceIndex => {
+        const x = Math.round(generated.positions[sourceIndex * 2] * TERRAIN_SECTOR_SIZE)
+        const y = Math.round(
+            generated.positions[sourceIndex * 2 + 1] * TERRAIN_SECTOR_SIZE
+        )
+        const key = `${x}/${y}`
+        let index = compactIndices.get(key)
+        if (index === undefined) {
+            index = compactPositions.length / 2
+            compactIndices.set(key, index)
+            compactPositions.push(x, y)
+        }
+        return index
+    })
+    const positions = new Uint32Array(compactPositions)
     return Object.freeze({
         positions,
         indices,
@@ -1395,8 +1401,7 @@ function currentReads(resources: readonly ContentResource[]) {
 
 async function consumeFeedback(
     graph: WebMercatorTerrainGraph,
-    ready: PendingFeedback,
-    state: WebMercatorTerrainState
+    ready: PendingFeedback
 ): Promise<ConsumedFeedback> {
 
     const [ coverFeedback, demandFeedback ] = await Promise.all([

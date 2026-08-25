@@ -385,6 +385,56 @@ describe('Underwater Terrain clean cut', () => {
         ]) expect(runtime).not.to.include(forbidden)
     })
 
+    it('keeps the active terrain support graph free of retired internal state', () => {
+
+        const cover = read(
+            'packages', 'geoscratch', 'src', 'geo', 'gpu-web-mercator-quad-cover.ts'
+        )
+        const coverLayout = read(
+            'packages', 'geoscratch', 'src', 'geo',
+            'gpu-web-mercator-quad-cover-layout.ts'
+        )
+        const demandLayout = read(
+            'packages', 'geoscratch', 'src', 'geo',
+            'gpu-web-mercator-quad-demand-layout.ts'
+        )
+        const virtualGpu = read(
+            'packages', 'geoscratch', 'src', 'geo', 'virtual-raster-gpu.ts'
+        )
+        const virtualRuntime = read(
+            'packages', 'geoscratch', 'src', 'geo', 'virtual-raster-runtime.ts'
+        )
+        const demSource = read('examples', 'underwaterTerrain', 'dem-source.ts')
+        const demExecutor = read('examples', 'underwaterTerrain', 'dem-tile-executor.ts')
+        const coverLimit = coverLayout.slice(
+            coverLayout.indexOf('gpuWebMercatorQuadCoverLimitCodec'),
+            coverLayout.indexOf('gpuWebMercatorQuadCoverVerticalBoundsCodec')
+        )
+        const demandLimit = demandLayout.slice(
+            demandLayout.indexOf('gpuWebMercatorQuadDemandLimitCodec'),
+            demandLayout.indexOf('gpuWebMercatorQuadDemandCodec')
+        )
+
+        expect(cover).not.to.include('readonly #policy:')
+        expect(cover).not.to.include('readonly #coverageLimits:')
+        expect(coverLayout).not.to.include("{ name: 'coverageLimitCount'")
+        expect(coverLimit).not.to.include("{ name: 'matrixLevel'")
+        expect(coverLayout).not.to.match(/name: 'reserved\d+'/)
+        expect(demandLimit).not.to.include("{ name: 'matrixLevel'")
+        for (const removed of [
+            'virtualRasterResidencySubmissionStamp',
+            'virtualRasterGpuAcknowledgedSnapshot',
+            'virtualRasterGpuEncodedSnapshotEpoch',
+            'virtualRasterGpuSubmittedSnapshotEpoch',
+            'acknowledgedSnapshots',
+        ]) expect(virtualGpu).not.to.include(removed)
+        expect(virtualRuntime).not.to.include('function nonNegativeInteger(')
+        expect(demSource).not.to.include('export type DemVirtualRaster =')
+        expect(demExecutor).not.to.include(
+            'export function demCacheConfigurationForShard('
+        )
+    })
+
     it('validates cached DEM payloads through the canonical Geo cache identity', () => {
 
         const worker = read('examples', 'underwaterTerrain', 'dem-tile-worker.ts')

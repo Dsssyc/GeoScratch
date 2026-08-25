@@ -10,7 +10,6 @@ import {
     type GPURuntime,
     type Program,
     type ReadbackCommand,
-    type ShaderModule,
     type SubmissionAuthority,
     type SubmissionAuthorityStamp,
     type SubmissionBuilder,
@@ -248,8 +247,6 @@ export class GpuWebMercatorQuadCover {
     readonly runtime: GPURuntime
     readonly id: string
     readonly descriptor: GpuWebMercatorQuadCoverDescriptor
-    readonly #policy: BufferResource
-    readonly #coverageLimits: BufferResource
     readonly #verticalBounds: BufferResource
     readonly #pass: ComputePassSpec
     readonly #templates: readonly [ParityTemplate, ParityTemplate]
@@ -267,8 +264,6 @@ export class GpuWebMercatorQuadCover {
         runtime: GPURuntime,
         descriptor: GpuWebMercatorQuadCoverDescriptor,
         state: Readonly<{
-            policy: BufferResource
-            coverageLimits: BufferResource
             verticalBounds: BufferResource
             pass: ComputePassSpec
             templates: readonly [ParityTemplate, ParityTemplate]
@@ -283,8 +278,6 @@ export class GpuWebMercatorQuadCover {
         this.runtime = runtime
         this.id = `geo-gpu-web-mercator-quad-cover-${nextCoverId++}`
         this.descriptor = descriptor
-        this.#policy = state.policy
-        this.#coverageLimits = state.coverageLimits
         this.#verticalBounds = state.verticalBounds
         this.#pass = state.pass
         this.#templates = state.templates
@@ -312,7 +305,6 @@ export class GpuWebMercatorQuadCover {
         let verticalBoundsOffset = 0
         const limits = descriptor.spatialProfile.coverage.limits.map(limit => {
             const record = {
-                matrixLevel: Number(limit.matrixId),
                 minTileRow: limit.minTileRow,
                 maxTileRow: limit.maxTileRow,
                 minTileCol: limit.minTileCol,
@@ -370,15 +362,12 @@ export class GpuWebMercatorQuadCover {
                 }),
                 data: gpuWebMercatorQuadCoverPolicyCodec.pack({
                     ...descriptor.policy,
-                    coverageLimitCount: limits.length,
                     coordinateBits: descriptor.spatialProfile.coordinateBits,
                     lookupCapacity,
-                    boundsMaximumMatrixLevel: limits.at(-1)!.matrixLevel,
+                    boundsMaximumMatrixLevel: Number(
+                        descriptor.spatialProfile.coverage.limits.at(-1)!.matrixId
+                    ),
                     verticalBoundsMode: verticalBoundsMode === 'hierarchy' ? 1 : 0,
-                    cellsPerPatchEdge: descriptor.policy.cellsPerPatchEdge,
-                    maximumCellSpanReferencePixels:
-                        descriptor.policy.maximumCellSpanReferencePixels,
-                    refinementTolerance: descriptor.policy.refinementTolerance,
                     minimumVerticalMeters: descriptor.verticalRangeMeters[0],
                     maximumVerticalMeters: descriptor.verticalRangeMeters[1],
                 }),
@@ -631,8 +620,6 @@ export class GpuWebMercatorQuadCover {
                 ]),
             })
             const cover = new GpuWebMercatorQuadCover(runtime, descriptor, {
-                policy,
-                coverageLimits,
                 verticalBounds: verticalBoundsBuffer,
                 pass,
                 templates,

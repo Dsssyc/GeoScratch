@@ -24,7 +24,6 @@ export const gpuWebMercatorQuadCoverPolicyCodec = layoutCodec({
         { name: 'minimumMatrixLevel', type: 'u32' },
         { name: 'maximumMatrixLevel', type: 'u32' },
         { name: 'maximumPatches', type: 'u32' },
-        { name: 'coverageLimitCount', type: 'u32' },
         { name: 'coordinateBits', type: 'u32' },
         { name: 'lookupCapacity', type: 'u32' },
         { name: 'boundsMaximumMatrixLevel', type: 'u32' },
@@ -40,7 +39,6 @@ export const gpuWebMercatorQuadCoverPolicyCodec = layoutCodec({
 export const gpuWebMercatorQuadCoverLimitCodec = layoutCodec({
     name: 'GpuWebMercatorQuadCoverLimit',
     fields: [
-        { name: 'matrixLevel', type: 'u32' },
         { name: 'minTileRow', type: 'u32' },
         { name: 'maxTileRow', type: 'u32' },
         { name: 'minTileCol', type: 'u32' },
@@ -91,11 +89,6 @@ export const gpuWebMercatorQuadCoverStateCodec = layoutCodec({
         { name: 'finestMatrixLevel', type: 'u32' },
         { name: 'minimumCellSpanQ8', type: 'u32' },
         { name: 'maximumCellSpanQ8', type: 'u32' },
-        { name: 'reserved0', type: 'u32' },
-        { name: 'reserved1', type: 'u32' },
-        { name: 'reserved2', type: 'u32' },
-        { name: 'reserved3', type: 'u32' },
-        { name: 'reserved4', type: 'u32' },
     ],
 }, { usage: [ 'storage', 'readback' ] })
 
