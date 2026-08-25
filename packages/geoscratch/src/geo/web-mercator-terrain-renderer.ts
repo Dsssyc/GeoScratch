@@ -46,6 +46,7 @@ import {
 import type { WebMercatorVirtualRasterField } from './web-mercator-virtual-raster-field.js'
 import { webMercatorVirtualRasterWgslModule } from './web-mercator-virtual-raster-wgsl.js'
 import {
+    WEB_MERCATOR_TERRAIN_TILE_WIREFRAME_FRAGMENT_ENTRY_POINT,
     webMercatorTerrainConfigCodec,
     webMercatorTerrainWgslModule,
 } from './web-mercator-terrain-wgsl.js'
@@ -512,7 +513,8 @@ export async function createWebMercatorTerrainRenderer<
         virtualRaster,
         renderTemplates,
         bindSets,
-        pipelines
+        pipelines,
+        presentationTable
     )
     const graph: WebMercatorTerrainGraph = {
         runtime,
@@ -566,6 +568,7 @@ export async function createWebMercatorTerrainRenderer<
             .upload(uniforms.config.upload)
             .upload(buffers.positions.upload)
             .upload(buffers.indices.upload)
+            .upload(buffers.wireframeIndices.upload)
         cover.initialize(builder)
         demandProjection.initialize(builder)
         patchDraw.initialize(builder)
@@ -958,13 +961,63 @@ async function createUniform(
 function createTerrainGeometry() {
 
     const generated = plane(Math.log2(TERRAIN_SECTOR_SIZE))
+    const positions = Uint32Array.from(generated.positions, value =>
+        Math.round(value * TERRAIN_SECTOR_SIZE)
+    )
+    const indices = new Uint32Array(generated.indices)
     return Object.freeze({
-        positions: Uint32Array.from(generated.positions, value =>
-            Math.round(value * TERRAIN_SECTOR_SIZE)
+        positions,
+        indices,
+        wireframeIndices: createWebMercatorTerrainWireframeIndices(
+            positions,
+            indices,
+            TERRAIN_SECTOR_SIZE
         ),
-        indices: new Uint32Array(generated.indices),
-        elementCount: generated.indices.length,
+        elementCount: indices.length,
     })
+}
+
+/** @internal */
+export function createWebMercatorTerrainWireframeIndices(
+    positions: Uint32Array<ArrayBuffer>,
+    triangleIndices: Uint32Array<ArrayBuffer>,
+    cellsPerEdge: number
+): Uint32Array<ArrayBuffer> {
+
+    if (!Number.isSafeInteger(cellsPerEdge) || cellsPerEdge < 1) {
+        throw new TypeError('Terrain wireframe cellsPerEdge must be a positive integer')
+    }
+    const positionIndices = new Map<string, number>()
+    for (const index of triangleIndices) {
+        const key = `${positions[index * 2]}/${positions[index * 2 + 1]}`
+        if (!positionIndices.has(key)) positionIndices.set(key, index)
+    }
+    const indexAt = (x: number, y: number) => {
+        const index = positionIndices.get(`${x}/${y}`)
+        if (index === undefined) throw new Error('Terrain plane is missing one grid vertex')
+        return index
+    }
+    const output = new Uint32Array(triangleIndices.length)
+    let offset = 0
+    const line = (start: number, end: number) => {
+        output[offset++] = start
+        output[offset++] = end
+    }
+    for (let y = 0; y < cellsPerEdge; y++) {
+        for (let x = 0; x < cellsPerEdge; x++) {
+            line(indexAt(x, y), indexAt(x + 1, y))
+            line(indexAt(x, y), indexAt(x, y + 1))
+            if ((x + y) % 2 === 0) {
+                line(indexAt(x, y), indexAt(x + 1, y + 1))
+            } else {
+                line(indexAt(x, y + 1), indexAt(x + 1, y))
+            }
+        }
+    }
+    if (offset !== output.length) {
+        throw new Error('Terrain wireframe and triangle element counts differ')
+    }
+    return output
 }
 
 async function createBufferResources(runtime: GPURuntime, geometry: TerrainGeometry) {
@@ -980,7 +1033,13 @@ async function createBufferResources(runtime: GPURuntime, geometry: TerrainGeome
             runtime,
             'Web Mercator terrain grid indices',
             geometry.indices,
-            BUFFER_COPY_DST | BUFFER_INDEX | BUFFER_STORAGE
+            BUFFER_COPY_DST | BUFFER_INDEX
+        ),
+        wireframeIndices: await createBufferWithUpload(
+            runtime,
+            'Web Mercator terrain wireframe indices',
+            geometry.wireframeIndices,
+            BUFFER_COPY_DST | BUFFER_INDEX
         ),
     }
 }
@@ -1082,7 +1141,6 @@ async function createBindLayouts(runtime: GPURuntime, mapMetaBytes: number) {
             label: 'Web Mercator terrain cover data layout',
             group: 1,
             entries: [
-                readStorage(0, 'indices'),
                 readStorage(1, 'gridPositions'),
                 readStorage(2, 'coverPatches'),
                 readStorage(3, 'coverLookupEntries'),
@@ -1118,7 +1176,6 @@ async function createBindSets(
     const terrainData = []
     for (const [ parity, template ] of templates.terrain.entries()) {
         terrainData.push(await runtime.createBindSet(layouts.terrainData, {
-            indices: buffers.indices.region,
             gridPositions: buffers.positions.region,
             coverPatches: template.patches.region(),
             coverLookupEntries: template.coverLookup.region(),
@@ -1182,7 +1239,6 @@ async function createPrograms({
         mapMetaBinding: 0,
         configBinding: 1,
         dataGroup: 1,
-        indicesBinding: 0,
         gridPositionsBinding: 1,
         patchesBinding: 2,
         lookupEntriesBinding: 3,
@@ -1224,6 +1280,8 @@ async function createPipelines(
 
     const pipelines: Record<string, RenderPipeline> = {}
     for (const presentation of presentations.values()) {
+        const wireframe = presentation.fragmentEntryPoint ===
+            WEB_MERCATOR_TERRAIN_TILE_WIREFRAME_FRAGMENT_ENTRY_POINT
         pipelines[presentation.id] = await runtime.createRenderPipeline({
             label: presentation.label ?? `Web Mercator terrain ${presentation.id} pipeline`,
             program: programs[presentation.id]!,
@@ -1232,7 +1290,10 @@ async function createPipelines(
                 bindLayouts: [ layouts.scene, layouts.terrainData, layouts.terrainTextures ],
             },
             targets: [ { format: surface.format } ],
-            primitive: { topology: 'triangle-list', cullMode: 'none' },
+            primitive: {
+                topology: wireframe ? 'line-list' : 'triangle-list',
+                cullMode: 'none',
+            },
             depthStencil: {
                 format: textures.depth.format,
                 depthWriteEnabled: true,
@@ -1271,12 +1332,14 @@ function createCommands(
     virtualRaster: WebMercatorTerrainVirtualRaster,
     templates: RenderTemplates,
     bindSets: BindSets,
-    pipelines: Pipelines
+    pipelines: Pipelines,
+    presentations: ReadonlyMap<string, WebMercatorTerrainPresentationDescriptor>
 ) {
 
     const terrainCommands = (
         label: string,
-        pipeline: RenderPipeline
+        pipeline: RenderPipeline,
+        indexBuffer: Buffers['indices']
     ) => templates.terrain.map((template, parity) => runtime.createDrawCommand({
         label: `${label} ${parity}`,
         pipeline,
@@ -1285,13 +1348,13 @@ function createCommands(
             { set: bindSets.terrainData[parity]! },
             { set: bindSets.terrainTextures },
         ],
-        indexBuffer: { region: buffers.indices.region, format: 'uint32' },
+        indexBuffer: { region: indexBuffer.region, format: 'uint32' },
         count: { indirect: template.drawArgument.region },
         resources: {
             read: currentReads([
                 template.mapMeta,
                 uniforms.config.buffer,
-                buffers.indices.buffer,
+                indexBuffer.buffer,
                 buffers.positions.buffer,
                 template.patches,
                 template.coverLookup,
@@ -1306,10 +1369,21 @@ function createCommands(
 
     return Object.freeze({
         terrain: Object.freeze(Object.fromEntries(
-            Object.entries(pipelines).map(([ id, pipeline ]) => [
-                id,
-                Object.freeze(terrainCommands(`Draw Web Mercator terrain ${id}`, pipeline)),
-            ])
+            Object.entries(pipelines).map(([ id, pipeline ]) => {
+                const presentation = presentations.get(id)!
+                const indexBuffer = presentation.fragmentEntryPoint ===
+                    WEB_MERCATOR_TERRAIN_TILE_WIREFRAME_FRAGMENT_ENTRY_POINT
+                    ? buffers.wireframeIndices
+                    : buffers.indices
+                return [
+                    id,
+                    Object.freeze(terrainCommands(
+                        `Draw Web Mercator terrain ${id}`,
+                        pipeline,
+                        indexBuffer
+                    )),
+                ]
+            })
         )),
     })
 }
@@ -1536,6 +1610,7 @@ function identityObjectsByKind(graph: WebMercatorTerrainGraph) {
             graph.uniforms.config.buffer,
             graph.buffers.positions.buffer,
             graph.buffers.indices.buffer,
+            graph.buffers.wireframeIndices.buffer,
             graph.virtualRaster.gpu.atlas,
             graph.virtualRaster.gpu.pageTable,
             graph.virtualRaster.gpu.slotTable,
@@ -1549,6 +1624,7 @@ function identityObjectsByKind(graph: WebMercatorTerrainGraph) {
             graph.uniforms.config.upload,
             graph.buffers.positions.upload,
             graph.buffers.indices.upload,
+            graph.buffers.wireframeIndices.upload,
             ...coverIdentity.uploads,
             ...demandIdentity.uploads,
             ...patchDrawIdentity.uploads,

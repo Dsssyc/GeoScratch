@@ -55,9 +55,10 @@ cut remains active.
 fixed standard-tile positions, subtracts the camera before f32 conversion, resolves
 cover neighbors, snaps mixed-LoD edges, samples height by global field coordinate, and
 projects the result. Terrain uses indexed indirect drawing so one logical grid vertex is
-shaded once per patch instead of once per triangle corner. The built-in wireframe entry
-point reconstructs the regular mesh's grid and checkerboard diagonal edges from snapped
-grid coordinates and displays the post-stitch mesh with stable tile colors. Application
+shaded once per patch instead of once per triangle corner. The renderer owns equal-length
+triangle-list and line-list index buffers; the latter contains each cell's bottom, left,
+and actual diagonal edges. The built-in wireframe fragment colors those native post-stitch
+lines with stable tile colors instead of inferring topology in the fragment. Application
 presentation WGSL supplies fragment shading only.
 
 `render(capture)` consumes one `GeoViewSourceCapture<ViewInput>`, resizes physical

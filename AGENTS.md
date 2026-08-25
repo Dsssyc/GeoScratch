@@ -67,9 +67,11 @@ tiled source-demand projection, and patch-mesh indirect arguments have separate 
 put source ceilings, raster request identities, mesh vertex counts, or draw-argument buffers back
 inside `GpuWebMercatorQuadCover`.
 WebMercator terrain uses indexed indirect drawing over its immutable grid. Preserve the generic
-20-byte `[elementCount, patchCount, 0, 0, 0]` patch-draw ABI, INDEX plus STORAGE index-buffer
-usage, logical vertex reuse, and the core-WGSL grid/parity wireframe. Do not restore unindexed
-triangle-corner sampling or depend on an experimental fragment `primitive_index` extension.
+20-byte `[elementCount, patchCount, 0, 0, 0]` patch-draw ABI, INDEX-only index buffers,
+logical vertex reuse, and the equal-count renderer-owned
+triangle-list/line-list index buffers. Wireframe must draw native line topology; do not restore
+fragment-inferred grid edges, unindexed triangle-corner sampling, or an experimental fragment
+`primitive_index` extension.
 Until a camera decision has settled its delayed cover feedback, every newer same-decision
 terrain frame must retain bounded `needsFollowUp`; latest-only frame admission must not strand
 the final one-frame-lagged readback.

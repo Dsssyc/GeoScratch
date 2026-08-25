@@ -3174,7 +3174,7 @@ webMercatorTerrainWgslModule(options: WebMercatorTerrainWgslOptions): WebMercato
 Kind: `Type Alias`.
 
 ```ts
-type WebMercatorTerrainWgslModule = Readonly<{ bindings: Readonly<{ config: number; dataGroup: number; gridPositions: number; indices: number; lookupEntries: number; mapMeta: number; patches: number; sceneGroup: number }>; code: string; kind: "web-mercator-terrain-wgsl-module"; layoutDependencies: readonly LayoutArtifact[]; namespace: string; tileWireframeFragmentEntryPoint: string; vertexEntryPoint: string }>
+type WebMercatorTerrainWgslModule = Readonly<{ bindings: Readonly<{ config: number; dataGroup: number; gridPositions: number; lookupEntries: number; mapMeta: number; patches: number; sceneGroup: number }>; code: string; kind: "web-mercator-terrain-wgsl-module"; layoutDependencies: readonly LayoutArtifact[]; namespace: string; tileWireframeFragmentEntryPoint: string; vertexEntryPoint: string }>
 ```
 
 ### `WebMercatorTerrainWgslOptions`
@@ -3182,7 +3182,7 @@ type WebMercatorTerrainWgslModule = Readonly<{ bindings: Readonly<{ config: numb
 Kind: `Type Alias`.
 
 ```ts
-type WebMercatorTerrainWgslOptions = Readonly<{ addressNamespace: string; cellsPerPatchEdge: number; configBinding: number; dataGroup: number; fieldNamespace: string; gridPositionsBinding: number; indicesBinding: number; lookupEntriesBinding: number; mapMetaBinding: number; namespace?: string; patchesBinding: number; sceneGroup: number }>
+type WebMercatorTerrainWgslOptions = Readonly<{ addressNamespace: string; cellsPerPatchEdge: number; configBinding: number; dataGroup: number; fieldNamespace: string; gridPositionsBinding: number; lookupEntriesBinding: number; mapMetaBinding: number; namespace?: string; patchesBinding: number; sceneGroup: number }>
 ```
 
 ## `packages/geoscratch/src/geo/web-mercator-virtual-raster-field.ts`

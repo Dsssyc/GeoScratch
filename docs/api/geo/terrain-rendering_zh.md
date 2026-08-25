@@ -2,7 +2,7 @@
 docId: geo.terrain-rendering.zh
 canonical: false
 translationOf: ./terrain-rendering.md
-canonicalDigest: ec2486f08b61fc49ddd0e1ff37b5b81df70b12cd29a4f8cd6c245fbfb528b2ff
+canonicalDigest: 5055808270b966fa0b38cc2bb25331639ff0d64a46be95e3935c94018fca8aba
 ---
 # 地形渲染
 
@@ -47,9 +47,10 @@ page 不消耗 request budget；缺少 exact page 时通过 page-table ancestor 
 `webMercatorTerrainWgslModule` 拥有完整 vertex 路径：重建 wide-fixed 标准瓦片
 位置、在 f32 转换前减去相机、解析 cover neighbor、吸附混合 LoD 边缘、按全局 field
 坐标采样高度并投影。Terrain 使用 indexed indirect draw，让每个逻辑网格顶点在每个
-patch 中只执行一次 vertex shading，而不是按每个三角形角重复执行。内建 wireframe
-entry point 从 snapped grid coordinate 重建规则网格边与棋盘式对角线，并以稳定瓦片
-颜色显示 stitching 后 mesh；应用只提供 fragment presentation WGSL。
+patch 中只执行一次 vertex shading，而不是按每个三角形角重复执行。Renderer 拥有
+等长的 triangle-list 与 line-list index buffer；后者直接包含每个 cell 的 bottom、left
+和真实 diagonal edge。内建 wireframe fragment 以稳定瓦片颜色绘制这些 native、
+post-stitch 线段，不在 fragment 中猜测拓扑；应用只提供 fragment presentation WGSL。
 
 `render(capture)` 消费一个 `GeoViewSourceCapture<ViewInput>`，根据
 `presentationSize` 调整物理 attachment，并返回

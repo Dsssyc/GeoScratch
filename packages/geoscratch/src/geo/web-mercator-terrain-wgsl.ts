@@ -14,7 +14,6 @@ export type WebMercatorTerrainWgslOptions = Readonly<{
     mapMetaBinding: number
     configBinding: number
     dataGroup: number
-    indicesBinding: number
     gridPositionsBinding: number
     patchesBinding: number
     lookupEntriesBinding: number
@@ -32,7 +31,6 @@ export type WebMercatorTerrainWgslModule = Readonly<{
         mapMeta: number
         config: number
         dataGroup: number
-        indices: number
         gridPositions: number
         patches: number
         lookupEntries: number
@@ -70,7 +68,6 @@ export function webMercatorTerrainWgslModule(
         mapMeta: nonNegativeInteger(options?.mapMetaBinding, 'mapMetaBinding'),
         config: nonNegativeInteger(options?.configBinding, 'configBinding'),
         dataGroup: nonNegativeInteger(options?.dataGroup, 'dataGroup'),
-        indices: nonNegativeInteger(options?.indicesBinding, 'indicesBinding'),
         gridPositions: nonNegativeInteger(
             options?.gridPositionsBinding,
             'gridPositionsBinding'
@@ -97,7 +94,6 @@ export function webMercatorTerrainWgslModule(
     const tileWireframeFragmentEntryPoint = `${namespace}_tile_wireframe`
     const config = 'webMercatorTerrainConfig'
     const mapMeta = 'webMercatorTerrainMapMeta'
-    const indices = 'webMercatorTerrainIndices'
     const positions = 'webMercatorTerrainGridPositions'
     const code = [
         patch.code,
@@ -113,8 +109,7 @@ struct ${namespace}VertexInput {
 struct ${namespace}VertexOutput {
     @builtin(position) position: vec4f,
     @location(0) normalizedElevation: f32,
-    @location(1) gridPosition: vec2f,
-    @location(2) @interpolate(flat) tileColor: vec3f,
+    @location(1) @interpolate(flat) tileColor: vec3f,
 }
 
 @group(${bindings.sceneGroup}) @binding(${bindings.mapMeta})
@@ -122,8 +117,6 @@ var<uniform> ${mapMeta}: GpuWebMercatorQuadCoverMapMeta;
 @group(${bindings.sceneGroup}) @binding(${bindings.config})
 var<uniform> ${config}: WebMercatorTerrainConfig;
 
-@group(${bindings.dataGroup}) @binding(${bindings.indices})
-var<storage, read> ${indices}: array<u32>;
 @group(${bindings.dataGroup}) @binding(${bindings.gridPositions})
 var<storage, read> ${positions}: array<u32>;
 
@@ -268,7 +261,6 @@ fn ${vertexEntryPoint}(input: ${namespace}VertexInput) -> ${namespace}VertexOutp
         output.position = vec4f(${namespace}_nan());
         output.normalizedElevation = 0.0f;
     }
-    output.gridPosition = vec2f(grid);
     output.tileColor = ${namespace}_logical_tile_color(instance);
     return output;
 }
@@ -277,22 +269,7 @@ fn ${vertexEntryPoint}(input: ${namespace}VertexInput) -> ${namespace}VertexOutp
 fn ${tileWireframeFragmentEntryPoint}(
     input: ${namespace}VertexOutput,
 ) -> @location(0) vec4f {
-    let cell = vec2u(floor(input.gridPosition));
-    let withinCell = fract(input.gridPosition);
-    let gridDistance = min(
-        min(withinCell.x, 1.0f - withinCell.x),
-        min(withinCell.y, 1.0f - withinCell.y),
-    );
-    let diagonalDistance = select(
-        abs(withinCell.x - withinCell.y),
-        abs(withinCell.x + withinCell.y - 1.0f),
-        ((cell.x + cell.y) & 1u) != 0u,
-    );
-    let edgeDistance = min(gridDistance, diagonalDistance * 0.5f);
-    let width = max(fwidth(edgeDistance), 1e-5f);
-    let coverage = 1.0f - smoothstep(0.0f, width * 1.35f, edgeDistance);
-    if (coverage <= 0.01f) { discard; }
-    return vec4f(input.tileColor * coverage, coverage);
+    return vec4f(input.tileColor, 1.0f);
 }
 `,
     ].join('\n')
@@ -340,7 +317,6 @@ function assertDistinctBindings(bindings: WebMercatorTerrainWgslModule['bindings
 
     const scene = [ bindings.mapMeta, bindings.config ]
     const data = [
-        bindings.indices,
         bindings.gridPositions,
         bindings.patches,
         bindings.lookupEntries,
