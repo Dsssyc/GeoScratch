@@ -1,20 +1,21 @@
-# Flow Layer 纯速度 Virtual Raster 设计
+# Flow Field 纯速度 Virtual Raster 设计
 
 英文设计稿是事实基准；本文是其中文翻译。
 
 ## 状态
 
-设计方向已于 2026-08-26 获得认可。本书面规格仍需用户审阅，之后才能进入实现规划。
+已于 2026-08-27 获准进入实现规划。
 
 ## 目标
 
-用瓦片化时序速度采样替换整场加载和 viewport 光栅化的 Flow Layer，同时保持正常路径
-的传输数据面最小。Flow Layer 表达可输运的流动，而不是权威的有水范围。动态粒子支撑、
+围绕瓦片化时序速度采样建立一个独立的 `examples/flowField/` 页面，标题为
+`Flow Field`，同时保持正常路径的传输数据面最小。现有 `examples/flowLayer/` 页面原样
+冻结为行为参考。Flow Field 表达可输运的流动，而不是权威的有水范围。动态粒子支撑、
 生成、生命周期和可见 Flow 支撑轮廓，都在 GPU 上从模拟本来就需要的速度场派生。
 
 ## 当前事实
 
-当前案例加载一份 `station.bin` 和 27 份完整的 `uv_N.bin`。每个文件包含 117,148 个
+冻结的 Flow Layer 案例加载一份 `station.bin` 和 27 份完整的 `uv_N.bin`。每个文件包含 117,148 个
 `float32` 数对。页面构建一次全局 Delaunay 三角网，把 234,240 个三角形展开成
 702,720 个非索引顶点，并在每帧把两个时刻的场光栅化为 viewport 大小的
 `rg32float` 速度纹理和 `r8unorm` mask。mask 由最大三角形边长启发式规则与
@@ -38,6 +39,25 @@
    与局部性事实。
 9. 屏幕空间 history 纹理、reverse-gather 重投影、衰减、截止与呈现继续作为
    viewport 资源，而不是 Virtual Raster 页面。
+10. `examples/flowLayer/` 的源码与行为保持冻结。Flow Field 既不修改它，也不导入其
+    实现文件。
+11. Flow Field 首先组合当前公开的 `geoscratch/geo` 与 `geoscratch/scratch` 能力。
+    缺失组合先在 `examples/flowField/` 内实现；未经独立设计审阅和用户批准，不把
+    example-local 概念移入 package。
+
+## Example 与库边界
+
+`examples/flowField/` 是独立的公共 package 消费者，拥有自己的页面、应用组装、source
+adapter、时间协调器、粒子模拟、派生支撑预处理、shader、proof facts 与释放 authority。
+它只从 `geoscratch/scratch` 导入基础契约，只从 `geoscratch/geo` 导入地理契约。
+
+首个实现不修改 `packages/geoscratch/src/`。它把当前单 plane Virtual Raster runtime
+组合成 example-local 的有界时序速度对，在 reconcile 公开 demand 前本地合并 view 与
+prefetch 需求，并本地拥有 Flow 专用 spawn index 和 contour 产品。实现中发现的重复、
+consumer-neutral primitive 记录为后续下沉讨论证据；构建 Flow Field 时不直接提升它。
+
+路由、catalog label、runtime label、proof fact、测试和文档统一使用精确名称
+`Flow Field`。`Flow Layer` 只继续标识冻结的参考页面。
 
 ## 最小数据产品
 
@@ -53,7 +73,7 @@
 - cold-start、spin-up、transient 或 production 等阶段标签；这些是每帧标量元数据，
   不是栅格通道。
 
-应用设置而非 source manifest 拥有 `FLOW_DISPLAY_EXTENT`，以及显式有限并满足
+Flow Field 应用设置而非 source manifest 拥有 `FLOW_DISPLAY_EXTENT`，以及显式有限并满足
 `activitySpawn > activityKill >= 0` 的 `activitySpawn` 与 `activityKill` 阈值。
 这些设置进入帧 provenance，但不创建数据 URL、cache identity 或栅格通道。
 
@@ -109,8 +129,9 @@ advectable = status 可用
     && speed >= activityKill
 ```
 
-这需要 Geo 中一份通用、有界的时序 Virtual Raster 组合。它不构成 Flow 专用 page
-table、scheduler、Worker pool 或 Scratch primitive 的理由。
+首个实现把它表达成 current public Virtual Raster instance 之上的 example-local 有界
+组合。它不构成 Flow 专用 page table、scheduler、Worker pool 或 Scratch primitive 的
+理由。只有 Flow Field 实现提供可复用证据后，才可以单独提出通用 Geo 抽象。
 
 ## 粒子支撑与生命周期
 
@@ -163,9 +184,9 @@ marching-squares 歧义情形采用一种明确、确定的判定器。容量溢
   状态、生成 accessor 与通用时序组合。
 - Scratch 拥有 Worker 执行、持久原始载荷 cache、GPU resource、command、submission、
   epoch 与 diagnostics，但不获取 Geo 或 Flow 语义。
-- Flow source adapter 拥有 URL 构造、解码、checksum、单位、source revision 与离线构建
+- Flow Field source adapter 拥有 URL 构造、解码、checksum、单位、source revision 与离线构建
   schema。
-- Flow example 拥有阈值、时间播放、生成策略、粒子生命周期、动态轮廓表现、history、
+- Flow Field example 拥有阈值、时间播放、生成策略、粒子生命周期、动态轮廓表现、history、
   相机集成和总预算。
 
 首先请求 view 可见的速度页面。粒子位移可以增加一个有界预测 halo，下一时间平面可以
@@ -220,7 +241,10 @@ readback，释放派生 spawn/contour 状态和 Virtual Raster resource，最后
   载荷；
 - 长时间 operation、residency、staging、particle、spawn、contour 与 history 数量保持
   有界，drain 后 pending work 为零；
-- 现有相机重投影、resize、660 帧以上 cadence、结构化失败与清理门禁继续通过。
+- 冻结的 Flow Layer 参考继续通过现有相机重投影、resize、660 帧以上 cadence、结构化
+  失败与清理门禁；
+- Flow Field 拥有独立路由、页面 identity、proof facts、browser gate 与清理证据，源码
+  门禁证明 `examples/flowLayer/` 保持不变且未被 Flow Field 导入。
 
 ## 非目标
 
@@ -228,8 +252,9 @@ readback，释放派生 spawn/contour 状态和 Virtual Raster resource，最后
 - 边界 feature identity、属性、拓扑或 picking。
 - 反射、投影、滑移、壁面法向响应或基于 SDF 的碰撞。
 - Flow 专用 scheduler、page table、Worker pool、scene hierarchy 或 Scratch API。
-- 保留当前 viewport Voronoi stage、整场 Worker 传输、全局粒子经纬度 `f32` ABI 或
-  screen-UV 场采样。
+- 修改、删除、重定向或导入冻结的 `examples/flowLayer/` 参考实现。
+- 在 Flow Field 内复用当前 viewport Voronoi stage、整场 Worker 传输、全局粒子经纬度
+  `f32` ABI 或 screen-UV 场采样。
 - 在没有实测证据和独立审批契约时，引入 16 位载荷、第二 activity 通道或额外栅格
   平面。
 

@@ -1,21 +1,21 @@
-# Flow Layer Velocity-Only Virtual Raster Design
+# Flow Field Velocity-Only Virtual Raster Design
 
 ## Status
 
-The design direction was approved on 2026-08-26. This written specification requires
-user review before implementation planning begins.
+Approved for implementation planning on 2026-08-27.
 
 ## Goal
 
-Replace the whole-field, viewport-rasterized Flow Layer with tiled temporal velocity
-sampling while keeping the normal transferred data surface minimal. The Flow Layer
-visualizes advectable motion, not authoritative water presence. It derives dynamic
-particle support, spawning, lifecycle, and the visible Flow support contour on the GPU
-from the velocity field already required for simulation.
+Build a separate `examples/flowField/` page titled `Flow Field` around tiled temporal
+velocity sampling while keeping the normal transferred data surface minimal. The
+existing `examples/flowLayer/` page is frozen unchanged as behavioral reference. Flow
+Field visualizes advectable motion, not authoritative water presence. It derives
+dynamic particle support, spawning, lifecycle, and the visible Flow support contour on
+the GPU from the velocity field already required for simulation.
 
 ## Current Facts
 
-The current example loads one `station.bin` plus 27 whole `uv_N.bin` files. Each file
+The frozen Flow Layer example loads one `station.bin` plus 27 whole `uv_N.bin` files. Each file
 contains 117,148 `float32` pairs. The page builds one global Delaunay triangulation,
 expands 234,240 triangles into 702,720 non-indexed vertices, and rasterizes two temporal
 fields into viewport-sized `rg32float` velocity and `r8unorm` mask textures every frame.
@@ -46,6 +46,31 @@ not a claim about physical water extent.
    are transient sampling, demand, and locality facts only.
 9. Screen-space history textures, reverse-gather reprojection, decay, cutoff, and
    presentation remain viewport resources rather than Virtual Raster pages.
+10. `examples/flowLayer/` remains source- and behavior-frozen. Flow Field neither
+    modifies it nor imports implementation files from it.
+11. Flow Field first composes current public `geoscratch/geo` and
+    `geoscratch/scratch` capabilities. A missing composition is implemented under
+    `examples/flowField/`; no example-local concept is moved into the package without a
+    separate design review and user approval.
+
+## Example And Library Boundary
+
+`examples/flowField/` is an independent public-package consumer with its own page,
+application assembly, source adapter, temporal coordinator, particle simulation,
+derived-support preprocesses, shaders, proof facts, and disposal authority. It imports
+foundation contracts only from `geoscratch/scratch` and geographic contracts only from
+`geoscratch/geo`.
+
+The first implementation does not change `packages/geoscratch/src/`. It composes the
+current one-plane Virtual Raster runtime into an example-local bounded temporal velocity
+pair, merges its view/prefetch needs locally before reconciling public demands, and owns
+Flow-specific spawn-index and contour products locally. Any repeated, consumer-neutral
+primitive discovered during implementation is recorded for a later lowering discussion;
+it is not promoted while Flow Field is being built.
+
+The route, catalog label, runtime labels, proof facts, tests, and documentation use the
+exact identity `Flow Field`. `Flow Layer` continues to identify only the frozen reference
+page.
 
 ## Minimal Data Product
 
@@ -61,7 +86,7 @@ One immutable `FlowDatasetManifest` records:
 - phase labels such as cold-start, spin-up, transient, or production as scalar
   per-frame metadata rather than raster channels.
 
-Application settings, not the source manifest, own `FLOW_DISPLAY_EXTENT` and explicit
+Flow Field application settings, not the source manifest, own `FLOW_DISPLAY_EXTENT` and explicit
 finite `activitySpawn` and `activityKill` thresholds satisfying
 `activitySpawn > activityKill >= 0`. Those settings enter frame provenance but do not
 create data URLs, cache identities, or raster channels.
@@ -125,8 +150,10 @@ advectable = status is available
     && speed >= activityKill
 ```
 
-This requires a generic bounded temporal Virtual Raster composition in Geo. It does not
-justify a Flow-specific page table, scheduler, Worker pool, or Scratch primitive.
+The first implementation expresses this as an example-local bounded composition over
+current public Virtual Raster instances. It does not justify a Flow-specific page table,
+scheduler, Worker pool, or Scratch primitive. A generic Geo abstraction may be proposed
+only after the Flow Field implementation exposes reusable evidence.
 
 ## Particle Support And Lifecycle
 
@@ -185,9 +212,9 @@ an authoritative wet shoreline or flood extent.
   fallback status, generated accessors, and the generic temporal composition.
 - Scratch owns Worker execution, persistent raw-payload cache, GPU resources, commands,
   submissions, epochs, and diagnostics without acquiring Geo or Flow meaning.
-- The Flow source adapter owns URL construction, decoding, checksums, units, source
+- The Flow Field source adapter owns URL construction, decoding, checksums, units, source
   revision, and offline-build schema.
-- The Flow example owns thresholds, temporal playback, spawn policy, particle lifecycle,
+- The Flow Field example owns thresholds, temporal playback, spawn policy, particle lifecycle,
   dynamic contour presentation, history, camera integration, and total budgets.
 
 View-visible velocity pages are demanded first. Particle displacement may add a bounded
@@ -250,7 +277,10 @@ resources, and only then releases the runtime and map authorities.
 - long-running operation, residency, staging, particle, spawn, contour, and history
   counts remain bounded with zero pending work after drain;
 - existing camera reprojection, resize, 660-plus-frame cadence, structured failure, and
-  cleanup gates continue to pass.
+  cleanup gates continue to pass for the frozen Flow Layer reference;
+- Flow Field has its own route, page identity, proof facts, browser gate, and cleanup
+  evidence, while source guards prove `examples/flowLayer/` remains unchanged and is not
+  imported by Flow Field.
 
 ## Non-Goals
 
@@ -258,8 +288,10 @@ resources, and only then releases the runtime and map authorities.
 - Boundary feature identity, attributes, topology, or picking.
 - Reflection, projection, sliding, wall-normal response, or SDF-based collision.
 - A Flow-specific scheduler, page table, Worker pool, scene hierarchy, or Scratch API.
-- Preserving the current viewport Voronoi stage, whole-field Worker transfers, global
-  particle longitude/latitude `f32` ABI, or screen-UV field sampling.
+- Modifying, deleting, redirecting, or importing implementation from the frozen
+  `examples/flowLayer/` reference.
+- Reusing the current viewport Voronoi stage, whole-field Worker transfers, global
+  particle longitude/latitude `f32` ABI, or screen-UV field sampling inside Flow Field.
 - Introducing 16-bit payloads, a second activity channel, or additional raster planes
   without measured evidence and a separately approved contract.
 
