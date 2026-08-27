@@ -40,6 +40,7 @@ import type {
     FlowHistory,
     FlowHistoryFrame,
 } from './flow-history.ts'
+import { flowEncodedTemporalSnapshot } from './flow-frame-provenance.ts'
 import {
     flowActivityThresholds,
 } from './flow-particle-policy.ts'
@@ -176,7 +177,12 @@ export async function createFlowFieldRenderer(
         options.particleCount ?? DEFAULT_PARTICLE_COUNT
     )
     const model = temporal.current.model
-    const maximumCandidatePages = model.addressSpace.pageTableEntryCount
+    const maximumCandidatePages = Math.min(
+        model.addressSpace.pageTableEntryCount,
+        temporal.current.viewDemandProducer.maxDemands,
+        temporal.next.viewDemandProducer.maxDemands,
+        temporal.prefetch.viewDemandProducer.maxDemands
+    )
     const maximumCandidateCount = maximumCandidatePages * cellsPerPageEdge ** 2
     if (!Number.isSafeInteger(maximumCandidateCount) || maximumCandidateCount <= 0) {
         throw new RangeError('Flow Field candidate capacity exceeds the safe integer range')
@@ -191,10 +197,8 @@ export async function createFlowFieldRenderer(
     let disposed = false
     let disposePromise: Promise<void> | undefined
     let frameCount = 0
-    let pendingPrefetchInitialization: Readonly<{
-        runtime: FlowVelocityTimeRuntime
-        publication: VirtualRasterRuntimePublication
-    }> | undefined
+    let constructionInFlight: Promise<void> | undefined
+    let frameInFlight: Promise<unknown> | undefined
 
     try {
         const initialPublications = await Promise.all([
@@ -222,7 +226,7 @@ export async function createFlowFieldRenderer(
                 maximumCellSpanReferencePixels: 5,
                 refinementTolerance: 0.005,
             }),
-            maximumDemands: COVER_MAXIMUM_PATCHES,
+            maximumDemands: Math.min(COVER_MAXIMUM_PATCHES, maximumCandidatePages),
         }))
         const demand = own(createFlowDemandCoordinator({
             temporal,
@@ -289,6 +293,11 @@ export async function createFlowFieldRenderer(
             temporal.acknowledgePending(initialSubmitted),
             temporal.prefetch.acknowledge(initialPublications[2], initialSubmitted),
         ])
+        temporal.recordPrefetchPublication(
+            temporal.prefetch.source.timeIndex,
+            initialPublications[2].snapshotEpoch,
+            initialPair.generation
+        )
         if (initialPair.generation !== temporal.snapshot().generation) {
             throw new Error('Flow Field temporal generation changed during initialization')
         }
@@ -304,18 +313,29 @@ export async function createFlowFieldRenderer(
                 capture?.view === undefined) {
                 throw new TypeError('Flow Field render requires one monotonic captured frame')
             }
+            if (constructionInFlight !== undefined || frameInFlight !== undefined) {
+                throw new Error('Flow Field renderer permits exactly one frame in flight')
+            }
+            let finishConstruction!: () => void
+            constructionInFlight = new Promise(resolve => { finishConstruction = resolve })
+            try {
             const nextSize = flowSurfaceSize(capture.presentationSize)
             if (!sameSize(size, nextSize)) {
                 surface.resize(nextSize)
                 await history.resize(nextSize)
                 size = nextSize
             }
-            const frameTemporal = temporal.snapshot()
+            const acknowledgedTemporal = temporal.snapshot()
+            const publications = takeFramePublications()
+            const frameTemporal = flowEncodedTemporalSnapshot(
+                acknowledgedTemporal,
+                publications.current.snapshotEpoch,
+                publications.next.snapshotEpoch
+            )
             const view = flowFieldViewAdapter.read(capture.view, {
                 frameEpoch: frameNumber,
                 residencySnapshotEpoch: frameTemporal.temporalResidencyEpoch,
             })
-            const publications = takeFramePublications()
             const builder = runtime.createSubmission({ validation: 'throw' })
             temporal.setPendingPublications(publications.current, publications.next)
             temporal.encodePending(builder)
@@ -354,7 +374,7 @@ export async function createFlowFieldRenderer(
             const reconciliations = demand.reconcile(demandFrame).then(
                 requireFlowDemandReconciliations
             )
-            const observation = observeFrame(
+            const observing = observeFrame(
                 submitted,
                 publications,
                 frameTemporal,
@@ -363,6 +383,11 @@ export async function createFlowFieldRenderer(
                 contour,
                 temporalBindings
             )
+            let observation: Promise<unknown>
+            observation = observing.finally(() => {
+                if (frameInFlight === observation) frameInFlight = undefined
+            })
+            frameInFlight = observation
             const settlement = reconciliations.then(flowDemandSettlement)
             frameCount = frameNumber
             return Object.freeze({
@@ -377,24 +402,18 @@ export async function createFlowFieldRenderer(
                     history: historyFrame,
                 }),
             })
+            } finally {
+                finishConstruction()
+                constructionInFlight = undefined
+            }
         }
 
         function takeFramePublications(): FlowFramePublications {
 
             const current = temporal.current.publish()
             const next = temporal.next.publish()
-            const pendingInitialization = pendingPrefetchInitialization
             const prefetchRuntime = temporal.prefetch
-            let prefetch: VirtualRasterRuntimePublication
-            if (pendingInitialization === undefined) {
-                prefetch = prefetchRuntime.publish()
-            } else {
-                if (pendingInitialization.runtime !== prefetchRuntime) {
-                    throw new Error('Flow Field prefetch initialization provenance is stale')
-                }
-                prefetch = pendingInitialization.publication
-                pendingPrefetchInitialization = undefined
-            }
+            const prefetch = prefetchRuntime.publish()
             return Object.freeze({ current, next, prefetchRuntime, prefetch })
         }
 
@@ -416,6 +435,17 @@ export async function createFlowFieldRenderer(
                 activeViewDemand.observe(submitted),
                 activeContour.observeOverflow(submitted),
             ])
+            temporal.recordPrefetchPublication(
+                publications.prefetchRuntime.source.timeIndex,
+                publications.prefetch.snapshotEpoch,
+                encodedTemporal.generation
+            )
+            const acknowledged = temporal.snapshot()
+            if (acknowledged.currentSnapshotEpoch !== encodedTemporal.currentSnapshotEpoch ||
+                acknowledged.nextSnapshotEpoch !== encodedTemporal.nextSnapshotEpoch ||
+                acknowledged.temporalResidencyEpoch !== encodedTemporal.temporalResidencyEpoch) {
+                throw new Error('Flow Field acknowledged temporal provenance differs from sampling')
+            }
             if (encodedTemporal.frameInTime === encodedTemporal.framesPerTime - 1) {
                 const latest = await reconciliations
                 await Promise.all([
@@ -426,12 +456,24 @@ export async function createFlowFieldRenderer(
             }
             const advanced = await temporal.advanceFrame()
             if (advanced.generation !== beforeGeneration) {
+                if (publications.prefetchRuntime !== temporal.next ||
+                    advanced.nextSnapshotEpoch !== publications.prefetch.snapshotEpoch) {
+                    throw new Error('Flow Field prefetch epoch was not preserved through rotation')
+                }
                 const prefetchRuntime = temporal.prefetch
                 const publication = await prefetchRuntime.initialize()
-                pendingPrefetchInitialization = Object.freeze({
-                    runtime: prefetchRuntime,
-                    publication,
-                })
+                const builder = runtime.createSubmission({ validation: 'throw' })
+                prefetchRuntime.gpu.encode(builder, publication.update)
+                const initializedPrefetch = builder.submit()
+                await Promise.all([
+                    observeFlowSubmittedWork(initializedPrefetch),
+                    prefetchRuntime.acknowledge(publication, initializedPrefetch),
+                ])
+                temporal.recordPrefetchPublication(
+                    prefetchRuntime.source.timeIndex,
+                    publication.snapshotEpoch,
+                    advanced.generation
+                )
                 await activeBindings.refresh()
             }
             return results[0]
@@ -460,8 +502,25 @@ export async function createFlowFieldRenderer(
 
             if (disposePromise !== undefined) return disposePromise
             disposed = true
-            pendingPrefetchInitialization = undefined
-            disposePromise = disposeOwned(owned)
+            disposePromise = (async() => {
+                const failures: unknown[] = []
+                if (constructionInFlight !== undefined) await constructionInFlight
+                if (frameInFlight !== undefined) {
+                    try {
+                        await frameInFlight
+                    } catch (error) {
+                        failures.push(error)
+                    }
+                }
+                try {
+                    await disposeOwned(owned)
+                } catch (error) {
+                    failures.push(error)
+                }
+                if (failures.length > 0) {
+                    throw new AggregateError(failures, 'Flow Field renderer disposal failed')
+                }
+            })()
             return disposePromise
         }
 
@@ -506,7 +565,7 @@ function flowDemandSettlement(
     return Object.freeze({
         residencySettlement: Promise.all(members.map(member => member.settlement)),
         residencyWorkCount,
-        needsFollowUp: residencyWorkCount > 0,
+        needsFollowUp: false,
     })
 }
 

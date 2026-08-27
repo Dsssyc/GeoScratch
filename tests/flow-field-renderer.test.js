@@ -1,12 +1,37 @@
 import { expect } from 'chai'
 import fs from 'node:fs'
 import path from 'node:path'
+import { flowEncodedTemporalSnapshot } from '../examples/flowField/flow-frame-provenance.ts'
 
 const sourcePath = path.join(
     process.cwd(), 'examples', 'flowField', 'flow-renderer.ts'
 )
 
 describe('Flow Field renderer composition', () => {
+
+    it('binds frame provenance to the publications sampled in the same submission', () => {
+
+        const acknowledged = Object.freeze({
+            generation: 1,
+            currentTimeIndex: 0,
+            nextTimeIndex: 1,
+            prefetchTimeIndex: 2,
+            frameInTime: 0,
+            framesPerTime: 2,
+            progress: 0,
+            temporalResidencyEpoch: 5,
+            currentSnapshotEpoch: 7,
+            nextSnapshotEpoch: 8,
+        })
+        expect(flowEncodedTemporalSnapshot(acknowledged, 9, 8)).to.deep.equal({
+            ...acknowledged,
+            temporalResidencyEpoch: 6,
+            currentSnapshotEpoch: 9,
+            nextSnapshotEpoch: 8,
+        })
+        expect(() => flowEncodedTemporalSnapshot(acknowledged, 6, 8))
+            .to.throw(/backwards/i)
+    })
 
     it('initializes and acknowledges exactly three bounded temporal runtimes', () => {
 
@@ -18,6 +43,7 @@ describe('Flow Field renderer composition', () => {
         expect(source).to.include('temporal.encodePending(initialBuilder)')
         expect(source).to.include('temporal.acknowledgePending(initialSubmitted)')
         expect(source).to.include('temporal.prefetch.acknowledge(')
+        expect(source).to.include('temporal.recordPrefetchPublication(')
     })
 
     it('orders publication support simulation contour history and submission explicitly', () => {
@@ -66,6 +92,10 @@ describe('Flow Field renderer composition', () => {
         expect(source).to.include('createFlowSpawnIndex')
         expect(source).to.include('createFlowContour')
         expect(source).to.include('createFlowHistory')
+        expect(source).to.include('permits exactly one frame in flight')
+        expect(source).to.include('await frameInFlight')
+        expect(source).to.include('viewDemandProducer.maxDemands')
+        expect(source).to.include('needsFollowUp: false')
         expect(source).to.not.match(/runtime\.(?:device|queue)/)
         expect(source).to.not.match(/packages\/geoscratch\/src|flowLayer/)
         expect(source).to.not.match(/boundary(?:Texture|Feature)|depthTexture|wetMask|SDF/)

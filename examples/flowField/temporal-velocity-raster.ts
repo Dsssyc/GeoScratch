@@ -81,6 +81,11 @@ export type TemporalVelocityRaster<Runtime> = Readonly<{
         snapshotEpoch: number,
         generation?: number
     ): TemporalVelocitySnapshot
+    recordPrefetchPublication(
+        timeIndex: number,
+        snapshotEpoch: number,
+        generation?: number
+    ): TemporalVelocitySnapshot
     setPendingPublications(
         current: VirtualRasterRuntimePublication,
         next: VirtualRasterRuntimePublication
@@ -321,6 +326,28 @@ export async function createTemporalVelocityRaster<Runtime>(
         return pair
     }
 
+    function recordPrefetchPublication(
+        timeIndex: number,
+        snapshotEpoch: number,
+        publicationGeneration = generation
+    ): TemporalVelocitySnapshot {
+
+        assertActive()
+        if (publicationGeneration !== generation) {
+            throw new Error('Velocity prefetch publication belongs to a stale generation')
+        }
+        if (timeIndex !== prefetch.timeIndex) {
+            throw new RangeError(`Velocity publication time ${timeIndex} is not the prefetch slot`)
+        }
+        if (!Number.isSafeInteger(snapshotEpoch) || snapshotEpoch <= 0 ||
+            snapshotEpoch < prefetch.snapshotEpoch) {
+            throw new RangeError('Velocity prefetch snapshot epochs must increase monotonically')
+        }
+        if (snapshotEpoch === prefetch.snapshotEpoch) return readSnapshot()
+        prefetch.snapshotEpoch = snapshotEpoch
+        return readSnapshot()
+    }
+
     function pendingPublication(): TemporalVelocityPublicationPair | undefined {
 
         return pending?.pair
@@ -418,6 +445,7 @@ export async function createTemporalVelocityRaster<Runtime>(
         next = prefetch
         prefetch = replacement
         generation++
+        temporalResidencyEpoch++
         frameInTime = 0
         await disposeTracked(retired.runtime)
         return readSnapshot()
@@ -508,6 +536,7 @@ export async function createTemporalVelocityRaster<Runtime>(
         snapshot,
         activeBindResources,
         recordPublication,
+        recordPrefetchPublication,
         setPendingPublications,
         pendingPublication,
         encodePending,

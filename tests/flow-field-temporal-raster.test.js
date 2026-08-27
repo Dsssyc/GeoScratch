@@ -101,6 +101,7 @@ describe('Flow Field temporal velocity raster', () => {
         })
         expect(() => temporal.recordPublication(1, 2))
             .to.throw('Prefetch publication cannot enter the active temporal pair')
+        temporal.recordPrefetchPublication(1, 2)
         expect(() => temporal.recordPublication(26, 3))
             .to.throw('Velocity snapshot epochs must increase monotonically')
 
@@ -111,7 +112,8 @@ describe('Flow Field temporal velocity raster', () => {
             nextTimeIndex: 1,
             prefetchTimeIndex: 2,
             currentSnapshotEpoch: 7,
-            nextSnapshotEpoch: 0,
+            nextSnapshotEpoch: 2,
+            temporalResidencyEpoch: 3,
         })
         await temporal.dispose()
     })
@@ -219,6 +221,13 @@ describe('Flow Field temporal velocity raster', () => {
         const builder = { kind: 'submission-builder' }
         temporal.encodePending(builder)
         await temporal.acknowledgePending({ kind: 'submitted-work' })
+        const prefetchPublication = temporal.prefetch.publish()
+        temporal.prefetch.gpu.encode(builder, prefetchPublication.update)
+        await temporal.prefetch.acknowledge(
+            prefetchPublication,
+            { kind: 'submitted-work' }
+        )
+        temporal.recordPrefetchPublication(2, prefetchPublication.snapshotEpoch)
 
         expect(events).to.deep.equal([
             'publish:0',
@@ -227,6 +236,9 @@ describe('Flow Field temporal velocity raster', () => {
             'encode:1',
             'acknowledge:0',
             'acknowledge:1',
+            'publish:2',
+            'encode:2',
+            'acknowledge:2',
         ])
         expect(temporal.snapshot()).to.deep.include({
             temporalResidencyEpoch: 2,
@@ -240,6 +252,8 @@ describe('Flow Field temporal velocity raster', () => {
             currentTimeIndex: 1,
             nextTimeIndex: 2,
             prefetchTimeIndex: 3,
+            currentSnapshotEpoch: 11,
+            nextSnapshotEpoch: 12,
         })
         await temporal.dispose()
     })

@@ -296,7 +296,7 @@ describe('Scratch persistent binding final parity', () => {
             capabilityRowCount: 11,
             officialBindingRowCount: 6,
             nativeCopyQuadrantCount: 4,
-            ordinaryExampleCount: 17,
+            ordinaryExampleCount: 18,
             legacyExampleCount: 0,
         })
         expect(result.publicSurface.missingBaselineValues).to.deep.equal([
