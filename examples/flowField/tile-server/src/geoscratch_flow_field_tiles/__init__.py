@@ -7,14 +7,22 @@ from .contracts import (
     UnsupportedInterpolationError,
     UnsupportedTopologyError,
 )
+from .resolution import (
+    ResolutionSelection,
+    StationSpacingResolution,
+    UnsupportedResolutionError,
+)
 
 
 __version__ = "0.2.0"
 
 __all__ = [
     "DelaunayTopology",
+    "ResolutionSelection",
+    "StationSpacingResolution",
     "BuildBudget",
     "TriangleLinearInterpolation",
     "UnsupportedInterpolationError",
+    "UnsupportedResolutionError",
     "UnsupportedTopologyError",
 ]
