@@ -55,6 +55,19 @@ def test_unimplemented_strategies_fail_instead_of_falling_back():
     assert interpolation_error.value.code == "UNSUPPORTED_INTERPOLATION"
 
 
+def test_strategy_descriptors_reject_unknown_keys_instead_of_ignoring_typos():
+    with pytest.raises(ValueError, match="unknown keys"):
+        read_topology_spec({
+            "kind": "delaunay",
+            "maximumEdgeLenghtMeters": 5_000.0,
+        })
+    with pytest.raises(ValueError, match="unknown keys"):
+        read_interpolation_spec({
+            "kind": "triangle-linear",
+            "stationaryEpslion": 0.0,
+        })
+
+
 @pytest.mark.parametrize(
     ("arguments", "message"),
     (

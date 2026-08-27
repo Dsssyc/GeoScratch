@@ -1,4 +1,4 @@
-# ADR-090: Flow Field Inferred-Topology Backend
+# ADR-090: Flow Field Velocity-Only Virtual Raster Backend
 
 ## Status
 
@@ -68,7 +68,10 @@ Construction uses NumPy and SciPy only:
 7. reuse each page stencil for U and V at every model time;
 8. write exact zero when the target is outside the convex hull, belongs to a rejected
    triangle, or any triangle vertex is stationary for that time; and
-9. convert the final interleaved U/V page to little-endian float32.
+9. prepare a one-texel cross-page halo and retain a central lattice velocity only when its
+   complete 3 by 3 advectable neighborhood is valid, preventing ordinary four-corner
+   bilinear filtering from leaking velocity across representable invalid support; and
+10. convert the final interleaved U/V page to little-endian float32.
 
 The bridge rule is an inferred-support heuristic, not a water boundary or physical topology.
 The manifest records requested and resolved strategy, SciPy version, Qhull options, topology
@@ -85,13 +88,36 @@ gating is evaluated while applying each time field and produces exact U/V zero; 
 boundary, activity, depth, wet/dry, SDF, or vector-feature plane.
 
 The content version is derived from source identity, build algorithm version, resolved
-topology and interpolation facts, tile matrix range, page size, lattice registration, and
-direct-level policy. The service and verifier reject stale construction contracts.
+topology and interpolation facts, exact matrix limits, page size, lattice registration,
+direct-level policy, support filter, and a canonical SHA-256 root over the complete ordered
+page set. The builder, verifier, and service reject incomplete address products, altered
+budgets, malformed page metadata, and stale construction contracts.
 
-Before atomic installation, the builder reproduces the runtime's finest-level bilinear sample
-at every unique topology vertex and records per-time velocity error, angular error,
-stationary-to-moving mismatches, moving-to-zero collapses, and maximum false-moving speed.
-These are explicit QA facts, not a claim that z9 meets an unchosen physical error budget.
+Before atomic installation, the builder reproduces the Geo accessor's outer-boundary clamp and
+runtime bilinear sample at every unique topology vertex for every z4 through z9 level. It
+records per-level/per-time velocity error, angular error, stationary-to-moving mismatches,
+moving-to-zero collapses, raw advectable lattice count, bilinear-safe lattice count, and
+maximum false-moving speed. These are explicit QA facts, not a claim that a raster level can
+preserve source variations below its texel scale.
+
+Construction performs a page/byte/free-space preflight before topology preparation. It only
+replaces an explicit non-symlink `cache` directory that carries a Flow Field artifact marker or
+a narrowly recognized legacy Flow Field layout. Installation remains staged and atomic; an
+unowned cache directory is never recursively removed.
+
+The first v4 build of the committed source makes the resolution tradeoff visible. At z9, the
+bilinear-safe filter retains a median 97.6% of raw advectable lattice samples. Across all 27
+times, station reconstruction reports 118 stationary-to-moving cases out of 307,723 stationary
+vertex-times and 336,799 moving-to-zero cases out of 2,854,976 moving vertex-times. At z4 the
+moving-to-zero fraction is about 74.4%. This is conservative failure at coarse resolution, not
+permission to treat z4 as a physically accurate simulation field. A later runtime/LoD decision
+must use these facts rather than hiding them behind successful byte verification.
+
+Accordingly, the v4 manifest and service health explicitly report particle simulation as
+`not-approved` with reason `resolution-error-budget-unset`. The artifact is available for
+resource inspection and the next LoD decision, but no current level is claimed as a validated
+particle-simulation field. Sub-texel invalid triangle interiors remain unresolved by a finite
+velocity-only lattice.
 
 ## Consequences
 
@@ -100,12 +126,14 @@ These are explicit QA facts, not a claim that z9 meets an unchosen physical erro
 - One immutable topology and page stencil set is reused across all 27 time fields.
 - Exact duplicate behavior is deterministic and auditable.
 - Dynamic non-advectable support is encoded only as zero U/V and follows each time field.
-- Direct per-level sampling removes recursive zero-value spreading and accumulated LoD error.
+- Direct per-level sampling removes recursive zero-value spreading and accumulated LoD error;
+  one-texel support erosion prevents bleed across invalid support represented on that level's
+  lattice, but does not recover invalid source detail below the texel scale.
 - The current Delaunay result remains an inferred fallback. It cannot prove riverbanks,
   holes, disconnected water bodies, nested-grid priority, or conservative polygon-cell
   remapping from XY alone.
-- The recorded z9 station-reconstruction facts must guide a later resolution/storage decision;
-  passing byte/hash verification alone is not numerical-accuracy approval.
+- The recorded all-level reconstruction facts must guide later resolution/storage decisions;
+  passing byte/hash and support-safety verification alone is not numerical-accuracy approval.
 
 Future topology types are additive descriptors such as authoritative indexed triangles,
 rectilinear grids, nested grids, and polygon cells. Each must lower into the same reusable

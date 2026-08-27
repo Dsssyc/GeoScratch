@@ -53,18 +53,33 @@ The builder:
    model time;
 5. writes a triangle only when all three station velocities can move a particle in that model
    time; otherwise its targets remain exact U/V zero without another raster plane;
-6. samples every z4 through z9 page directly on the global WebMercator texel lattice instead
+6. evaluates a one-texel halo across page seams and keeps a central sample only when its 3x3
+   neighborhood is advectable, so ordinary bilinear filtering cannot bleed velocity across
+   representable invalid support;
+7. samples every z4 through z9 page directly on the global WebMercator texel lattice instead
    of recursively averaging a finer level; and
-7. verifies every 524,288-byte little-endian RG32F page before atomically installing `cache/`.
+8. verifies every 524,288-byte little-endian RG32F page before atomically installing `cache/`.
 
 The lattice registration matches the runtime accessor: page texel `(0, 0)` represents the
 integer global texel coordinate at that page origin, and bilinear sampling spans to the next
 global texel, including across page seams. Every level is reconstructed independently from
 the same topology, so a zero outside topology support is never averaged into a coarser page.
-Before installation, the builder also reproduces the runtime's finest-level bilinear sampling
-at every unique topology vertex. The manifest records per-time velocity and angular error,
-stationary vertices reconstructed as moving, moving vertices reconstructed as zero, and the
-largest false-moving speed. These are QA facts rather than another runtime data plane.
+Before installation, the builder reproduces the Geo runtime's clamped bilinear sampling at
+every unique topology vertex for every z4 through z9 level. The manifest records per-level and
+per-time velocity and angular error, stationary vertices reconstructed as moving, moving
+vertices reconstructed as zero, raw versus bilinear-safe support counts, and the largest
+false-moving speed. These are QA facts rather than another runtime data plane.
+They deliberately expose that coarse fallback is conservative and may retire moving particles;
+successful byte verification is not a numerical-accuracy approval for every LoD.
+The current manifest and `/health` therefore report particle simulation as `not-approved`
+(`resolution-error-budget-unset`). The generated pages are an inspectable backend artifact,
+not yet an approved simulation input.
+
+The manifest also carries a canonical digest of its complete ordered page set. Verification
+requires the exact `times × limits` address product, matching budgets, page paths, lengths,
+hashes, and maximum speeds. A configurable preflight bounds spatial pages and raw bytes and
+reserves free disk space before topology preparation. Atomic replacement rejects symlinked or
+unowned directories even when they happen to be named `cache`.
 
 There is no second raster plane. In particular, construction emits no boundary, depth,
 wet/dry, SDF, activity, or vector-feature payload. Runtime display exclusion remains an
@@ -101,6 +116,7 @@ override them with the currently implemented typed modes:
 
 ```python
 from geoscratch_flow_field_tiles import (
+    BuildBudget,
     DelaunayTopology,
     TriangleLinearInterpolation,
 )
@@ -116,6 +132,11 @@ build_velocity_tiles(
     interpolation=TriangleLinearInterpolation(
         stationary_policy="require-all-moving",
         stationary_epsilon=0.0,
+    ),
+    budget=BuildBudget(
+        max_spatial_pages=4_096,
+        max_raw_page_bytes=8 * 1024**3,
+        minimum_free_bytes=64 * 1024**2,
     ),
 )
 ```

@@ -62,14 +62,14 @@ describe('Geo virtual-raster Flow readiness contract', () => {
         }
     })
 
-    it('freezes the complete next Flow clean-cut matrix without performing it', () => {
+    it('records the independent velocity-only Flow Field readiness boundary', () => {
 
         for (const requirement of [
-            'screen UV',
+            'independent `Flow Field`',
+            'velocity-only',
+            'no support/mask plane',
             '27 slices',
-            '`simulationLod`',
-            '`renderLod`',
-            '`residencyLod`',
+            'simulation, render-demand, and resolved-residency levels',
             'prediction',
             'split/merge',
             'history',

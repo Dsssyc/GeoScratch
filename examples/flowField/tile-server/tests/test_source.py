@@ -138,3 +138,15 @@ def test_source_rejects_non_finite_velocity_even_with_matching_hash(
 
     with pytest.raises(ValueError, match="finite float32 pairs"):
         load_source_dataset(source_directory, descriptor_path=descriptor_path)
+
+
+def test_source_descriptor_rejects_unknown_schema_keys(synthetic_source, tmp_path):
+    descriptor = json.loads(
+        synthetic_source.descriptor_path.read_text(encoding="utf-8")
+    )
+    descriptor["topolgy"] = descriptor["topology"]
+    descriptor_path = tmp_path / "source-dataset.json"
+    descriptor_path.write_text(json.dumps(descriptor), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="unknown keys"):
+        read_source_descriptor(descriptor_path)

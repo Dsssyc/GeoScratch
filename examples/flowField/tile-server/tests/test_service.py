@@ -4,7 +4,7 @@ import json
 
 from fastapi.testclient import TestClient
 
-from geoscratch_flow_field_tiles.service import create_app
+from geoscratch_flow_field_tiles.service import VelocityTileStore, create_app
 
 
 def _first_page(built_tiles) -> dict:
@@ -30,6 +30,7 @@ def test_health_and_manifest_are_immutable_and_conditional(built_tiles):
         "status": "ok",
         "contentVersion": built_tiles.content_version,
         "pageCount": built_tiles.page_count,
+        "particleSimulation": "not-approved",
     }
     assert health.headers["cache-control"] == "no-store"
     assert manifest.status_code == 200
@@ -107,6 +108,45 @@ def test_conditional_request_cannot_hide_a_missing_declared_page(built_tiles, tm
     )
 
 
+def test_conditional_request_cannot_hide_same_length_page_corruption(
+    built_tiles,
+    tmp_path,
+):
+    output = tmp_path / "corrupt"
+    output.mkdir()
+    output.joinpath("manifest.json").write_bytes(built_tiles.manifest_path.read_bytes())
+    page = _first_page(built_tiles)
+    path = output / page["path"]
+    path.parent.mkdir(parents=True)
+    path.write_bytes(b"\x01" + b"\x00" * (page["byteLength"] - 1))
+
+    with TestClient(create_app(output)) as client:
+        response = client.get(
+            _route(page),
+            headers={"If-None-Match": f'"{page["sha256"]}"'},
+        )
+
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == (
+        "FLOW_FIELD_TILE_ARTIFACT_UNAVAILABLE"
+    )
+
+
+def test_unchanged_verified_tile_skips_a_second_body_read(
+    built_tiles,
+    monkeypatch,
+):
+    store = VelocityTileStore(built_tiles.output_directory)
+    page = _first_page(built_tiles)
+    store.verify_tile(page)
+
+    def unexpected_read(_path):
+        raise AssertionError("unchanged verified tile body was read again")
+
+    monkeypatch.setattr(type(built_tiles.manifest_path), "read_bytes", unexpected_read)
+    store.verify_tile(page)
+
+
 def test_stats_are_bounded_aggregates_without_request_history(built_tiles):
     page = _first_page(built_tiles)
     with TestClient(create_app(built_tiles.output_directory)) as client:
@@ -132,7 +172,7 @@ def test_service_refuses_a_stale_builder_manifest(built_tiles, tmp_path):
     output = tmp_path / "stale"
     output.mkdir()
     manifest = json.loads(built_tiles.manifest_path.read_text(encoding="utf-8"))
-    manifest["construction"]["algorithmVersion"] = "flow-rg32f-wmq-v2"
+    manifest["construction"]["algorithmVersion"] = "flow-rg32f-wmq-v3"
     output.joinpath("manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
 
     try:

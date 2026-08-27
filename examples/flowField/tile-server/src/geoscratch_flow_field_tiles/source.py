@@ -89,6 +89,25 @@ def read_source_descriptor(path: str | Path = DEFAULT_DESCRIPTOR_PATH) -> Source
     raw = json.loads(descriptor_path.read_text(encoding="utf-8"))
     if not isinstance(raw, dict) or raw.get("schemaVersion") != 2:
         raise ValueError("Flow Field source descriptor schemaVersion must be 2")
+    allowed = {
+        "schemaVersion",
+        "datasetId",
+        "sourceRevision",
+        "stationCount",
+        "fieldCount",
+        "unit",
+        "basis",
+        "phase",
+        "station",
+        "fields",
+        "topology",
+        "interpolation",
+    }
+    unknown = set(raw) - allowed
+    if unknown:
+        raise ValueError(
+            f"Flow Field source descriptor contains unknown keys: {sorted(unknown)}"
+        )
     station_count = _require_integer(raw.get("stationCount"), "stationCount", 3)
     field_count = _require_integer(raw.get("fieldCount"), "fieldCount", 1)
     if raw.get("unit") != "legacy-flow-unit":
@@ -100,6 +119,8 @@ def read_source_descriptor(path: str | Path = DEFAULT_DESCRIPTOR_PATH) -> Source
     station = raw.get("station")
     if not isinstance(station, dict):
         raise ValueError("station must be an object")
+    if set(station) != {"file", "sha256"}:
+        raise ValueError("station must contain exactly file and sha256")
     raw_fields = raw.get("fields")
     if not isinstance(raw_fields, list) or len(raw_fields) != field_count:
         raise ValueError("fields length must equal fieldCount")
@@ -107,6 +128,10 @@ def read_source_descriptor(path: str | Path = DEFAULT_DESCRIPTOR_PATH) -> Source
     for expected_time_index, field in enumerate(raw_fields):
         if not isinstance(field, dict):
             raise ValueError(f"fields[{expected_time_index}] must be an object")
+        if set(field) != {"timeIndex", "modelTime", "file", "sha256"}:
+            raise ValueError(
+                f"fields[{expected_time_index}] contains unknown or missing keys"
+            )
         time_index = _require_integer(
             field.get("timeIndex"),
             f"fields[{expected_time_index}].timeIndex",

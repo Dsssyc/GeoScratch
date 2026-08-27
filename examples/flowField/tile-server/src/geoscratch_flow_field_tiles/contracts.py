@@ -8,6 +8,24 @@ from typing import Any, Literal, TypeAlias
 DuplicatePolicy: TypeAlias = Literal["error", "first", "mean"]
 
 
+@dataclass(frozen=True, slots=True)
+class BuildBudget:
+    """Bounds page count, raw output bytes, and the disk reserve for one build."""
+
+    max_spatial_pages: int = 4_096
+    max_raw_page_bytes: int = 8 * 1024 * 1024 * 1024
+    minimum_free_bytes: int = 64 * 1024 * 1024
+
+    def __post_init__(self) -> None:
+        for name, value in (
+            ("max_spatial_pages", self.max_spatial_pages),
+            ("max_raw_page_bytes", self.max_raw_page_bytes),
+            ("minimum_free_bytes", self.minimum_free_bytes),
+        ):
+            if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+                raise ValueError(f"{name} must be a positive integer")
+
+
 class UnsupportedTopologyError(ValueError):
     """Raised when a build requests a topology strategy this version cannot prepare."""
 
@@ -121,6 +139,18 @@ def resolve_interpolation(value: object | None) -> TriangleLinearInterpolation:
 def read_topology_spec(value: Any) -> DelaunayTopology:
     if not isinstance(value, dict) or value.get("kind") != "delaunay":
         raise UnsupportedTopologyError("Flow Field source topology must be delaunay")
+    allowed = {
+        "kind",
+        "duplicatePolicy",
+        "localSpacingNeighbors",
+        "maximumEdgeRatio",
+        "maximumEdgeLengthMeters",
+    }
+    unknown = set(value) - allowed
+    if unknown:
+        raise ValueError(
+            f"Flow Field Delaunay topology contains unknown keys: {sorted(unknown)}"
+        )
     return DelaunayTopology(
         duplicate_policy=value.get("duplicatePolicy", "error"),
         local_spacing_neighbors=value.get("localSpacingNeighbors", 8),
@@ -133,6 +163,13 @@ def read_interpolation_spec(value: Any) -> TriangleLinearInterpolation:
     if not isinstance(value, dict) or value.get("kind") != "triangle-linear":
         raise UnsupportedInterpolationError(
             "Flow Field source interpolation must be triangle-linear"
+        )
+    allowed = {"kind", "stationaryPolicy", "stationaryEpsilon"}
+    unknown = set(value) - allowed
+    if unknown:
+        raise ValueError(
+            "Flow Field triangle-linear interpolation contains unknown keys: "
+            f"{sorted(unknown)}"
         )
     return TriangleLinearInterpolation(
         stationary_policy=value.get("stationaryPolicy", "require-all-moving"),

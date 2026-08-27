@@ -22,6 +22,7 @@ class TriangleLinearStencil:
     target_indices: np.ndarray
     vertex_indices: np.ndarray
     weights: np.ndarray
+    status: np.ndarray
     outside_target_count: int
     rejected_target_count: int
     numerical_target_count: int
@@ -38,12 +39,20 @@ class TriangleLinearStencil:
         return self.apply_unique(topology.aggregate_field(field))
 
     def apply_unique(self, unique_field: np.ndarray) -> np.ndarray:
+        output, _advectable = self.apply_unique_with_support(unique_field)
+        return output
+
+    def apply_unique_with_support(
+        self,
+        unique_field: np.ndarray,
+    ) -> tuple[np.ndarray, np.ndarray]:
         values_by_vertex = np.asarray(unique_field, dtype=np.float64)
         if values_by_vertex.ndim != 2 or values_by_vertex.shape[1] != 2:
             raise ValueError("prepared velocity field must contain U/V pairs")
         if not np.isfinite(values_by_vertex).all():
             raise ValueError("prepared velocity field must contain finite U/V pairs")
         output = np.zeros((self.target_count, 2), dtype=np.float64)
+        advectable = np.zeros(self.target_count, dtype=bool)
         if self.target_indices.size:
             if int(self.vertex_indices.max(initial=-1)) >= values_by_vertex.shape[0]:
                 raise ValueError("prepared velocity field does not cover the stencil vertices")
@@ -53,14 +62,16 @@ class TriangleLinearStencil:
                 > self.interpolation.stationary_epsilon,
                 axis=1,
             )
-            interpolated = np.einsum(
-                "ki,kic->kc",
-                self.weights,
-                values,
-                optimize=True,
-            )
-            output[self.target_indices[moving]] = interpolated[moving]
-        return output.astype("<f4")
+            if moving.any():
+                selected_targets = self.target_indices[moving]
+                output[selected_targets] = np.einsum(
+                    "ki,kic->kc",
+                    self.weights[moving],
+                    values[moving],
+                    optimize=True,
+                )
+                advectable[selected_targets] = True
+        return output.astype("<f4"), advectable
 
     def manifest(self) -> dict[str, object]:
         return {
@@ -96,7 +107,8 @@ def prepare_triangle_linear_stencil(
         project_lon_lat(np.column_stack((longitude, latitude)))
     )
     # `find_simplex` returns -1 outside the triangulation; filter it before any
-    # indexing. Source: https://docs.scipy.org/doc/scipy/reference/generated/scipy.spatial.Delaunay.find_simplex.html
+    # indexing. Source:
+    # https://docs.scipy.org/doc/scipy/reference/generated/scipy.spatial.Delaunay.find_simplex.html
     simplex_ids = topology.triangulation.find_simplex(
         normalized,
         tol=_BARYCENTRIC_TOLERANCE,
@@ -106,6 +118,8 @@ def prepare_triangle_linear_stencil(
     accepted[inside] = topology.accepted_simplices[simplex_ids[inside]]
     candidate_indices = np.flatnonzero(accepted)
     numerical = np.zeros(target_count, dtype=bool)
+    status = np.zeros(target_count, dtype=np.uint8)
+    status[inside] = 2
 
     if candidate_indices.size:
         candidate_simplex_ids = simplex_ids[candidate_indices]
@@ -126,6 +140,8 @@ def prepare_triangle_linear_stencil(
         stable &= np.all(weights <= 1.0 + _BARYCENTRIC_TOLERANCE, axis=1)
         numerical[candidate_indices[~stable]] = True
         target_indices = candidate_indices[stable]
+        status[target_indices] = 1
+        status[candidate_indices[~stable]] = 3
         simplex_indices = candidate_simplex_ids[stable]
         weights = np.clip(weights[stable], 0.0, 1.0)
         weights /= weights.sum(axis=1, keepdims=True)
@@ -142,7 +158,7 @@ def prepare_triangle_linear_stencil(
     rejected_target_count = int(np.count_nonzero(inside & ~accepted))
     numerical_target_count = int(np.count_nonzero(numerical))
     target_indices = target_indices.astype(np.int32, copy=False)
-    for array in (target_indices, vertex_indices, weights):
+    for array in (target_indices, vertex_indices, weights, status):
         array.setflags(write=False)
     return TriangleLinearStencil(
         interpolation=spec,
@@ -150,6 +166,7 @@ def prepare_triangle_linear_stencil(
         target_indices=target_indices,
         vertex_indices=vertex_indices,
         weights=weights,
+        status=status,
         outside_target_count=outside_target_count,
         rejected_target_count=rejected_target_count,
         numerical_target_count=numerical_target_count,

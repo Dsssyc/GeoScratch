@@ -122,6 +122,8 @@ class VelocityTileStore:
                 raise ValueError(f"Flow Field manifest page contract is invalid: {key}")
             pages[key] = page
         self.pages = pages
+        self._verified_tiles: dict[Path, tuple[int, int, int, int, int]] = {}
+        self._verified_tiles_lock = threading.Lock()
 
     def tile_facts(
         self,
@@ -140,6 +142,47 @@ class VelocityTileStore:
     def etag(self, page: dict[str, Any]) -> str:
         return f'"{page["sha256"]}"'
 
+    def ensure_tile_available(
+        self,
+        page: dict[str, Any],
+    ) -> tuple[Path, tuple[int, int, int, int, int]]:
+        relative_path = Path(page["path"])
+        if relative_path.is_absolute() or ".." in relative_path.parts:
+            raise FileNotFoundError("declared Flow Field page path is invalid")
+        path = self.output_directory / relative_path
+        if not path.is_file():
+            raise FileNotFoundError(f"declared Flow Field page is missing: {relative_path}")
+        stat = path.stat()
+        if stat.st_size != page["byteLength"]:
+            raise FileNotFoundError(
+                f"declared Flow Field page has the wrong byte length: {relative_path}"
+            )
+        return path, (
+            stat.st_dev,
+            stat.st_ino,
+            stat.st_size,
+            stat.st_mtime_ns,
+            stat.st_ctime_ns,
+        )
+
+    def verify_tile(self, page: dict[str, Any]) -> None:
+        path, fingerprint = self.ensure_tile_available(page)
+        with self._verified_tiles_lock:
+            if self._verified_tiles.get(path) == fingerprint:
+                return
+        content = path.read_bytes()
+        if hashlib.sha256(content).hexdigest() != page["sha256"]:
+            raise FileNotFoundError(
+                f"declared Flow Field page has the wrong hash: {Path(page['path'])}"
+            )
+        _path, after = self.ensure_tile_available(page)
+        if after != fingerprint:
+            raise FileNotFoundError(
+                f"declared Flow Field page changed while being verified: {Path(page['path'])}"
+            )
+        with self._verified_tiles_lock:
+            self._verified_tiles[path] = fingerprint
+
     def read_tile(
         self,
         time_id: str,
@@ -150,21 +193,23 @@ class VelocityTileStore:
         page = self.tile_facts(time_id, matrix_id, tile_row, tile_col)
         if page is None:
             raise KeyError((time_id, matrix_id, tile_row, tile_col))
+        path, fingerprint = self.ensure_tile_available(page)
         relative_path = Path(page["path"])
-        if relative_path.is_absolute() or ".." in relative_path.parts:
-            raise FileNotFoundError("declared Flow Field page path is invalid")
-        path = self.output_directory / relative_path
-        if not path.is_file():
-            raise FileNotFoundError(f"declared Flow Field page is missing: {relative_path}")
         content = path.read_bytes()
-        if len(content) != page["byteLength"]:
+        _path, after = self.ensure_tile_available(page)
+        if after != fingerprint:
             raise FileNotFoundError(
-                f"declared Flow Field page has the wrong byte length: {relative_path}"
+                f"declared Flow Field page changed while being read: {relative_path}"
             )
-        if hashlib.sha256(content).hexdigest() != page["sha256"]:
+        with self._verified_tiles_lock:
+            is_verified = self._verified_tiles.get(path) == fingerprint
+        if not is_verified and hashlib.sha256(content).hexdigest() != page["sha256"]:
             raise FileNotFoundError(
                 f"declared Flow Field page has the wrong hash: {relative_path}"
             )
+        if not is_verified:
+            with self._verified_tiles_lock:
+                self._verified_tiles[path] = fingerprint
         return TileRead(content=content, page=page, time_id=time_id)
 
 
@@ -185,6 +230,9 @@ def create_app(output_directory: str | Path = DEFAULT_OUTPUT_DIRECTORY) -> FastA
             "status": "ok",
             "contentVersion": store.manifest["contentVersion"],
             "pageCount": len(store.pages),
+            "particleSimulation": store.manifest["construction"]["quality"][
+                "particleSimulation"
+            ],
         })
         response.headers["Cache-Control"] = "no-store"
         return response
@@ -231,8 +279,13 @@ def create_app(output_directory: str | Path = DEFAULT_OUTPUT_DIRECTORY) -> FastA
             )
         etag = store.etag(page)
         headers = {"Cache-Control": IMMUTABLE_CACHE_CONTROL, "ETag": etag}
+        conditional = request.headers.get("if-none-match") == etag
         try:
-            tile_read = store.read_tile(time_id, matrix_id, tile_row, tile_col)
+            if conditional:
+                store.verify_tile(page)
+                tile_read = None
+            else:
+                tile_read = store.read_tile(time_id, matrix_id, tile_row, tile_col)
         except (FileNotFoundError, OSError) as error:
             stats.record_failure()
             raise HTTPException(
@@ -242,9 +295,11 @@ def create_app(output_directory: str | Path = DEFAULT_OUTPUT_DIRECTORY) -> FastA
                     "message": str(error),
                 },
             ) from error
-        if request.headers.get("if-none-match") == etag:
+        if conditional:
             stats.record_not_modified()
             return Response(status_code=304, headers=headers)
+        if tile_read is None:
+            raise RuntimeError("Flow Field tile read unexpectedly missing")
         stats.record_success(
             len(tile_read.content),
             tile_read.page["matrixId"],

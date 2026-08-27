@@ -7,6 +7,7 @@ from geoscratch_flow_field_tiles import DelaunayTopology
 from geoscratch_flow_field_tiles.topology import (
     DegenerateTopologyError,
     DuplicateStationError,
+    _maximum_pairwise_distance,
     prepare_topology,
 )
 
@@ -97,3 +98,11 @@ def test_velocity_field_validation_happens_before_interpolation():
         prepared.aggregate_field(np.ones((2, 2)))
     with pytest.raises(ValueError, match="finite"):
         prepared.aggregate_field(np.asarray([[1, 2], [3, np.nan], [5, 6]]))
+
+
+def test_duplicate_difference_scan_is_exact_across_bounded_blocks():
+    values = np.zeros((513, 2), dtype=np.float64)
+    values[256] = [3.0, 4.0]
+    values[512] = [-3.0, -4.0]
+
+    assert _maximum_pairwise_distance(values) == 10.0

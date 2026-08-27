@@ -95,10 +95,9 @@ class PreparedDelaunayTopology:
             members = np.flatnonzero(self.source_to_vertex == vertex)
             for field in fields:
                 values = np.asarray(field, dtype=np.float64)[members]
-                differences = values[:, None, :] - values[None, :, :]
                 maximum_difference = max(
                     maximum_difference,
-                    float(np.linalg.norm(differences, axis=2).max(initial=0.0)),
+                    _maximum_pairwise_distance(values),
                 )
         return DuplicateStatistics(
             location_count=int(duplicate_vertices.size),
@@ -168,6 +167,20 @@ def project_lon_lat(points: np.ndarray) -> np.ndarray:
     ))
 
 
+def _maximum_pairwise_distance(values: np.ndarray, block_size: int = 256) -> float:
+    maximum = 0.0
+    for first_start in range(0, values.shape[0], block_size):
+        first = values[first_start:first_start + block_size]
+        for second_start in range(first_start, values.shape[0], block_size):
+            second = values[second_start:second_start + block_size]
+            differences = first[:, None, :] - second[None, :, :]
+            maximum = max(
+                maximum,
+                float(np.linalg.norm(differences, axis=2).max(initial=0.0)),
+            )
+    return maximum
+
+
 def prepare_topology(
     stations: np.ndarray,
     topology: TopologySpec | None = None,
@@ -210,7 +223,8 @@ def prepare_topology(
         raise DegenerateTopologyError("station coordinates are collinear")
     try:
         # SciPy documents the simplex/connectivity contract and the possibility of
-        # omitted points here: https://docs.scipy.org/doc/scipy/reference/generated/scipy.spatial.Delaunay.html
+        # omitted points here:
+        # https://docs.scipy.org/doc/scipy/reference/generated/scipy.spatial.Delaunay.html
         triangulation = Delaunay(normalized, qhull_options=QHULL_OPTIONS)
     except QhullError as error:
         raise DegenerateTopologyError(f"Delaunay construction failed: {error}") from error
