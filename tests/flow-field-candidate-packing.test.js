@@ -117,6 +117,21 @@ describe('Flow Field candidate packing', () => {
             candidate(coarse, 6, 13, 0, 0, 0),
         ], coarse.codec, 16)).to.throw(RangeError)
     })
+
+    it('preserves internal levels independently from z8/z9 page identity', () => {
+
+        const fixture = createMultiLevelFixture()
+        const finest = candidateAtMatrix(fixture, '9', 210, 428, 0)
+        const parent = candidateAtMatrix(fixture, '8', 105, 214, 1)
+        const packed = packFlowCandidateCells([ finest, parent ], fixture.codec, 32)
+        const view = new DataView(packed.buffer, packed.byteOffset, packed.byteLength)
+
+        expect(finest.page.level).to.equal(0)
+        expect(parent.page.level).to.equal(1)
+        expect(view.getUint32(20, true)).to.equal(0)
+        expect(view.getUint32(52, true)).to.equal(1)
+        expect(view.getUint32(48, true)).to.equal(view.getUint32(16, true) * 2)
+    })
 })
 
 function createFixture(matrixId, bounds) {
@@ -135,6 +150,33 @@ function createFixture(matrixId, bounds) {
     }
 }
 
+function createMultiLevelFixture() {
+
+    const coverage = tileMatrixCoverage({
+        tileMatrixSet: WebMercatorQuad,
+        limits: [
+            {
+                matrixId: '8',
+                minTileRow: 105,
+                maxTileRow: 105,
+                minTileCol: 214,
+                maxTileCol: 214,
+            },
+            {
+                matrixId: '9',
+                minTileRow: 210,
+                maxTileRow: 210,
+                minTileCol: 428,
+                maxTileCol: 428,
+            },
+        ],
+    })
+    return {
+        codec: webMercatorQuadAddressCodec({ coverage, coordinateBits: 40 }),
+        addressSpace: virtualRasterTileAddressSpace({ id: 'flow-candidate-z8-z9', coverage }),
+    }
+}
+
 function candidate(fixture, tileRow, tileCol, cellX, cellY, requestedLevel) {
 
     return Object.freeze({
@@ -146,6 +188,16 @@ function candidate(fixture, tileRow, tileCol, cellX, cellY, requestedLevel) {
         requestedLevel,
         cellX,
         cellY,
+    })
+}
+
+function candidateAtMatrix(fixture, matrixId, tileRow, tileCol, requestedLevel) {
+
+    return Object.freeze({
+        page: fixture.addressSpace.pageFromTile({ matrixId, tileRow, tileCol }),
+        requestedLevel,
+        cellX: 0,
+        cellY: 0,
     })
 }
 
