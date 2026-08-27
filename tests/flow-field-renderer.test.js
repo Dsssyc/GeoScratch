@@ -96,6 +96,8 @@ describe('Flow Field renderer composition', () => {
         expect(source).to.include('await frameInFlight')
         expect(source).to.include('viewDemandProducer.maxDemands')
         expect(source).to.include('needsFollowUp: false')
+        expect(source).to.include('async function flushResidency()')
+        expect(source).to.include('residency flush requires an idle renderer')
         expect(source).to.not.match(/runtime\.(?:device|queue)/)
         expect(source).to.not.match(/packages\/geoscratch\/src|flowLayer/)
         expect(source).to.not.match(/boundary(?:Texture|Feature)|depthTexture|wetMask|SDF/)

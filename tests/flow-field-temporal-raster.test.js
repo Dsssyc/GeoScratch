@@ -288,6 +288,8 @@ describe('Flow Field temporal velocity raster', () => {
         expect(module.code).to.include('fn FlowVelocityNext_sample_compute(')
         expect(module.code.match(/struct FlowVelocityAddressFixedPosition/g)).to.have.length(1)
         expect(module.code).to.include('fn FlowVelocity_sample(')
+        expect(module.code).to.include('fn FlowVelocity_source_contains(')
+        expect(module.code).to.include('if (!FlowVelocity_source_contains(position))')
         expect(module.code).to.include('common_level = max(')
         expect(module.code).to.include('FlowVelocityCurrent_sample_compute(position, common_level)')
         expect(module.code).to.include('FlowVelocityNext_sample_compute(position, common_level)')

@@ -107,6 +107,7 @@ describe('Flow Field contour reference', () => {
         for (const label of [
             'Flow Field contour candidates',
             'Flow Field contour segments',
+            'Initialize Flow Field contour segments',
             'Flow Field contour indirect arguments',
             'Flow Field contour overflow',
             'Flow Field contour uniform',
@@ -116,6 +117,9 @@ describe('Flow Field contour reference', () => {
         expect(source).to.include('candidateBytes: ArrayBufferView')
         expect(source).to.include('candidateStaging.set(new Uint8Array(')
         expect(source).to.include('builder.upload(candidateUpload)')
+        expect(source).to.include('usage: BUFFER_COPY_DST | BUFFER_STORAGE')
+        expect(source).to.include('builder.clear(clearSegments)')
+        expect(source).to.include("{ resource: segments, contentEpoch: 'current-at-step' }")
         expect(source).to.include('segmentCapacity * FLOW_CONTOUR_SEGMENT_BYTE_LENGTH')
         expect(source).to.not.match(/runtime\.(?:device|queue)/)
         expect(source).to.not.match(/packages\/geoscratch\/src|flowLayer/)

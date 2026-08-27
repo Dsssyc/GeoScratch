@@ -15,7 +15,7 @@ struct FlowParticleSegment {
     previous: FlowVelocityAddressFixedPosition,
     current: FlowVelocityAddressFixedPosition,
     velocity: vec2f,
-    active: u32,
+    visible: u32,
 }
 
 @group(0) @binding(0) var<storage, read> flowParticleRenderRecords:

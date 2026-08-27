@@ -32,6 +32,8 @@ describe('Flow Field application shell', () => {
         expect(source).to.include('maximumInFlightFrames: 1')
         expect(source).to.include('return renderer.render(frameNumber, captured)')
         expect(source).to.include('if (!paused) frameController.invalidate()')
+        expect(source).to.include('frameController.stop()')
+        expect(source).to.include('renderer.flushResidency()')
         expect(source).not.to.match(/map\.on\(['"](?:move|resize|load)/)
     })
 

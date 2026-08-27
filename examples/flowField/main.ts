@@ -13,6 +13,11 @@ type FlowFieldProofApi = Readonly<{
     dispose(): Promise<unknown>
     facts(): FlowFieldApplicationFacts | undefined
 }>
+type FailureDetails = Error & {
+    diagnostic?: unknown
+    context?: unknown
+    cause?: unknown
+}
 
 const canvas = document.getElementById('GPUFrame') as HTMLCanvasElement
 const lifetime = new LifetimeScope({ label: 'flow-field-page' })
@@ -39,6 +44,8 @@ const proofApi: FlowFieldProofApi = Object.freeze({
     async pauseAndDrain() {
 
         application?.setPaused(true)
+        await lifetime.drain()
+        await application?.flush()
         await lifetime.drain()
         return application?.facts()
     },
@@ -116,5 +123,15 @@ function reportFatalError(error: unknown): void {
 
     setStatus('error')
     canvas.dataset.error = error instanceof Error ? error.message : String(error)
+    if ((error as FailureDetails | null | undefined)?.diagnostic !== undefined) {
+        const details = error as FailureDetails
+        canvas.dataset.diagnostic = JSON.stringify(details.diagnostic)
+        canvas.dataset.failure = JSON.stringify({
+            context: details.context,
+            cause: details.cause instanceof Error
+                ? { name: details.cause.name, message: details.cause.message }
+                : details.cause,
+        })
+    }
     console.error(error)
 }

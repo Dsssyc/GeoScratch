@@ -231,6 +231,7 @@ type OwnedContourGraph = Readonly<{
     buffers: readonly BufferResource[]
     uploads: readonly UploadCommand[]
     clearOverflow: ClearBufferCommand
+    clearSegments: ClearBufferCommand
     bindLayouts: readonly BindLayout[]
     bindSets: readonly BindSet[]
     shaderModules: readonly ShaderModule[]
@@ -296,7 +297,7 @@ export async function createFlowContour(options: FlowContourOptions): Promise<Fl
     const segments = await runtime.createBuffer({
         label: 'Flow Field contour segments',
         size: segmentCapacity * FLOW_CONTOUR_SEGMENT_BYTE_LENGTH,
-        usage: BUFFER_STORAGE,
+        usage: BUFFER_COPY_DST | BUFFER_STORAGE,
     })
     const indirect = await runtime.createBuffer({
         label: 'Flow Field contour indirect arguments',
@@ -333,6 +334,10 @@ export async function createFlowContour(options: FlowContourOptions): Promise<Fl
     const clearOverflow = runtime.createClearBufferCommand({
         label: 'Clear Flow Field contour overflow',
         target: overflow.region(),
+    })
+    const clearSegments = runtime.createClearBufferCommand({
+        label: 'Initialize Flow Field contour segments',
+        target: segments.region(),
     })
     const computeLayout = await runtime.createBindLayout({
         label: 'Flow Field contour compute layout',
@@ -470,6 +475,7 @@ export async function createFlowContour(options: FlowContourOptions): Promise<Fl
         buffers: Object.freeze([ candidates, uniform, segments, indirect, overflow ]),
         uploads: Object.freeze([ candidateUpload, uniformUpload, indirectReset ]),
         clearOverflow,
+        clearSegments,
         bindLayouts: Object.freeze([ computeLayout, segmentLayout ]),
         bindSets: Object.freeze([ computeSet, segmentSet ]),
         shaderModules: Object.freeze([ computeModule, renderModule ]),
@@ -482,6 +488,7 @@ export async function createFlowContour(options: FlowContourOptions): Promise<Fl
     })
     let generate: DispatchCommand | undefined
     let temporalSet: BindSet | undefined
+    let segmentsInitialized = false
     let candidateCount = 0
     let generation = 0
     let currentSnapshotEpoch = 0
@@ -524,6 +531,9 @@ export async function createFlowContour(options: FlowContourOptions): Promise<Fl
                     read: [
                         { resource: candidates, contentEpoch: 'current-at-step' },
                         { resource: uniform, contentEpoch: 'current-at-step' },
+                        { resource: segments, contentEpoch: 'current-at-step' },
+                        { resource: indirect, contentEpoch: 'current-at-step' },
+                        { resource: overflow, contentEpoch: 'current-at-step' },
                         ...currentReads(temporalFrame.resources),
                     ],
                     write: [ segments, indirect, overflow ],
@@ -544,6 +554,10 @@ export async function createFlowContour(options: FlowContourOptions): Promise<Fl
         builder.upload(candidateUpload)
         builder.upload(uniformUpload)
         builder.upload(indirectReset)
+        if (!segmentsInitialized) {
+            builder.clear(clearSegments)
+            segmentsInitialized = true
+        }
         builder.clear(clearOverflow)
         builder.compute(computePass, [ generate ])
         builder.readback(overflowReadback)
@@ -605,6 +619,7 @@ export async function createFlowContour(options: FlowContourOptions): Promise<Fl
         for (const bindSet of graph.bindSets) bindSet.dispose()
         for (const bindLayout of graph.bindLayouts) bindLayout.dispose()
         graph.clearOverflow.dispose()
+        graph.clearSegments.dispose()
         for (const upload of graph.uploads) upload.dispose()
         for (const buffer of graph.buffers) buffer.dispose()
     }

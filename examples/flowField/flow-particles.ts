@@ -139,7 +139,7 @@ export async function prepareFlowParticleSpawnBindings(
             {
                 binding: 0,
                 name: 'flowParticleSpawnCount',
-                type: 'storage',
+                type: 'read-storage',
                 visibility: [ 'compute' ],
                 minBindingSize: 4,
             },
@@ -324,6 +324,7 @@ export async function createFlowParticles(
                         read: dedupeResources([
                             config,
                             particles,
+                            counters,
                             ...temporal.resources,
                             ...spawn.resources,
                         ]).map(resource => ({
@@ -487,8 +488,8 @@ struct FlowParticleSpawnCandidates {
     values: array<FlowParticleSpawnCandidate>,
 }
 
-struct FlowParticleSpawnAtomic {
-    value: atomic<u32>,
+struct FlowParticleSpawnCount {
+    value: u32,
 }
 
 struct FlowSpawnIndexSelection {
@@ -497,14 +498,14 @@ struct FlowSpawnIndexSelection {
     available: u32,
 }
 
-@group(2) @binding(0) var<storage, read_write> flowParticleSpawnCount:
-    FlowParticleSpawnAtomic;
+@group(2) @binding(0) var<storage, read> flowParticleSpawnCount:
+    FlowParticleSpawnCount;
 @group(2) @binding(1) var<storage, read> flowParticleSpawnCandidates:
     FlowParticleSpawnCandidates;
 
 fn FlowSpawnIndex_select(random_state: u32) -> FlowSpawnIndexSelection {
     let count = min(
-        atomicLoad(&flowParticleSpawnCount.value),
+        flowParticleSpawnCount.value,
         arrayLength(&flowParticleSpawnCandidates.values),
     );
     if (count == 0u) {

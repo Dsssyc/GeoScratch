@@ -599,6 +599,7 @@ export function temporalVelocityWgslModule(
             sharedAddress,
             currentModule.code.slice(prefix.length),
             nextModule.code.slice(prefix.length),
+            flowVelocitySourceBoundsWgsl(current),
             options.wrapper,
         ].join('\n\n'),
         bindings: Object.freeze({
@@ -613,6 +614,33 @@ export function temporalVelocityWgslModule(
             }),
         }),
     })
+}
+
+function flowVelocitySourceBoundsWgsl(model: WebMercatorVirtualRasterField): string {
+
+    const [ west, south, east, north ] = model.geographicBounds
+    const northwest = model.addressCodec.fromLonLat([ west, north ]).fixed.limbs
+    const southeast = model.addressCodec.fromLonLat([ east, south ]).fixed.limbs
+    const axis = (value: Readonly<{ low: number, high: number }>) =>
+        `FlowVelocityAddressFixedAxis(${value.low}u, ${value.high}u)`
+    return `const FlowVelocity_source_west = ${axis(northwest[0]!)};
+const FlowVelocity_source_north = ${axis(northwest[1]!)};
+const FlowVelocity_source_east = ${axis(southeast[0]!)};
+const FlowVelocity_source_south = ${axis(southeast[1]!)};
+
+fn FlowVelocity_axis_less(
+    left: FlowVelocityAddressFixedAxis,
+    right: FlowVelocityAddressFixedAxis,
+) -> bool {
+    return left.high < right.high || (left.high == right.high && left.low < right.low);
+}
+
+fn FlowVelocity_source_contains(position: FlowVelocityAddressFixedPosition) -> bool {
+    return !FlowVelocity_axis_less(position.axes[0], FlowVelocity_source_west) &&
+        !FlowVelocity_axis_less(FlowVelocity_source_east, position.axes[0]) &&
+        !FlowVelocity_axis_less(position.axes[1], FlowVelocity_source_north) &&
+        !FlowVelocity_axis_less(FlowVelocity_source_south, position.axes[1]);
+}`
 }
 
 function isInjectedOptions<Runtime>(

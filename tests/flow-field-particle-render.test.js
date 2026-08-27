@@ -49,7 +49,7 @@ describe('Flow Field particle line draw', () => {
         expect(shader).to.include('fixedDifferenceMeters(')
         expect(shader).to.include('particle.lifecycle_state == FLOW_PARTICLE_ACTIVE')
         expect(shader).to.include('sameFixedPosition(particle.current, particle.previous)')
-        expect(shader).to.include('active = active && !sameFixedPosition')
+        expect(shader).to.include('visible = visible && !sameFixedPosition')
         expect(shader).to.include('contourView.clipFromRelativeWorld * relative')
         expect(shader).to.not.match(/normalizedWorld|worldPosition:\s*vec2f/)
     })

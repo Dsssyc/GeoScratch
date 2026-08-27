@@ -50,10 +50,12 @@ export type FlowFieldApplicationFacts = Readonly<{
     frames: ReturnType<GeoFrameController['snapshot']>
     renderer: ReturnType<FlowFieldRenderer['facts']>
     workers: ReturnType<WorkerSystem['inspect']>
+    diagnostics: ReturnType<GPURuntime['diagnostics']['snapshot']>
 }>
 
 export type FlowFieldApplication = Readonly<{
     setPaused(paused: boolean): void
+    flush(): Promise<void>
     facts(): FlowFieldApplicationFacts
 }>
 
@@ -197,6 +199,15 @@ export async function startFlowFieldApplication(
         }
     }
 
+    function flush(): Promise<void> {
+
+        if (frameController.snapshot().state !== 'running') {
+            return Promise.reject(new Error('Flow Field frame controller is stopped'))
+        }
+        frameController.stop()
+        return lifetime.track(renderer.flushResidency(), 'flow-field-residency-flush')
+    }
+
     function facts(): FlowFieldApplicationFacts {
 
         return Object.freeze({
@@ -204,10 +215,11 @@ export async function startFlowFieldApplication(
             frames: frameController.snapshot(),
             renderer: renderer.facts(),
             workers: workers.inspect(),
+            diagnostics: runtime.diagnostics.snapshot(),
         })
     }
 
-    return Object.freeze({ setPaused, facts })
+    return Object.freeze({ setPaused, flush, facts })
 }
 
 function flowManifestUrl(tileServerUrl: string): URL {

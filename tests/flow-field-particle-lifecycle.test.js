@@ -241,9 +241,12 @@ describe('Flow Field particle lifecycle policy', () => {
         })
 
         expect(prepared.module.layout.group).to.equal(2)
+        expect(prepared.module.layout.entries[0].type).to.equal('read-storage')
         expect(prepared.bindings.resources).to.deep.equal([ counter, output ])
         expect(prepared.module.wgsl).to.include('fn FlowSpawnIndex_select(')
-        expect(prepared.module.wgsl).to.include('atomicLoad(&flowParticleSpawnCount.value)')
+        expect(prepared.module.wgsl).to.include('flowParticleSpawnCount.value')
+        expect(prepared.module.wgsl).to.include('var<storage, read> flowParticleSpawnCount')
+        expect(prepared.module.wgsl).to.not.include('atomicLoad(&flowParticleSpawnCount.value)')
         expect(prepared.module.wgsl).to.include('texel_step_quanta: u32')
         expect(prepared.module.wgsl).to.include('requested_level: u32')
         expect(prepared.module.wgsl).to.include('random_x % candidate.texel_step_quanta')

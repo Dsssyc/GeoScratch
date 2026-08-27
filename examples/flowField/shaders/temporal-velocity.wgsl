@@ -22,6 +22,9 @@ fn FlowVelocity_sample(
     requested_level: u32,
     temporal: FlowVelocityTemporal,
 ) -> FlowVelocitySample {
+    if (!FlowVelocity_source_contains(position)) {
+        return FlowVelocitySample(0u, vec2f(0.0), 0.0f, false, requested_level);
+    }
     var common_level = requested_level;
     var current = FlowVelocityCurrent_sample_compute(position, common_level);
     var next = FlowVelocityNext_sample_compute(position, common_level);

@@ -231,7 +231,7 @@ export async function createFlowSpawnIndex(
     const output = await runtime.createBuffer({
         label: 'Flow Field spawn output',
         size: capacity * FLOW_SPAWN_CANDIDATE_BYTE_LENGTH,
-        usage: GPUBufferUsage.STORAGE,
+        usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.STORAGE,
     })
     const overflow = await runtime.createBuffer({
         label: 'Flow Field spawn overflow',
@@ -267,6 +267,10 @@ export async function createFlowSpawnIndex(
     const clearOverflow = runtime.createClearBufferCommand({
         label: 'Clear Flow Field spawn overflow',
         target: resources.overflow,
+    })
+    const clearOutput = runtime.createClearBufferCommand({
+        label: 'Initialize Flow Field spawn output',
+        target: resources.output,
     })
     const spawnLayout = await runtime.createBindLayout({
         label: 'Flow Field spawn index layout',
@@ -345,7 +349,7 @@ export async function createFlowSpawnIndex(
     const graph: OwnedSpawnGraph = Object.freeze({
         buffers: Object.freeze([ candidates, counter, output, overflow, uniform ]),
         uploads: Object.freeze([ candidateUpload, uniformUpload ]),
-        clears: Object.freeze([ clearCounter, clearOverflow ]),
+        clears: Object.freeze([ clearCounter, clearOverflow, clearOutput ]),
         bindLayout: spawnLayout,
         bindSet: spawnSet,
         shaderModule,
@@ -355,6 +359,7 @@ export async function createFlowSpawnIndex(
     })
     let lastDispatch: DispatchCommand | undefined
     let lastTemporalSet: BindSet | undefined
+    let outputInitialized = false
     let candidateCount = 0
     let generation = 0
     let currentSnapshotEpoch = 0
@@ -396,6 +401,9 @@ export async function createFlowSpawnIndex(
                     read: [
                         { resource: candidates, contentEpoch: 'current-at-step' },
                         { resource: uniform, contentEpoch: 'current-at-step' },
+                        { resource: counter, contentEpoch: 'current-at-step' },
+                        { resource: output, contentEpoch: 'current-at-step' },
+                        { resource: overflow, contentEpoch: 'current-at-step' },
                         ...currentReads(temporalFrame.resources),
                     ],
                     write: [ counter, output, overflow ],
@@ -415,6 +423,10 @@ export async function createFlowSpawnIndex(
         )
         builder.upload(candidateUpload)
         builder.upload(uniformUpload)
+        if (!outputInitialized) {
+            builder.clear(clearOutput)
+            outputInitialized = true
+        }
         builder.clear(clearCounter)
         builder.clear(clearOverflow)
         builder.compute(pass, [ lastDispatch ])

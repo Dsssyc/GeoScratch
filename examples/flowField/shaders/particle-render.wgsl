@@ -32,7 +32,7 @@ struct FlowContourViewUniform {
 struct FlowParticleVertexOutput {
     @builtin(position) position: vec4f,
     @location(0) velocity: vec2f,
-    @location(1) @interpolate(flat) active: u32,
+    @location(1) @interpolate(flat) visible: u32,
 };
 
 @group(0) @binding(0) var<storage, read> flowParticleRenderRecords:
@@ -73,8 +73,8 @@ fn sameFixedPosition(
 @vertex
 fn vParticle(@builtin(vertex_index) vertexIndex: u32) -> FlowParticleVertexOutput {
     let particle = flowParticleRenderRecords[vertexIndex / 2u];
-    var active = particle.lifecycle_state == FLOW_PARTICLE_ACTIVE;
-    active = active && !sameFixedPosition(particle.current, particle.previous);
+    var visible = particle.lifecycle_state == FLOW_PARTICLE_ACTIVE;
+    visible = visible && !sameFixedPosition(particle.current, particle.previous);
     var endpoint = particle.previous;
     if ((vertexIndex & 1u) == 1u) { endpoint = particle.current; }
     let x = vec2u(endpoint.axes[0].low, endpoint.axes[0].high);
@@ -89,16 +89,16 @@ fn vParticle(@builtin(vertex_index) vertexIndex: u32) -> FlowParticleVertexOutpu
     output.position = select(
         vec4f(2.0, 2.0, 2.0, 1.0),
         contourView.clipFromRelativeWorld * relative,
-        active,
+        visible,
     );
     output.velocity = particle.velocity;
-    output.active = select(0u, 1u, active);
+    output.visible = select(0u, 1u, visible);
     return output;
 }
 
 @fragment
 fn fParticle(input: FlowParticleVertexOutput) -> @location(0) vec4f {
-    if (input.active == FLOW_PARTICLE_DORMANT) { return vec4f(0.0); }
+    if (input.visible == FLOW_PARTICLE_DORMANT) { return vec4f(0.0); }
     let speed = length(input.velocity);
     let color = mix(vec3f(0.18, 0.72, 0.96), vec3f(0.98, 0.56, 0.24), clamp(speed, 0.0, 1.0));
     return vec4f(color, 0.72);

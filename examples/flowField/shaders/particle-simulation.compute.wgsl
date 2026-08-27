@@ -32,10 +32,10 @@ struct FlowParticleConfig {
 }
 
 struct FlowParticleCounters {
-    active: atomic<u32>,
-    dormant: atomic<u32>,
-    retired: atomic<u32>,
-    reserved: atomic<u32>,
+    active_count: atomic<u32>,
+    dormant_count: atomic<u32>,
+    retired_count: atomic<u32>,
+    reserved_count: atomic<u32>,
 }
 
 @group(0) @binding(0) var<uniform> flowParticleConfig: FlowParticleConfig;
@@ -64,7 +64,7 @@ fn FlowParticles_dormant(particle: ptr<function, FlowParticle>) {
     (*particle).age_steps = 0u;
     (*particle).stagnant_steps = 0u;
     (*particle).lifecycle_state = FLOW_PARTICLE_DORMANT;
-    atomicAdd(&flowParticleCounters.dormant, 1u);
+    atomicAdd(&flowParticleCounters.dormant_count, 1u);
 }
 
 fn FlowParticles_rebirth(particle: ptr<function, FlowParticle>) -> bool {
@@ -91,7 +91,7 @@ fn FlowParticles_rebirth(particle: ptr<function, FlowParticle>) -> bool {
     (*particle).age_steps = 0u;
     (*particle).stagnant_steps = 0u;
     (*particle).lifecycle_state = FLOW_PARTICLE_ACTIVE;
-    atomicAdd(&flowParticleCounters.active, 1u);
+    atomicAdd(&flowParticleCounters.active_count, 1u);
     return true;
 }
 
@@ -151,13 +151,13 @@ fn FlowParticles_simulate(@builtin(global_invocation_id) global_id: vec3u) {
                 0u,
                 length(displacement_meters) >= flowParticleConfig.minimum_displacement_meters,
             );
-            atomicAdd(&flowParticleCounters.active, 1u);
+            atomicAdd(&flowParticleCounters.active_count, 1u);
         }
     }
 
     if (retire) {
         if (particle.lifecycle_state == FLOW_PARTICLE_ACTIVE) {
-            atomicAdd(&flowParticleCounters.retired, 1u);
+            atomicAdd(&flowParticleCounters.retired_count, 1u);
         }
         _ = FlowParticles_rebirth(&particle);
     }

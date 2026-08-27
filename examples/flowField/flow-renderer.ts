@@ -119,6 +119,12 @@ export type FlowFieldRendererFacts = Readonly<{
     maximumCandidatePages: number
     maximumCandidateCount: number
     maximumSpeed: number
+    temporalWindow: TemporalVelocitySnapshot
+    runtimes: Readonly<{
+        current: ReturnType<FlowVelocityTimeRuntime['inspect']>
+        next: ReturnType<FlowVelocityTimeRuntime['inspect']>
+        prefetch: ReturnType<FlowVelocityTimeRuntime['inspect']>
+    }>
     temporal: ReturnType<FlowTemporalBindings['facts']>
     viewDemand: ReturnType<FlowViewDemandAdapter['facts']>
     spawn: ReturnType<FlowSpawnIndex['facts']>
@@ -132,6 +138,7 @@ export type FlowFieldRenderer = Readonly<{
         frameNumber: number,
         capture: GeoViewSourceCapture<MapLibrePlanarCameraState>
     ): Promise<GeoFrameResult<FlowFieldRendererFrame>>
+    flushResidency(): Promise<void>
     facts(): FlowFieldRendererFacts
     dispose(): Promise<void>
 }>
@@ -417,6 +424,40 @@ export async function createFlowFieldRenderer(
             return Object.freeze({ current, next, prefetchRuntime, prefetch })
         }
 
+        async function flushResidency(): Promise<void> {
+
+            assertActive()
+            if (constructionInFlight !== undefined || frameInFlight !== undefined) {
+                throw new Error('Flow Field residency flush requires an idle renderer')
+            }
+            const publications = takeFramePublications()
+            const builder = runtime.createSubmission({ validation: 'throw' })
+            const pair = temporal.setPendingPublications(
+                publications.current,
+                publications.next
+            )
+            temporal.encodePending(builder)
+            publications.prefetchRuntime.gpu.encode(builder, publications.prefetch.update)
+            const submitted = builder.submit()
+            const flushing = Promise.all([
+                observeFlowSubmittedWork(submitted),
+                temporal.acknowledgePending(submitted),
+                publications.prefetchRuntime.acknowledge(publications.prefetch, submitted),
+            ]).then(() => {
+                temporal.recordPrefetchPublication(
+                    publications.prefetchRuntime.source.timeIndex,
+                    publications.prefetch.snapshotEpoch,
+                    pair.generation
+                )
+            })
+            let tracked: Promise<void>
+            tracked = flushing.finally(() => {
+                if (frameInFlight === tracked) frameInFlight = undefined
+            })
+            frameInFlight = tracked
+            return await tracked
+        }
+
         async function observeFrame(
             submitted: SubmittedWork,
             publications: FlowFramePublications,
@@ -489,6 +530,12 @@ export async function createFlowFieldRenderer(
                 maximumCandidatePages,
                 maximumCandidateCount,
                 maximumSpeed: options.maximumSpeed,
+                temporalWindow: temporal.snapshot(),
+                runtimes: Object.freeze({
+                    current: temporal.current.inspect(),
+                    next: temporal.next.inspect(),
+                    prefetch: temporal.prefetch.inspect(),
+                }),
                 temporal: temporalBindings.facts(),
                 viewDemand: viewDemand.facts(),
                 spawn: spawn.facts(),
@@ -529,7 +576,7 @@ export async function createFlowFieldRenderer(
             if (!initialized || disposed) throw new Error('Flow Field renderer is not active')
         }
 
-        return Object.freeze({ render, facts, dispose })
+        return Object.freeze({ render, flushResidency, facts, dispose })
     } catch (error) {
         await disposeOwned(owned)
         throw error
