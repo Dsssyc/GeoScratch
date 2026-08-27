@@ -1090,9 +1090,13 @@ function validateStaticWorkerDeployment(value, processState) {
 
     const failures = []
     const manifest = value.manifest?.body
-    const module = manifest?.modules?.[0]
-    const expectedArtifactUrl = typeof module?.url === 'string'
-        ? new URL(module.url, value.manifest.url).href
+    const modules = Array.isArray(manifest?.modules) ? manifest.modules : []
+    const demModule = modules.find(module => module?.id === 'geoscratch-dem-tile')
+    const flowModule = modules.find(module => (
+        module?.id === 'geoscratch-flow-field-velocity-tile'
+    ))
+    const expectedArtifactUrl = typeof demModule?.url === 'string'
+        ? new URL(demModule.url, value.manifest.url).href
         : undefined
     const successfulJavaScript = response => response.status === 200 &&
         /(?:java|ecma)script/i.test(response.contentType)
@@ -1102,11 +1106,17 @@ function validateStaticWorkerDeployment(value, processState) {
     if (value.manifest?.status !== 200 ||
         !/application\/json/i.test(value.manifest?.contentType ?? '') ||
         manifest?.kind !== 'geoscratch-worker-module-manifest' ||
-        manifest?.schemaVersion !== 1 || manifest?.modules?.length !== 1 ||
-        module?.id !== 'geoscratch-dem-tile' || module?.version !== '2' ||
-        !/^\.\/geoscratch-dem-tile-[0-9a-f]{12}\.js$/.test(module?.url ?? '') ||
-        !/^[0-9a-f]{64}$/.test(module?.sha256 ?? '')) {
-        failures.push('production Worker manifest was not the strict content-addressed DEM catalog')
+        manifest?.schemaVersion !== 1 || modules.length < 2 ||
+        demModule?.version !== '2' || flowModule?.version !== '1' ||
+        !/^\.\/geoscratch-dem-tile-[0-9a-f]{12}\.js$/.test(demModule?.url ?? '') ||
+        !/^\.\/geoscratch-flow-field-velocity-tile-[0-9a-f]{12}\.js$/.test(
+            flowModule?.url ?? ''
+        ) ||
+        !/^[0-9a-f]{64}$/.test(demModule?.sha256 ?? '') ||
+        !/^[0-9a-f]{64}$/.test(flowModule?.sha256 ?? '')) {
+        failures.push(
+            'production Worker manifest was not the strict content-addressed DEM and Flow catalog'
+        )
     }
     if (!value.events.workerManifestResponses.some(response => (
         response.status === 200 && /application\/json/i.test(response.contentType)

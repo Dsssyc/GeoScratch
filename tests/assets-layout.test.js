@@ -55,20 +55,31 @@ describe('asset layout', () => {
         expect(config).to.not.include("publicDir: path.resolve(projectRoot, 'public')")
     })
 
-    it('keeps DEM Worker deployment independent from Vite-specific URL modules', () => {
+    it('keeps example Worker deployment independent from Vite-specific URL modules', () => {
 
         const config = read('examples', 'vite.config.ts')
         const workerExecutor = read('examples', 'underwaterTerrain', 'dem-tile-executor.ts')
+        const flowExecutor = read('examples', 'flowField', 'velocity-tile-executor.ts')
+        const workerModules = read('examples', 'worker-modules.ts')
 
         expect(exists('examples', 'underwaterTerrain', 'dem-tile-worker-url.ts')).to.equal(false)
         expect(exists('examples', 'underwaterTerrain', 'dem-worker-source.ts')).to.equal(false)
+        expect(exists('examples', 'flowField', 'velocity-tile-protocol.ts')).to.equal(true)
+        expect(exists('examples', 'flowField', 'velocity-tile-worker.ts')).to.equal(true)
+        expect(exists('examples', 'flowField', 'velocity-tile-executor.ts')).to.equal(true)
         expect(config).to.not.include('workerModuleUrlPlugin')
         expect(config).to.not.include('demWorkerUrlModule')
         expect(config).to.not.include('demWorkerModule')
         expect(workerExecutor).to.include('DEM_TILE_WORKER')
         expect(workerExecutor).to.include('moduleResolver: descriptor.workerModules')
         expect(workerExecutor).to.include('module: DEM_TILE_WORKER')
-        expect(read('examples', 'worker-modules.ts')).to.include('defineWorkerModuleBuild')
+        expect(flowExecutor).to.include('FLOW_FIELD_VELOCITY_TILE_WORKER')
+        expect(flowExecutor).to.include('descriptor.workerModules.resolve(')
+        expect(workerModules).to.include('defineWorkerModuleBuild')
+        expect(workerModules).to.include('DEM_TILE_WORKER')
+        expect(workerModules).to.include('FLOW_FIELD_VELOCITY_TILE_WORKER')
+        expect(workerModules).to.include("entry: './underwaterTerrain/dem-tile-worker.ts'")
+        expect(workerModules).to.include("entry: './flowField/velocity-tile-worker.ts'")
         expect(JSON.parse(read('examples', 'package.json')).scripts).to.deep.include({
             'workers:build': 'geoscratch-worker build --config ./worker-modules.ts',
             predev: 'npm run workers:build',
