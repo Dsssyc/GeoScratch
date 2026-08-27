@@ -23,7 +23,12 @@ from .contracts import (
     resolve_interpolation,
     resolve_topology,
 )
-from .interpolation import TriangleLinearStencil, prepare_triangle_linear_stencil
+from .interpolation import (
+    BilinearSafeBlock,
+    TriangleLinearStencil,
+    apply_bilinear_safe_block,
+    prepare_triangle_linear_stencil,
+)
 from .source import (
     DEFAULT_DATA_DIRECTORY,
     DEFAULT_DESCRIPTOR_PATH,
@@ -62,13 +67,6 @@ class BuildResult:
     page_count: int
     total_raw_page_bytes: int
     duration_seconds: float
-
-
-@dataclass(frozen=True, slots=True)
-class RenderedPage:
-    values: np.ndarray
-    raw_advectable_count: int
-    bilinear_safe_count: int
 
 
 def _tile_matrix_limits(
@@ -179,23 +177,11 @@ def _texel_lattice_window(
 def _render_page(
     stencil: TriangleLinearStencil,
     unique_field: np.ndarray,
-) -> RenderedPage:
-    side = TILE_SIZE + 2
-    if stencil.target_count != side * side:
-        raise ValueError("Flow Field page rendering requires a one-texel stencil halo")
-    values, raw_advectable = stencil.apply_unique_with_support(unique_field)
-    values = values.reshape(side, side, 2)
-    raw_advectable = raw_advectable.reshape(side, side)
-    bilinear_safe = np.lib.stride_tricks.sliding_window_view(
-        raw_advectable,
-        (3, 3),
-    ).all(axis=(2, 3))
-    page = values[1:-1, 1:-1].copy()
-    page[~bilinear_safe] = 0.0
-    return RenderedPage(
-        values=page,
-        raw_advectable_count=int(np.count_nonzero(raw_advectable[1:-1, 1:-1])),
-        bilinear_safe_count=int(np.count_nonzero(bilinear_safe)),
+) -> BilinearSafeBlock:
+    return apply_bilinear_safe_block(
+        stencil,
+        unique_field,
+        block_size=TILE_SIZE,
     )
 
 

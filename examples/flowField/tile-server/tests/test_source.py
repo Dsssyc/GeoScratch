@@ -13,6 +13,7 @@ from geoscratch_flow_field_tiles import (
 )
 from geoscratch_flow_field_tiles.source import (
     load_source_dataset,
+    load_source_snapshot,
     read_source_descriptor,
 )
 
@@ -150,3 +151,37 @@ def test_source_descriptor_rejects_unknown_schema_keys(synthetic_source, tmp_pat
 
     with pytest.raises(ValueError, match="unknown keys"):
         read_source_descriptor(descriptor_path)
+
+
+def test_snapshot_loads_only_the_selected_velocity_file(synthetic_source, tmp_path):
+    source_directory = tmp_path / "source"
+    source_directory.mkdir()
+    source_directory.joinpath("station.bin").write_bytes(
+        synthetic_source.directory.joinpath("station.bin").read_bytes()
+    )
+    source_directory.joinpath("uv_0.bin").write_bytes(
+        synthetic_source.directory.joinpath("uv_0.bin").read_bytes()
+    )
+
+    snapshot = load_source_snapshot(
+        source_directory,
+        time_index=0,
+        descriptor_path=synthetic_source.descriptor_path,
+    )
+
+    assert snapshot.field_descriptor.time_index == 0
+    assert np.array_equal(snapshot.stations, synthetic_source.stations.astype(np.float32))
+    assert np.array_equal(snapshot.field, synthetic_source.fields[0])
+    assert snapshot.source_hash != load_source_dataset(
+        synthetic_source.directory,
+        descriptor_path=synthetic_source.descriptor_path,
+    ).source_hash
+
+
+def test_snapshot_rejects_invalid_time_index(synthetic_source):
+    with pytest.raises(ValueError, match="time_index"):
+        load_source_snapshot(
+            synthetic_source.directory,
+            time_index=2,
+            descriptor_path=synthetic_source.descriptor_path,
+        )

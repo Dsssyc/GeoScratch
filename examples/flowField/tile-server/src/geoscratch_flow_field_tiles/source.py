@@ -58,6 +58,16 @@ class SourceDataset:
     source_hash: str
 
 
+@dataclass(frozen=True)
+class SourceSnapshot:
+    descriptor: SourceDescriptor
+    field_descriptor: FieldSourceDescriptor
+    stations: np.ndarray
+    field: np.ndarray
+    geographic_bounds: tuple[float, float, float, float]
+    source_hash: str
+
+
 def _require_integer(value: Any, name: str, minimum: int = 0) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
         raise ValueError(f"{name} must be an integer greater than or equal to {minimum}")
@@ -212,6 +222,64 @@ def _aggregate_source_hash(descriptor: SourceDescriptor) -> str:
         descriptor.phase,
     ]
     return hashlib.sha256("\n".join(facts).encode("utf-8")).hexdigest()
+
+
+def _aggregate_snapshot_hash(
+    descriptor: SourceDescriptor,
+    field: FieldSourceDescriptor,
+) -> str:
+    facts = [
+        descriptor.dataset_id,
+        descriptor.source_revision,
+        str(descriptor.station_count),
+        descriptor.station_sha256,
+        f"{field.time_index}:{field.model_time}:{field.filename}:{field.sha256}",
+        descriptor.unit,
+        descriptor.basis,
+        descriptor.phase,
+    ]
+    return hashlib.sha256("\n".join(facts).encode("utf-8")).hexdigest()
+
+
+def load_source_snapshot(
+    data_directory: str | Path = DEFAULT_DATA_DIRECTORY,
+    *,
+    time_index: int,
+    descriptor_path: str | Path = DEFAULT_DESCRIPTOR_PATH,
+) -> SourceSnapshot:
+    if isinstance(time_index, bool) or not isinstance(time_index, int):
+        raise ValueError("time_index must be an integer")
+    source_directory = Path(data_directory).resolve()
+    descriptor = read_source_descriptor(descriptor_path)
+    if not 0 <= time_index < len(descriptor.fields):
+        raise ValueError("time_index is outside the source descriptor")
+    field_descriptor = descriptor.fields[time_index]
+    stations = _read_float32_pairs(
+        source_directory / descriptor.station_filename,
+        descriptor.station_count,
+        descriptor.station_sha256,
+        "station",
+    )
+    field = _read_float32_pairs(
+        source_directory / field_descriptor.filename,
+        descriptor.station_count,
+        field_descriptor.sha256,
+        f"time {time_index}",
+    )
+    bounds = (
+        float(stations[:, 0].min()),
+        float(stations[:, 1].min()),
+        float(stations[:, 0].max()),
+        float(stations[:, 1].max()),
+    )
+    return SourceSnapshot(
+        descriptor=descriptor,
+        field_descriptor=field_descriptor,
+        stations=stations,
+        field=field,
+        geographic_bounds=bounds,
+        source_hash=_aggregate_snapshot_hash(descriptor, field_descriptor),
+    )
 
 
 def load_source_dataset(

@@ -57,6 +57,7 @@ examples/underwaterTerrain/tile-server/**/*.py[cod]
 examples/underwaterTerrain/tile-server/src/*.egg-info/
 examples/flowField/tile-server/.venv/
 examples/flowField/tile-server/cache/
+examples/flowField/tile-server/cog-cache/
 examples/flowField/tile-server/build/
 examples/flowField/tile-server/dist/
 examples/flowField/tile-server/.pytest_cache/

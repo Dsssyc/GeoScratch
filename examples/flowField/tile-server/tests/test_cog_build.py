@@ -1,0 +1,197 @@
+from __future__ import annotations
+
+import hashlib
+import json
+import shutil
+
+import numpy as np
+import pytest
+import rasterio
+from rio_cogeo.cogeo import cog_validate
+
+from geoscratch_flow_field_tiles.cog import (
+    COG_ARTIFACT_MARKER,
+    build_velocity_cog_snapshot,
+    verify_velocity_cog_snapshot,
+)
+from geoscratch_flow_field_tiles.resolution import StationSpacingResolution
+
+
+def _test_resolution() -> StationSpacingResolution:
+    return StationSpacingResolution(
+        minimum_support_points=3,
+        minimum_support_fraction=0.10,
+    )
+
+
+def _rewrite_construction_identity(output, mutate) -> dict:
+    manifest_path = output / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    mutate(manifest)
+    facts = manifest["construction"]["facts"]
+    construction_sha = hashlib.sha256(
+        json.dumps(facts, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    manifest["construction"]["sha256"] = construction_sha
+    time_index = facts["snapshot"]["timeIndex"]
+    matrix_id = facts["plan"]["grid"]["matrixId"]
+    content_version = (
+        f"flow-cog-{construction_sha[:16]}-t{time_index:02d}-z{matrix_id}-v1"
+    )
+    manifest["contentVersion"] = content_version
+    manifest_path.write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    output.joinpath(COG_ARTIFACT_MARKER).write_text(
+        json.dumps({
+            "kind": "geoscratch-flow-field-cog-artifact",
+            "contentVersion": content_version,
+        }, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return manifest
+
+
+@pytest.fixture(scope="module")
+def built_cog(synthetic_source, tmp_path_factory):
+    output = tmp_path_factory.mktemp("flow-cog-parent") / "cog-cache"
+    return build_velocity_cog_snapshot(
+        synthetic_source.directory,
+        output,
+        time_index=0,
+        descriptor_path=synthetic_source.descriptor_path,
+        resolution=_test_resolution(),
+        matrix_override=9,
+    )
+
+
+def test_snapshot_builds_one_valid_two_band_float32_cog_without_overviews(built_cog):
+    valid, errors, warnings = cog_validate(built_cog.cog_path, strict=False)
+
+    assert valid, {"errors": errors, "warnings": warnings}
+    assert errors == []
+    with rasterio.open(built_cog.cog_path) as dataset:
+        assert dataset.crs.to_string() == "EPSG:3857"
+        assert dataset.count == 2
+        assert dataset.dtypes == ("float32", "float32")
+        assert dataset.descriptions == ("U", "V")
+        assert dataset.nodata is None
+        assert dataset.block_shapes == [(256, 256), (256, 256)]
+        assert dataset.overviews(1) == []
+        assert dataset.overviews(2) == []
+        assert dataset.transform.e < 0
+        assert np.isfinite(dataset.read((1, 2))).all()
+
+
+def test_cog_manifest_records_selected_snapshot_override_and_unapproved_role(built_cog):
+    manifest = json.loads(built_cog.manifest_path.read_text(encoding="utf-8"))
+    marker = json.loads(
+        built_cog.output_directory.joinpath(COG_ARTIFACT_MARKER).read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert manifest["artifactType"] == "flow-field-cog-snapshot"
+    assert manifest["snapshot"]["timeIndex"] == 0
+    assert manifest["construction"]["facts"]["plan"]["matrixOverride"] == 9
+    assert manifest["construction"]["facts"]["plan"]["resolution"]["resolved"][
+        "matrixId"
+    ] != "9"
+    assert manifest["construction"]["facts"]["encoding"]["overviewPolicy"] == (
+        "none"
+    )
+    assert manifest["quality"] == {
+        "artifactRole": "reconstruction-prototype",
+        "particleSimulation": "not-approved",
+        "approvalReason": "single-snapshot-statistical-resolution-unvalidated",
+    }
+    assert marker == {
+        "kind": "geoscratch-flow-field-cog-artifact",
+        "contentVersion": manifest["contentVersion"],
+    }
+
+
+def test_cog_verifier_checks_container_and_pixel_identity(built_cog):
+    facts = verify_velocity_cog_snapshot(built_cog.output_directory)
+
+    assert facts["contentVersion"] == built_cog.content_version
+    assert facts["cogSha256"] == built_cog.cog_sha256
+    assert facts["matrixId"] == "9"
+    assert facts["particleSimulation"] == "not-approved"
+
+
+def test_repeated_snapshot_build_preserves_pixels_and_content_identity(
+    built_cog,
+    synthetic_source,
+    tmp_path,
+):
+    rebuilt = build_velocity_cog_snapshot(
+        synthetic_source.directory,
+        tmp_path / "cog-cache",
+        time_index=0,
+        descriptor_path=synthetic_source.descriptor_path,
+        resolution=_test_resolution(),
+        matrix_override=9,
+    )
+
+    assert rebuilt.content_version == built_cog.content_version
+    with rasterio.open(built_cog.cog_path) as first, rasterio.open(rebuilt.cog_path) as second:
+        assert first.profile == second.profile
+        assert first.tags() == second.tags()
+        assert np.array_equal(first.read((1, 2)), second.read((1, 2)))
+
+
+def test_verifier_rejects_self_consistent_path_traversal(built_cog, tmp_path):
+    output = tmp_path / "cog-cache"
+    shutil.copytree(built_cog.output_directory, output)
+    shutil.copy2(built_cog.cog_path, tmp_path / "external.cog.tif")
+    _rewrite_construction_identity(
+        output,
+        lambda manifest: manifest["construction"]["facts"]["cog"].update({
+            "path": "../external.cog.tif",
+        }),
+    )
+
+    with pytest.raises(ValueError, match="ownership"):
+        verify_velocity_cog_snapshot(output)
+
+
+def test_verifier_rejects_self_consistent_false_validation_facts(
+    built_cog,
+    tmp_path,
+):
+    output = tmp_path / "cog-cache"
+    shutil.copytree(built_cog.output_directory, output)
+    _rewrite_construction_identity(
+        output,
+        lambda manifest: manifest["construction"]["facts"]["cog"].update({
+            "overviewCount": 1,
+        }),
+    )
+
+    with pytest.raises(ValueError, match="validation facts"):
+        verify_velocity_cog_snapshot(output)
+
+
+def test_replacement_refuses_owned_marker_with_unrelated_residue(
+    built_cog,
+    synthetic_source,
+    tmp_path,
+):
+    output = tmp_path / "cog-cache"
+    shutil.copytree(built_cog.output_directory, output)
+    residue = output / "notes.txt"
+    residue.write_text("belongs to the user\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="unowned"):
+        build_velocity_cog_snapshot(
+            synthetic_source.directory,
+            output,
+            time_index=0,
+            descriptor_path=synthetic_source.descriptor_path,
+            resolution=_test_resolution(),
+            matrix_override=9,
+        )
+
+    assert residue.read_text(encoding="utf-8") == "belongs to the user\n"

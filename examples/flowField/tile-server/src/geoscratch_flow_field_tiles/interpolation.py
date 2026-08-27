@@ -86,6 +86,40 @@ class TriangleLinearStencil:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class BilinearSafeBlock:
+    values: np.ndarray
+    raw_advectable_count: int
+    bilinear_safe_count: int
+
+
+def apply_bilinear_safe_block(
+    stencil: TriangleLinearStencil,
+    unique_field: np.ndarray,
+    *,
+    block_size: int,
+) -> BilinearSafeBlock:
+    if isinstance(block_size, bool) or not isinstance(block_size, int) or block_size <= 0:
+        raise ValueError("block_size must be a positive integer")
+    side = block_size + 2
+    if stencil.target_count != side * side:
+        raise ValueError("bilinear-safe block requires a one-texel stencil halo")
+    values, raw_advectable = stencil.apply_unique_with_support(unique_field)
+    values = values.reshape(side, side, 2)
+    raw_advectable = raw_advectable.reshape(side, side)
+    bilinear_safe = np.lib.stride_tricks.sliding_window_view(
+        raw_advectable,
+        (3, 3),
+    ).all(axis=(2, 3))
+    block = values[1:-1, 1:-1].copy()
+    block[~bilinear_safe] = 0.0
+    return BilinearSafeBlock(
+        values=block,
+        raw_advectable_count=int(np.count_nonzero(raw_advectable[1:-1, 1:-1])),
+        bilinear_safe_count=int(np.count_nonzero(bilinear_safe)),
+    )
+
+
 def prepare_triangle_linear_stencil(
     topology: PreparedDelaunayTopology,
     longitudes: np.ndarray,
