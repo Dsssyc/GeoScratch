@@ -1,6 +1,12 @@
 import { expect } from 'chai'
+import fs from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
+import {
+    WebMercatorQuad,
+    tileMatrixCoverage,
+    webMercatorVirtualRasterField,
+} from 'geoscratch/geo'
 
 const moduleUrl = pathToFileURL(path.join(
     process.cwd(),
@@ -173,4 +179,169 @@ describe('Flow Field temporal velocity raster', () => {
         expect(disposed).to.deep.equal([ 0, 1, 2 ])
         expect(() => temporal.snapshot()).to.throw('Temporal velocity raster is disposed')
     })
+
+    it('exposes only active bind resources and settles one current-next publication pair', async() => {
+
+        const { createTemporalVelocityRaster } = await import(`${moduleUrl}?gpu-hooks=1`)
+        const events = []
+        const temporal = await createTemporalVelocityRaster({
+            fieldCount: 27,
+            framesPerTime: 1,
+            createRuntime: async timeIndex => fakePublicationRuntime(timeIndex, events),
+            disposeRuntime: runtime => runtime.dispose(),
+        })
+
+        expect(temporal.activeBindResources()).to.deep.equal({
+            generation: 1,
+            current: {
+                timeIndex: 0,
+                pageTable: { kind: 'page-table', timeIndex: 0 },
+                atlas: { kind: 'atlas', timeIndex: 0 },
+            },
+            next: {
+                timeIndex: 1,
+                pageTable: { kind: 'page-table', timeIndex: 1 },
+                atlas: { kind: 'atlas', timeIndex: 1 },
+            },
+        })
+        const pending = temporal.setPendingPublications(
+            temporal.current.publish(),
+            temporal.next.publish()
+        )
+        expect(Object.isFrozen(pending)).to.equal(true)
+        expect(pending).to.deep.include({
+            generation: 1,
+            currentTimeIndex: 0,
+            nextTimeIndex: 1,
+        })
+        expect(() => temporal.advance()).to.throw('publication is pending')
+
+        const builder = { kind: 'submission-builder' }
+        temporal.encodePending(builder)
+        await temporal.acknowledgePending({ kind: 'submitted-work' })
+
+        expect(events).to.deep.equal([
+            'publish:0',
+            'publish:1',
+            'encode:0',
+            'encode:1',
+            'acknowledge:0',
+            'acknowledge:1',
+        ])
+        expect(temporal.snapshot()).to.deep.include({
+            temporalResidencyEpoch: 2,
+            currentSnapshotEpoch: 10,
+            nextSnapshotEpoch: 11,
+        })
+        expect(() => temporal.recordPublication(0, 12, 0)).to.throw('stale generation')
+
+        await temporal.advance()
+        expect(temporal.snapshot()).to.deep.include({
+            currentTimeIndex: 1,
+            nextTimeIndex: 2,
+            prefetchTimeIndex: 3,
+        })
+        await temporal.dispose()
+    })
+
+    it('generates two public samplers with one shared address module and common-level retry', async() => {
+
+        const { temporalVelocityWgslModule } = await import(`${moduleUrl}?wgsl=1`)
+        const wrapper = fs.readFileSync(path.join(
+            process.cwd(),
+            'examples',
+            'flowField',
+            'shaders',
+            'temporal-velocity.wgsl'
+        ), 'utf8')
+        const current = velocityModel('current')
+        const next = velocityModel('next')
+        const module = temporalVelocityWgslModule(current, next, {
+            group: 2,
+            currentPageTableBinding: 0,
+            currentAtlasBinding: 1,
+            nextPageTableBinding: 2,
+            nextAtlasBinding: 3,
+            wrapper,
+        })
+
+        expect(module.bindings).to.deep.equal({
+            group: 2,
+            current: { pageTable: 0, atlas: 1 },
+            next: { pageTable: 2, atlas: 3 },
+        })
+        expect(module.code).to.include('fn FlowVelocityCurrent_sample_compute(')
+        expect(module.code).to.include('fn FlowVelocityNext_sample_compute(')
+        expect(module.code.match(/struct FlowVelocityAddressFixedPosition/g)).to.have.length(1)
+        expect(module.code).to.include('fn FlowVelocity_sample(')
+        expect(module.code).to.include('common_level = max(')
+        expect(module.code).to.include('FlowVelocityCurrent_sample_compute(position, common_level)')
+        expect(module.code).to.include('FlowVelocityNext_sample_compute(position, common_level)')
+        expect(module.code).to.include(
+            'let velocity = mix(current.value.xy, next.value.xy, temporal.progress);'
+        )
+        expect(module.code).to.not.match(/slot[_-]?table/i)
+        expect(module.code).to.not.match(/prefetch/i)
+
+        const source = fs.readFileSync(path.join(
+            process.cwd(),
+            'examples',
+            'flowField',
+            'temporal-velocity-raster.ts'
+        ), 'utf8')
+        expect(source).to.include('createVelocityTimeRuntime')
+        expect(source).to.not.match(/runtime\.(?:device|queue)/)
+    })
 })
+
+function fakePublicationRuntime(timeIndex, events) {
+
+    return {
+        timeIndex,
+        gpu: {
+            pageTable: {
+                region: () => Object.freeze({ kind: 'page-table', timeIndex }),
+            },
+            atlasView: Object.freeze({ kind: 'atlas', timeIndex }),
+            encode(_builder, _update) { events.push(`encode:${timeIndex}`) },
+        },
+        publish() {
+
+            events.push(`publish:${timeIndex}`)
+            return Object.freeze({
+                snapshotEpoch: 10 + timeIndex,
+                update: Object.freeze({ timeIndex }),
+            })
+        },
+        async acknowledge() { events.push(`acknowledge:${timeIndex}`) },
+        async dispose() {},
+    }
+}
+
+function velocityModel(id) {
+
+    const limits = Array.from({ length: 6 }, (_value, index) => {
+        const matrixId = String(index + 4)
+        const tile = WebMercatorQuad.tileFromLonLat([ 121, 31 ], matrixId)
+        return {
+            matrixId,
+            minTileRow: tile.tileRow,
+            maxTileRow: tile.tileRow,
+            minTileCol: tile.tileCol,
+            maxTileCol: tile.tileCol,
+        }
+    })
+    const coverage = tileMatrixCoverage({ tileMatrixSet: WebMercatorQuad, limits })
+    return webMercatorVirtualRasterField({
+        id: `flow-velocity.${id}`,
+        addressSpaceId: `flow-velocity-address.${id}`,
+        sourceRevision: 'test-v1',
+        coverage,
+        geographicBounds: [ 120.5, 30.5, 121.5, 31.5 ],
+        fieldKind: 'vector',
+        channels: 2,
+        sampleType: 'float32',
+        gpuFormat: 'rg32float',
+        interpolation: 'linear',
+    })
+}
