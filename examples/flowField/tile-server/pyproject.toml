@@ -4,13 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "geoscratch-flow-field-tiles"
-version = "0.1.0"
+version = "0.2.0"
 description = "Deterministic velocity-only tile builder for the GeoScratch Flow Field example"
 requires-python = ">=3.12,<3.15"
 dependencies = [
     "fastapi==0.141.1",
     "morecantile==7.0.3",
     "numpy==2.4.6",
+    "scipy==1.18.1",
     "uvicorn==0.52.1",
 ]
 
