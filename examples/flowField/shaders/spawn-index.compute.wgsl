@@ -1,8 +1,16 @@
-struct FlowSpawnCandidate {
-    position: FlowVelocityAddressFixedPosition,
+struct FlowSpawnCellCandidate {
+    origin: FlowVelocityAddressFixedPosition,
+    texelStepQuanta: u32,
+    requestedLevel: u32,
+    reserved: vec2u,
+};
+
+struct FlowParticleSpawnCandidate {
+    origin: FlowVelocityAddressFixedPosition,
+    texelStepQuanta: u32,
     requestedLevel: u32,
     identity: u32,
-    reserved: vec2u,
+    reserved: u32,
 };
 
 struct FlowSpawnUniform {
@@ -16,8 +24,12 @@ struct FlowSpawnUniform {
     reservedF32: f32,
 };
 
-struct FlowSpawnCandidates {
-    values: array<FlowSpawnCandidate>,
+struct FlowSpawnCellCandidates {
+    values: array<FlowSpawnCellCandidate>,
+};
+
+struct FlowParticleSpawnCandidates {
+    values: array<FlowParticleSpawnCandidate>,
 };
 
 struct FlowSpawnAtomic {
@@ -25,24 +37,39 @@ struct FlowSpawnAtomic {
 };
 
 @group(0) @binding(0) var<uniform> spawnUniform: FlowSpawnUniform;
-@group(0) @binding(1) var<storage, read> candidates: FlowSpawnCandidates;
+@group(0) @binding(1) var<storage, read> candidates: FlowSpawnCellCandidates;
 @group(0) @binding(2) var<storage, read_write> counter: FlowSpawnAtomic;
-@group(0) @binding(3) var<storage, read_write> output: FlowSpawnCandidates;
+@group(0) @binding(3) var<storage, read_write> output: FlowParticleSpawnCandidates;
 @group(0) @binding(4) var<storage, read_write> overflow: FlowSpawnAtomic;
+
+fn FlowSpawn_identity(candidateIndex: u32) -> u32 {
+    var value = candidateIndex + 0x9e3779b9u;
+    value = (value ^ (value >> 16u)) * 0x85ebca6bu;
+    value = (value ^ (value >> 13u)) * 0xc2b2ae35u;
+    return value ^ (value >> 16u);
+}
 
 @compute @workgroup_size(64)
 fn compactSpawnIndex(@builtin(global_invocation_id) globalId: vec3u) {
     let candidateIndex = globalId.x;
-    if (candidateIndex >= spawnUniform.candidateCount) {
+    if (candidateIndex >= spawnUniform.candidateCount) { return; }
+    let candidate = candidates.values[candidateIndex];
+    if (candidate.texelStepQuanta == 0u || candidate.texelStepQuanta > 0x7fffffffu) {
         return;
     }
-    let candidate = candidates.values[candidateIndex];
+    let halfStep = candidate.texelStepQuanta / 2u;
+    let center = FlowVelocityAddress_advance_i32(
+        candidate.origin,
+        vec2i(i32(halfStep), i32(halfStep)),
+    );
+    if (center.north_south_valid == 0u) { return; }
     let sample = FlowVelocity_sample(
-        candidate.position,
+        center.position,
         candidate.requestedLevel,
         FlowVelocityTemporal(spawnUniform.progress, spawnUniform.activityKill)
     );
-    if (sample.status == 0u || sample.speed < spawnUniform.activitySpawn) {
+    if (sample.status == 0u || sample.status == 3u || sample.status == 4u ||
+        sample.speed < spawnUniform.activitySpawn) {
         return;
     }
     let outputIndex = atomicAdd(&counter.value, 1u);
@@ -50,5 +77,11 @@ fn compactSpawnIndex(@builtin(global_invocation_id) globalId: vec3u) {
         atomicStore(&overflow.value, 1u);
         return;
     }
-    output.values[outputIndex] = candidate;
+    output.values[outputIndex] = FlowParticleSpawnCandidate(
+        candidate.origin,
+        candidate.texelStepQuanta,
+        candidate.requestedLevel,
+        FlowSpawn_identity(candidateIndex),
+        0u,
+    );
 }

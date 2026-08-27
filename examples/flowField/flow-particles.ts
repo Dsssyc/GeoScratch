@@ -476,10 +476,11 @@ function dedupeResources(resources: readonly FlowParticleGpuResource[]): FlowPar
 function particleSpawnSelectionWgsl(): string {
 
     return `struct FlowParticleSpawnCandidate {
-    position: FlowVelocityAddressFixedPosition,
+    origin: FlowVelocityAddressFixedPosition,
+    texel_step_quanta: u32,
     requested_level: u32,
     identity: u32,
-    reserved: vec2u,
+    reserved: u32,
 }
 
 struct FlowParticleSpawnCandidates {
@@ -492,6 +493,7 @@ struct FlowParticleSpawnAtomic {
 
 struct FlowSpawnIndexSelection {
     position: FlowVelocityAddressFixedPosition,
+    requested_level: u32,
     available: u32,
 }
 
@@ -500,10 +502,6 @@ struct FlowSpawnIndexSelection {
 @group(2) @binding(1) var<storage, read> flowParticleSpawnCandidates:
     FlowParticleSpawnCandidates;
 
-fn FlowParticleSpawn_unit(value: u32) -> f32 {
-    return f32(value & 0xffffu) / 65535.0f;
-}
-
 fn FlowSpawnIndex_select(random_state: u32) -> FlowSpawnIndexSelection {
     let count = min(
         atomicLoad(&flowParticleSpawnCount.value),
@@ -511,17 +509,23 @@ fn FlowSpawnIndex_select(random_state: u32) -> FlowSpawnIndexSelection {
     );
     if (count == 0u) {
         var empty_position: FlowVelocityAddressFixedPosition;
-        return FlowSpawnIndexSelection(empty_position, 0u);
+        return FlowSpawnIndexSelection(empty_position, 0u, 0u);
     }
     let candidate = flowParticleSpawnCandidates.values[random_state % count];
-    let jitter_seed = random_state * 1664525u + candidate.identity + 1013904223u;
-    let jitter = vec2f(
-        FlowParticleSpawn_unit(jitter_seed) - 0.5f,
-        FlowParticleSpawn_unit(jitter_seed >> 16u) - 0.5f,
-    ) * 50.0f;
-    let advanced = FlowVelocityAddress_advance_meters(candidate.position, jitter);
+    if (candidate.texel_step_quanta == 0u || candidate.texel_step_quanta > 0x7fffffffu) {
+        var invalid_position: FlowVelocityAddressFixedPosition;
+        return FlowSpawnIndexSelection(invalid_position, candidate.requested_level, 0u);
+    }
+    let random_x = FlowParticles_random(random_state ^ candidate.identity);
+    let random_y = FlowParticles_random(random_x + 0x9e3779b9u);
+    let offset = vec2i(
+        i32(random_x % candidate.texel_step_quanta),
+        i32(random_y % candidate.texel_step_quanta),
+    );
+    let advanced = FlowVelocityAddress_advance_i32(candidate.origin, offset);
     return FlowSpawnIndexSelection(
         advanced.position,
+        candidate.requested_level,
         advanced.north_south_valid,
     );
 }`

@@ -116,6 +116,9 @@ describe('Flow Field candidate packing', () => {
         expect(() => packFlowCandidateCells([
             candidate(coarse, 6, 13, 0, 0, 0),
         ], coarse.codec, 16)).to.throw(RangeError)
+        expect(() => packFlowCandidateCells([
+            candidate(coarse, 6, 13, 0, 0, 0),
+        ], coarse.codec, 32)).to.throw(RangeError)
     })
 
     it('preserves internal levels independently from z8/z9 page identity', () => {

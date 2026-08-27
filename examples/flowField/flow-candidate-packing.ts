@@ -5,7 +5,7 @@ import type { FlowCandidateCell } from './flow-demand.ts'
 export const FLOW_CANDIDATE_RECORD_BYTES = 32
 
 const PAGE_TEXELS = 256
-const U32_MAX = 0xffff_ffffn
+const I32_MAX = 0x7fff_ffffn
 
 /** Packs demand-derived logical cells into the shared spawn/contour candidate ABI. */
 export function packFlowCandidateCells(
@@ -77,8 +77,8 @@ function packCandidate(
         throw new RangeError('Flow candidate cell step is not exact in canonical quanta')
     }
     const texelStepQuanta = pageQuanta / cellCount
-    if (texelStepQuanta <= 0n || texelStepQuanta > U32_MAX) {
-        throw new RangeError('Flow candidate cell step does not fit its u32 ABI')
+    if (texelStepQuanta <= 0n || texelStepQuanta > I32_MAX) {
+        throw new RangeError('Flow candidate cell step does not fit shader i32 advancement')
     }
     const origin = codec.fromWorldQuanta([
         BigInt(tile.tileCol) * pageQuanta + BigInt(candidate.cellX) * texelStepQuanta,

@@ -145,7 +145,7 @@ const BUFFER_INDIRECT = 0x100
 
 export type FlowContourTemporalBinding = Readonly<{
     module: TemporalVelocityWgslModule
-    bindLayout: BindLayout
+    layout: BindLayout
     frame(): Readonly<{
         bindSet: BindSet
         resources: readonly (BufferResource | TextureResource)[]
@@ -431,7 +431,7 @@ export async function createFlowContour(options: FlowContourOptions): Promise<Fl
     const computePipeline = await runtime.createComputePipeline({
         label: 'Flow Field contour compute pipeline',
         program: computeProgram,
-        layout: { mode: 'explicit', bindLayouts: [ computeLayout, temporal.bindLayout ] },
+        layout: { mode: 'explicit', bindLayouts: [ computeLayout, temporal.layout ] },
     })
     const renderPipeline = await runtime.createRenderPipeline({
         label: 'Flow Field contour line pipeline',
@@ -667,7 +667,7 @@ function validateTemporalBinding(runtime: GPURuntime, temporal: FlowContourTempo
         typeof temporal.module.code !== 'string' ||
         !temporal.module.code.includes('fn FlowVelocity_sample(') ||
         temporal.module.bindings.group !== 1 ||
-        temporal.bindLayout?.runtime !== runtime || temporal.bindLayout.group !== 1 ||
+        temporal.layout?.runtime !== runtime || temporal.layout.group !== 1 ||
         typeof temporal.frame !== 'function') {
         throw new TypeError(
             'Flow contour requires one group-1 temporal sampler and four declared resources'
@@ -681,7 +681,7 @@ function validateTemporalFrame(
     frame: ReturnType<FlowContourTemporalBinding['frame']>
 ): void {
 
-    if (frame?.bindSet?.runtime !== runtime || frame.bindSet.layout !== temporal.bindLayout ||
+    if (frame?.bindSet?.runtime !== runtime || frame.bindSet.layout !== temporal.layout ||
         !Array.isArray(frame.resources) || frame.resources.length !== 4 ||
         frame.resources.some(resource => resource?.runtime !== runtime) ||
         !Number.isFinite(frame.progress) || frame.progress < 0 || frame.progress > 1) {

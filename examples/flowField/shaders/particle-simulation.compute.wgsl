@@ -78,7 +78,7 @@ fn FlowParticles_rebirth(particle: ptr<function, FlowParticle>) -> bool {
     }
     let sample = FlowVelocity_sample(
         selection.position,
-        flowParticleConfig.requested_level,
+        selection.requested_level,
         FlowParticles_temporal(),
     );
     if (!FlowParticles_available(sample) || sample.speed < flowParticleConfig.activity_spawn) {

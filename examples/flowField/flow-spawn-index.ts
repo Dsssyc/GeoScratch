@@ -92,11 +92,16 @@ const FLOW_SPAWN_WORKGROUP_SIZE = 64
 const U32_BYTE_LENGTH = 4
 const U32_MAX = 0xffff_ffff
 
-export type FlowSpawnTemporalBinding = Readonly<{
-    module: TemporalVelocityWgslModule
-    bindLayout: BindLayout
+export type FlowSpawnTemporalFrame = Readonly<{
     bindSet: BindSet
     resources: readonly (BufferResource | TextureResource)[]
+    progress: number
+}>
+
+export type FlowSpawnTemporalBinding = Readonly<{
+    module: TemporalVelocityWgslModule
+    layout: BindLayout
+    frame(): FlowSpawnTemporalFrame
 }>
 
 export type FlowSpawnSnapshotParameters = Readonly<{
@@ -178,7 +183,6 @@ type OwnedSpawnGraph = Readonly<{
     program: Program
     pipeline: ComputePipeline
     pass: ComputePassSpec
-    dispatch: DispatchCommand
 }>
 
 /** Creates one fixed-capacity GPU support-cell compaction graph. */
@@ -334,25 +338,10 @@ export async function createFlowSpawnIndex(
     const pipeline = await runtime.createComputePipeline({
         label: 'Flow Field spawn index pipeline',
         program,
-        layout: { mode: 'explicit', bindLayouts: [ spawnLayout, temporal.bindLayout ] },
+        layout: { mode: 'explicit', bindLayouts: [ spawnLayout, temporal.layout ] },
     })
     const pass = runtime.createComputePass({ label: 'Flow Field spawn index pass' })
     const dispatchWorkgroups = Math.ceil(maximumCandidateCount / FLOW_SPAWN_WORKGROUP_SIZE)
-    const dispatch = runtime.createDispatchCommand({
-        label: 'Compact Flow Field spawn index',
-        pipeline,
-        bindSets: [ { set: spawnSet }, { set: temporal.bindSet } ],
-        count: { workgroups: [ dispatchWorkgroups ] },
-        resources: {
-            read: [
-                { resource: candidates, contentEpoch: 'current-at-step' },
-                { resource: uniform, contentEpoch: 'current-at-step' },
-                ...currentReads(temporal.resources),
-            ],
-            write: [ counter, output, overflow ],
-        },
-        whenMissing: 'throw',
-    })
     const graph: OwnedSpawnGraph = Object.freeze({
         buffers: Object.freeze([ candidates, counter, output, overflow, uniform ]),
         uploads: Object.freeze([ candidateUpload, uniformUpload ]),
@@ -363,8 +352,9 @@ export async function createFlowSpawnIndex(
         program,
         pipeline,
         pass,
-        dispatch,
     })
+    let lastDispatch: DispatchCommand | undefined
+    let lastTemporalSet: BindSet | undefined
     let candidateCount = 0
     let generation = 0
     let currentSnapshotEpoch = 0
@@ -389,6 +379,30 @@ export async function createFlowSpawnIndex(
             throw new RangeError('Flow spawn candidate bytes must match a bounded record count')
         }
         validateSnapshot(snapshot)
+        const temporalFrame = temporal.frame()
+        validateTemporalFrame(runtime, temporal.layout, temporalFrame)
+        if (temporalFrame.progress !== snapshot.progress) {
+            throw new Error('Flow spawn index temporal frame progress is stale')
+        }
+        if (lastDispatch === undefined || lastTemporalSet !== temporalFrame.bindSet) {
+            lastDispatch?.dispose()
+            lastTemporalSet = temporalFrame.bindSet
+            lastDispatch = runtime.createDispatchCommand({
+                label: 'Compact Flow Field spawn index',
+                pipeline,
+                bindSets: [ { set: spawnSet }, { set: temporalFrame.bindSet } ],
+                count: { workgroups: [ dispatchWorkgroups ] },
+                resources: {
+                    read: [
+                        { resource: candidates, contentEpoch: 'current-at-step' },
+                        { resource: uniform, contentEpoch: 'current-at-step' },
+                        ...currentReads(temporalFrame.resources),
+                    ],
+                    write: [ counter, output, overflow ],
+                },
+                whenMissing: 'throw',
+            })
+        }
         candidateStaging.fill(0)
         candidateStaging.set(new Uint8Array(
             packedCandidates.buffer,
@@ -403,7 +417,7 @@ export async function createFlowSpawnIndex(
         builder.upload(uniformUpload)
         builder.clear(clearCounter)
         builder.clear(clearOverflow)
-        builder.compute(pass, [ dispatch ])
+        builder.compute(pass, [ lastDispatch ])
         candidateCount = nextCandidateCount
         generation = snapshot.generation
         currentSnapshotEpoch = snapshot.currentSnapshotEpoch
@@ -436,7 +450,7 @@ export async function createFlowSpawnIndex(
     function dispose(): void {
         if (disposed) return
         disposed = true
-        graph.dispatch.dispose()
+        lastDispatch?.dispose()
         graph.pass.dispose()
         graph.pipeline.dispose()
         graph.program.dispose()
@@ -491,13 +505,24 @@ function validateTemporalBinding(runtime: GPURuntime, temporal: FlowSpawnTempora
         typeof temporal.module.code !== 'string' ||
         !temporal.module.code.includes('fn FlowVelocity_sample(') ||
         temporal.module.bindings.group !== 1 ||
-        temporal.bindLayout?.runtime !== runtime || temporal.bindLayout.group !== 1 ||
-        temporal.bindSet?.runtime !== runtime || temporal.bindSet.layout !== temporal.bindLayout ||
-        !Array.isArray(temporal.resources) || temporal.resources.length !== 4 ||
-        temporal.resources.some(resource => resource?.runtime !== runtime)) {
+        temporal.layout?.runtime !== runtime || temporal.layout.group !== 1 ||
+        typeof temporal.frame !== 'function') {
         throw new TypeError(
-            'Flow spawn index requires one group-1 temporal sampler and four declared resources'
+            'Flow spawn index requires one stable group-1 temporal sampler provider'
         )
+    }
+}
+
+function validateTemporalFrame(
+    runtime: GPURuntime,
+    layout: BindLayout,
+    frame: FlowSpawnTemporalFrame
+): void {
+    if (frame?.bindSet?.runtime !== runtime || frame.bindSet.layout !== layout ||
+        !Array.isArray(frame.resources) || frame.resources.length !== 4 ||
+        frame.resources.some(resource => resource?.runtime !== runtime) ||
+        !Number.isFinite(frame.progress) || frame.progress < 0 || frame.progress > 1) {
+        throw new TypeError('Flow spawn index temporal frame bindings are invalid')
     }
 }
 
