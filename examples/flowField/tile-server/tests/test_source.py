@@ -1,0 +1,138 @@
+from __future__ import annotations
+
+import hashlib
+import json
+
+import numpy as np
+import pytest
+
+import geoscratch_flow_field_tiles.source as source_module
+from geoscratch_flow_field_tiles.source import (
+    load_source_dataset,
+    read_source_descriptor,
+)
+
+
+EXPECTED_STATION_HASH = (
+    "1d50f140b8333b78d0c2784a3a85ede2cc3f0085bdb923a0fd3d7d7334409ec1"
+)
+EXPECTED_FIELD_HASHES = (
+    "75d47f2e64178530ba36302e135046768db09edb30040ee5f8bd69426babb81d",
+    "6368fccc436309e594f5813e2cba38aa316efafcd924c80ba8bcfc62a4606648",
+    "0adf5f0fe1dec72d66a76fac9b0d1a8afad56946b03f9e7da951a56710b5530b",
+    "d6d6db6e5ed8fe14ff2d823d1a5c9e7a4c112a83a1cbd0f4ff52c3e29102325d",
+    "10d3cc1d1a2681d1e3f5363ae29f42be0e768d95bd7635c11c9f13b087ae816a",
+    "c598c9ebca8bad56eafe71102593aa3b3a121250eb9e509d139d1655d25fae8b",
+    "b191404c6cb1dc88ad69c64abad85d3a188c30ff3874e3f532fd932a8c29e33b",
+    "3794f7e19ccffa9180d78ec0611c2ce314648b42cdbe45904172801168907978",
+    "30a649009bc739b5818d0e4039d4bf2e28931c7ae9c58a5905b6f901bff6d80d",
+    "cd83e7a864adc031907568b4a62d0ca5c3bcee66caed5f20fdabd1b066d0f648",
+    "a5020f32818ab0d1ec290ee4be9263768d1182d5a2f27966f893aa6b538ebb58",
+    "3430eea7ac25a630a4a8fb49c19c43a8c73bb47886a5717cab718d4ada873c43",
+    "a362bd8b5ba8be8e04eac625f357acd17e121558131cfe9456d5b14ca49ac699",
+    "7e7ebec339d629ae82010b5f2dc4c7c778fbcd33fb669ce1b78633c1712dd460",
+    "ff79711c754d831435bb3c8e314b9f62491407c48714bb50fed537aca6b34473",
+    "5a94a1b0803d98cc9791a25b93205e419af9b0240be17ae3403dc8b2fefe97c2",
+    "9137a3dc0a1097c67bb3697908075e12f148cd8aa5004c7add7b2ae9bd54f404",
+    "4889b0249f945c2aa86236df4e0c040862de2118efa10b115d502530432a6cfe",
+    "449a8ed5964c395c4630b3992fb5c103984ef07afb12239f1b2cd33a688b53f6",
+    "0e3351a1dd5789d314b27c414eb88360df11f680353986c4d28f66fffd7b8fa3",
+    "0b5b392dd88ffd752a72eac360d3d0253500b314baf8c5bf45942002e0174dbb",
+    "afec66ad9f67be51e38ea7581a70fe44d5e14b336902ac8e35d33cef6442c91d",
+    "6e06da56c172be5574d64e519757de3f23bb5d1f6ad7e61c3dbdc3b2fe47584c",
+    "f1e53cc31048aa1dec52775b252fc4c06fdaec8a869f78b9032f32d780adf060",
+    "42744783e565d81b2ed58effd019eafbbcb2fed85197ab03b46c655e081bf759",
+    "1d956347384c730f65907d6723ab43cd8695ba38bc22e256c4c08714db08ce04",
+    "8d7ad6e84acc954a4210f47d1f40a93c82f0e7497c9ab3d5f10a550be5624f9a",
+)
+
+
+def test_source_descriptor_freezes_all_verified_repository_hashes():
+    descriptor_path = source_module.DEFAULT_DESCRIPTOR_PATH
+    raw = json.loads(descriptor_path.read_text(encoding="utf-8"))
+
+    assert raw["stationCount"] == 117_148
+    assert raw["fieldCount"] == 27
+    assert raw["triangleCount"] == 234_240
+    assert raw["station"]["sha256"] == EXPECTED_STATION_HASH
+    assert tuple(field["sha256"] for field in raw["fields"]) == EXPECTED_FIELD_HASHES
+    assert [field["timeIndex"] for field in raw["fields"]] == list(range(27))
+    assert [field["modelTime"] for field in raw["fields"]] == list(range(27))
+    assert raw["unit"] == "legacy-flow-unit"
+    assert raw["basis"] == "source-u-v"
+    assert raw["phase"] == "unspecified"
+
+
+def test_source_loads_little_endian_pairs_and_builds_one_global_topology(
+    synthetic_source,
+    monkeypatch,
+):
+    descriptor = read_source_descriptor(synthetic_source.descriptor_path)
+    calls = 0
+    invoke = source_module._invoke_delaunay
+
+    def counted_invoke(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return invoke(*args, **kwargs)
+
+    monkeypatch.setattr(source_module, "_invoke_delaunay", counted_invoke)
+    dataset = load_source_dataset(
+        synthetic_source.directory,
+        descriptor_path=synthetic_source.descriptor_path,
+    )
+
+    assert calls == 1
+    assert descriptor.station_count == 4
+    assert dataset.stations.dtype == np.dtype("<f4")
+    assert dataset.stations.shape == (4, 2)
+    assert np.array_equal(dataset.stations, synthetic_source.stations.astype(np.float32))
+    assert len(dataset.fields) == 2
+    assert all(field.dtype == np.dtype("<f4") for field in dataset.fields)
+    assert dataset.triangles.dtype == np.dtype("<u4")
+    assert dataset.triangles.shape == (2, 3)
+    assert dataset.connectivity_sha256 == hashlib.sha256(
+        dataset.triangles.astype("<u4", copy=False).tobytes()
+    ).hexdigest()
+
+
+def test_source_rejects_hash_drift_before_triangulation(
+    synthetic_source,
+    tmp_path,
+):
+    descriptor = json.loads(
+        synthetic_source.descriptor_path.read_text(encoding="utf-8")
+    )
+    descriptor["station"]["sha256"] = "0" * 64
+    descriptor_path = tmp_path / "source-dataset.json"
+    descriptor_path.write_text(json.dumps(descriptor), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="station source hash mismatch"):
+        load_source_dataset(
+            synthetic_source.directory,
+            descriptor_path=descriptor_path,
+        )
+
+
+def test_source_rejects_non_finite_velocity_even_with_matching_hash(
+    synthetic_source,
+    tmp_path,
+):
+    source_directory = tmp_path / "source"
+    source_directory.mkdir()
+    for path in synthetic_source.directory.iterdir():
+        if path.is_file():
+            source_directory.joinpath(path.name).write_bytes(path.read_bytes())
+    values = np.fromfile(source_directory / "uv_0.bin", dtype="<f4")
+    values[0] = np.nan
+    payload = values.astype("<f4", copy=False).tobytes()
+    source_directory.joinpath("uv_0.bin").write_bytes(payload)
+    descriptor = json.loads(
+        synthetic_source.descriptor_path.read_text(encoding="utf-8")
+    )
+    descriptor["fields"][0]["sha256"] = hashlib.sha256(payload).hexdigest()
+    descriptor_path = source_directory / "source-dataset.json"
+    descriptor_path.write_text(json.dumps(descriptor), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="finite float32 pairs"):
+        load_source_dataset(source_directory, descriptor_path=descriptor_path)

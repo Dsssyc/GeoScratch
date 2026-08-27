@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools==83.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "geoscratch-flow-field-tiles"
+version = "0.1.0"
+description = "Deterministic velocity-only tile builder for the GeoScratch Flow Field example"
+requires-python = ">=3.12,<3.15"
+dependencies = [
+    "fastapi==0.141.1",
+    "morecantile==7.0.3",
+    "numpy==2.4.6",
+    "uvicorn==0.52.1",
+]
+
+[project.optional-dependencies]
+test = [
+    "httpx==0.28.1",
+    "pytest==9.1.1",
+]
+
+[project.scripts]
+flow-field-tile-build = "geoscratch_flow_field_tiles.build:main"
+flow-field-tile-serve = "geoscratch_flow_field_tiles.service:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
