@@ -270,7 +270,12 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
     })
     const presentationPass = runtime.createRenderPass({
         label: 'Flow Field history presentation',
-        color: [ { target: surface, load: 'load', store: 'store' } ],
+        color: [ {
+            target: surface,
+            load: 'clear',
+            store: 'store',
+            clear: [ 0, 0, 0, 0 ],
+        } ],
     })
     const composeBToA = composeCommand(
         runtime, historyPipeline, uniformSet, historyBToA, uniformBuffer, historyB,
