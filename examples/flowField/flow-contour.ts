@@ -146,8 +146,11 @@ const BUFFER_INDIRECT = 0x100
 export type FlowContourTemporalBinding = Readonly<{
     module: TemporalVelocityWgslModule
     bindLayout: BindLayout
-    bindSet: BindSet
-    resources: readonly (BufferResource | TextureResource)[]
+    frame(): Readonly<{
+        bindSet: BindSet
+        resources: readonly (BufferResource | TextureResource)[]
+        progress: number
+    }>
 }>
 
 export type FlowContourViewBinding = Readonly<{
@@ -235,7 +238,6 @@ type OwnedContourGraph = Readonly<{
     computePipeline: ComputePipeline
     renderPipeline: RenderPipeline
     computePass: ComputePassSpec
-    generate: DispatchCommand
     draw: DrawCommand
     overflowReadback: ReadbackCommand
 }>
@@ -440,21 +442,6 @@ export async function createFlowContour(options: FlowContourOptions): Promise<Fl
     })
     const computePass = runtime.createComputePass({ label: 'Flow Field contour compute pass' })
     const dispatchWorkgroups = Math.ceil(maximumCandidateCount / FLOW_CONTOUR_WORKGROUP_SIZE)
-    const generate = runtime.createDispatchCommand({
-        label: 'Generate Flow Field contour',
-        pipeline: computePipeline,
-        bindSets: [ { set: computeSet }, { set: temporal.bindSet } ],
-        count: { workgroups: [ dispatchWorkgroups ] },
-        resources: {
-            read: [
-                { resource: candidates, contentEpoch: 'current-at-step' },
-                { resource: uniform, contentEpoch: 'current-at-step' },
-                ...currentReads(temporal.resources),
-            ],
-            write: [ segments, indirect, overflow ],
-        },
-        whenMissing: 'throw',
-    })
     const draw = runtime.createDrawCommand({
         label: 'Draw Flow Field contour',
         pipeline: renderPipeline,
@@ -490,10 +477,11 @@ export async function createFlowContour(options: FlowContourOptions): Promise<Fl
         computePipeline,
         renderPipeline,
         computePass,
-        generate,
         draw,
         overflowReadback,
     })
+    let generate: DispatchCommand | undefined
+    let temporalSet: BindSet | undefined
     let candidateCount = 0
     let generation = 0
     let currentSnapshotEpoch = 0
@@ -519,6 +507,30 @@ export async function createFlowContour(options: FlowContourOptions): Promise<Fl
             throw new RangeError('Flow contour candidate bytes must match a bounded record count')
         }
         validateSnapshot(snapshot)
+        const temporalFrame = temporal.frame()
+        validateTemporalFrame(runtime, temporal, temporalFrame)
+        if (temporalFrame.progress !== snapshot.progress) {
+            throw new Error('Flow contour temporal frame progress is stale')
+        }
+        if (generate === undefined || temporalSet !== temporalFrame.bindSet) {
+            generate?.dispose()
+            temporalSet = temporalFrame.bindSet
+            generate = runtime.createDispatchCommand({
+                label: 'Generate Flow Field contour',
+                pipeline: computePipeline,
+                bindSets: [ { set: computeSet }, { set: temporalFrame.bindSet } ],
+                count: { workgroups: [ dispatchWorkgroups ] },
+                resources: {
+                    read: [
+                        { resource: candidates, contentEpoch: 'current-at-step' },
+                        { resource: uniform, contentEpoch: 'current-at-step' },
+                        ...currentReads(temporalFrame.resources),
+                    ],
+                    write: [ segments, indirect, overflow ],
+                },
+                whenMissing: 'throw',
+            })
+        }
         candidateStaging.fill(0)
         candidateStaging.set(new Uint8Array(
             packedCandidates.buffer,
@@ -584,7 +596,7 @@ export async function createFlowContour(options: FlowContourOptions): Promise<Fl
         disposed = true
         graph.overflowReadback.dispose()
         graph.draw.dispose()
-        graph.generate.dispose()
+        generate?.dispose()
         graph.computePass.dispose()
         graph.renderPipeline.dispose()
         graph.computePipeline.dispose()
@@ -656,11 +668,25 @@ function validateTemporalBinding(runtime: GPURuntime, temporal: FlowContourTempo
         !temporal.module.code.includes('fn FlowVelocity_sample(') ||
         temporal.module.bindings.group !== 1 ||
         temporal.bindLayout?.runtime !== runtime || temporal.bindLayout.group !== 1 ||
-        temporal.bindSet?.runtime !== runtime || temporal.bindSet.layout !== temporal.bindLayout ||
-        !Array.isArray(temporal.resources) || temporal.resources.length !== 4 ||
-        temporal.resources.some(resource => resource?.runtime !== runtime)) {
+        typeof temporal.frame !== 'function') {
         throw new TypeError(
             'Flow contour requires one group-1 temporal sampler and four declared resources'
+        )
+    }
+}
+
+function validateTemporalFrame(
+    runtime: GPURuntime,
+    temporal: FlowContourTemporalBinding,
+    frame: ReturnType<FlowContourTemporalBinding['frame']>
+): void {
+
+    if (frame?.bindSet?.runtime !== runtime || frame.bindSet.layout !== temporal.bindLayout ||
+        !Array.isArray(frame.resources) || frame.resources.length !== 4 ||
+        frame.resources.some(resource => resource?.runtime !== runtime) ||
+        !Number.isFinite(frame.progress) || frame.progress < 0 || frame.progress > 1) {
+        throw new TypeError(
+            'Flow contour requires one current temporal set and four declared resources'
         )
     }
 }
