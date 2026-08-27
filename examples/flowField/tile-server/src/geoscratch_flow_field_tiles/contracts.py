@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Any, Literal, TypeAlias
 
@@ -36,13 +37,25 @@ class DelaunayTopology:
             self.local_spacing_neighbors, int
         ) or self.local_spacing_neighbors < 2:
             raise ValueError("local_spacing_neighbors must be an integer greater than one")
-        if self.maximum_edge_ratio is not None and self.maximum_edge_ratio <= 1.0:
-            raise ValueError("maximum_edge_ratio must be greater than one or None")
+        if self.maximum_edge_ratio is not None and (
+            isinstance(self.maximum_edge_ratio, bool)
+            or not isinstance(self.maximum_edge_ratio, (int, float))
+            or not math.isfinite(self.maximum_edge_ratio)
+            or self.maximum_edge_ratio <= 1.0
+        ):
+            raise ValueError("maximum_edge_ratio must be a finite number greater than one or None")
         if (
             self.maximum_edge_length_meters is not None
-            and self.maximum_edge_length_meters <= 0.0
+            and (
+                isinstance(self.maximum_edge_length_meters, bool)
+                or not isinstance(self.maximum_edge_length_meters, (int, float))
+                or not math.isfinite(self.maximum_edge_length_meters)
+                or self.maximum_edge_length_meters <= 0.0
+            )
         ):
-            raise ValueError("maximum_edge_length_meters must be positive or None")
+            raise ValueError(
+                "maximum_edge_length_meters must be a finite positive number or None"
+            )
 
     def manifest(self) -> dict[str, Any]:
         return {

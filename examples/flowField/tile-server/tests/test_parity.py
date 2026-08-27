@@ -7,10 +7,11 @@ import numpy as np
 
 from geoscratch_flow_field_tiles.build import (
     MAX_TILE_MATRIX,
-    MAX_TRIANGLE_EDGE_DEGREES,
     TILE_SIZE,
     build_velocity_tiles,
 )
+from geoscratch_flow_field_tiles.interpolation import prepare_triangle_linear_stencil
+from geoscratch_flow_field_tiles.topology import prepare_topology
 
 
 WEB_MERCATOR_RADIUS = 6_378_137.0
@@ -19,8 +20,8 @@ WEB_MERCATOR_RADIUS = 6_378_137.0
 def _texel_lon_lat(page: dict, texel_row: int, texel_col: int) -> tuple[float, float]:
     level = int(page["matrixId"])
     world_cells = (1 << level) * TILE_SIZE
-    global_col = page["tileCol"] * TILE_SIZE + texel_col + 0.5
-    global_row = page["tileRow"] * TILE_SIZE + texel_row + 0.5
+    global_col = page["tileCol"] * TILE_SIZE + texel_col
+    global_row = page["tileRow"] * TILE_SIZE + texel_row
     longitude = global_col / world_cells * 360.0 - 180.0
     mercator_y = math.pi * (1.0 - 2.0 * global_row / world_cells)
     latitude = math.degrees(math.atan(math.sinh(mercator_y)))
@@ -29,33 +30,15 @@ def _texel_lon_lat(page: dict, texel_row: int, texel_col: int) -> tuple[float, f
 
 def _reference_velocity(
     point: tuple[float, float],
-    stations: np.ndarray,
-    triangles: np.ndarray,
+    topology,
     field: np.ndarray,
 ) -> np.ndarray:
-    x, y = point
-    for triangle in triangles:
-        vertices = stations[triangle].astype(np.float64)
-        edges = (
-            np.linalg.norm(vertices[0] - vertices[1]),
-            np.linalg.norm(vertices[1] - vertices[2]),
-            np.linalg.norm(vertices[2] - vertices[0]),
-        )
-        if max(edges) > MAX_TRIANGLE_EDGE_DEGREES:
-            continue
-        ax, ay = vertices[0]
-        bx, by = vertices[1]
-        cx, cy = vertices[2]
-        denominator = (by - cy) * (ax - cx) + (cx - bx) * (ay - cy)
-        weights = np.asarray([
-            ((by - cy) * (x - cx) + (cx - bx) * (y - cy)) / denominator,
-            ((cy - ay) * (x - cx) + (ax - cx) * (y - cy)) / denominator,
-            0.0,
-        ])
-        weights[2] = 1.0 - weights[0] - weights[1]
-        if np.all(weights >= -1e-10) and np.all(weights <= 1.0 + 1e-10):
-            return (weights[:, None] * field[triangle]).sum(axis=0)
-    return np.zeros(2, dtype=np.float64)
+    stencil = prepare_triangle_linear_stencil(
+        topology,
+        np.asarray([point[0]]),
+        np.asarray([point[1]]),
+    )
+    return stencil.apply(topology, field)[0]
 
 
 def test_finest_pages_match_float64_global_barycentric_reference(
@@ -72,6 +55,7 @@ def test_finest_pages_match_float64_global_barycentric_reference(
         synthetic_source.directory,
         descriptor_path=synthetic_source.descriptor_path,
     )
+    topology = prepare_topology(dataset.stations, dataset.descriptor.topology)
 
     sampled = 0
     for page in pages:
@@ -83,8 +67,7 @@ def test_finest_pages_match_float64_global_barycentric_reference(
         for texel_row, texel_col in active[::max(1, len(active) // 7)][:7]:
             expected = _reference_velocity(
                 _texel_lon_lat(page, int(texel_row), int(texel_col)),
-                dataset.stations,
-                dataset.triangles,
+                topology,
                 dataset.fields[0],
             ).astype(np.float32)
             assert np.array_equal(values[texel_row, texel_col], expected)
@@ -107,12 +90,19 @@ def test_unsupported_triangles_lower_to_zero_velocity_without_an_extra_plane(
     source.joinpath("station.bin").write_bytes(station_payload)
     source.joinpath("uv_0.bin").write_bytes(field_payload)
     descriptor = {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "datasetId": "unsupported-synthetic-flow",
         "sourceRevision": "synthetic-v1",
         "stationCount": 4,
         "fieldCount": 1,
-        "triangleCount": 2,
+        "topology": {
+            "kind": "delaunay",
+            "duplicatePolicy": "error",
+            "localSpacingNeighbors": 8,
+            "maximumEdgeRatio": None,
+            "maximumEdgeLengthMeters": 2_000.0,
+        },
+        "interpolation": {"kind": "triangle-linear"},
         "unit": "legacy-flow-unit",
         "basis": "source-u-v",
         "phase": "unspecified",

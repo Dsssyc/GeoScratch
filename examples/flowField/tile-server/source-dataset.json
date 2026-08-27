@@ -32,13 +32,22 @@
     {"file": "uv_26.bin", "modelTime": 26, "sha256": "8d7ad6e84acc954a4210f47d1f40a93c82f0e7497c9ab3d5f10a550be5624f9a", "timeIndex": 26}
   ],
   "phase": "unspecified",
-  "schemaVersion": 1,
+  "interpolation": {
+    "kind": "triangle-linear"
+  },
+  "schemaVersion": 2,
   "sourceRevision": "station-uv-sha256-v1",
   "station": {
     "file": "station.bin",
     "sha256": "1d50f140b8333b78d0c2784a3a85ede2cc3f0085bdb923a0fd3d7d7334409ec1"
   },
   "stationCount": 117148,
-  "triangleCount": 234240,
+  "topology": {
+    "duplicatePolicy": "mean",
+    "kind": "delaunay",
+    "localSpacingNeighbors": 8,
+    "maximumEdgeLengthMeters": 5000.0,
+    "maximumEdgeRatio": 16.0
+  },
   "unit": "legacy-flow-unit"
 }

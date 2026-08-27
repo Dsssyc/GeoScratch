@@ -5,7 +5,6 @@ import hashlib
 import json
 import math
 import os
-import random
 import shutil
 import tempfile
 import time
@@ -17,20 +16,22 @@ from typing import Any
 import morecantile
 import numpy as np
 
+from .contracts import InterpolationSpec, TopologySpec, resolve_interpolation, resolve_topology
+from .interpolation import TriangleLinearStencil, prepare_triangle_linear_stencil
 from .source import (
     DEFAULT_DATA_DIRECTORY,
     DEFAULT_DESCRIPTOR_PATH,
     SourceDataset,
     load_source_dataset,
 )
+from .topology import PreparedDelaunayTopology, prepare_topology
 
 
 TILE_SIZE = 256
 MIN_TILE_MATRIX = 4
 MAX_TILE_MATRIX = 9
-MAX_TRIANGLE_EDGE_DEGREES = 0.04
 PAGE_BYTE_LENGTH = TILE_SIZE * TILE_SIZE * 2 * 4
-BUILD_ALGORITHM_VERSION = "flow-rg32f-wmq-v1"
+BUILD_ALGORITHM_VERSION = "flow-rg32f-wmq-v2"
 WEB_MERCATOR_QUAD_URI = (
     "http://www.opengis.net/def/tilematrixset/OGC/1.0/WebMercatorQuad"
 )
@@ -51,104 +52,6 @@ class BuildResult:
     page_count: int
     total_raw_page_bytes: int
     duration_seconds: float
-
-
-@dataclass(frozen=True)
-class PageMapping:
-    station_indices: np.ndarray
-    weights: np.ndarray
-
-
-class SupportedTriangleLocator:
-    def __init__(self, dataset: SourceDataset) -> None:
-        self.stations = dataset.stations.astype(np.float64)
-        self.triangles = dataset.triangles.astype(np.int64)
-        vertices = self.stations[self.triangles]
-        edge_lengths = np.stack((
-            np.linalg.norm(vertices[:, 0] - vertices[:, 1], axis=1),
-            np.linalg.norm(vertices[:, 1] - vertices[:, 2], axis=1),
-            np.linalg.norm(vertices[:, 2] - vertices[:, 0], axis=1),
-        ), axis=1)
-        self.supported_triangle_ids = np.flatnonzero(
-            edge_lengths.max(axis=1) <= MAX_TRIANGLE_EDGE_DEGREES
-        )
-        west, south, _, _ = dataset.geographic_bounds
-        self.origin = (west, south)
-        bins: dict[tuple[int, int], list[int]] = {}
-        for triangle_id in self.supported_triangle_ids:
-            triangle_vertices = vertices[triangle_id]
-            minimum = triangle_vertices.min(axis=0)
-            maximum = triangle_vertices.max(axis=0)
-            min_x = math.floor((minimum[0] - west) / MAX_TRIANGLE_EDGE_DEGREES)
-            max_x = math.floor((maximum[0] - west) / MAX_TRIANGLE_EDGE_DEGREES)
-            min_y = math.floor((minimum[1] - south) / MAX_TRIANGLE_EDGE_DEGREES)
-            max_y = math.floor((maximum[1] - south) / MAX_TRIANGLE_EDGE_DEGREES)
-            for bin_y in range(min_y, max_y + 1):
-                for bin_x in range(min_x, max_x + 1):
-                    bins.setdefault((bin_x, bin_y), []).append(int(triangle_id))
-        self.bins = {key: tuple(values) for key, values in bins.items()}
-
-    def locate(self, longitudes: np.ndarray, latitudes: np.ndarray) -> PageMapping:
-        if longitudes.shape != latitudes.shape:
-            raise ValueError("longitude and latitude arrays must have matching shapes")
-        sample_count = longitudes.size
-        station_indices = np.full((sample_count, 3), -1, dtype=np.int32)
-        weights = np.zeros((sample_count, 3), dtype=np.float64)
-        west, south = self.origin
-        bin_x = np.floor(
-            (longitudes - west) / MAX_TRIANGLE_EDGE_DEGREES
-        ).astype(np.int64)
-        bin_y = np.floor(
-            (latitudes - south) / MAX_TRIANGLE_EDGE_DEGREES
-        ).astype(np.int64)
-        keys = np.stack((bin_x, bin_y), axis=1)
-        order = np.lexsort((keys[:, 1], keys[:, 0]))
-        sorted_keys = keys[order]
-        group_starts = np.concatenate((
-            np.asarray([0], dtype=np.int64),
-            np.flatnonzero(np.any(sorted_keys[1:] != sorted_keys[:-1], axis=1)) + 1,
-        ))
-        group_ends = np.concatenate((
-            group_starts[1:],
-            np.asarray([sample_count], dtype=np.int64),
-        ))
-        for group_start, group_end in zip(group_starts, group_ends, strict=True):
-            key = sorted_keys[group_start]
-            candidates = self.bins.get((int(key[0]), int(key[1])))
-            if not candidates:
-                continue
-            sample_indices = order[group_start:group_end]
-            unresolved = np.ones(sample_indices.size, dtype=bool)
-            x = longitudes[sample_indices]
-            y = latitudes[sample_indices]
-            for triangle_id in candidates:
-                if not unresolved.any():
-                    break
-                triangle = self.triangles[triangle_id]
-                vertices = self.stations[triangle]
-                ax, ay = vertices[0]
-                bx, by = vertices[1]
-                cx, cy = vertices[2]
-                denominator = (by - cy) * (ax - cx) + (cx - bx) * (ay - cy)
-                if denominator == 0:
-                    continue
-                first = (
-                    (by - cy) * (x - cx) + (cx - bx) * (y - cy)
-                ) / denominator
-                second = (
-                    (cy - ay) * (x - cx) + (ax - cx) * (y - cy)
-                ) / denominator
-                third = 1.0 - first - second
-                triangle_weights = np.stack((first, second, third), axis=1)
-                inside = unresolved & np.all(triangle_weights >= -1e-12, axis=1)
-                inside &= np.all(triangle_weights <= 1.0 + 1e-12, axis=1)
-                if not inside.any():
-                    continue
-                resolved_samples = sample_indices[inside]
-                station_indices[resolved_samples] = triangle.astype(np.int32)
-                weights[resolved_samples] = triangle_weights[inside]
-                unresolved[inside] = False
-        return PageMapping(station_indices=station_indices, weights=weights)
 
 
 def _tile_matrix_limits(
@@ -186,14 +89,14 @@ def _projected_bounds(
     )
 
 
-def _texel_centers(
+def _texel_lattice(
     matrix_level: int,
     tile_row: int,
     tile_col: int,
 ) -> tuple[np.ndarray, np.ndarray]:
     world_cells = (1 << matrix_level) * TILE_SIZE
-    global_cols = tile_col * TILE_SIZE + np.arange(TILE_SIZE, dtype=np.float64) + 0.5
-    global_rows = tile_row * TILE_SIZE + np.arange(TILE_SIZE, dtype=np.float64) + 0.5
+    global_cols = tile_col * TILE_SIZE + np.arange(TILE_SIZE, dtype=np.float64)
+    global_rows = tile_row * TILE_SIZE + np.arange(TILE_SIZE, dtype=np.float64)
     longitudes = global_cols / world_cells * 360.0 - 180.0
     mercator_y = math.pi * (1.0 - 2.0 * global_rows / world_cells)
     latitudes = np.degrees(np.arctan(np.sinh(mercator_y)))
@@ -203,13 +106,8 @@ def _texel_centers(
     )
 
 
-def _render_page(mapping: PageMapping, field: np.ndarray) -> np.ndarray:
-    output = np.zeros((TILE_SIZE * TILE_SIZE, 2), dtype=np.float64)
-    valid = mapping.station_indices[:, 0] >= 0
-    if valid.any():
-        values = field[mapping.station_indices[valid]].astype(np.float64)
-        output[valid] = np.sum(values * mapping.weights[valid, :, None], axis=1)
-    return output.astype("<f4").reshape(TILE_SIZE, TILE_SIZE, 2)
+def _render_page(stencil: TriangleLinearStencil, unique_field: np.ndarray) -> np.ndarray:
+    return stencil.apply_unique(unique_field).reshape(TILE_SIZE, TILE_SIZE, 2)
 
 
 def _page_relative_path(
@@ -265,99 +163,46 @@ def _write_page(
     }
 
 
-def _read_page(path: Path) -> np.ndarray:
-    payload = path.read_bytes()
-    if len(payload) != PAGE_BYTE_LENGTH:
-        raise RuntimeError(
-            f"RG32F child page byte length mismatch: expected {PAGE_BYTE_LENGTH}, received {len(payload)}"
-        )
-    values = np.frombuffer(payload, dtype="<f4")
-    if not np.isfinite(values).all():
-        raise RuntimeError(f"RG32F child page contains a non-finite value: {path}")
-    return values.reshape(TILE_SIZE, TILE_SIZE, 2)
-
-
-def _downsample_parent(
-    output_directory: Path,
-    time_index: int,
-    child_level: int,
-    parent_row: int,
-    parent_col: int,
-    child_limit: dict[str, int | str],
-) -> tuple[np.ndarray, float, float]:
-    composite = np.zeros((TILE_SIZE * 2, TILE_SIZE * 2, 2), dtype=np.float64)
-    for child_y in range(2):
-        for child_x in range(2):
-            child_row = parent_row * 2 + child_y
-            child_col = parent_col * 2 + child_x
-            child_is_covered = (
-                int(child_limit["minTileRow"]) <= child_row
-                <= int(child_limit["maxTileRow"])
-                and int(child_limit["minTileCol"]) <= child_col
-                <= int(child_limit["maxTileCol"])
-            )
-            if not child_is_covered:
-                continue
-            child_path = output_directory / _page_relative_path(
-                time_index,
-                child_level,
-                child_row,
-                child_col,
-            )
-            if not child_path.is_file():
-                raise RuntimeError(f"Covered RG32F child page is missing: {child_path}")
-            child = _read_page(child_path).astype(np.float64)
-            row = child_y * TILE_SIZE
-            col = child_x * TILE_SIZE
-            composite[row:row + TILE_SIZE, col:col + TILE_SIZE] = child
-    parent64 = composite.reshape(TILE_SIZE, 2, TILE_SIZE, 2, 2).mean(
-        axis=(1, 3),
-        dtype=np.float64,
-    )
-    reconstructed = np.repeat(np.repeat(parent64, 2, axis=0), 2, axis=1)
-    velocity_error = np.linalg.norm(composite - reconstructed, axis=2)
-    maximum_error = float(velocity_error.max(initial=0.0))
-    rmse = float(math.sqrt(np.mean(np.square(velocity_error), dtype=np.float64)))
-    return parent64.astype("<f4"), maximum_error, rmse
-
-
-def _parity_samples(output_directory: Path, pages: list[dict[str, Any]]) -> dict[str, Any]:
-    seed = 20_260_827
-    generator = random.Random(seed)
-    selected_count = min(16, len(pages))
-    selected_indices = sorted(generator.sample(range(len(pages)), selected_count))
-    samples: list[dict[str, Any]] = []
-    for page_index in selected_indices:
-        page = pages[page_index]
-        texel_row = generator.randrange(TILE_SIZE)
-        texel_col = generator.randrange(TILE_SIZE)
-        values = _read_page(output_directory / page["path"])
-        samples.append({
-            "timeIndex": page["timeIndex"],
-            "matrixId": page["matrixId"],
-            "tileRow": page["tileRow"],
-            "tileCol": page["tileCol"],
-            "texelRow": texel_row,
-            "texelCol": texel_col,
-            "velocity": [
-                float(values[texel_row, texel_col, 0]),
-                float(values[texel_row, texel_col, 1]),
-            ],
-        })
-    return {"seed": seed, "samples": samples}
-
-
 def _manifest(
     dataset: SourceDataset,
     limits: tuple[dict[str, int | str], ...],
     pages: list[dict[str, Any]],
-    mapping_page_count: int,
-    reduction_error: list[dict[str, Any]],
-    parity: dict[str, Any],
+    topology: PreparedDelaunayTopology,
+    interpolation: InterpolationSpec,
+    mapping_statistics: list[dict[str, Any]],
 ) -> dict[str, Any]:
     descriptor = dataset.descriptor
+    duplicate_statistics = topology.duplicate_statistics(dataset.fields)
+    topology_manifest = topology.manifest(duplicate_statistics)
+    interpolation_manifest = {
+        "requested": interpolation.kind,
+        "resolved": interpolation.kind,
+        "coordinateSpace": "EPSG:3857",
+        "weightPrecision": "float64",
+        "outputPrecision": "float32-le",
+    }
+    construction_identity = {
+        "algorithmVersion": BUILD_ALGORITHM_VERSION,
+        "sourceHash": dataset.source_hash,
+        "topology": topology_manifest,
+        "interpolation": interpolation_manifest,
+        "tileMatrixSet": "WebMercatorQuad",
+        "tileSize": TILE_SIZE,
+        "minimumTileMatrix": MIN_TILE_MATRIX,
+        "maximumTileMatrix": MAX_TILE_MATRIX,
+        "sampleRegistration": "global-texel-lattice",
+        "levelConstruction": "direct",
+    }
+    construction_hash = hashlib.sha256(
+        json.dumps(
+            construction_identity,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
     content_version = (
-        f"flow-{dataset.source_hash[:16]}-rg32f-wmq-z{MIN_TILE_MATRIX}-z{MAX_TILE_MATRIX}-v1"
+        f"flow-{construction_hash[:16]}-rg32f-wmq-"
+        f"z{MIN_TILE_MATRIX}-z{MAX_TILE_MATRIX}-v2"
     )
     spatial_page_count = sum(
         (int(limit["maxTileRow"]) - int(limit["minTileRow"]) + 1)
@@ -444,18 +289,13 @@ def _manifest(
         },
         "construction": {
             "algorithmVersion": BUILD_ALGORITHM_VERSION,
-            "topology": {
-                "algorithm": "d3-delaunay-6",
-                "triangleCount": descriptor.triangle_count,
-                "sha256": dataset.connectivity_sha256,
-            },
-            "maximumTriangleEdgeDegrees": MAX_TRIANGLE_EDGE_DEGREES,
+            "constructionHash": construction_hash,
+            "topology": topology_manifest,
+            "interpolation": interpolation_manifest,
             "unsupportedVelocity": [0.0, 0.0],
-            "finestInterpolation": "float64-barycentric-to-float32-le",
-            "coarseReduction": "component-wise-2x2-average",
-            "mappingPageCount": mapping_page_count,
-            "reductionError": reduction_error,
-            "parity": parity,
+            "sampleRegistration": "global-texel-lattice",
+            "levelConstruction": "direct",
+            "mapping": mapping_statistics,
         },
     }
 
@@ -503,7 +343,8 @@ def build_velocity_tiles(
     output_directory: str | Path = DEFAULT_OUTPUT_DIRECTORY,
     *,
     descriptor_path: str | Path = DEFAULT_DESCRIPTOR_PATH,
-    node_executable: str = "node",
+    topology: TopologySpec | None = None,
+    interpolation: InterpolationSpec | None = None,
 ) -> BuildResult:
     started = time.perf_counter()
     output = Path(output_directory).resolve()
@@ -512,50 +353,32 @@ def build_velocity_tiles(
     dataset = load_source_dataset(
         data_directory,
         descriptor_path=descriptor_path,
-        node_executable=node_executable,
+    )
+    topology_spec = resolve_topology(
+        dataset.descriptor.topology if topology is None else topology
+    )
+    interpolation_spec = resolve_interpolation(
+        dataset.descriptor.interpolation if interpolation is None else interpolation
+    )
+    prepared_topology = prepare_topology(dataset.stations, topology_spec)
+    prepared_fields = tuple(
+        prepared_topology.aggregate_field(field) for field in dataset.fields
     )
     limits = _tile_matrix_limits(dataset.geographic_bounds)
-    limit_by_level = {int(limit["matrixId"]): limit for limit in limits}
     staged = Path(tempfile.mkdtemp(prefix=f".{output.name}.build-", dir=output.parent))
     try:
         pages: list[dict[str, Any]] = []
-        locator = SupportedTriangleLocator(dataset)
-        finest_limit = limit_by_level[MAX_TILE_MATRIX]
-        mapping_page_count = 0
-        for tile_row in range(
-            int(finest_limit["minTileRow"]),
-            int(finest_limit["maxTileRow"]) + 1,
-        ):
-            for tile_col in range(
-                int(finest_limit["minTileCol"]),
-                int(finest_limit["maxTileCol"]) + 1,
-            ):
-                longitudes, latitudes = _texel_centers(
-                    MAX_TILE_MATRIX,
-                    tile_row,
-                    tile_col,
-                )
-                mapping = locator.locate(longitudes, latitudes)
-                mapping_page_count += 1
-                for field_descriptor, field in zip(
-                    dataset.descriptor.fields,
-                    dataset.fields,
-                    strict=True,
-                ):
-                    pages.append(_write_page(
-                        staged,
-                        _render_page(mapping, field),
-                        time_index=field_descriptor.time_index,
-                        matrix_level=MAX_TILE_MATRIX,
-                        tile_row=tile_row,
-                        tile_col=tile_col,
-                    ))
-        reduction_error: list[dict[str, Any]] = []
-        for matrix_level in range(MAX_TILE_MATRIX - 1, MIN_TILE_MATRIX - 1, -1):
-            limit = limit_by_level[matrix_level]
-            error_accumulators = {
-                field.time_index: {"maximum": 0.0, "squared": 0.0, "count": 0}
-                for field in dataset.descriptor.fields
+        mapping_statistics: list[dict[str, Any]] = []
+        for limit in limits:
+            matrix_level = int(limit["matrixId"])
+            level_statistics = {
+                "matrixId": str(matrix_level),
+                "pageCount": 0,
+                "targetCount": 0,
+                "validTargetCount": 0,
+                "outsideTargetCount": 0,
+                "rejectedTargetCount": 0,
+                "numericalTargetCount": 0,
             }
             for tile_row in range(
                 int(limit["minTileRow"]),
@@ -565,54 +388,56 @@ def build_velocity_tiles(
                     int(limit["minTileCol"]),
                     int(limit["maxTileCol"]) + 1,
                 ):
-                    for field_descriptor in dataset.descriptor.fields:
-                        page, maximum_error, rmse = _downsample_parent(
-                            staged,
-                            field_descriptor.time_index,
-                            matrix_level + 1,
-                            tile_row,
-                            tile_col,
-                            limit_by_level[matrix_level + 1],
-                        )
+                    longitudes, latitudes = _texel_lattice(
+                        matrix_level,
+                        tile_row,
+                        tile_col,
+                    )
+                    stencil = prepare_triangle_linear_stencil(
+                        prepared_topology,
+                        longitudes,
+                        latitudes,
+                        interpolation_spec,
+                    )
+                    level_statistics["pageCount"] += 1
+                    level_statistics["targetCount"] += stencil.target_count
+                    level_statistics["validTargetCount"] += stencil.valid_target_count
+                    level_statistics["outsideTargetCount"] += (
+                        stencil.outside_target_count
+                    )
+                    level_statistics["rejectedTargetCount"] += (
+                        stencil.rejected_target_count
+                    )
+                    level_statistics["numericalTargetCount"] += (
+                        stencil.numerical_target_count
+                    )
+                    for field_descriptor, field in zip(
+                        dataset.descriptor.fields,
+                        prepared_fields,
+                        strict=True,
+                    ):
                         pages.append(_write_page(
                             staged,
-                            page,
+                            _render_page(stencil, field),
                             time_index=field_descriptor.time_index,
                             matrix_level=matrix_level,
                             tile_row=tile_row,
                             tile_col=tile_col,
                         ))
-                        accumulator = error_accumulators[field_descriptor.time_index]
-                        accumulator["maximum"] = max(accumulator["maximum"], maximum_error)
-                        accumulator["squared"] += rmse * rmse
-                        accumulator["count"] += 1
-            for time_index, accumulator in error_accumulators.items():
-                reduction_error.append({
-                    "timeIndex": time_index,
-                    "matrixId": str(matrix_level),
-                    "maximumVelocityError": accumulator["maximum"],
-                    "rmse": math.sqrt(
-                        accumulator["squared"] / max(1, accumulator["count"])
-                    ),
-                })
+            mapping_statistics.append(level_statistics)
         pages.sort(key=lambda page: (
             page["timeIndex"],
             int(page["matrixId"]),
             page["tileRow"],
             page["tileCol"],
         ))
-        reduction_error.sort(key=lambda record: (
-            record["timeIndex"],
-            int(record["matrixId"]),
-        ))
-        parity = _parity_samples(staged, pages)
         manifest = _manifest(
             dataset,
             limits,
             pages,
-            mapping_page_count,
-            reduction_error,
-            parity,
+            prepared_topology,
+            interpolation_spec,
+            mapping_statistics,
         )
         _validate_staged_artifact(staged, manifest)
         manifest_path = staged / "manifest.json"
@@ -668,7 +493,6 @@ def main() -> None:
     parser.add_argument("--source", type=Path, default=DEFAULT_DATA_DIRECTORY)
     parser.add_argument("--descriptor", type=Path, default=DEFAULT_DESCRIPTOR_PATH)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT_DIRECTORY)
-    parser.add_argument("--node", default="node")
     parser.add_argument("--verify-existing", action="store_true")
     arguments = parser.parse_args()
     if arguments.verify_existing:
@@ -678,7 +502,6 @@ def main() -> None:
         arguments.source,
         arguments.output,
         descriptor_path=arguments.descriptor,
-        node_executable=arguments.node,
     )
     print(json.dumps({
         "contentVersion": result.content_version,

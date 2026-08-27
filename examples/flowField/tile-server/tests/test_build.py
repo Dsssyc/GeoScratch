@@ -12,7 +12,7 @@ from geoscratch_flow_field_tiles.build import (
     MIN_TILE_MATRIX,
     PAGE_BYTE_LENGTH,
     TILE_SIZE,
-    _downsample_parent,
+    _texel_lattice,
     build_velocity_tiles,
     verify_existing_tiles,
 )
@@ -106,43 +106,23 @@ def test_repeated_builds_have_identical_manifest_and_page_bytes(
         )
 
 
-def test_coarse_pages_are_component_wise_two_by_two_child_averages(built_tiles):
+def test_every_level_is_directly_mapped_from_the_prepared_topology(built_tiles):
     manifest = json.loads(built_tiles.manifest_path.read_text(encoding="utf-8"))
-    pages = {
-        (page["timeIndex"], int(page["matrixId"]), page["tileRow"], page["tileCol"]): page
-        for page in manifest["pages"]
-    }
-    parent = next(page for page in manifest["pages"] if page["timeIndex"] == 0)
-    level = int(parent["matrixId"])
-    parent_key = (0, level, parent["tileRow"], parent["tileCol"])
-    composite = np.zeros((TILE_SIZE * 2, TILE_SIZE * 2, 2), dtype=np.float64)
-    for child_y in range(2):
-        for child_x in range(2):
-            child_key = (
-                0,
-                level + 1,
-                parent["tileRow"] * 2 + child_y,
-                parent["tileCol"] * 2 + child_x,
-            )
-            child = pages.get(child_key)
-            if child is None:
-                continue
-            values = np.fromfile(
-                _page_path(built_tiles.output_directory, child),
-                dtype="<f4",
-            ).reshape(TILE_SIZE, TILE_SIZE, 2)
-            row = child_y * TILE_SIZE
-            col = child_x * TILE_SIZE
-            composite[row:row + TILE_SIZE, col:col + TILE_SIZE] = values
-    expected = composite.reshape(TILE_SIZE, 2, TILE_SIZE, 2, 2).mean(
-        axis=(1, 3),
-        dtype=np.float64,
-    ).astype("<f4")
-    actual = np.fromfile(
-        _page_path(built_tiles.output_directory, pages[parent_key]),
-        dtype="<f4",
-    ).reshape(TILE_SIZE, TILE_SIZE, 2)
-    assert np.array_equal(actual, expected)
+    construction = manifest["construction"]
+    mapping = construction["mapping"]
+
+    assert construction["levelConstruction"] == "direct"
+    assert construction["sampleRegistration"] == "global-texel-lattice"
+    assert [entry["matrixId"] for entry in mapping] == [
+        str(level) for level in range(MIN_TILE_MATRIX, MAX_TILE_MATRIX + 1)
+    ]
+    assert sum(entry["pageCount"] for entry in mapping) == (
+        manifest["budgets"]["spatialPageCount"]
+    )
+    assert all(
+        entry["targetCount"] == entry["pageCount"] * TILE_SIZE * TILE_SIZE
+        for entry in mapping
+    )
 
 
 def test_existing_artifact_verification_recomputes_every_page_hash(built_tiles):
@@ -153,24 +133,18 @@ def test_existing_artifact_verification_recomputes_every_page_hash(built_tiles):
     assert facts["contentVersion"] == built_tiles.content_version
 
 
-def test_downsampling_rejects_a_missing_child_inside_declared_coverage(tmp_path):
-    child_limit = {
-        "matrixId": "9",
-        "minTileRow": 20,
-        "maxTileRow": 20,
-        "minTileCol": 40,
-        "maxTileCol": 40,
-    }
+def test_global_texel_lattice_is_continuous_across_adjacent_pages():
+    left_longitude, left_latitude = _texel_lattice(9, 208, 426)
+    right_longitude, right_latitude = _texel_lattice(9, 208, 427)
+    south_longitude, south_latitude = _texel_lattice(9, 209, 426)
+    longitude_step = left_longitude[1] - left_longitude[0]
 
-    with pytest.raises(RuntimeError, match="Covered RG32F child page is missing"):
-        _downsample_parent(
-            tmp_path,
-            time_index=0,
-            child_level=9,
-            parent_row=10,
-            parent_col=20,
-            child_limit=child_limit,
-        )
+    assert right_longitude[0] == pytest.approx(
+        left_longitude[TILE_SIZE - 1] + longitude_step
+    )
+    assert right_latitude[0] == left_latitude[0]
+    assert south_longitude[0] == left_longitude[0]
+    assert south_latitude[0] < left_latitude[(TILE_SIZE - 1) * TILE_SIZE]
 
 
 def test_builder_rejects_a_non_cache_output_before_source_processing(

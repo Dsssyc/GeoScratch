@@ -209,6 +209,8 @@ def prepare_topology(
     if np.linalg.matrix_rank(normalized - normalized.mean(axis=0)) < 2:
         raise DegenerateTopologyError("station coordinates are collinear")
     try:
+        # SciPy documents the simplex/connectivity contract and the possibility of
+        # omitted points here: https://docs.scipy.org/doc/scipy/reference/generated/scipy.spatial.Delaunay.html
         triangulation = Delaunay(normalized, qhull_options=QHULL_OPTIONS)
     except QhullError as error:
         raise DegenerateTopologyError(f"Delaunay construction failed: {error}") from error
@@ -218,6 +220,10 @@ def prepare_topology(
         )
 
     simplices = triangulation.simplices.astype(np.int64, copy=False)
+    if np.unique(simplices).size != unique.shape[0]:
+        raise DegenerateTopologyError(
+            "Delaunay construction omitted one or more unique stations"
+        )
     vertices = projected[simplices]
     first_edge = vertices[:, 1] - vertices[:, 0]
     second_edge = vertices[:, 2] - vertices[:, 0]

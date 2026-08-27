@@ -35,10 +35,19 @@ class TriangleLinearStencil:
         topology: PreparedDelaunayTopology,
         field: np.ndarray,
     ) -> np.ndarray:
-        unique_field = topology.aggregate_field(field)
+        return self.apply_unique(topology.aggregate_field(field))
+
+    def apply_unique(self, unique_field: np.ndarray) -> np.ndarray:
+        values_by_vertex = np.asarray(unique_field, dtype=np.float64)
+        if values_by_vertex.ndim != 2 or values_by_vertex.shape[1] != 2:
+            raise ValueError("prepared velocity field must contain U/V pairs")
+        if not np.isfinite(values_by_vertex).all():
+            raise ValueError("prepared velocity field must contain finite U/V pairs")
         output = np.zeros((self.target_count, 2), dtype=np.float64)
         if self.target_indices.size:
-            values = unique_field[self.vertex_indices]
+            if int(self.vertex_indices.max(initial=-1)) >= values_by_vertex.shape[0]:
+                raise ValueError("prepared velocity field does not cover the stencil vertices")
+            values = values_by_vertex[self.vertex_indices]
             output[self.target_indices] = np.einsum(
                 "ki,kic->kc",
                 self.weights,
@@ -80,6 +89,8 @@ def prepare_triangle_linear_stencil(
     normalized = topology.normalize_projected(
         project_lon_lat(np.column_stack((longitude, latitude)))
     )
+    # `find_simplex` returns -1 outside the triangulation; filter it before any
+    # indexing. Source: https://docs.scipy.org/doc/scipy/reference/generated/scipy.spatial.Delaunay.find_simplex.html
     simplex_ids = topology.triangulation.find_simplex(
         normalized,
         tol=_BARYCENTRIC_TOLERANCE,

@@ -7,6 +7,10 @@ import numpy as np
 import pytest
 
 import geoscratch_flow_field_tiles.source as source_module
+from geoscratch_flow_field_tiles import (
+    DelaunayTopology,
+    TriangleLinearInterpolation,
+)
 from geoscratch_flow_field_tiles.source import (
     load_source_dataset,
     read_source_descriptor,
@@ -53,7 +57,15 @@ def test_source_descriptor_freezes_all_verified_repository_hashes():
 
     assert raw["stationCount"] == 117_148
     assert raw["fieldCount"] == 27
-    assert raw["triangleCount"] == 234_240
+    assert raw["schemaVersion"] == 2
+    assert raw["topology"] == {
+        "duplicatePolicy": "mean",
+        "kind": "delaunay",
+        "localSpacingNeighbors": 8,
+        "maximumEdgeLengthMeters": 5_000.0,
+        "maximumEdgeRatio": 16.0,
+    }
+    assert raw["interpolation"] == {"kind": "triangle-linear"}
     assert raw["station"]["sha256"] == EXPECTED_STATION_HASH
     assert tuple(field["sha256"] for field in raw["fields"]) == EXPECTED_FIELD_HASHES
     assert [field["timeIndex"] for field in raw["fields"]] == list(range(27))
@@ -63,37 +75,23 @@ def test_source_descriptor_freezes_all_verified_repository_hashes():
     assert raw["phase"] == "unspecified"
 
 
-def test_source_loads_little_endian_pairs_and_builds_one_global_topology(
+def test_source_loads_little_endian_pairs_and_typed_build_strategies(
     synthetic_source,
-    monkeypatch,
 ):
     descriptor = read_source_descriptor(synthetic_source.descriptor_path)
-    calls = 0
-    invoke = source_module._invoke_delaunay
-
-    def counted_invoke(*args, **kwargs):
-        nonlocal calls
-        calls += 1
-        return invoke(*args, **kwargs)
-
-    monkeypatch.setattr(source_module, "_invoke_delaunay", counted_invoke)
     dataset = load_source_dataset(
         synthetic_source.directory,
         descriptor_path=synthetic_source.descriptor_path,
     )
 
-    assert calls == 1
     assert descriptor.station_count == 4
+    assert descriptor.topology == DelaunayTopology(maximum_edge_ratio=None)
+    assert descriptor.interpolation == TriangleLinearInterpolation()
     assert dataset.stations.dtype == np.dtype("<f4")
     assert dataset.stations.shape == (4, 2)
     assert np.array_equal(dataset.stations, synthetic_source.stations.astype(np.float32))
     assert len(dataset.fields) == 2
     assert all(field.dtype == np.dtype("<f4") for field in dataset.fields)
-    assert dataset.triangles.dtype == np.dtype("<u4")
-    assert dataset.triangles.shape == (2, 3)
-    assert dataset.connectivity_sha256 == hashlib.sha256(
-        dataset.triangles.astype("<u4", copy=False).tobytes()
-    ).hexdigest()
 
 
 def test_source_rejects_hash_drift_before_triangulation(

@@ -3,13 +3,18 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-import subprocess
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+
+from .contracts import (
+    DelaunayTopology,
+    TriangleLinearInterpolation,
+    read_interpolation_spec,
+    read_topology_spec,
+)
 
 
 TILE_SERVER_ROOT = Path(__file__).resolve().parents[2]
@@ -17,7 +22,6 @@ DEFAULT_DESCRIPTOR_PATH = TILE_SERVER_ROOT / "source-dataset.json"
 DEFAULT_DATA_DIRECTORY = (
     TILE_SERVER_ROOT.parent.parent / "public" / "json" / "examples" / "flow"
 )
-DEFAULT_DELAUNAY_SCRIPT = TILE_SERVER_ROOT / "tools" / "delaunay.mjs"
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
 
@@ -35,13 +39,14 @@ class SourceDescriptor:
     source_revision: str
     station_count: int
     field_count: int
-    triangle_count: int
     unit: str
     basis: str
     phase: str
     station_filename: str
     station_sha256: str
     fields: tuple[FieldSourceDescriptor, ...]
+    topology: DelaunayTopology
+    interpolation: TriangleLinearInterpolation
 
 
 @dataclass(frozen=True)
@@ -49,8 +54,6 @@ class SourceDataset:
     descriptor: SourceDescriptor
     stations: np.ndarray
     fields: tuple[np.ndarray, ...]
-    triangles: np.ndarray
-    connectivity_sha256: str
     geographic_bounds: tuple[float, float, float, float]
     source_hash: str
 
@@ -84,11 +87,10 @@ def _require_sha256(value: Any, name: str) -> str:
 def read_source_descriptor(path: str | Path = DEFAULT_DESCRIPTOR_PATH) -> SourceDescriptor:
     descriptor_path = Path(path).resolve()
     raw = json.loads(descriptor_path.read_text(encoding="utf-8"))
-    if not isinstance(raw, dict) or raw.get("schemaVersion") != 1:
-        raise ValueError("Flow Field source descriptor schemaVersion must be 1")
+    if not isinstance(raw, dict) or raw.get("schemaVersion") != 2:
+        raise ValueError("Flow Field source descriptor schemaVersion must be 2")
     station_count = _require_integer(raw.get("stationCount"), "stationCount", 3)
     field_count = _require_integer(raw.get("fieldCount"), "fieldCount", 1)
-    triangle_count = _require_integer(raw.get("triangleCount"), "triangleCount", 1)
     if raw.get("unit") != "legacy-flow-unit":
         raise ValueError("Flow Field source unit must be legacy-flow-unit")
     if raw.get("basis") != "source-u-v":
@@ -132,13 +134,14 @@ def read_source_descriptor(path: str | Path = DEFAULT_DESCRIPTOR_PATH) -> Source
         source_revision=_require_string(raw.get("sourceRevision"), "sourceRevision"),
         station_count=station_count,
         field_count=field_count,
-        triangle_count=triangle_count,
         unit=raw["unit"],
         basis=raw["basis"],
         phase=raw["phase"],
         station_filename=_require_filename(station.get("file"), "station.file"),
         station_sha256=_require_sha256(station.get("sha256"), "station.sha256"),
         fields=tuple(fields),
+        topology=read_topology_spec(raw.get("topology")),
+        interpolation=read_interpolation_spec(raw.get("interpolation")),
     )
 
 
@@ -168,44 +171,17 @@ def _read_float32_pairs(
     return values
 
 
-def _invoke_delaunay(
-    station_path: Path,
-    station_count: int,
-    expected_triangle_count: int,
-    output_path: Path,
-    *,
-    node_executable: str,
-    delaunay_script: Path,
-) -> None:
-    try:
-        subprocess.run(
-            [
-                node_executable,
-                str(delaunay_script),
-                "--stations",
-                str(station_path),
-                "--station-count",
-                str(station_count),
-                "--expected-triangles",
-                str(expected_triangle_count),
-                "--output",
-                str(output_path),
-            ],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-    except subprocess.CalledProcessError as error:
-        detail = error.stderr.strip() or error.stdout.strip() or str(error)
-        raise RuntimeError(f"D3 Delaunay construction failed: {detail}") from error
-
-
 def _aggregate_source_hash(descriptor: SourceDescriptor) -> str:
     facts = [
         descriptor.dataset_id,
         descriptor.source_revision,
+        str(descriptor.station_count),
+        str(descriptor.field_count),
         descriptor.station_sha256,
-        *(field.sha256 for field in descriptor.fields),
+        *(
+            f"{field.time_index}:{field.model_time}:{field.filename}:{field.sha256}"
+            for field in descriptor.fields
+        ),
         descriptor.unit,
         descriptor.basis,
         descriptor.phase,
@@ -217,8 +193,6 @@ def load_source_dataset(
     data_directory: str | Path = DEFAULT_DATA_DIRECTORY,
     *,
     descriptor_path: str | Path = DEFAULT_DESCRIPTOR_PATH,
-    node_executable: str = "node",
-    delaunay_script: str | Path = DEFAULT_DELAUNAY_SCRIPT,
 ) -> SourceDataset:
     source_directory = Path(data_directory).resolve()
     descriptor = read_source_descriptor(descriptor_path)
@@ -238,41 +212,10 @@ def load_source_dataset(
         )
         for field in descriptor.fields
     )
-    script = Path(delaunay_script).resolve()
-    if not script.is_file():
-        raise FileNotFoundError(f"D3 Delaunay helper does not exist: {script}")
-    with tempfile.TemporaryDirectory(prefix="geoscratch-flow-topology-") as temporary:
-        topology_path = Path(temporary) / "triangles.u32"
-        _invoke_delaunay(
-            station_path,
-            descriptor.station_count,
-            descriptor.triangle_count,
-            topology_path,
-            node_executable=node_executable,
-            delaunay_script=script,
-        )
-        connectivity = topology_path.read_bytes()
-    expected_bytes = descriptor.triangle_count * 3 * np.dtype("<u4").itemsize
-    if len(connectivity) != expected_bytes:
-        raise ValueError(
-            "D3 connectivity byte length mismatch: "
-            f"expected {expected_bytes}, received {len(connectivity)}"
-        )
-    triangles = np.frombuffer(connectivity, dtype="<u4").reshape(-1, 3).copy()
-    if int(triangles.max(initial=0)) >= descriptor.station_count:
-        raise ValueError("D3 connectivity contains an out-of-range station index")
-    if np.any(
-        (triangles[:, 0] == triangles[:, 1])
-        | (triangles[:, 1] == triangles[:, 2])
-        | (triangles[:, 2] == triangles[:, 0])
-    ):
-        raise ValueError("D3 connectivity contains a degenerate triangle")
     return SourceDataset(
         descriptor=descriptor,
         stations=stations,
         fields=fields,
-        triangles=triangles,
-        connectivity_sha256=hashlib.sha256(connectivity).hexdigest(),
         geographic_bounds=(
             float(stations[:, 0].min()),
             float(stations[:, 1].min()),

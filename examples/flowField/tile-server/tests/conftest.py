@@ -49,12 +49,19 @@ def synthetic_source(tmp_path_factory: pytest.TempPathFactory) -> SyntheticSourc
             "sha256": _write_float32_pairs(directory / filename, values),
         })
     descriptor = {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "datasetId": "synthetic-flow-field",
         "sourceRevision": "synthetic-v1",
         "stationCount": 4,
         "fieldCount": len(fields),
-        "triangleCount": 2,
+        "topology": {
+            "kind": "delaunay",
+            "duplicatePolicy": "error",
+            "localSpacingNeighbors": 8,
+            "maximumEdgeRatio": None,
+            "maximumEdgeLengthMeters": None,
+        },
+        "interpolation": {"kind": "triangle-linear"},
         "unit": "legacy-flow-unit",
         "basis": "source-u-v",
         "phase": "unspecified",
