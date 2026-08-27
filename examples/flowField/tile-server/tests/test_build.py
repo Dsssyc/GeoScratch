@@ -52,6 +52,21 @@ def test_manifest_is_velocity_only_standard_web_mercator_quad(built_tiles):
     assert not any(word in json.dumps(manifest).lower() for word in (
         "boundary", "depth", "wet", "sdf", "vector-feature",
     ))
+    assert manifest["construction"]["algorithmVersion"] == "flow-rg32f-wmq-v2"
+    topology = manifest["construction"]["topology"]
+    assert {
+        "requested": topology["requested"],
+        "resolved": topology["resolved"],
+        "inferred": topology["inferred"],
+    } == {
+        "requested": "delaunay",
+        "resolved": "delaunay",
+        "inferred": True,
+    }
+    assert manifest["construction"]["interpolation"]["resolved"] == (
+        "triangle-linear"
+    )
+    assert manifest["contentVersion"].endswith("-v2")
 
 
 def test_every_page_has_exact_little_endian_rg32f_bytes_and_hash(built_tiles):
@@ -131,6 +146,20 @@ def test_existing_artifact_verification_recomputes_every_page_hash(built_tiles):
     assert facts["pageCount"] == built_tiles.page_count
     assert facts["totalRawPageBytes"] == built_tiles.total_raw_page_bytes
     assert facts["contentVersion"] == built_tiles.content_version
+
+
+def test_existing_artifact_verification_rejects_stale_construction_contract(
+    built_tiles,
+    tmp_path,
+):
+    output = tmp_path / "cache"
+    output.mkdir()
+    manifest = json.loads(built_tiles.manifest_path.read_text(encoding="utf-8"))
+    manifest["construction"]["sampleRegistration"] = "texel-center"
+    output.joinpath("manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="construction contract"):
+        verify_existing_tiles(output)
 
 
 def test_global_texel_lattice_is_continuous_across_adjacent_pages():

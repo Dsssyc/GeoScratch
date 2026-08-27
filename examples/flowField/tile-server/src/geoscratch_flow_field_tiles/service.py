@@ -13,7 +13,11 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 
-from .build import DEFAULT_OUTPUT_DIRECTORY, PAGE_BYTE_LENGTH
+from .build import (
+    DEFAULT_OUTPUT_DIRECTORY,
+    PAGE_BYTE_LENGTH,
+    validate_artifact_manifest,
+)
 
 
 FLOW_RG32F_MEDIA_TYPE = "application/vnd.geoscratch.flow-rg32f"
@@ -92,8 +96,7 @@ class VelocityTileStore:
             )
         self.manifest_bytes = self.manifest_path.read_bytes()
         self.manifest = json.loads(self.manifest_bytes)
-        if self.manifest.get("schemaVersion") != 1:
-            raise ValueError("Flow Field manifest schemaVersion must be 1")
+        validate_artifact_manifest(self.manifest)
         self.manifest_etag = f'"{hashlib.sha256(self.manifest_bytes).hexdigest()}"'
         self.matrix_ids = tuple(self.manifest["tileMatrixSet"]["tileMatrixIds"])
         self.time_ids = tuple(

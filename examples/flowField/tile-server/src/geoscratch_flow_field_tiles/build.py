@@ -181,18 +181,11 @@ def _manifest(
         "weightPrecision": "float64",
         "outputPrecision": "float32-le",
     }
-    construction_identity = {
-        "algorithmVersion": BUILD_ALGORITHM_VERSION,
-        "sourceHash": dataset.source_hash,
-        "topology": topology_manifest,
-        "interpolation": interpolation_manifest,
-        "tileMatrixSet": "WebMercatorQuad",
-        "tileSize": TILE_SIZE,
-        "minimumTileMatrix": MIN_TILE_MATRIX,
-        "maximumTileMatrix": MAX_TILE_MATRIX,
-        "sampleRegistration": "global-texel-lattice",
-        "levelConstruction": "direct",
-    }
+    construction_identity = _construction_identity(
+        dataset.source_hash,
+        topology_manifest,
+        interpolation_manifest,
+    )
     construction_hash = hashlib.sha256(
         json.dumps(
             construction_identity,
@@ -300,7 +293,77 @@ def _manifest(
     }
 
 
+def _construction_identity(
+    source_hash: str,
+    topology_manifest: dict[str, object],
+    interpolation_manifest: dict[str, object],
+) -> dict[str, object]:
+    return {
+        "algorithmVersion": BUILD_ALGORITHM_VERSION,
+        "sourceHash": source_hash,
+        "topology": topology_manifest,
+        "interpolation": interpolation_manifest,
+        "tileMatrixSet": "WebMercatorQuad",
+        "tileSize": TILE_SIZE,
+        "minimumTileMatrix": MIN_TILE_MATRIX,
+        "maximumTileMatrix": MAX_TILE_MATRIX,
+        "sampleRegistration": "global-texel-lattice",
+        "levelConstruction": "direct",
+    }
+
+
+def validate_artifact_manifest(manifest: dict[str, Any]) -> None:
+    if manifest.get("schemaVersion") != 1:
+        raise ValueError("Flow Field manifest schemaVersion must be 1")
+    source_hash = manifest.get("sourceHash")
+    construction = manifest.get("construction")
+    if (
+        not isinstance(source_hash, str)
+        or len(source_hash) != 64
+        or any(character not in "0123456789abcdef" for character in source_hash)
+    ):
+        raise ValueError("Flow Field manifest sourceHash is invalid")
+    if not isinstance(construction, dict):
+        raise ValueError("Flow Field manifest construction facts are missing")
+    topology = construction.get("topology")
+    interpolation = construction.get("interpolation")
+    mapping = construction.get("mapping")
+    if (
+        construction.get("algorithmVersion") != BUILD_ALGORITHM_VERSION
+        or construction.get("sampleRegistration") != "global-texel-lattice"
+        or construction.get("levelConstruction") != "direct"
+        or construction.get("unsupportedVelocity") != [0.0, 0.0]
+        or not isinstance(topology, dict)
+        or topology.get("requested") != "delaunay"
+        or topology.get("resolved") != "delaunay"
+        or topology.get("inferred") is not True
+        or not isinstance(interpolation, dict)
+        or interpolation.get("requested") != "triangle-linear"
+        or interpolation.get("resolved") != "triangle-linear"
+        or not isinstance(mapping, list)
+        or len(mapping) != MAX_TILE_MATRIX - MIN_TILE_MATRIX + 1
+        or not all(isinstance(entry, dict) for entry in mapping)
+        or [entry.get("matrixId") for entry in mapping]
+        != [str(level) for level in range(MIN_TILE_MATRIX, MAX_TILE_MATRIX + 1)]
+    ):
+        raise ValueError("Flow Field manifest construction contract is invalid")
+    identity = _construction_identity(source_hash, topology, interpolation)
+    expected_hash = hashlib.sha256(
+        json.dumps(identity, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    expected_version = (
+        f"flow-{expected_hash[:16]}-rg32f-wmq-"
+        f"z{MIN_TILE_MATRIX}-z{MAX_TILE_MATRIX}-v2"
+    )
+    if (
+        construction.get("constructionHash") != expected_hash
+        or manifest.get("contentVersion") != expected_version
+    ):
+        raise ValueError("Flow Field manifest construction identity is invalid")
+
+
 def _validate_staged_artifact(output_directory: Path, manifest: dict[str, Any]) -> None:
+    validate_artifact_manifest(manifest)
     pages = manifest.get("pages")
     if not isinstance(pages, list) or not pages:
         raise RuntimeError("Flow Field manifest must declare at least one RG32F page")
@@ -474,8 +537,7 @@ def verify_existing_tiles(output_directory: str | Path) -> dict[str, Any]:
     if not manifest_path.is_file():
         raise FileNotFoundError(f"Flow Field manifest does not exist: {manifest_path}")
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    if manifest.get("schemaVersion") != 1:
-        raise ValueError("Flow Field manifest schemaVersion must be 1")
+    validate_artifact_manifest(manifest)
     _validate_staged_artifact(output, manifest)
     pages = manifest["pages"]
     return {

@@ -126,3 +126,18 @@ def test_stats_are_bounded_aggregates_without_request_history(built_tiles):
     assert set(payload["timeReads"]) == {"t00", "t01"}
     assert "history" not in payload
     assert "requestHistory" not in payload
+
+
+def test_service_refuses_a_stale_builder_manifest(built_tiles, tmp_path):
+    output = tmp_path / "stale"
+    output.mkdir()
+    manifest = json.loads(built_tiles.manifest_path.read_text(encoding="utf-8"))
+    manifest["construction"]["algorithmVersion"] = "flow-rg32f-wmq-v1"
+    output.joinpath("manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+    try:
+        create_app(output)
+    except ValueError as error:
+        assert "construction contract" in str(error)
+    else:
+        raise AssertionError("service accepted a stale construction contract")
