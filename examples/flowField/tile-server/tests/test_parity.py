@@ -102,7 +102,11 @@ def test_unsupported_triangles_lower_to_zero_velocity_without_an_extra_plane(
             "maximumEdgeRatio": None,
             "maximumEdgeLengthMeters": 2_000.0,
         },
-        "interpolation": {"kind": "triangle-linear"},
+        "interpolation": {
+            "kind": "triangle-linear",
+            "stationaryPolicy": "require-all-moving",
+            "stationaryEpsilon": 0.0,
+        },
         "unit": "legacy-flow-unit",
         "basis": "source-u-v",
         "phase": "unspecified",

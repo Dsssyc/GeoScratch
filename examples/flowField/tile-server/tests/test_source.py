@@ -65,7 +65,11 @@ def test_source_descriptor_freezes_all_verified_repository_hashes():
         "maximumEdgeLengthMeters": 5_000.0,
         "maximumEdgeRatio": 16.0,
     }
-    assert raw["interpolation"] == {"kind": "triangle-linear"}
+    assert raw["interpolation"] == {
+        "kind": "triangle-linear",
+        "stationaryEpsilon": 0.0,
+        "stationaryPolicy": "require-all-moving",
+    }
     assert raw["station"]["sha256"] == EXPECTED_STATION_HASH
     assert tuple(field["sha256"] for field in raw["fields"]) == EXPECTED_FIELD_HASHES
     assert [field["timeIndex"] for field in raw["fields"]] == list(range(27))

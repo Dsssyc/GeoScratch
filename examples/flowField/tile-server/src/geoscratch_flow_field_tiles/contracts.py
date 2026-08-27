@@ -69,12 +69,29 @@ class DelaunayTopology:
 
 @dataclass(frozen=True, slots=True)
 class TriangleLinearInterpolation:
-    """Interpolates U and V with the same non-negative barycentric weights."""
+    """Interpolates U/V only where every triangle vertex can advect a particle."""
 
     kind: Literal["triangle-linear"] = field(default="triangle-linear", init=False)
+    stationary_policy: Literal["require-all-moving"] = "require-all-moving"
+    stationary_epsilon: float = 0.0
 
-    def manifest(self) -> dict[str, str]:
-        return {"kind": self.kind}
+    def __post_init__(self) -> None:
+        if self.stationary_policy != "require-all-moving":
+            raise ValueError("stationary_policy must be require-all-moving")
+        if (
+            isinstance(self.stationary_epsilon, bool)
+            or not isinstance(self.stationary_epsilon, (int, float))
+            or not math.isfinite(self.stationary_epsilon)
+            or self.stationary_epsilon < 0.0
+        ):
+            raise ValueError("stationary_epsilon must be a finite non-negative number")
+
+    def manifest(self) -> dict[str, str | float]:
+        return {
+            "kind": self.kind,
+            "stationaryPolicy": self.stationary_policy,
+            "stationaryEpsilon": self.stationary_epsilon,
+        }
 
 
 TopologySpec: TypeAlias = DelaunayTopology
@@ -117,4 +134,7 @@ def read_interpolation_spec(value: Any) -> TriangleLinearInterpolation:
         raise UnsupportedInterpolationError(
             "Flow Field source interpolation must be triangle-linear"
         )
-    return TriangleLinearInterpolation()
+    return TriangleLinearInterpolation(
+        stationary_policy=value.get("stationaryPolicy", "require-all-moving"),
+        stationary_epsilon=value.get("stationaryEpsilon", 0.0),
+    )

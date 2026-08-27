@@ -52,7 +52,7 @@ def test_manifest_is_velocity_only_standard_web_mercator_quad(built_tiles):
     assert not any(word in json.dumps(manifest).lower() for word in (
         "boundary", "depth", "wet", "sdf", "vector-feature",
     ))
-    assert manifest["construction"]["algorithmVersion"] == "flow-rg32f-wmq-v2"
+    assert manifest["construction"]["algorithmVersion"] == "flow-rg32f-wmq-v3"
     topology = manifest["construction"]["topology"]
     assert {
         "requested": topology["requested"],
@@ -66,7 +66,10 @@ def test_manifest_is_velocity_only_standard_web_mercator_quad(built_tiles):
     assert manifest["construction"]["interpolation"]["resolved"] == (
         "triangle-linear"
     )
-    assert manifest["contentVersion"].endswith("-v2")
+    assert manifest["construction"]["interpolation"]["stationaryPolicy"] == (
+        "require-all-moving"
+    )
+    assert manifest["contentVersion"].endswith("-v3")
 
 
 def test_every_page_has_exact_little_endian_rg32f_bytes_and_hash(built_tiles):

@@ -132,7 +132,7 @@ def test_service_refuses_a_stale_builder_manifest(built_tiles, tmp_path):
     output = tmp_path / "stale"
     output.mkdir()
     manifest = json.loads(built_tiles.manifest_path.read_text(encoding="utf-8"))
-    manifest["construction"]["algorithmVersion"] = "flow-rg32f-wmq-v1"
+    manifest["construction"]["algorithmVersion"] = "flow-rg32f-wmq-v2"
     output.joinpath("manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
 
     try:

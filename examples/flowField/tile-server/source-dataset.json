@@ -33,7 +33,9 @@
   ],
   "phase": "unspecified",
   "interpolation": {
-    "kind": "triangle-linear"
+    "kind": "triangle-linear",
+    "stationaryEpsilon": 0.0,
+    "stationaryPolicy": "require-all-moving"
   },
   "schemaVersion": 2,
   "sourceRevision": "station-uv-sha256-v1",

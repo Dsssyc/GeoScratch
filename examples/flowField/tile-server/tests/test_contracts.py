@@ -38,7 +38,11 @@ def test_source_specs_round_trip_as_typed_public_contracts():
         "maximumEdgeRatio": 12.0,
         "maximumEdgeLengthMeters": 5_000.0,
     }
-    assert interpolation.manifest() == {"kind": "triangle-linear"}
+    assert interpolation.manifest() == {
+        "kind": "triangle-linear",
+        "stationaryPolicy": "require-all-moving",
+        "stationaryEpsilon": 0.0,
+    }
 
 
 def test_unimplemented_strategies_fail_instead_of_falling_back():
@@ -63,3 +67,10 @@ def test_unimplemented_strategies_fail_instead_of_falling_back():
 def test_delaunay_configuration_is_validated_at_the_api_boundary(arguments, message):
     with pytest.raises(ValueError, match=message):
         DelaunayTopology(**arguments)
+
+
+def test_triangle_linear_stationary_policy_is_validated_at_the_api_boundary():
+    with pytest.raises(ValueError, match="stationary_policy"):
+        TriangleLinearInterpolation(stationary_policy="continuous")
+    with pytest.raises(ValueError, match="stationary_epsilon"):
+        TriangleLinearInterpolation(stationary_epsilon=-1.0)

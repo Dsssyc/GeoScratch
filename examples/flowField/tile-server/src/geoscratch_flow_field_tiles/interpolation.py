@@ -48,12 +48,18 @@ class TriangleLinearStencil:
             if int(self.vertex_indices.max(initial=-1)) >= values_by_vertex.shape[0]:
                 raise ValueError("prepared velocity field does not cover the stencil vertices")
             values = values_by_vertex[self.vertex_indices]
-            output[self.target_indices] = np.einsum(
+            moving = np.all(
+                np.linalg.norm(values, axis=2)
+                > self.interpolation.stationary_epsilon,
+                axis=1,
+            )
+            interpolated = np.einsum(
                 "ki,kic->kc",
                 self.weights,
                 values,
                 optimize=True,
             )
+            output[self.target_indices[moving]] = interpolated[moving]
         return output.astype("<f4")
 
     def manifest(self) -> dict[str, object]:

@@ -29,7 +29,11 @@ The source descriptor is schema version 2. Its current strategy is explicitly:
     "maximumEdgeRatio": 16.0,
     "maximumEdgeLengthMeters": 5000.0
   },
-  "interpolation": {"kind": "triangle-linear"}
+  "interpolation": {
+    "kind": "triangle-linear",
+    "stationaryPolicy": "require-all-moving",
+    "stationaryEpsilon": 0.0
+  }
 }
 ```
 
@@ -47,9 +51,11 @@ The builder:
    metric local-spacing facts;
 4. compiles one float64 barycentric stencil for each spatial page and reuses it for every
    model time;
-5. samples every z4 through z9 page directly on the global WebMercator texel lattice instead
+5. writes a triangle only when all three station velocities can move a particle in that model
+   time; otherwise its targets remain exact U/V zero without another raster plane;
+6. samples every z4 through z9 page directly on the global WebMercator texel lattice instead
    of recursively averaging a finer level; and
-6. verifies every 524,288-byte little-endian RG32F page before atomically installing `cache/`.
+7. verifies every 524,288-byte little-endian RG32F page before atomically installing `cache/`.
 
 The lattice registration matches the runtime accessor: page texel `(0, 0)` represents the
 integer global texel coordinate at that page origin, and bilinear sampling spans to the next
@@ -103,7 +109,10 @@ build_velocity_tiles(
         maximum_edge_ratio=16.0,
         maximum_edge_length_meters=5_000.0,
     ),
-    interpolation=TriangleLinearInterpolation(),
+    interpolation=TriangleLinearInterpolation(
+        stationary_policy="require-all-moving",
+        stationary_epsilon=0.0,
+    ),
 )
 ```
 

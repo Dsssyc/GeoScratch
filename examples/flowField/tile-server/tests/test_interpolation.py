@@ -124,3 +124,26 @@ def test_duplicate_mean_is_applied_before_barycentric_interpolation():
     field = np.asarray([[0, 2], [4, 6], [8, 10], [12, 14]])
 
     assert np.allclose(stencil.apply(topology, field), [[2, 4]])
+
+
+def test_triangle_with_any_stationary_vertex_lowers_to_exact_zero():
+    stations = np.asarray([
+        [120.00, 31.00],
+        [120.10, 31.00],
+        [120.00, 31.10],
+    ])
+    topology = prepare_topology(
+        stations,
+        DelaunayTopology(maximum_edge_ratio=None),
+    )
+    stencil = prepare_triangle_linear_stencil(
+        topology,
+        np.asarray([120.02]),
+        np.asarray([31.03]),
+    )
+
+    cold_start = np.asarray([[1, 1], [0, 0], [2, 2]], dtype=np.float32)
+    filled = np.asarray([[1, 1], [3, 3], [2, 2]], dtype=np.float32)
+
+    assert np.array_equal(stencil.apply(topology, cold_start), [[0, 0]])
+    assert np.linalg.norm(stencil.apply(topology, filled)[0]) > 0

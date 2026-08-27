@@ -61,7 +61,11 @@ def synthetic_source(tmp_path_factory: pytest.TempPathFactory) -> SyntheticSourc
             "maximumEdgeRatio": None,
             "maximumEdgeLengthMeters": None,
         },
-        "interpolation": {"kind": "triangle-linear"},
+        "interpolation": {
+            "kind": "triangle-linear",
+            "stationaryPolicy": "require-all-moving",
+            "stationaryEpsilon": 0.0,
+        },
         "unit": "legacy-flow-unit",
         "basis": "source-u-v",
         "phase": "unspecified",

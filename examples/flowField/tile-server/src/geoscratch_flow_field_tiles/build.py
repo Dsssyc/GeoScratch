@@ -31,7 +31,7 @@ TILE_SIZE = 256
 MIN_TILE_MATRIX = 4
 MAX_TILE_MATRIX = 9
 PAGE_BYTE_LENGTH = TILE_SIZE * TILE_SIZE * 2 * 4
-BUILD_ALGORITHM_VERSION = "flow-rg32f-wmq-v2"
+BUILD_ALGORITHM_VERSION = "flow-rg32f-wmq-v3"
 WEB_MERCATOR_QUAD_URI = (
     "http://www.opengis.net/def/tilematrixset/OGC/1.0/WebMercatorQuad"
 )
@@ -180,6 +180,8 @@ def _manifest(
         "coordinateSpace": "EPSG:3857",
         "weightPrecision": "float64",
         "outputPrecision": "float32-le",
+        "stationaryPolicy": interpolation.stationary_policy,
+        "stationaryEpsilon": interpolation.stationary_epsilon,
     }
     construction_identity = _construction_identity(
         dataset.source_hash,
@@ -195,7 +197,7 @@ def _manifest(
     ).hexdigest()
     content_version = (
         f"flow-{construction_hash[:16]}-rg32f-wmq-"
-        f"z{MIN_TILE_MATRIX}-z{MAX_TILE_MATRIX}-v2"
+        f"z{MIN_TILE_MATRIX}-z{MAX_TILE_MATRIX}-v3"
     )
     spatial_page_count = sum(
         (int(limit["maxTileRow"]) - int(limit["minTileRow"]) + 1)
@@ -340,6 +342,8 @@ def validate_artifact_manifest(manifest: dict[str, Any]) -> None:
         or not isinstance(interpolation, dict)
         or interpolation.get("requested") != "triangle-linear"
         or interpolation.get("resolved") != "triangle-linear"
+        or interpolation.get("stationaryPolicy") != "require-all-moving"
+        or interpolation.get("stationaryEpsilon") != 0.0
         or not isinstance(mapping, list)
         or len(mapping) != MAX_TILE_MATRIX - MIN_TILE_MATRIX + 1
         or not all(isinstance(entry, dict) for entry in mapping)
@@ -353,7 +357,7 @@ def validate_artifact_manifest(manifest: dict[str, Any]) -> None:
     ).hexdigest()
     expected_version = (
         f"flow-{expected_hash[:16]}-rg32f-wmq-"
-        f"z{MIN_TILE_MATRIX}-z{MAX_TILE_MATRIX}-v2"
+        f"z{MIN_TILE_MATRIX}-z{MAX_TILE_MATRIX}-v3"
     )
     if (
         construction.get("constructionHash") != expected_hash
