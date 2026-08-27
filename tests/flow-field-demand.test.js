@@ -175,7 +175,7 @@ describe('Flow Field demand', () => {
             [ '3', 4, 0 ], [ '3', 4, 1 ], [ '3', 4, 7 ],
             [ '3', 5, 0 ], [ '3', 5, 1 ], [ '3', 5, 7 ],
         ])
-        expect(forward.requestedLevel).to.equal(3)
+        expect(forward.requestedLevel).to.equal(0)
         expect(forward.candidateCells).to.have.length(9 * 2 * 2)
         expect(new Set(forward.candidateCells.map(cell =>
             `${cell.page.key}/${cell.cellX}/${cell.cellY}`

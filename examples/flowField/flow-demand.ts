@@ -301,7 +301,10 @@ function buildCandidates(options: FlowDemandCandidateOptions): CandidateBuild {
     const candidateCells: FlowCandidateCell[] = []
     for (let pageIndex = 0; pageIndex < candidatePages.length; pageIndex++) {
         const page = candidatePages[pageIndex]!
-        const requestedLevel = spatial[pageIndex]!.requestedLevel
+        const requestedLevel = candidateSampleLevel(
+            options.addressSpace,
+            spatial[pageIndex]!
+        )
         for (let cellY = 0; cellY < options.cellsPerPageEdge; cellY++) {
             for (let cellX = 0; cellX < options.cellsPerPageEdge; cellX++) {
                 candidateCells.push(Object.freeze({
@@ -313,10 +316,12 @@ function buildCandidates(options: FlowDemandCandidateOptions): CandidateBuild {
             }
         }
     }
-    const requestedLevel = spatial.reduce(
-        (maximum, candidate) => Math.max(maximum, candidate.requestedLevel),
-        0
-    )
+    const requestedLevel = candidateCells.length === 0
+        ? 0
+        : candidateCells.reduce(
+            (finest, candidate) => Math.min(finest, candidate.requestedLevel),
+            options.addressSpace.levelCount - 1
+        )
     return Object.freeze({
         public: Object.freeze({
             requestedLevel,
@@ -325,6 +330,18 @@ function buildCandidates(options: FlowDemandCandidateOptions): CandidateBuild {
         }),
         spatial,
     })
+}
+
+function candidateSampleLevel(
+    addressSpace: VirtualRasterAddressSpace,
+    candidate: SpatialCandidate
+): number {
+
+    const sampleMatrixLevel = Math.min(
+        candidate.requestedLevel,
+        candidate.sourceLevelCeiling
+    )
+    return addressSpace.levelForMatrix(String(sampleMatrixLevel))
 }
 
 function produceDemandSet(
