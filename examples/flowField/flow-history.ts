@@ -457,7 +457,7 @@ function historyUniformCodec(): LayoutCodec {
 }
 
 async function textureLayout(runtime: GPURuntime, group: number, label: string) {
-    return runtime.createBindLayout({
+    return await runtime.createBindLayout({
         label,
         group,
         entries: [ {

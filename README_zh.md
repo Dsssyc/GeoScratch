@@ -455,6 +455,7 @@ async function main() {
 | Readiness Policies | `examples/readinessPolicies/` |
 | Underwater Terrain | `examples/underwaterTerrain/` |
 | Flow Layer | `examples/flowLayer/` |
+| Flow Field | `examples/flowField/` |
 | Hello GAW | `examples/helloGAW/` |
 
 ## 开发说明

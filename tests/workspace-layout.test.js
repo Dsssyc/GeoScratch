@@ -105,6 +105,10 @@ describe('workspace layout', () => {
             'examples/flowLayer/main.ts',
             'examples/flowLayer/flow-layer.ts',
             'examples/flowLayer/flow-map.ts',
+            'examples/flowField/main.ts',
+            'examples/flowField/application.ts',
+            'examples/flowField/map.ts',
+            'examples/flowField/flow-renderer.ts',
             'examples/helloGAW/main.ts',
         ]
 

@@ -23,6 +23,7 @@ describe('examples structure', () => {
         'readinessPolicies',
         'underwaterTerrain',
         'flowLayer',
+        'flowField',
         'helloGAW',
     ]
     const standaloneExamples = [
@@ -41,6 +42,7 @@ describe('examples structure', () => {
         'readinessPolicies',
         'underwaterTerrain',
         'flowLayer',
+        'flowField',
         'helloGAW',
     ]
 
@@ -121,6 +123,7 @@ describe('examples structure', () => {
             [ 'underwaterTerrain', 'Underwater Terrain' ],
             [ 'helloGAW', 'Hello GAW' ],
             [ 'flowLayer', 'Flow Layer' ],
+            [ 'flowField', 'Flow Field' ],
         ]
 
         for (const [ name, title ] of scratchBackedExamples) {
@@ -177,14 +180,17 @@ describe('examples structure', () => {
         }
     })
 
-    it('loads MapLibre only for the map-backed terrain examples', () => {
+    it('loads MapLibre for the map-backed geographic examples', () => {
         const terrainHtml = read('examples', 'underwaterTerrain', 'index.html')
         const flowHtml = read('examples', 'flowLayer', 'index.html')
+        const fieldHtml = read('examples', 'flowField', 'index.html')
 
         expect(terrainHtml).to.include('maplibre-gl@4.7.1/dist/maplibre-gl.js')
         expect(terrainHtml).to.include('maplibre-gl@4.7.1/dist/maplibre-gl.css')
         expect(flowHtml).to.include('maplibre-gl@4.7.1/dist/maplibre-gl.js')
         expect(flowHtml).to.include('maplibre-gl@4.7.1/dist/maplibre-gl.css')
+        expect(fieldHtml).to.include('maplibre-gl@4.7.1/dist/maplibre-gl.js')
+        expect(fieldHtml).to.include('maplibre-gl@4.7.1/dist/maplibre-gl.css')
     })
 
     it('builds each runnable example as a Vite input page', () => {

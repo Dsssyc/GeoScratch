@@ -6,6 +6,12 @@ Keep example runtime code in `main.ts` and place only page shell concerns, such 
 
 Keep ordinary example assets beside the example that owns them. Use relative asset URLs for images and raw shader imports for WGSL files. Reserve `examples/public/` for large local data that must be loaded by stable absolute URL, such as `/json/examples/flow/station.bin`.
 
+`Flow Field` is the independent velocity-only Virtual Raster consumer. It tiles the
+27 time slices, derives advectable support and its visible contour on the GPU, and
+keeps canonical particles independent of page residency. `Flow Layer` remains a
+frozen reference implementation. Flow-specific composition stays inside
+`examples/flowField/` until reuse evidence justifies a separate package decision.
+
 Scratch examples must `await` persistent buffer, texture, sampler, query-set, bind-layout, and bind-set creation. Buffer consumers receive explicit `BufferRegion` values, while persistent texture bindings and pass attachments receive logical `TextureViewSpec` values. Examples must not pass whole BufferResource or TextureResource objects where one of those views is required.
 
 A changed `TextureResource.resize()` must be awaited before the example relies on the replacement allocation; the same-size path returns an already-resolved promise. Replacement makes every affected BindSet stale, so reuse requires an explicit acknowledged `await bindSet.prepare()` before submission. Submission never creates or repairs persistent native bindings. Examples must not add synchronous compatibility helpers or reach into library source.

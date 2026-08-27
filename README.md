@@ -467,6 +467,7 @@ Run `npm run dev` and open the examples browser. Each demo also has a standalone
 | Readiness Policies | `examples/readinessPolicies/` |
 | Underwater Terrain | `examples/underwaterTerrain/` |
 | Flow Layer | `examples/flowLayer/` |
+| Flow Field | `examples/flowField/` |
 | Hello GAW | `examples/helloGAW/` |
 
 ## Development Notes

@@ -21,6 +21,9 @@ describe('asset layout', () => {
         expect(exists('examples', 'helloGAW', 'assets', 'images', 'earth.jpg')).to.equal(true)
         expect(exists('examples', 'helloGAW', 'shaders', 'land.wgsl')).to.equal(true)
         expect(exists('examples', 'flowLayer', 'shaders', 'flow', 'particles.wgsl')).to.equal(true)
+        expect(exists('examples', 'flowField', 'shaders', 'temporal-velocity.wgsl')).to.equal(true)
+        expect(exists('examples', 'flowField', 'shaders', 'particle-render.wgsl')).to.equal(true)
+        expect(exists('examples', 'flowField', 'shaders', 'contour.compute.wgsl')).to.equal(true)
         expect(exists('examples', 'underwaterTerrain', 'assets', 'dem.png')).to.equal(true)
         expect(exists('examples', 'underwaterTerrain', 'shaders', 'lod-map.wgsl')).to.equal(false)
         expect(exists(
@@ -29,6 +32,7 @@ describe('asset layout', () => {
 
         const helloGAW = read('examples', 'helloGAW', 'main.ts')
         const flowLayer = read('examples', 'flowLayer', 'flow-layer.ts')
+        const flowField = read('examples', 'flowField', 'flow-renderer.ts')
 
         expect(helloGAW).to.not.include('/images/Earth/')
         expect(helloGAW).to.not.include('/shaders/examples/GAW/')
@@ -36,6 +40,8 @@ describe('asset layout', () => {
         expect(helloGAW).to.include('./shaders/land.wgsl?raw')
         expect(flowLayer).to.not.include('/shaders/examples/flow/')
         expect(flowLayer).to.include('./shaders/flow/particles.wgsl?raw')
+        expect(flowField).to.include('./shaders/particle-simulation.compute.wgsl?raw')
+        expect(flowField).to.not.match(/flowLayer|\/shaders\/examples\/flow\//)
     })
 
     it('keeps public directories only for large URL-addressed local data', () => {

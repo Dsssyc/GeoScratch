@@ -24,6 +24,7 @@ const additionalOrdinaryFiles = [
     'examples/flowLayer/main.ts',
     'examples/flowLayer/flow-layer.ts',
     'examples/flowLayer/flow-map.ts',
+    ...flowFieldTypeScriptFiles(),
 ]
 const supportingFactories = new Set([
     'createSampler',
@@ -47,6 +48,15 @@ describe('ordinary Scratch example target API audit', () => {
         expect(violations).to.deep.equal([])
     })
 })
+
+function flowFieldTypeScriptFiles() {
+
+    const directory = path.join(root, 'examples', 'flowField')
+    return fs.readdirSync(directory, { withFileTypes: true })
+        .filter(entry => entry.isFile() && entry.name.endsWith('.ts'))
+        .map(entry => `examples/flowField/${entry.name}`)
+        .sort()
+}
 
 function auditExample(relativePath) {
 

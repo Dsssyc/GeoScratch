@@ -61,6 +61,7 @@ const examplePages = {
   readinessPolicies: path.resolve(examplesRoot, 'readinessPolicies/index.html'),
   underwaterTerrain: path.resolve(examplesRoot, 'underwaterTerrain/index.html'),
   flowLayer: path.resolve(examplesRoot, 'flowLayer/index.html'),
+  flowField: path.resolve(examplesRoot, 'flowField/index.html'),
   helloGAW: path.resolve(examplesRoot, 'helloGAW/index.html'),
 }
 
