@@ -4,7 +4,8 @@
 
 Accepted. Supersedes the D3-specific, fixed-degree support, texel-center storage, and
 recursive coarse-reduction clauses in the Flow Field implementation plan. It does not
-change the frozen `Flow Layer` example or add a Geo/Scratch public API.
+change the frozen `Flow Layer` example or add a Geo/Scratch public API. ADR-091 extends the
+example-owned backend with a statistically resolved single-snapshot COG prototype.
 
 ## Date
 
@@ -57,7 +58,7 @@ The strict `DelaunayTopology()` default still rejects duplicates. `mean` is a re
 for this source, not a universal rule. A future authoritative topology may legitimately keep
 coincident node identities separate.
 
-Construction uses NumPy and SciPy only:
+The normal RG32F page construction uses NumPy and SciPy only:
 
 1. validate all source hashes, lengths, shapes, and finite U/V pairs;
 2. reduce exact duplicates deterministically according to the topology request;
@@ -121,8 +122,9 @@ velocity-only lattice.
 
 ## Consequences
 
-- The active builder no longer depends on Node, D3, C++, QuikGrid, GDAL, PROJ, packed PNGs,
-  seed textures, or projection textures.
+- The normal RG32F page builder no longer depends on Node, D3, C++, QuikGrid, GDAL, PROJ,
+  packed PNGs, seed textures, or projection textures. ADR-091's optional COG writer adds the
+  already established Rasterio/rio-cogeo stack only to the example-owned offline tool.
 - One immutable topology and page stencil set is reused across all 27 time fields.
 - Exact duplicate behavior is deterministic and auditable.
 - Dynamic non-advectable support is encoded only as zero U/V and follows each time field.
@@ -144,3 +146,6 @@ page-stencil and RG32F writer contract without changing the normal runtime data 
 SciPy documents Delaunay simplices, omitted/coplanar inputs, `find_simplex()` outside value
 `-1`, and the `transform` matrices used for barycentric coordinates:
 <https://docs.scipy.org/doc/scipy/reference/generated/scipy.spatial.Delaunay.html>.
+
+The single-snapshot statistical resolution and COG contract is recorded by
+[ADR-091](./ADR-091-statistical-flow-cog-snapshot.md).

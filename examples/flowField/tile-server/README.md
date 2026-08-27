@@ -1,4 +1,4 @@
-# Flow Field velocity tile server
+# Flow Field velocity resource tools
 
 This example-owned tool builds and serves the immutable velocity-only data product used by
 `Flow Field`. It does not modify or import the frozen `Flow Layer` implementation and it does
@@ -90,6 +90,62 @@ artifact contains 1,593 pages and 835,190,784 raw page bytes. This is an expecte
 measurement, not an optimization claim. Unit tests use a small synthetic source and do not
 materialize the full artifact.
 
+## Single-snapshot COG prototype
+
+`flow-field-cog-build` builds one selected U/V time as one internally tiled, two-band
+float32 COG. It uses the same Delaunay topology, stationary-triangle rule, and one-pixel
+bilinear-safe support erosion as the RG32F page builder, but samples standard GeoTIFF pixel
+centres instead of the existing RG32F runtime's integer global lattice. The output is
+EPSG:3857, band 1 U, band 2 V, 256 by 256 pixel-interleaved blocks, DEFLATE predictor 3, no
+nodata/mask/alpha, and no overview levels. Exact `(0, 0)` remains the only representation of
+non-advectable support; the COG adds no boundary, wet/dry, depth, SDF, or activity plane.
+
+The default resolution strategy does not use the absolute minimum station distance. It:
+
+1. deduplicates exact station coordinates and projects them to EPSG:3857;
+2. computes nearest non-self distance for each unique station;
+3. finds the leftmost statistically supported mode in a fixed, smoothed log2 histogram;
+4. requires at least 1% or 1,024 supporting stations plus 25% peak prominence;
+5. uses the median original distance in that mode's `+/-0.25`-octave window; and
+6. chooses the first WebMercatorQuad matrix providing at least two samples per spacing.
+
+For the repository data this resolves `12.504520 m` effective spacing to z15 at
+`4.777314 m/pixel`. Its complete extent is `275 x 301` blocks and
+`43,397,939,200` raw U/V bytes (`40.4175 GiB`) for one time. The default 4,096-block and
+two-GiB raw-byte budgets reject that output. Budgets never choose another matrix.
+
+An explicit matrix override is a separate, visible prototype decision. The currently verified
+local artifact uses z12: `36 x 39` blocks, `9,216 x 9,984` pixels, and `736,100,352` raw
+bytes. Its manifest still contains the selected z15 grid and rejected selected-grid budget,
+alongside the approved z12 output grid and budget. Both products remain
+`particleSimulation: not-approved` until their reconstruction errors are accepted.
+
+Planning is read-only and returns both grid decisions as JSON:
+
+```bash
+# Reports selected z15 and its rejected default budget; writes no artifact.
+examples/flowField/tile-server/.venv/bin/flow-field-cog-build --plan-only
+
+# Reports selected z15 plus the explicit, budget-approved z12 output.
+examples/flowField/tile-server/.venv/bin/flow-field-cog-build \
+  --plan-only --matrix 12
+
+# Builds only uv_0 as the explicit z12 prototype.
+examples/flowField/tile-server/.venv/bin/flow-field-cog-build \
+  --time-index 0 --matrix 12
+
+# Recomputes marker, manifest, container, encoding, file, and pixel identity.
+examples/flowField/tile-server/.venv/bin/flow-field-cog-build --verify-existing
+```
+
+Building the selected z15 grid requires explicitly raising `--max-blocks` and
+`--max-raw-bytes` after reviewing the plan's staging-space requirement; the CLI never raises
+those limits automatically. COG internal tiling permits range reads but does not avoid
+interpolating and writing every selected pixel. No overview is generated because ordinary
+averaging would blur exact-zero support into motion; a future overview policy needs its own
+support-preserving numerical contract. See
+[ADR-091](../../../docs/decisions/ADR-091-statistical-flow-cog-snapshot.md).
+
 ```bash
 python3 -m venv examples/flowField/tile-server/.venv
 examples/flowField/tile-server/.venv/bin/python -m pip install -e \
@@ -145,6 +201,33 @@ No other topology or interpolation kind is accepted yet. Unsupported objects fai
 `UNSUPPORTED_TOPOLOGY` or `UNSUPPORTED_INTERPOLATION`; they never silently fall back to
 Delaunay. Future authoritative triangle, rectilinear, nested-grid, or polygon-cell strategies
 can extend these typed parameters without changing the build entrypoint.
+
+The COG path exposes the same typed upper-level parameters and keeps planning separate from
+construction:
+
+```python
+from geoscratch_flow_field_tiles.cog import (
+    CogBuildBudget,
+    build_velocity_cog_snapshot,
+    plan_velocity_cog_snapshot,
+)
+from geoscratch_flow_field_tiles.source import load_source_snapshot
+
+snapshot = load_source_snapshot(time_index=0)
+plan = plan_velocity_cog_snapshot(
+    snapshot.stations,
+    snapshot.geographic_bounds,
+    output_parent="examples/flowField/tile-server",
+    matrix_override=12,
+)
+plan.require_output_approved()
+
+result = build_velocity_cog_snapshot(
+    time_index=0,
+    matrix_override=12,
+    budget=CogBuildBudget(),
+)
+```
 
 ## Static service
 
