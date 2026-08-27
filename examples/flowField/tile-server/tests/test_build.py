@@ -69,6 +69,20 @@ def test_manifest_is_velocity_only_standard_web_mercator_quad(built_tiles):
     assert manifest["construction"]["interpolation"]["stationaryPolicy"] == (
         "require-all-moving"
     )
+    quality = manifest["construction"]["quality"]
+    assert quality["finestMatrixId"] == str(MAX_TILE_MATRIX)
+    assert quality["runtimeSampling"] == "global-lattice-bilinear"
+    assert [record["timeIndex"] for record in quality["stationReconstruction"]] == [
+        0,
+        1,
+    ]
+    assert all(
+        record["topologyVertexCount"] == 4
+        and record["velocityRmse"] >= 0
+        and record["maximumVelocityError"] >= 0
+        and record["stationaryFalseMovingCount"] == 0
+        for record in quality["stationReconstruction"]
+    )
     assert manifest["contentVersion"].endswith("-v3")
 
 

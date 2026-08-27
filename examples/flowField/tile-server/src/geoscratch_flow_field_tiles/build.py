@@ -163,6 +163,115 @@ def _write_page(
     }
 
 
+def _read_page(path: Path) -> np.ndarray:
+    payload = path.read_bytes()
+    if len(payload) != PAGE_BYTE_LENGTH:
+        raise RuntimeError(
+            f"RG32F page byte length mismatch: expected {PAGE_BYTE_LENGTH}, received {len(payload)}"
+        )
+    values = np.frombuffer(payload, dtype="<f4")
+    if not np.isfinite(values).all():
+        raise RuntimeError(f"RG32F page contains a non-finite value: {path}")
+    return values.reshape(TILE_SIZE, TILE_SIZE, 2)
+
+
+def _finest_station_reconstruction_quality(
+    output_directory: Path,
+    dataset: SourceDataset,
+    topology: PreparedDelaunayTopology,
+    prepared_fields: tuple[np.ndarray, ...],
+    finest_limit: dict[str, int | str],
+) -> list[dict[str, Any]]:
+    min_row = int(finest_limit["minTileRow"])
+    max_row = int(finest_limit["maxTileRow"])
+    min_col = int(finest_limit["minTileCol"])
+    max_col = int(finest_limit["maxTileCol"])
+    height = (max_row - min_row + 1) * TILE_SIZE
+    width = (max_col - min_col + 1) * TILE_SIZE
+    world_cells = (1 << MAX_TILE_MATRIX) * TILE_SIZE
+    stations = topology.vertices_lon_lat
+    global_x = (stations[:, 0] + 180.0) / 360.0 * world_cells
+    mercator_y = np.arcsinh(np.tan(np.radians(stations[:, 1])))
+    global_y = (1.0 - mercator_y / math.pi) * 0.5 * world_cells
+    local_x = global_x - min_col * TILE_SIZE
+    local_y = global_y - min_row * TILE_SIZE
+    base_x = np.floor(local_x).astype(np.int64)
+    base_y = np.floor(local_y).astype(np.int64)
+    if np.any(base_x < 0) or np.any(base_x + 1 >= width):
+        raise RuntimeError("finest reconstruction stations exceed longitude coverage")
+    if np.any(base_y < 0) or np.any(base_y + 1 >= height):
+        raise RuntimeError("finest reconstruction stations exceed latitude coverage")
+    weight_x = (local_x - base_x)[:, None]
+    weight_y = (local_y - base_y)[:, None]
+
+    quality: list[dict[str, Any]] = []
+    for field_descriptor, reference in zip(
+        dataset.descriptor.fields,
+        prepared_fields,
+        strict=True,
+    ):
+        mosaic = np.zeros((height, width, 2), dtype=np.float32)
+        for tile_row in range(min_row, max_row + 1):
+            row = (tile_row - min_row) * TILE_SIZE
+            for tile_col in range(min_col, max_col + 1):
+                col = (tile_col - min_col) * TILE_SIZE
+                mosaic[row:row + TILE_SIZE, col:col + TILE_SIZE] = _read_page(
+                    output_directory / _page_relative_path(
+                        field_descriptor.time_index,
+                        MAX_TILE_MATRIX,
+                        tile_row,
+                        tile_col,
+                    )
+                )
+        top_left = mosaic[base_y, base_x].astype(np.float64)
+        top_right = mosaic[base_y, base_x + 1].astype(np.float64)
+        bottom_left = mosaic[base_y + 1, base_x].astype(np.float64)
+        bottom_right = mosaic[base_y + 1, base_x + 1].astype(np.float64)
+        reconstructed = (
+            (top_left * (1.0 - weight_x) + top_right * weight_x)
+            * (1.0 - weight_y)
+            + (bottom_left * (1.0 - weight_x) + bottom_right * weight_x)
+            * weight_y
+        )
+        reference_speed = np.linalg.norm(reference, axis=1)
+        reconstructed_speed = np.linalg.norm(reconstructed, axis=1)
+        velocity_error = np.linalg.norm(reconstructed - reference, axis=1)
+        stationary = reference_speed == 0.0
+        moving = ~stationary
+        false_moving = stationary & (reconstructed_speed > 0.0)
+        collapsed_moving = moving & (reconstructed_speed == 0.0)
+        directional = moving & (reconstructed_speed > 0.0)
+        if directional.any():
+            cosine = np.sum(reference[directional] * reconstructed[directional], axis=1)
+            cosine /= reference_speed[directional] * reconstructed_speed[directional]
+            angular_error = np.degrees(np.arccos(np.clip(cosine, -1.0, 1.0)))
+            maximum_angular_error = float(angular_error.max(initial=0.0))
+            angular_rmse = float(
+                math.sqrt(np.mean(np.square(angular_error), dtype=np.float64))
+            )
+        else:
+            maximum_angular_error = 0.0
+            angular_rmse = 0.0
+        quality.append({
+            "timeIndex": field_descriptor.time_index,
+            "topologyVertexCount": topology.vertex_count,
+            "velocityRmse": float(
+                math.sqrt(np.mean(np.square(velocity_error), dtype=np.float64))
+            ),
+            "maximumVelocityError": float(velocity_error.max(initial=0.0)),
+            "angularRmseDegrees": angular_rmse,
+            "maximumAngularErrorDegrees": maximum_angular_error,
+            "stationaryVertexCount": int(np.count_nonzero(stationary)),
+            "stationaryFalseMovingCount": int(np.count_nonzero(false_moving)),
+            "maximumFalseMovingSpeed": float(
+                reconstructed_speed[false_moving].max(initial=0.0)
+            ),
+            "movingVertexCount": int(np.count_nonzero(moving)),
+            "movingCollapsedCount": int(np.count_nonzero(collapsed_moving)),
+        })
+    return quality
+
+
 def _manifest(
     dataset: SourceDataset,
     limits: tuple[dict[str, int | str], ...],
@@ -170,6 +279,7 @@ def _manifest(
     topology: PreparedDelaunayTopology,
     interpolation: InterpolationSpec,
     mapping_statistics: list[dict[str, Any]],
+    station_reconstruction_quality: list[dict[str, Any]],
 ) -> dict[str, Any]:
     descriptor = dataset.descriptor
     duplicate_statistics = topology.duplicate_statistics(dataset.fields)
@@ -291,6 +401,11 @@ def _manifest(
             "sampleRegistration": "global-texel-lattice",
             "levelConstruction": "direct",
             "mapping": mapping_statistics,
+            "quality": {
+                "finestMatrixId": str(MAX_TILE_MATRIX),
+                "runtimeSampling": "global-lattice-bilinear",
+                "stationReconstruction": station_reconstruction_quality,
+            },
         },
     }
 
@@ -330,6 +445,8 @@ def validate_artifact_manifest(manifest: dict[str, Any]) -> None:
     topology = construction.get("topology")
     interpolation = construction.get("interpolation")
     mapping = construction.get("mapping")
+    quality = construction.get("quality")
+    times = manifest.get("times")
     if (
         construction.get("algorithmVersion") != BUILD_ALGORITHM_VERSION
         or construction.get("sampleRegistration") != "global-texel-lattice"
@@ -349,6 +466,12 @@ def validate_artifact_manifest(manifest: dict[str, Any]) -> None:
         or not all(isinstance(entry, dict) for entry in mapping)
         or [entry.get("matrixId") for entry in mapping]
         != [str(level) for level in range(MIN_TILE_MATRIX, MAX_TILE_MATRIX + 1)]
+        or not isinstance(quality, dict)
+        or quality.get("finestMatrixId") != str(MAX_TILE_MATRIX)
+        or quality.get("runtimeSampling") != "global-lattice-bilinear"
+        or not isinstance(quality.get("stationReconstruction"), list)
+        or not isinstance(times, list)
+        or len(quality["stationReconstruction"]) != len(times)
     ):
         raise ValueError("Flow Field manifest construction contract is invalid")
     identity = _construction_identity(source_hash, topology, interpolation)
@@ -498,6 +621,13 @@ def build_velocity_tiles(
             page["tileRow"],
             page["tileCol"],
         ))
+        station_reconstruction_quality = _finest_station_reconstruction_quality(
+            staged,
+            dataset,
+            prepared_topology,
+            prepared_fields,
+            limits[-1],
+        )
         manifest = _manifest(
             dataset,
             limits,
@@ -505,6 +635,7 @@ def build_velocity_tiles(
             prepared_topology,
             interpolation_spec,
             mapping_statistics,
+            station_reconstruction_quality,
         )
         _validate_staged_artifact(staged, manifest)
         manifest_path = staged / "manifest.json"

@@ -61,6 +61,10 @@ The lattice registration matches the runtime accessor: page texel `(0, 0)` repre
 integer global texel coordinate at that page origin, and bilinear sampling spans to the next
 global texel, including across page seams. Every level is reconstructed independently from
 the same topology, so a zero outside topology support is never averaged into a coarser page.
+Before installation, the builder also reproduces the runtime's finest-level bilinear sampling
+at every unique topology vertex. The manifest records per-time velocity and angular error,
+stationary vertices reconstructed as moving, moving vertices reconstructed as zero, and the
+largest false-moving speed. These are QA facts rather than another runtime data plane.
 
 There is no second raster plane. In particular, construction emits no boundary, depth,
 wet/dry, SDF, activity, or vector-feature payload. Runtime display exclusion remains an
