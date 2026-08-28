@@ -21,6 +21,8 @@ def _test_resolution() -> StationSpacingResolution:
     return StationSpacingResolution(
         minimum_support_points=3,
         minimum_support_fraction=0.10,
+        minimum_matrix=9,
+        maximum_matrix=9,
     )
 
 
@@ -36,7 +38,7 @@ def _rewrite_construction_identity(output, mutate) -> dict:
     time_index = facts["snapshot"]["timeIndex"]
     matrix_id = facts["plan"]["grid"]["matrixId"]
     content_version = (
-        f"flow-cog-{construction_sha[:16]}-t{time_index:02d}-z{matrix_id}-v1"
+        f"flow-cog-{construction_sha[:16]}-t{time_index:02d}-z{matrix_id}-v2"
     )
     manifest["contentVersion"] = content_version
     manifest_path.write_text(
@@ -62,7 +64,6 @@ def built_cog(synthetic_source, tmp_path_factory):
         time_index=0,
         descriptor_path=synthetic_source.descriptor_path,
         resolution=_test_resolution(),
-        matrix_override=9,
     )
 
 
@@ -101,17 +102,22 @@ def test_cog_manifest_records_selected_snapshot_override_and_unapproved_role(bui
     )
 
     assert manifest["artifactType"] == "flow-field-cog-snapshot"
+    assert manifest["schemaVersion"] == 2
     assert manifest["snapshot"]["timeIndex"] == 0
-    assert manifest["construction"]["facts"]["plan"]["matrixOverride"] == 9
-    assert manifest["construction"]["facts"]["plan"]["resolution"]["resolved"][
-        "matrixId"
-    ] != "9"
+    assert manifest["construction"]["facts"]["plan"]["matrixDecision"] == {
+        "selectedMatrixId": "9",
+        "outputMatrixId": "9",
+        "relation": "statistically-selected",
+    }
     assert manifest["construction"]["facts"]["encoding"]["overviewPolicy"][
         "kind"
     ] == "recursive-conservative-vector-box-v1"
     assert manifest["construction"]["facts"]["support"]["overviewLevels"][0][
         "nominalFactor"
     ] == 2
+    assert manifest["preflight"]["budget"]["approved"]
+    assert manifest["preflight"]["staging"]["peakStagedBytes"] > 0
+    assert manifest["preflight"]["staging"]["observationCount"] > 0
     assert manifest["quality"] == {
         "artifactRole": "reconstruction-prototype",
         "particleSimulation": "not-approved",
@@ -143,7 +149,6 @@ def test_repeated_snapshot_build_preserves_pixels_and_content_identity(
         time_index=0,
         descriptor_path=synthetic_source.descriptor_path,
         resolution=_test_resolution(),
-        matrix_override=9,
     )
 
     assert rebuilt.content_version == built_cog.content_version
@@ -208,7 +213,6 @@ def test_replacement_refuses_owned_marker_with_unrelated_residue(
             time_index=0,
             descriptor_path=synthetic_source.descriptor_path,
             resolution=_test_resolution(),
-            matrix_override=9,
         )
 
     assert residue.read_text(encoding="utf-8") == "belongs to the user\n"

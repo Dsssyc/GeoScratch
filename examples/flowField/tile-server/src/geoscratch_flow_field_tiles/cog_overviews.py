@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import hashlib
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from xml.etree import ElementTree
@@ -27,6 +28,17 @@ class SemanticOverviewLevel:
     effective_decimation_x: float
     effective_decimation_y: float
 
+    @property
+    def raw_bytes(self) -> int:
+        return self.width * self.height * 2 * np.dtype("<f4").itemsize
+
+    def block_count(self, block_size: int) -> int:
+        _require_positive_integer(block_size, "block_size")
+        return (
+            math.ceil(self.width / block_size)
+            * math.ceil(self.height / block_size)
+        )
+
     def manifest(self) -> dict[str, object]:
         return {
             "index": self.index,
@@ -36,6 +48,7 @@ class SemanticOverviewLevel:
             "transform": list(self.transform),
             "effectiveDecimationX": self.effective_decimation_x,
             "effectiveDecimationY": self.effective_decimation_y,
+            "rawBytes": self.raw_bytes,
         }
 
 
@@ -152,10 +165,7 @@ def reduce_semantic_overview_block(
         )
 
     candidate_values, candidate_valid, cancellation = _reduce_candidates(values)
-    bilinear_safe = np.lib.stride_tricks.sliding_window_view(
-        candidate_valid,
-        (3, 3),
-    ).all(axis=(2, 3))
+    bilinear_safe = _erode_3x3(candidate_valid)
     central_values = candidate_values[1:-1, 1:-1].copy()
     central_candidates = candidate_valid[1:-1, 1:-1]
     central_cancellation = cancellation[1:-1, 1:-1]
@@ -176,6 +186,7 @@ def write_semantic_overviews(
     *,
     block_size: int,
     temporary_compression_level: int = 1,
+    staging_observer: Callable[[str], None] | None = None,
 ) -> tuple[SemanticOverviewArtifact, ...]:
     _require_positive_integer(block_size, "block_size")
     if (
@@ -200,7 +211,7 @@ def write_semantic_overviews(
     for expected_index, level in enumerate(levels):
         if level.index != expected_index:
             raise ValueError("semantic overview indices must be contiguous from zero")
-        with rasterio.open(previous_path) as source:
+        with rasterio.open(previous_path, NUM_THREADS="ALL_CPUS") as source:
             _validate_velocity_dataset(source, "semantic overview source")
             if previous_width is not None and (
                 source.width != previous_width or source.height != previous_height
@@ -247,6 +258,7 @@ def write_semantic_overviews(
                 "zlevel": temporary_compression_level,
                 "interleave": "pixel",
                 "BIGTIFF": "IF_SAFER",
+                "NUM_THREADS": "ALL_CPUS",
             }
             digest = hashlib.sha256()
             candidate_count = 0
@@ -262,7 +274,9 @@ def write_semantic_overviews(
                 )
                 target.update_tags(1, GEOSCRATCH_COMPONENT="u")
                 target.update_tags(2, GEOSCRATCH_COMPONENT="v")
-                for _block, window in target.block_windows(1):
+                for block_index, (_block, window) in enumerate(
+                    target.block_windows(1)
+                ):
                     child_window = Window(
                         (int(window.col_off) - 1) * 2,
                         (int(window.row_off) - 1) * 2,
@@ -287,6 +301,13 @@ def write_semantic_overviews(
                     candidate_count += reduced.candidate_valid_count
                     bilinear_safe_count += reduced.bilinear_safe_count
                     cancellation_count += reduced.cancellation_to_zero_count
+                    if staging_observer is not None and block_index % 64 == 63:
+                        staging_observer(
+                            f"overview-{level.index}-block-{block_index}"
+                        )
+
+            if staging_observer is not None:
+                staging_observer(f"overview-{level.index}-complete")
 
         artifacts.append(SemanticOverviewArtifact(
             level=level,
@@ -427,21 +448,26 @@ def assemble_semantic_overview_cog(
         raise FileNotFoundError(f"explicit overview VRT does not exist: {source}")
     if source.parent != target.parent:
         raise ValueError("VRT and COG destination must share the staging directory")
-    rasterio_copy(
-        source,
-        target,
-        driver="COG",
-        strict=True,
-        blocksize=block_size,
-        compress="DEFLATE",
-        predictor="FLOATING_POINT",
-        level=compression_level,
-        overview_compress="DEFLATE",
-        overview_predictor="FLOATING_POINT",
-        overviews="FORCE_USE_EXISTING",
-        bigtiff=big_tiff,
-        interleave="PIXEL",
-    )
+    with rasterio.Env(
+        GDAL_CACHEMAX=256 * 1024 * 1024,
+        GDAL_NUM_THREADS="ALL_CPUS",
+    ):
+        rasterio_copy(
+            source,
+            target,
+            driver="COG",
+            strict=True,
+            blocksize=block_size,
+            compress="DEFLATE",
+            predictor="FLOATING_POINT",
+            level=compression_level,
+            overview_compress="DEFLATE",
+            overview_predictor="FLOATING_POINT",
+            overviews="FORCE_USE_EXISTING",
+            bigtiff=big_tiff,
+            interleave="PIXEL",
+            num_threads="ALL_CPUS",
+        )
 
 
 def _append_metadata(parent: ElementTree.Element, tags: dict[str, str]) -> None:
@@ -497,6 +523,19 @@ def _reduce_candidates(
     averaged[~candidate_valid] = 0.0
     averaged[averaged == 0.0] = 0.0
     return averaged.astype("<f4"), candidate_valid, cancellation
+
+
+def _erode_3x3(values: np.ndarray) -> np.ndarray:
+    height = values.shape[0] - 2
+    width = values.shape[1] - 2
+    result = np.ones((height, width), dtype=bool)
+    for row_offset in range(3):
+        for column_offset in range(3):
+            result &= values[
+                row_offset:row_offset + height,
+                column_offset:column_offset + width,
+            ]
+    return result
 
 
 def _require_velocity_values(value: np.ndarray) -> np.ndarray:

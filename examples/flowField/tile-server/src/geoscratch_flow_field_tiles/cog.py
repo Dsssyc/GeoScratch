@@ -60,14 +60,16 @@ WEB_MERCATOR_MAX_LATITUDE = math.degrees(math.atan(math.sinh(math.pi)))
 class CogBuildBudget:
     """Bounds a single-snapshot COG before any topology or raster allocation."""
 
-    max_blocks: int = 4_096
-    max_raw_bytes: int = 2 * 1024 * 1024 * 1024
-    minimum_free_bytes: int = 256 * 1024 * 1024
+    max_blocks: int = 131_072
+    max_raw_pyramid_bytes: int = 64 * 1024 * 1024 * 1024
+    max_staged_bytes: int = 32 * 1024 * 1024 * 1024
+    minimum_free_bytes: int = 8 * 1024 * 1024 * 1024
 
     def __post_init__(self) -> None:
         for name, value in (
             ("max_blocks", self.max_blocks),
-            ("max_raw_bytes", self.max_raw_bytes),
+            ("max_raw_pyramid_bytes", self.max_raw_pyramid_bytes),
+            ("max_staged_bytes", self.max_staged_bytes),
             ("minimum_free_bytes", self.minimum_free_bytes),
         ):
             if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
@@ -186,6 +188,7 @@ class CogGrid:
 @dataclass(frozen=True, slots=True)
 class CogBudgetAssessment:
     grid: CogGrid
+    overview_levels: tuple[SemanticOverviewLevel, ...]
     budget: CogBuildBudget
     available_bytes: int
     required_peak_bytes: int
@@ -195,18 +198,41 @@ class CogBudgetAssessment:
     def approved(self) -> bool:
         return not self.violations
 
+    @property
+    def overview_block_count(self) -> int:
+        return sum(
+            level.block_count(COG_BLOCK_SIZE) for level in self.overview_levels
+        )
+
+    @property
+    def total_block_count(self) -> int:
+        return self.grid.block_count + self.overview_block_count
+
+    @property
+    def overview_raw_bytes(self) -> int:
+        return sum(level.raw_bytes for level in self.overview_levels)
+
+    @property
+    def total_raw_pyramid_bytes(self) -> int:
+        return self.grid.raw_bytes + self.overview_raw_bytes
+
     def manifest(self) -> dict[str, Any]:
         return {
             "approved": self.approved,
             "violations": list(self.violations),
             "limits": {
                 "maxBlocks": self.budget.max_blocks,
-                "maxRawBytes": self.budget.max_raw_bytes,
+                "maxRawPyramidBytes": self.budget.max_raw_pyramid_bytes,
+                "maxStagedBytes": self.budget.max_staged_bytes,
                 "minimumFreeBytes": self.budget.minimum_free_bytes,
             },
             "observed": {
-                "blockCount": self.grid.block_count,
-                "rawBytes": self.grid.raw_bytes,
+                "baseBlockCount": self.grid.block_count,
+                "overviewBlockCount": self.overview_block_count,
+                "totalBlockCount": self.total_block_count,
+                "baseRawBytes": self.grid.raw_bytes,
+                "overviewRawBytes": self.overview_raw_bytes,
+                "totalRawPyramidBytes": self.total_raw_pyramid_bytes,
                 "availableBytes": self.available_bytes,
                 "requiredPeakBytes": self.required_peak_bytes,
             },
@@ -216,31 +242,18 @@ class CogBudgetAssessment:
 @dataclass(frozen=True, slots=True)
 class CogBuildPlan:
     selection: ResolutionSelection
-    selected_grid: CogGrid
     grid: CogGrid
-    matrix_override: int | None
-    selected_budget: CogBudgetAssessment
-    output_budget: CogBudgetAssessment
+    budget: CogBudgetAssessment
     overview_levels: tuple[SemanticOverviewLevel, ...]
-
-    @property
-    def matrix_relation(self) -> str:
-        if self.grid.matrix_id < self.selection.matrix_id:
-            return "coarser-explicit-override"
-        if self.grid.matrix_id > self.selection.matrix_id:
-            return "finer-explicit-override"
-        return "statistically-selected"
 
     def construction_manifest(self) -> dict[str, Any]:
         return {
             "resolution": self.selection.manifest(),
-            "matrixOverride": self.matrix_override,
             "matrixDecision": {
                 "selectedMatrixId": str(self.selection.matrix_id),
                 "outputMatrixId": str(self.grid.matrix_id),
-                "relation": self.matrix_relation,
+                "relation": "statistically-selected",
             },
-            "selectedGrid": self.selected_grid.manifest(),
             "grid": self.grid.manifest(),
             "overviewLevels": [
                 level.manifest() for level in self.overview_levels
@@ -251,19 +264,20 @@ class CogBuildPlan:
         return {
             **self.construction_manifest(),
             "preflight": {
-                "selected": self.selected_budget.manifest(),
-                "output": self.output_budget.manifest(),
+                "budget": self.budget.manifest(),
+                "staging": None,
             },
         }
 
     def require_output_approved(self) -> None:
-        if self.output_budget.approved:
+        if self.budget.approved:
             return
-        observed = self.output_budget.manifest()["observed"]
+        observed = self.budget.manifest()["observed"]
         raise ValueError(
             "Flow Field COG output plan exceeds configured budgets: "
-            + ", ".join(self.output_budget.violations)
-            + f"; blocks={observed['blockCount']}, rawBytes={observed['rawBytes']}, "
+            + ", ".join(self.budget.violations)
+            + f"; blocks={observed['totalBlockCount']}, "
+            + f"rawBytes={observed['totalRawPyramidBytes']}, "
             + f"requiredPeakBytes={observed['requiredPeakBytes']}, "
             + f"availableBytes={observed['availableBytes']}"
         )
@@ -279,76 +293,144 @@ class CogBuildResult:
     cog_size_bytes: int
 
 
+@dataclass(slots=True)
+class CogStagingGuard:
+    root: Path
+    budget: CogBuildBudget
+    initial_available_bytes: int
+    peak_staged_bytes: int = 0
+    minimum_available_bytes: int | None = None
+    observation_count: int = 0
+    copy_capacity_bytes: int | None = None
+
+    def observe(self, stage: str) -> None:
+        staged_bytes = sum(
+            path.stat().st_size
+            for path in self.root.iterdir()
+            if path.is_file()
+        )
+        available_bytes = shutil.disk_usage(self.root).free
+        self.peak_staged_bytes = max(self.peak_staged_bytes, staged_bytes)
+        self.minimum_available_bytes = (
+            available_bytes
+            if self.minimum_available_bytes is None
+            else min(self.minimum_available_bytes, available_bytes)
+        )
+        self.observation_count += 1
+        if staged_bytes > self.budget.max_staged_bytes:
+            raise OSError(
+                f"Flow Field COG staging budget exceeded during {stage}: "
+                f"{staged_bytes} > {self.budget.max_staged_bytes}"
+            )
+        if available_bytes < self.budget.minimum_free_bytes:
+            raise OSError(
+                f"Flow Field COG free-space reserve was crossed during {stage}: "
+                f"{available_bytes} < {self.budget.minimum_free_bytes}"
+            )
+
+    def require_copy_capacity(self) -> None:
+        self.observe("before-cog-copy")
+        current_staged_bytes = self.peak_staged_bytes
+        available_bytes = shutil.disk_usage(self.root).free
+        self.copy_capacity_bytes = current_staged_bytes
+        if current_staged_bytes * 2 > self.budget.max_staged_bytes:
+            raise OSError(
+                "Flow Field COG staging budget cannot hold both the compressed "
+                "intermediate pyramid and final COG"
+            )
+        if available_bytes < current_staged_bytes + self.budget.minimum_free_bytes:
+            raise OSError(
+                "Flow Field COG does not have enough free space for the final copy"
+            )
+
+    def manifest(self) -> dict[str, int]:
+        if self.minimum_available_bytes is None:
+            raise RuntimeError("Flow Field COG staging was never observed")
+        return {
+            "maxStagedBytes": self.budget.max_staged_bytes,
+            "minimumFreeBytes": self.budget.minimum_free_bytes,
+            "initialAvailableBytes": self.initial_available_bytes,
+            "peakStagedBytes": self.peak_staged_bytes,
+            "minimumAvailableBytes": self.minimum_available_bytes,
+            "copyCapacityBytes": self.copy_capacity_bytes or 0,
+            "observationCount": self.observation_count,
+        }
+
+
 def plan_velocity_cog_snapshot(
     stations: np.ndarray,
     geographic_bounds: tuple[float, float, float, float],
     output_parent: str | Path,
     *,
     resolution: ResolutionSpec | None = None,
-    matrix_override: int | None = None,
     budget: CogBuildBudget = CogBuildBudget(),
 ) -> CogBuildPlan:
     if not isinstance(budget, CogBuildBudget):
         raise TypeError("budget must be a CogBuildBudget")
     selection = select_resolution(stations, resolution)
-    selected_grid = _cog_grid(geographic_bounds, selection.matrix_id)
-    matrix_id = selection.matrix_id
-    if matrix_override is not None:
-        if (
-            isinstance(matrix_override, bool)
-            or not isinstance(matrix_override, int)
-            or not 0 <= matrix_override <= 24
-        ):
-            raise ValueError("matrix_override must be an integer in [0, 24] or None")
-        matrix_id = matrix_override
-    grid = _cog_grid(geographic_bounds, matrix_id)
+    grid = _cog_grid(geographic_bounds, selection.matrix_id)
     parent = Path(output_parent).resolve()
     if not parent.is_dir():
         raise FileNotFoundError(f"COG output parent does not exist: {parent}")
     available = shutil.disk_usage(parent).free
-    selected_budget = _assess_cog_budget(selected_grid, budget, available)
-    output_budget = _assess_cog_budget(grid, budget, available)
     overview_levels = plan_semantic_overview_levels(
         grid.width,
         grid.height,
         grid.transform,
         block_size=COG_BLOCK_SIZE,
     )
+    assessment = _assess_cog_budget(
+        grid,
+        overview_levels,
+        budget,
+        available,
+    )
     return CogBuildPlan(
         selection=selection,
-        selected_grid=selected_grid,
         grid=grid,
-        matrix_override=matrix_override,
-        selected_budget=selected_budget,
-        output_budget=output_budget,
+        budget=assessment,
         overview_levels=overview_levels,
     )
 
 
 def _assess_cog_budget(
     grid: CogGrid,
+    overview_levels: tuple[SemanticOverviewLevel, ...],
     budget: CogBuildBudget,
     available_bytes: int,
 ) -> CogBudgetAssessment:
-    required_peak_bytes = grid.raw_bytes * 2 + budget.minimum_free_bytes
+    assessment = CogBudgetAssessment(
+        grid=grid,
+        overview_levels=overview_levels,
+        budget=budget,
+        available_bytes=available_bytes,
+        required_peak_bytes=(
+            budget.max_staged_bytes + budget.minimum_free_bytes
+        ),
+        violations=(),
+    )
     violations: list[str] = []
-    if grid.block_count > budget.max_blocks:
+    if assessment.total_block_count > budget.max_blocks:
         violations.append(
-            f"block budget {grid.block_count} > {budget.max_blocks}"
+            f"block budget {assessment.total_block_count} > {budget.max_blocks}"
         )
-    if grid.raw_bytes > budget.max_raw_bytes:
+    if assessment.total_raw_pyramid_bytes > budget.max_raw_pyramid_bytes:
         violations.append(
-            f"raw byte budget {grid.raw_bytes} > {budget.max_raw_bytes}"
+            "raw pyramid byte budget "
+            f"{assessment.total_raw_pyramid_bytes} > "
+            f"{budget.max_raw_pyramid_bytes}"
         )
-    if available_bytes < required_peak_bytes:
+    if available_bytes < assessment.required_peak_bytes:
         violations.append(
-            f"free-space budget {required_peak_bytes} > {available_bytes}"
+            "free-space budget "
+            f"{assessment.required_peak_bytes} > {available_bytes}"
         )
     return CogBudgetAssessment(
         grid=grid,
+        overview_levels=overview_levels,
         budget=budget,
         available_bytes=available_bytes,
-        required_peak_bytes=required_peak_bytes,
+        required_peak_bytes=assessment.required_peak_bytes,
         violations=tuple(violations),
     )
 
@@ -363,7 +445,8 @@ def _validate_budget_manifest(value: object, grid: CogGrid) -> None:
     try:
         budget = CogBuildBudget(
             max_blocks=limits["maxBlocks"],
-            max_raw_bytes=limits["maxRawBytes"],
+            max_raw_pyramid_bytes=limits["maxRawPyramidBytes"],
+            max_staged_bytes=limits["maxStagedBytes"],
             minimum_free_bytes=limits["minimumFreeBytes"],
         )
         available_bytes = observed["availableBytes"]
@@ -375,9 +458,51 @@ def _validate_budget_manifest(value: object, grid: CogGrid) -> None:
         or available_bytes < 0
     ):
         raise ValueError("Flow Field COG budget facts are invalid")
-    expected = _assess_cog_budget(grid, budget, available_bytes).manifest()
+    overview_levels = plan_semantic_overview_levels(
+        grid.width,
+        grid.height,
+        grid.transform,
+        block_size=COG_BLOCK_SIZE,
+    )
+    expected = _assess_cog_budget(
+        grid,
+        overview_levels,
+        budget,
+        available_bytes,
+    ).manifest()
     if value != expected:
         raise ValueError("Flow Field COG budget identity is invalid")
+
+
+def _validate_staging_manifest(
+    value: object,
+    budget_manifest: dict[str, Any],
+) -> None:
+    if not isinstance(value, dict) or set(value) != {
+        "maxStagedBytes",
+        "minimumFreeBytes",
+        "initialAvailableBytes",
+        "peakStagedBytes",
+        "minimumAvailableBytes",
+        "copyCapacityBytes",
+        "observationCount",
+    }:
+        raise ValueError("Flow Field COG staging facts are invalid")
+    if any(
+        isinstance(item, bool) or not isinstance(item, int) or item < 0
+        for item in value.values()
+    ):
+        raise ValueError("Flow Field COG staging facts are invalid")
+    limits = budget_manifest["limits"]
+    if (
+        value["maxStagedBytes"] != limits["maxStagedBytes"]
+        or value["minimumFreeBytes"] != limits["minimumFreeBytes"]
+        or value["peakStagedBytes"] > value["maxStagedBytes"]
+        or value["minimumAvailableBytes"] < value["minimumFreeBytes"]
+        or value["copyCapacityBytes"] > value["peakStagedBytes"]
+        or value["observationCount"] <= 0
+    ):
+        raise ValueError("Flow Field COG staging identity is invalid")
 
 
 def _cog_grid(
@@ -488,6 +613,8 @@ def _write_intermediate_tiff(
     topology,
     unique_field: np.ndarray,
     interpolation,
+    encoding: CogEncoding,
+    staging_guard: CogStagingGuard,
 ) -> dict[str, Any]:
     grid = plan.grid
     transform = Affine(*grid.transform)
@@ -505,9 +632,10 @@ def _write_intermediate_tiff(
         "blockysize": COG_BLOCK_SIZE,
         "compress": "DEFLATE",
         "predictor": 3,
-        "zlevel": 9,
+        "zlevel": encoding.temporary_compression_level,
         "interleave": "pixel",
         "BIGTIFF": "IF_SAFER",
+        "NUM_THREADS": "ALL_CPUS",
     }
     pixel_digest = hashlib.sha256()
     raw_advectable_count = 0
@@ -570,6 +698,7 @@ def _write_intermediate_tiff(
                 )
                 rounded_zero_count += rendered.rounded_zero_count
                 bilinear_safe_count += rendered.bilinear_safe_count
+            staging_guard.observe(f"base-block-row-{block_row}")
     return {
         "pixelSha256": pixel_digest.hexdigest(),
         "rawAdvectablePixelCount": raw_advectable_count,
@@ -718,6 +847,7 @@ def _build_manifest(
     support: dict[str, Any],
     cog_path: Path,
     cog_validation: dict[str, Any],
+    staging_facts: dict[str, int],
 ) -> dict[str, Any]:
     cog_sha256 = _sha256(cog_path)
     cog_size = cog_path.stat().st_size
@@ -764,14 +894,14 @@ def _build_manifest(
     ).hexdigest()
     time_index = snapshot_facts["timeIndex"]
     return {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "artifactType": "flow-field-cog-snapshot",
         "datasetId": source_facts["datasetId"],
         "sourceRevision": source_facts["sourceRevision"],
         "sourceHash": source_facts["sourceHash"],
         "contentVersion": (
             f"flow-cog-{construction_sha256[:16]}-t{time_index:02d}-"
-            f"z{plan.grid.matrix_id}-v1"
+            f"z{plan.grid.matrix_id}-v2"
         ),
         "snapshot": snapshot_facts,
         "source": source_facts,
@@ -779,7 +909,10 @@ def _build_manifest(
             "sha256": construction_sha256,
             "facts": construction,
         },
-        "preflight": plan.manifest()["preflight"],
+        "preflight": {
+            "budget": plan.budget.manifest(),
+            "staging": staging_facts,
+        },
         "quality": {
             "artifactRole": "reconstruction-prototype",
             "particleSimulation": "not-approved",
@@ -862,7 +995,6 @@ def build_velocity_cog_snapshot(
     topology: TopologySpec | None = None,
     interpolation: InterpolationSpec | None = None,
     resolution: ResolutionSpec | None = None,
-    matrix_override: int | None = None,
     encoding: CogEncoding = CogEncoding(),
     budget: CogBuildBudget = CogBuildBudget(),
 ) -> CogBuildResult:
@@ -879,7 +1011,6 @@ def build_velocity_cog_snapshot(
         snapshot.geographic_bounds,
         output.parent,
         resolution=resolution,
-        matrix_override=matrix_override,
         budget=budget,
     )
     plan.require_output_approved()
@@ -895,6 +1026,12 @@ def build_velocity_cog_snapshot(
 
     staged = Path(tempfile.mkdtemp(prefix=f".{output.name}.build-", dir=output.parent))
     try:
+        staging_guard = CogStagingGuard(
+            root=staged,
+            budget=budget,
+            initial_available_bytes=shutil.disk_usage(staged).free,
+        )
+        staging_guard.observe("staging-created")
         source_tiff = staged / "base.tif"
         source_vrt = staged / "semantic-overviews.vrt"
         cog_path = staged / f"flow-t{time_index:02d}.cog.tif"
@@ -906,6 +1043,8 @@ def build_velocity_cog_snapshot(
             prepared_topology,
             unique_field,
             interpolation_spec,
+            encoding,
+            staging_guard,
         )
         overview_artifacts = write_semantic_overviews(
             source_tiff,
@@ -913,6 +1052,7 @@ def build_velocity_cog_snapshot(
             plan.overview_levels,
             block_size=encoding.block_size,
             temporary_compression_level=encoding.temporary_compression_level,
+            staging_observer=staging_guard.observe,
         )
         overview_records = tuple(
             artifact.manifest() for artifact in overview_artifacts
@@ -924,6 +1064,7 @@ def build_velocity_cog_snapshot(
             source_tiff,
             overview_artifacts,
         )
+        staging_guard.require_copy_capacity()
         # VRT explicit overviews and COG FORCE_USE_EXISTING are the documented
         # GDAL path for copying project-computed overview pixels without invoking
         # a generic resampler:
@@ -936,6 +1077,7 @@ def build_velocity_cog_snapshot(
             compression_level=encoding.compression_level,
             big_tiff=encoding.big_tiff,
         )
+        staging_guard.observe("cog-copy-complete")
         validation = _validate_cog(
             cog_path,
             plan.grid,
@@ -958,6 +1100,7 @@ def build_velocity_cog_snapshot(
             support,
             cog_path,
             validation,
+            staging_guard.manifest(),
         )
         manifest_path.write_text(
             json.dumps(manifest, indent=2, sort_keys=True) + "\n",
@@ -995,7 +1138,7 @@ def verify_velocity_cog_snapshot(
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     if (
         not isinstance(manifest, dict)
-        or manifest.get("schemaVersion") != 1
+        or manifest.get("schemaVersion") != 2
         or manifest.get("artifactType") != "flow-field-cog-snapshot"
         or manifest.get("quality")
         != {
@@ -1045,7 +1188,6 @@ def verify_velocity_cog_snapshot(
         time_index = snapshot_facts["timeIndex"]
         model_time = snapshot_facts["modelTime"]
         grid_facts = plan_facts["grid"]
-        selected_grid_facts = plan_facts["selectedGrid"]
         matrix_id = int(grid_facts["matrixId"])
         selected_matrix_id = int(
             plan_facts["resolution"]["resolved"]["matrixId"]
@@ -1079,12 +1221,8 @@ def verify_velocity_cog_snapshot(
     expected_grid = _cog_grid(source_bounds, matrix_id)
     if not isinstance(grid_facts, dict) or grid_facts != expected_grid.manifest():
         raise ValueError("Flow Field COG grid identity is invalid")
-    expected_selected_grid = _cog_grid(source_bounds, selected_matrix_id)
-    if (
-        not isinstance(selected_grid_facts, dict)
-        or selected_grid_facts != expected_selected_grid.manifest()
-    ):
-        raise ValueError("Flow Field COG selected-grid identity is invalid")
+    if matrix_id != selected_matrix_id:
+        raise ValueError("Flow Field COG output must use the statistically selected grid")
     expected_overview_plan = plan_semantic_overview_levels(
         expected_grid.width,
         expected_grid.height,
@@ -1095,36 +1233,19 @@ def verify_velocity_cog_snapshot(
         level.manifest() for level in expected_overview_plan
     ]:
         raise ValueError("Flow Field COG overview plan identity is invalid")
-    matrix_override = plan_facts.get("matrixOverride")
-    if matrix_override is None:
-        if matrix_id != selected_matrix_id:
-            raise ValueError("Flow Field COG matrix decision is invalid")
-    elif (
-        isinstance(matrix_override, bool)
-        or not isinstance(matrix_override, int)
-        or matrix_override != matrix_id
-    ):
-        raise ValueError("Flow Field COG matrix override is invalid")
-    expected_relation = (
-        "coarser-explicit-override"
-        if matrix_id < selected_matrix_id
-        else "finer-explicit-override"
-        if matrix_id > selected_matrix_id
-        else "statistically-selected"
-    )
     if plan_facts.get("matrixDecision") != {
         "selectedMatrixId": str(selected_matrix_id),
         "outputMatrixId": str(matrix_id),
-        "relation": expected_relation,
+        "relation": "statistically-selected",
     }:
         raise ValueError("Flow Field COG matrix decision is invalid")
     preflight = manifest.get("preflight")
-    if not isinstance(preflight, dict) or set(preflight) != {"selected", "output"}:
+    if not isinstance(preflight, dict) or set(preflight) != {"budget", "staging"}:
         raise ValueError("Flow Field COG preflight facts are invalid")
-    _validate_budget_manifest(preflight["selected"], expected_selected_grid)
-    _validate_budget_manifest(preflight["output"], expected_grid)
-    if not preflight["output"]["approved"]:
+    _validate_budget_manifest(preflight["budget"], expected_grid)
+    if not preflight["budget"]["approved"]:
         raise ValueError("Flow Field COG output was not budget-approved")
+    _validate_staging_manifest(preflight["staging"], preflight["budget"])
     encoding = CogEncoding()
     if encoding_facts != encoding.manifest():
         raise ValueError("Flow Field COG encoding identity is invalid")
@@ -1147,7 +1268,7 @@ def verify_velocity_cog_snapshot(
         ):
             raise ValueError("Flow Field COG overview support facts are invalid")
     expected_content_version = (
-        f"flow-cog-{expected_construction[:16]}-t{time_index:02d}-z{matrix_id}-v1"
+        f"flow-cog-{expected_construction[:16]}-t{time_index:02d}-z{matrix_id}-v2"
     )
     if manifest.get("contentVersion") != expected_content_version:
         raise ValueError("Flow Field COG content identity is invalid")
@@ -1222,24 +1343,22 @@ def main() -> None:
         help="single ordinal U/V snapshot to build",
     )
     parser.add_argument(
-        "--matrix",
-        type=int,
-        help=(
-            "explicit output WebMercatorQuad matrix override; the statistical "
-            "selection remains recorded and is never silently coarsened"
-        ),
-    )
-    parser.add_argument(
         "--max-blocks",
         type=int,
         default=defaults.max_blocks,
         help="maximum 256 by 256 blocks accepted by the build",
     )
     parser.add_argument(
-        "--max-raw-bytes",
+        "--max-raw-pyramid-bytes",
         type=int,
-        default=defaults.max_raw_bytes,
-        help="maximum uncompressed two-band pixel bytes accepted by the build",
+        default=defaults.max_raw_pyramid_bytes,
+        help="maximum uncompressed base plus overview bytes accepted by the build",
+    )
+    parser.add_argument(
+        "--max-staged-bytes",
+        type=int,
+        default=defaults.max_staged_bytes,
+        help="maximum compressed bytes permitted in the owned staging directory",
     )
     parser.add_argument(
         "--minimum-free-bytes",
@@ -1272,21 +1391,22 @@ def main() -> None:
         )
         budget = CogBuildBudget(
             max_blocks=arguments.max_blocks,
-            max_raw_bytes=arguments.max_raw_bytes,
+            max_raw_pyramid_bytes=arguments.max_raw_pyramid_bytes,
+            max_staged_bytes=arguments.max_staged_bytes,
             minimum_free_bytes=arguments.minimum_free_bytes,
         )
         result = plan_velocity_cog_snapshot(
             snapshot.stations,
             snapshot.geographic_bounds,
             arguments.output.parent,
-            matrix_override=arguments.matrix,
             budget=budget,
         )
         print(json.dumps(result.manifest(), sort_keys=True))
         return
     budget = CogBuildBudget(
         max_blocks=arguments.max_blocks,
-        max_raw_bytes=arguments.max_raw_bytes,
+        max_raw_pyramid_bytes=arguments.max_raw_pyramid_bytes,
+        max_staged_bytes=arguments.max_staged_bytes,
         minimum_free_bytes=arguments.minimum_free_bytes,
     )
     result = build_velocity_cog_snapshot(
@@ -1294,7 +1414,6 @@ def main() -> None:
         arguments.output,
         time_index=arguments.time_index,
         descriptor_path=arguments.descriptor,
-        matrix_override=arguments.matrix,
         budget=budget,
     )
     print(json.dumps({

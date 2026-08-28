@@ -113,10 +113,13 @@ def apply_bilinear_safe_block(
     representable_advectable = raw_advectable.copy()
     if require_representable_motion:
         representable_advectable &= np.any(values != 0.0, axis=2)
-    bilinear_safe = np.lib.stride_tricks.sliding_window_view(
-        representable_advectable,
-        (3, 3),
-    ).all(axis=(2, 3))
+    bilinear_safe = np.ones((block_size, block_size), dtype=bool)
+    for row_offset in range(3):
+        for column_offset in range(3):
+            bilinear_safe &= representable_advectable[
+                row_offset:row_offset + block_size,
+                column_offset:column_offset + block_size,
+            ]
     block = values[1:-1, 1:-1].copy()
     block[~bilinear_safe] = 0.0
     return BilinearSafeBlock(

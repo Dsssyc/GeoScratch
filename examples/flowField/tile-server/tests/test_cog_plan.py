@@ -20,6 +20,8 @@ def _resolution_for_tests() -> StationSpacingResolution:
     return StationSpacingResolution(
         minimum_support_points=3,
         minimum_support_fraction=0.10,
+        minimum_matrix=9,
+        maximum_matrix=9,
     )
 
 
@@ -50,15 +52,14 @@ def test_default_statistical_matrix_can_fail_budget_without_silent_coarsening(
         budget=CogBuildBudget(max_blocks=1),
     )
 
-    assert plan.matrix_override is None
-    assert plan.grid == plan.selected_grid
-    assert not plan.output_budget.approved
-    assert plan.output_budget.violations[0].startswith("block budget")
+    assert plan.grid.matrix_id == plan.selection.matrix_id == 9
+    assert not plan.budget.approved
+    assert plan.budget.violations[0].startswith("block budget")
     with pytest.raises(ValueError, match="block budget"):
         plan.require_output_approved()
 
 
-def test_explicit_matrix_override_is_visible_and_budgeted(
+def test_statistical_matrix_and_semantic_overviews_are_visible_and_budgeted(
     synthetic_source,
     tmp_path,
 ):
@@ -72,20 +73,24 @@ def test_explicit_matrix_override_is_visible_and_budgeted(
         ),
         tmp_path,
         resolution=_resolution_for_tests(),
-        matrix_override=9,
     )
 
-    assert plan.matrix_override == 9
     assert plan.grid.matrix_id == 9
     manifest = plan.manifest()
-    assert manifest["resolution"]["resolved"]["matrixId"] != "9"
-    assert manifest["selectedGrid"] == plan.selected_grid.manifest()
+    assert manifest["resolution"]["resolved"]["matrixId"] == "9"
     assert manifest["matrixDecision"] == {
-        "selectedMatrixId": str(plan.selection.matrix_id),
+        "selectedMatrixId": "9",
         "outputMatrixId": "9",
-        "relation": "finer-explicit-override",
+        "relation": "statistically-selected",
     }
-    assert manifest["preflight"]["output"]["approved"]
+    assert [level["nominalFactor"] for level in manifest["overviewLevels"]] == [2]
+    assert manifest["preflight"]["budget"]["approved"]
+    assert manifest["preflight"]["staging"] is None
+    assert manifest["preflight"]["budget"]["observed"][
+        "totalRawPyramidBytes"
+    ] == (
+        plan.grid.raw_bytes + plan.overview_levels[0].raw_bytes
+    )
 
 
 def test_build_enforces_a_rejected_default_plan_without_writing(
@@ -102,6 +107,28 @@ def test_build_enforces_a_rejected_default_plan_without_writing(
             descriptor_path=synthetic_source.descriptor_path,
             resolution=_resolution_for_tests(),
             budget=CogBuildBudget(max_blocks=1),
+        )
+
+    assert not output.exists()
+
+
+def test_build_aborts_when_compressed_staging_exceeds_its_hard_cap(
+    synthetic_source,
+    tmp_path,
+):
+    output = tmp_path / "cog-cache"
+
+    with pytest.raises(OSError, match="staging budget exceeded"):
+        build_velocity_cog_snapshot(
+            synthetic_source.directory,
+            output,
+            time_index=0,
+            descriptor_path=synthetic_source.descriptor_path,
+            resolution=_resolution_for_tests(),
+            budget=CogBuildBudget(
+                max_staged_bytes=1,
+                minimum_free_bytes=1,
+            ),
         )
 
     assert not output.exists()
@@ -155,3 +182,5 @@ def test_cog_contracts_reject_unimplemented_encoding_and_invalid_budgets():
         CogEncoding(compression="ZSTD")
     with pytest.raises(ValueError, match="max_blocks"):
         CogBuildBudget(max_blocks=0)
+    with pytest.raises(ValueError, match="max_staged_bytes"):
+        CogBuildBudget(max_staged_bytes=0)
