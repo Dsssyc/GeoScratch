@@ -19,10 +19,18 @@ import rio_cogeo
 from rasterio.enums import MaskFlags
 from rasterio.transform import Affine
 from rasterio.windows import Window
-from rio_cogeo.cogeo import cog_translate, cog_validate
-from rio_cogeo.profiles import cog_profiles
+from rio_cogeo.cogeo import cog_validate
 
 from .contracts import InterpolationSpec, TopologySpec, resolve_interpolation, resolve_topology
+from .cog_overviews import (
+    SEMANTIC_OVERVIEW_POLICY,
+    SemanticOverviewArtifact,
+    SemanticOverviewLevel,
+    assemble_semantic_overview_cog,
+    plan_semantic_overview_levels,
+    write_explicit_overview_vrt,
+    write_semantic_overviews,
+)
 from .interpolation import apply_bilinear_safe_block, prepare_triangle_linear_stencil
 from .resolution import (
     ResolutionSelection,
@@ -42,9 +50,6 @@ from .topology import WEB_MERCATOR_RADIUS, prepare_topology
 COG_BLOCK_SIZE = 256
 COG_BYTES_PER_PIXEL = 2 * np.dtype("<f4").itemsize
 COG_ARTIFACT_MARKER = ".flow-field-cog-artifact.json"
-NO_OVERVIEW_WARNING = (
-    "The file is greater than 512xH or 512xW, it is recommended to include internal overviews"
-)
 TILE_SERVER_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_COG_OUTPUT_DIRECTORY = TILE_SERVER_ROOT / "cog-cache"
 WEB_MERCATOR_QUAD = morecantile.tms.get("WebMercatorQuad")
@@ -78,7 +83,8 @@ class CogEncoding:
     predictor: int = 3
     compression_level: int = 9
     big_tiff: str = "IF_SAFER"
-    overview_policy: str = "none"
+    overview_policy: str = SEMANTIC_OVERVIEW_POLICY
+    temporary_compression_level: int = 1
 
     def __post_init__(self) -> None:
         if self.block_size != COG_BLOCK_SIZE:
@@ -91,8 +97,12 @@ class CogEncoding:
             raise ValueError("compression_level must be 9")
         if self.big_tiff != "IF_SAFER":
             raise ValueError("big_tiff must be IF_SAFER")
-        if self.overview_policy != "none":
-            raise ValueError("overview_policy must be none")
+        if self.overview_policy != SEMANTIC_OVERVIEW_POLICY:
+            raise ValueError(
+                f"overview_policy must be {SEMANTIC_OVERVIEW_POLICY}"
+            )
+        if self.temporary_compression_level != 1:
+            raise ValueError("temporary_compression_level must be 1")
 
     def manifest(self) -> dict[str, Any]:
         return {
@@ -109,7 +119,21 @@ class CogEncoding:
             "bigTiff": self.big_tiff,
             "nodata": None,
             "mask": None,
-            "overviewPolicy": self.overview_policy,
+            "overviewPolicy": {
+                "kind": self.overview_policy,
+                "childFootprint": "2x2-nw-ne-sw-se",
+                "childSupport": "finite-and-not-both-exact-zero",
+                "componentReduction": (
+                    "fixed-row-major-float64-mean-cast-float32-once"
+                ),
+                "roundedZero": "non-advectable-never-resurrected",
+                "bilinearSafety": "all-3x3-representable-candidates",
+                "outsideExtent": "non-advectable",
+                "signedZero": "canonical-positive",
+                "recursion": "immediately-finer-stored-level",
+                "assembly": "vrt-explicit-overviews-cog-force-use-existing",
+            },
+            "temporaryCompressionLevel": self.temporary_compression_level,
         }
 
 
@@ -197,6 +221,7 @@ class CogBuildPlan:
     matrix_override: int | None
     selected_budget: CogBudgetAssessment
     output_budget: CogBudgetAssessment
+    overview_levels: tuple[SemanticOverviewLevel, ...]
 
     @property
     def matrix_relation(self) -> str:
@@ -217,6 +242,9 @@ class CogBuildPlan:
             },
             "selectedGrid": self.selected_grid.manifest(),
             "grid": self.grid.manifest(),
+            "overviewLevels": [
+                level.manifest() for level in self.overview_levels
+            ],
         }
 
     def manifest(self) -> dict[str, Any]:
@@ -280,6 +308,12 @@ def plan_velocity_cog_snapshot(
     available = shutil.disk_usage(parent).free
     selected_budget = _assess_cog_budget(selected_grid, budget, available)
     output_budget = _assess_cog_budget(grid, budget, available)
+    overview_levels = plan_semantic_overview_levels(
+        grid.width,
+        grid.height,
+        grid.transform,
+        block_size=COG_BLOCK_SIZE,
+    )
     return CogBuildPlan(
         selection=selection,
         selected_grid=selected_grid,
@@ -287,6 +321,7 @@ def plan_velocity_cog_snapshot(
         matrix_override=matrix_override,
         selected_budget=selected_budget,
         output_budget=output_budget,
+        overview_levels=overview_levels,
     )
 
 
@@ -476,6 +511,8 @@ def _write_intermediate_tiff(
     }
     pixel_digest = hashlib.sha256()
     raw_advectable_count = 0
+    representable_advectable_count = 0
+    rounded_zero_count = 0
     bilinear_safe_count = 0
     with rasterio.open(path, "w", **profile) as dataset:
         dataset.set_band_description(1, "U")
@@ -511,6 +548,7 @@ def _write_intermediate_tiff(
                     stencil,
                     unique_field,
                     block_size=COG_BLOCK_SIZE,
+                    require_representable_motion=True,
                 )
                 band_first = np.moveaxis(rendered.values, 2, 0).astype(
                     "<f4",
@@ -527,38 +565,18 @@ def _write_intermediate_tiff(
                 )
                 pixel_digest.update(band_first.tobytes(order="C"))
                 raw_advectable_count += rendered.raw_advectable_count
+                representable_advectable_count += (
+                    rendered.representable_advectable_count
+                )
+                rounded_zero_count += rendered.rounded_zero_count
                 bilinear_safe_count += rendered.bilinear_safe_count
     return {
         "pixelSha256": pixel_digest.hexdigest(),
         "rawAdvectablePixelCount": raw_advectable_count,
+        "representableAdvectablePixelCount": representable_advectable_count,
+        "roundedZeroPixelCount": rounded_zero_count,
         "bilinearSafePixelCount": bilinear_safe_count,
     }
-
-
-def _translate_cog(source_tiff: Path, destination: Path, encoding: CogEncoding) -> None:
-    profile = cog_profiles.get("deflate")
-    profile.update({
-        "blockxsize": encoding.block_size,
-        "blockysize": encoding.block_size,
-        "predictor": encoding.predictor,
-        "zlevel": encoding.compression_level,
-        "BIGTIFF": encoding.big_tiff,
-        "interleave": "pixel",
-    })
-    # rio-cogeo documents overview_level=0 as an explicit empty overview set.
-    # Source: https://cogeotiff.github.io/rio-cogeo/API/
-    cog_translate(
-        source_tiff,
-        destination,
-        profile,
-        overview_level=0,
-        overview_resampling="nearest",
-        in_memory=False,
-        quiet=True,
-        forward_band_tags=True,
-        forward_ns_tags=True,
-        use_cog_driver=False,
-    )
 
 
 def _validate_cog(
@@ -566,13 +584,13 @@ def _validate_cog(
     grid: CogGrid,
     encoding: CogEncoding,
     expected_pixel_sha256: str,
+    expected_overviews: tuple[dict[str, Any], ...],
     *,
     expected_source_hash: str,
     expected_time_index: int,
 ) -> dict[str, Any]:
-    valid, errors, warnings = cog_validate(path, strict=False)
-    unexpected_warnings = [warning for warning in warnings if warning != NO_OVERVIEW_WARNING]
-    if not valid or errors or unexpected_warnings:
+    valid, errors, warnings = cog_validate(path, strict=True, quiet=True)
+    if not valid or errors or warnings:
         raise RuntimeError(
             "Generated Flow Field COG failed validation: "
             + json.dumps({
@@ -584,6 +602,7 @@ def _validate_cog(
     with rasterio.open(path) as dataset:
         root_tags = dataset.tags()
         image_structure = dataset.tags(ns="IMAGE_STRUCTURE")
+        observed_decimations = dataset.overviews(1)
         if (
             dataset.crs is None
             or dataset.crs.to_string() != "EPSG:3857"
@@ -596,8 +615,8 @@ def _validate_cog(
                 (encoding.block_size, encoding.block_size),
                 (encoding.block_size, encoding.block_size),
             ]
-            or dataset.overviews(1) != []
-            or dataset.overviews(2) != []
+            or dataset.overviews(2) != observed_decimations
+            or len(observed_decimations) != len(expected_overviews)
             or dataset.transform != Affine(*grid.transform)
             or tuple(dataset.bounds) != grid.projected_bounds
             or dataset.descriptions != ("U", "V")
@@ -609,6 +628,14 @@ def _validate_cog(
             or root_tags.get("GEOSCRATCH_SAMPLE_REGISTRATION") != "pixel-center"
             or root_tags.get("GEOSCRATCH_SOURCE_HASH") != expected_source_hash
             or root_tags.get("GEOSCRATCH_TIME_INDEX") != str(expected_time_index)
+            or root_tags.get("GEOSCRATCH_OVERVIEW_POLICY")
+            != SEMANTIC_OVERVIEW_POLICY
+            or root_tags.get("GEOSCRATCH_OVERVIEW_COUNT")
+            != str(len(expected_overviews))
+            or root_tags.get("GEOSCRATCH_OVERVIEW_FACTORS")
+            != ",".join(
+                str(record["nominalFactor"]) for record in expected_overviews
+            )
             or dataset.tags(1).get("GEOSCRATCH_COMPONENT") != "u"
             or dataset.tags(2).get("GEOSCRATCH_COMPONENT") != "v"
             or image_structure.get("LAYOUT") != "COG"
@@ -624,9 +651,59 @@ def _validate_cog(
             pixel_digest.update(np.asarray(values, dtype="<f4").tobytes(order="C"))
     if pixel_digest.hexdigest() != expected_pixel_sha256:
         raise RuntimeError("Generated Flow Field COG pixels changed during translation")
+    validated_overviews: list[dict[str, Any]] = []
+    for index, expected in enumerate(expected_overviews):
+        overview_digest = hashlib.sha256()
+        with rasterio.open(path, OVERVIEW_LEVEL=index) as overview:
+            observed_transform = list(tuple(overview.transform)[:6])
+            if (
+                overview.count != 2
+                or overview.dtypes != ("float32", "float32")
+                or overview.nodata is not None
+                or overview.width != expected["width"]
+                or overview.height != expected["height"]
+                or not np.allclose(
+                    tuple(overview.transform)[:6],
+                    expected["transform"],
+                    rtol=1.0e-14,
+                    atol=1.0e-10,
+                )
+                or any(
+                    flags != [MaskFlags.all_valid]
+                    for flags in overview.mask_flag_enums
+                )
+            ):
+                raise RuntimeError(
+                    f"Generated Flow Field COG overview {index} structure is invalid"
+                )
+            for _block, window in overview.block_windows(1):
+                values = overview.read((1, 2), window=window, out_dtype="float32")
+                if not np.isfinite(values).all():
+                    raise RuntimeError(
+                        f"Generated Flow Field COG overview {index} is non-finite"
+                    )
+                overview_digest.update(
+                    np.asarray(values, dtype="<f4").tobytes(order="C")
+                )
+        digest = overview_digest.hexdigest()
+        if digest != expected["pixelSha256"]:
+            raise RuntimeError(
+                f"Generated Flow Field COG overview {index} pixels changed"
+            )
+        validated_overviews.append({
+            "index": index,
+            "nominalFactor": expected["nominalFactor"],
+            "observedDecimation": observed_decimations[index],
+            "width": expected["width"],
+            "height": expected["height"],
+            "transform": observed_transform,
+            "pixelSha256": digest,
+        })
     return {
         "pixelSha256": pixel_digest.hexdigest(),
-        "overviewCount": 0,
+        "overviewCount": len(expected_overviews),
+        "overviewDecimations": observed_decimations,
+        "overviewLevels": validated_overviews,
         "blockCount": grid.block_count,
         "validationWarnings": warnings,
     }
@@ -818,7 +895,8 @@ def build_velocity_cog_snapshot(
 
     staged = Path(tempfile.mkdtemp(prefix=f".{output.name}.build-", dir=output.parent))
     try:
-        source_tiff = staged / "source.tif"
+        source_tiff = staged / "base.tif"
+        source_vrt = staged / "semantic-overviews.vrt"
         cog_path = staged / f"flow-t{time_index:02d}.cog.tif"
         manifest_path = staged / "manifest.json"
         support = _write_intermediate_tiff(
@@ -829,16 +907,48 @@ def build_velocity_cog_snapshot(
             unique_field,
             interpolation_spec,
         )
-        _translate_cog(source_tiff, cog_path, encoding)
+        overview_artifacts = write_semantic_overviews(
+            source_tiff,
+            staged,
+            plan.overview_levels,
+            block_size=encoding.block_size,
+            temporary_compression_level=encoding.temporary_compression_level,
+        )
+        overview_records = tuple(
+            artifact.manifest() for artifact in overview_artifacts
+        )
+        support["overviewPolicy"] = encoding.manifest()["overviewPolicy"]
+        support["overviewLevels"] = list(overview_records)
+        write_explicit_overview_vrt(
+            source_vrt,
+            source_tiff,
+            overview_artifacts,
+        )
+        # VRT explicit overviews and COG FORCE_USE_EXISTING are the documented
+        # GDAL path for copying project-computed overview pixels without invoking
+        # a generic resampler:
+        # https://gdal.org/en/stable/drivers/raster/vrt.html#vrtrasterband
+        # https://gdal.org/en/stable/drivers/raster/cog.html#creation-options
+        assemble_semantic_overview_cog(
+            source_vrt,
+            cog_path,
+            block_size=encoding.block_size,
+            compression_level=encoding.compression_level,
+            big_tiff=encoding.big_tiff,
+        )
         validation = _validate_cog(
             cog_path,
             plan.grid,
             encoding,
             support["pixelSha256"],
+            overview_records,
             expected_source_hash=snapshot.source_hash,
             expected_time_index=snapshot.field_descriptor.time_index,
         )
         source_tiff.unlink()
+        source_vrt.unlink()
+        for artifact in overview_artifacts:
+            artifact.path.unlink()
         manifest = _build_manifest(
             snapshot,
             plan,
@@ -910,6 +1020,7 @@ def verify_velocity_cog_snapshot(
     cog = facts.get("cog")
     plan_facts = facts.get("plan")
     encoding_facts = facts.get("encoding")
+    support_facts = facts.get("support")
     if (
         not isinstance(source_facts, dict)
         or not isinstance(snapshot_facts, dict)
@@ -917,6 +1028,7 @@ def verify_velocity_cog_snapshot(
         or not isinstance(cog, dict)
         or not isinstance(plan_facts, dict)
         or not isinstance(encoding_facts, dict)
+        or not isinstance(support_facts, dict)
     ):
         raise ValueError("Flow Field COG artifact facts are invalid")
     if (
@@ -973,6 +1085,16 @@ def verify_velocity_cog_snapshot(
         or selected_grid_facts != expected_selected_grid.manifest()
     ):
         raise ValueError("Flow Field COG selected-grid identity is invalid")
+    expected_overview_plan = plan_semantic_overview_levels(
+        expected_grid.width,
+        expected_grid.height,
+        expected_grid.transform,
+        block_size=COG_BLOCK_SIZE,
+    )
+    if plan_facts.get("overviewLevels") != [
+        level.manifest() for level in expected_overview_plan
+    ]:
+        raise ValueError("Flow Field COG overview plan identity is invalid")
     matrix_override = plan_facts.get("matrixOverride")
     if matrix_override is None:
         if matrix_id != selected_matrix_id:
@@ -1006,6 +1128,24 @@ def verify_velocity_cog_snapshot(
     encoding = CogEncoding()
     if encoding_facts != encoding.manifest():
         raise ValueError("Flow Field COG encoding identity is invalid")
+    overview_records = support_facts.get("overviewLevels")
+    if (
+        support_facts.get("overviewPolicy")
+        != encoding.manifest()["overviewPolicy"]
+        or not isinstance(overview_records, list)
+        or len(overview_records) != len(expected_overview_plan)
+    ):
+        raise ValueError("Flow Field COG overview support facts are invalid")
+    for expected_level, record in zip(
+        expected_overview_plan,
+        overview_records,
+        strict=True,
+    ):
+        if not isinstance(record, dict) or any(
+            record.get(key) != value
+            for key, value in expected_level.manifest().items()
+        ):
+            raise ValueError("Flow Field COG overview support facts are invalid")
     expected_content_version = (
         f"flow-cog-{expected_construction[:16]}-t{time_index:02d}-z{matrix_id}-v1"
     )
@@ -1036,6 +1176,7 @@ def verify_velocity_cog_snapshot(
         expected_grid,
         encoding,
         cog["pixelSha256"],
+        tuple(overview_records),
         expected_source_hash=source_facts["sourceHash"],
         expected_time_index=time_index,
     )

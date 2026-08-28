@@ -21,6 +21,7 @@ from geoscratch_flow_field_tiles.build import (
     validate_artifact_manifest,
     verify_existing_tiles,
 )
+from geoscratch_flow_field_tiles.interpolation import apply_bilinear_safe_block
 
 
 def _page_path(output_directory: Path, page: dict) -> Path:
@@ -328,9 +329,38 @@ def test_bilinear_safe_filter_erodes_all_lattice_nodes_around_invalid_support():
     rendered = _render_page(StubStencil(), np.ones((1, 2)))
 
     assert rendered.raw_advectable_count == TILE_SIZE * TILE_SIZE - 1
+    assert rendered.representable_advectable_count == TILE_SIZE * TILE_SIZE - 1
+    assert rendered.rounded_zero_count == 0
     assert rendered.bilinear_safe_count == TILE_SIZE * TILE_SIZE - 9
     assert np.array_equal(rendered.values[127:130, 127:130], np.zeros((3, 3, 2)))
     assert np.array_equal(rendered.values[0, 0], np.ones(2))
+
+
+def test_representable_motion_filter_erodes_interpolated_exact_zero():
+    side = TILE_SIZE + 2
+    raw_support = np.ones((side, side), dtype=bool)
+
+    class StubStencil:
+        target_count = side * side
+
+        @staticmethod
+        def apply_unique_with_support(_field):
+            values = np.ones((side, side, 2), dtype="<f4")
+            values[129, 129] = 0.0
+            return values.reshape(-1, 2), raw_support.reshape(-1)
+
+    rendered = apply_bilinear_safe_block(
+        StubStencil(),
+        np.ones((1, 2)),
+        block_size=TILE_SIZE,
+        require_representable_motion=True,
+    )
+
+    assert rendered.raw_advectable_count == TILE_SIZE * TILE_SIZE
+    assert rendered.representable_advectable_count == TILE_SIZE * TILE_SIZE - 1
+    assert rendered.rounded_zero_count == 1
+    assert rendered.bilinear_safe_count == TILE_SIZE * TILE_SIZE - 9
+    assert np.all(rendered.values[127:130, 127:130] == 0.0)
 
 
 def test_builder_rejects_a_non_cache_output_before_source_processing(

@@ -66,8 +66,10 @@ def built_cog(synthetic_source, tmp_path_factory):
     )
 
 
-def test_snapshot_builds_one_valid_two_band_float32_cog_without_overviews(built_cog):
-    valid, errors, warnings = cog_validate(built_cog.cog_path, strict=False)
+def test_snapshot_builds_one_valid_two_band_float32_cog_with_semantic_overviews(
+    built_cog,
+):
+    valid, errors, warnings = cog_validate(built_cog.cog_path, strict=True)
 
     assert valid, {"errors": errors, "warnings": warnings}
     assert errors == []
@@ -78,10 +80,16 @@ def test_snapshot_builds_one_valid_two_band_float32_cog_without_overviews(built_
         assert dataset.descriptions == ("U", "V")
         assert dataset.nodata is None
         assert dataset.block_shapes == [(256, 256), (256, 256)]
-        assert dataset.overviews(1) == []
-        assert dataset.overviews(2) == []
+        assert dataset.overviews(1) == [2]
+        assert dataset.overviews(2) == [2]
+        assert dataset.tags()["GEOSCRATCH_OVERVIEW_POLICY"] == (
+            "recursive-conservative-vector-box-v1"
+        )
         assert dataset.transform.e < 0
         assert np.isfinite(dataset.read((1, 2))).all()
+    with rasterio.open(built_cog.cog_path, OVERVIEW_LEVEL=0) as overview:
+        assert (overview.width, overview.height) == (256, 128)
+        assert np.isfinite(overview.read((1, 2))).all()
 
 
 def test_cog_manifest_records_selected_snapshot_override_and_unapproved_role(built_cog):
@@ -98,9 +106,12 @@ def test_cog_manifest_records_selected_snapshot_override_and_unapproved_role(bui
     assert manifest["construction"]["facts"]["plan"]["resolution"]["resolved"][
         "matrixId"
     ] != "9"
-    assert manifest["construction"]["facts"]["encoding"]["overviewPolicy"] == (
-        "none"
-    )
+    assert manifest["construction"]["facts"]["encoding"]["overviewPolicy"][
+        "kind"
+    ] == "recursive-conservative-vector-box-v1"
+    assert manifest["construction"]["facts"]["support"]["overviewLevels"][0][
+        "nominalFactor"
+    ] == 2
     assert manifest["quality"] == {
         "artifactRole": "reconstruction-prototype",
         "particleSimulation": "not-approved",
@@ -139,6 +150,12 @@ def test_repeated_snapshot_build_preserves_pixels_and_content_identity(
     with rasterio.open(built_cog.cog_path) as first, rasterio.open(rebuilt.cog_path) as second:
         assert first.profile == second.profile
         assert first.tags() == second.tags()
+        assert first.overviews(1) == second.overviews(1)
+        assert np.array_equal(first.read((1, 2)), second.read((1, 2)))
+    with (
+        rasterio.open(built_cog.cog_path, OVERVIEW_LEVEL=0) as first,
+        rasterio.open(rebuilt.cog_path, OVERVIEW_LEVEL=0) as second,
+    ):
         assert np.array_equal(first.read((1, 2)), second.read((1, 2)))
 
 
@@ -166,7 +183,7 @@ def test_verifier_rejects_self_consistent_false_validation_facts(
     _rewrite_construction_identity(
         output,
         lambda manifest: manifest["construction"]["facts"]["cog"].update({
-            "overviewCount": 1,
+            "overviewCount": 0,
         }),
     )
 

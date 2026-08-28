@@ -90,6 +90,8 @@ class TriangleLinearStencil:
 class BilinearSafeBlock:
     values: np.ndarray
     raw_advectable_count: int
+    representable_advectable_count: int
+    rounded_zero_count: int
     bilinear_safe_count: int
 
 
@@ -98,6 +100,7 @@ def apply_bilinear_safe_block(
     unique_field: np.ndarray,
     *,
     block_size: int,
+    require_representable_motion: bool = False,
 ) -> BilinearSafeBlock:
     if isinstance(block_size, bool) or not isinstance(block_size, int) or block_size <= 0:
         raise ValueError("block_size must be a positive integer")
@@ -107,8 +110,11 @@ def apply_bilinear_safe_block(
     values, raw_advectable = stencil.apply_unique_with_support(unique_field)
     values = values.reshape(side, side, 2)
     raw_advectable = raw_advectable.reshape(side, side)
+    representable_advectable = raw_advectable.copy()
+    if require_representable_motion:
+        representable_advectable &= np.any(values != 0.0, axis=2)
     bilinear_safe = np.lib.stride_tricks.sliding_window_view(
-        raw_advectable,
+        representable_advectable,
         (3, 3),
     ).all(axis=(2, 3))
     block = values[1:-1, 1:-1].copy()
@@ -116,6 +122,13 @@ def apply_bilinear_safe_block(
     return BilinearSafeBlock(
         values=block,
         raw_advectable_count=int(np.count_nonzero(raw_advectable[1:-1, 1:-1])),
+        representable_advectable_count=int(np.count_nonzero(
+            representable_advectable[1:-1, 1:-1]
+        )),
+        rounded_zero_count=int(np.count_nonzero(
+            raw_advectable[1:-1, 1:-1]
+            & ~representable_advectable[1:-1, 1:-1]
+        )),
         bilinear_safe_count=int(np.count_nonzero(bilinear_safe)),
     )
 
