@@ -9,6 +9,7 @@ from geoscratch_flow_field_tiles.cog import (
     CogEncoding,
     _cog_pixel_centers_window,
     _cog_grid,
+    _staging_observation_due,
     build_velocity_cog_snapshot,
     plan_velocity_cog_snapshot,
 )
@@ -175,6 +176,13 @@ def test_cog_grid_rejects_invalid_webmercator_bounds():
         _cog_grid((121.0, 31.0, 120.0, 32.0), 9)
     with pytest.raises(ValueError, match="WebMercator"):
         _cog_grid((120.0, -90.0, 121.0, 32.0), 9)
+
+
+def test_base_staging_observation_interval_is_aspect_ratio_independent():
+    assert not _staging_observation_due(1)
+    assert not _staging_observation_due(63)
+    assert _staging_observation_due(64)
+    assert _staging_observation_due(128)
 
 
 def test_cog_contracts_reject_unimplemented_encoding_and_invalid_budgets():

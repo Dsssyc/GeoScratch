@@ -188,6 +188,29 @@ def write_semantic_overviews(
     temporary_compression_level: int = 1,
     staging_observer: Callable[[str], None] | None = None,
 ) -> tuple[SemanticOverviewArtifact, ...]:
+    with rasterio.Env(
+        GDAL_CACHEMAX=256 * 1024 * 1024,
+        GDAL_NUM_THREADS="ALL_CPUS",
+    ):
+        return _write_semantic_overviews_in_environment(
+            base_path,
+            output_directory,
+            levels,
+            block_size=block_size,
+            temporary_compression_level=temporary_compression_level,
+            staging_observer=staging_observer,
+        )
+
+
+def _write_semantic_overviews_in_environment(
+    base_path: str | Path,
+    output_directory: str | Path,
+    levels: tuple[SemanticOverviewLevel, ...],
+    *,
+    block_size: int,
+    temporary_compression_level: int = 1,
+    staging_observer: Callable[[str], None] | None = None,
+) -> tuple[SemanticOverviewArtifact, ...]:
     _require_positive_integer(block_size, "block_size")
     if (
         isinstance(temporary_compression_level, bool)
@@ -515,14 +538,15 @@ def _reduce_candidates(
         (first_row[:, :, 0] + first_row[:, :, 1])
         + (second_row[:, :, 0] + second_row[:, :, 1])
     ) * 0.25
+    rounded = averaged.astype("<f4")
+    rounded[rounded == 0.0] = 0.0
     child_valid = np.any(values != 0.0, axis=4)
     all_children_valid = child_valid.all(axis=(1, 3))
-    mean_is_nonzero = np.any(averaged != 0.0, axis=2)
+    mean_is_nonzero = np.any(rounded != 0.0, axis=2)
     cancellation = all_children_valid & ~mean_is_nonzero
     candidate_valid = all_children_valid & mean_is_nonzero
-    averaged[~candidate_valid] = 0.0
-    averaged[averaged == 0.0] = 0.0
-    return averaged.astype("<f4"), candidate_valid, cancellation
+    rounded[~candidate_valid] = 0.0
+    return rounded, candidate_valid, cancellation
 
 
 def _erode_3x3(values: np.ndarray) -> np.ndarray:

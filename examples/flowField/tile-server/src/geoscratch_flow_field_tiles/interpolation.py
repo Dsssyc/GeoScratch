@@ -122,6 +122,8 @@ def apply_bilinear_safe_block(
             ]
     block = values[1:-1, 1:-1].copy()
     block[~bilinear_safe] = 0.0
+    if require_representable_motion:
+        block[block == 0.0] = 0.0
     return BilinearSafeBlock(
         values=block,
         raw_advectable_count=int(np.count_nonzero(raw_advectable[1:-1, 1:-1])),

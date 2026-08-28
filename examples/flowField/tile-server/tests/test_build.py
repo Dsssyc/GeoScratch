@@ -347,6 +347,7 @@ def test_representable_motion_filter_erodes_interpolated_exact_zero():
         def apply_unique_with_support(_field):
             values = np.ones((side, side, 2), dtype="<f4")
             values[129, 129] = 0.0
+            values[10, 10] = [-0.0, 1.0]
             return values.reshape(-1, 2), raw_support.reshape(-1)
 
     rendered = apply_bilinear_safe_block(
@@ -361,6 +362,7 @@ def test_representable_motion_filter_erodes_interpolated_exact_zero():
     assert rendered.rounded_zero_count == 1
     assert rendered.bilinear_safe_count == TILE_SIZE * TILE_SIZE - 9
     assert np.all(rendered.values[127:130, 127:130] == 0.0)
+    assert not np.signbit(rendered.values[rendered.values == 0.0]).any()
 
 
 def test_builder_rejects_a_non_cache_output_before_source_processing(

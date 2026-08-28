@@ -12,11 +12,17 @@ from rio_cogeo.cogeo import cog_validate
 
 from geoscratch_flow_field_tiles.cog_overviews import (
     SEMANTIC_OVERVIEW_POLICY,
+    SemanticOverviewArtifact,
     assemble_semantic_overview_cog,
     plan_semantic_overview_levels,
     reduce_semantic_overview,
     write_explicit_overview_vrt,
     write_semantic_overviews,
+)
+from geoscratch_flow_field_tiles.cog import (
+    CogEncoding,
+    CogGrid,
+    _validate_cog,
 )
 
 
@@ -67,6 +73,14 @@ def _write_base(path, values: np.ndarray) -> None:
         )
         dataset.update_tags(1, GEOSCRATCH_COMPONENT="u")
         dataset.update_tags(2, GEOSCRATCH_COMPONENT="v")
+
+
+def _block_digest(path) -> str:
+    digest = hashlib.sha256()
+    with rasterio.open(path) as dataset:
+        for _block, window in dataset.block_windows(1):
+            digest.update(dataset.read((1, 2), window=window).tobytes(order="C"))
+    return digest.hexdigest()
 
 
 @pytest.fixture()
@@ -173,3 +187,102 @@ def test_explicit_vrt_rejects_missing_or_external_overview_sources(
     external = replace(artifacts[0], path=external_path)
     with pytest.raises(ValueError, match="staging directory"):
         write_explicit_overview_vrt(root / "external.vrt", base, (external,))
+
+
+def test_semantic_verifier_rejects_a_strict_valid_forged_overview(tmp_path):
+    base_values = np.zeros((512, 512, 2), dtype=np.float32)
+    base_values[254:256, 254:256] = 1.0
+    base = tmp_path / "base.tif"
+    _write_base(base, base_values)
+    with rasterio.open(base) as source:
+        level = plan_semantic_overview_levels(
+            source.width,
+            source.height,
+            tuple(source.transform)[:6],
+            block_size=256,
+        )[0]
+        bounds = tuple(source.bounds)
+        base_transform = tuple(source.transform)[:6]
+
+    forged_values = np.zeros((level.height, level.width, 2), dtype=np.float32)
+    forged_values[127, 127] = 1.0
+    forged_path = tmp_path / "forged-overview.tif"
+    with rasterio.open(
+        forged_path,
+        "w",
+        driver="GTiff",
+        width=level.width,
+        height=level.height,
+        count=2,
+        dtype="float32",
+        crs="EPSG:3857",
+        transform=rasterio.Affine(*level.transform),
+        nodata=None,
+        tiled=True,
+        blockxsize=256,
+        blockysize=256,
+        compress="DEFLATE",
+        predictor=3,
+        interleave="pixel",
+    ) as dataset:
+        dataset.write(np.moveaxis(forged_values, 2, 0))
+
+    artifact = SemanticOverviewArtifact(
+        level=level,
+        path=forged_path,
+        pixel_sha256=_block_digest(forged_path),
+        candidate_valid_count=1,
+        bilinear_safe_count=1,
+        cancellation_to_zero_count=0,
+        size_bytes=forged_path.stat().st_size,
+    )
+    vrt = write_explicit_overview_vrt(
+        tmp_path / "forged.vrt",
+        base,
+        (artifact,),
+    )
+    cog = tmp_path / "forged.cog.tif"
+    encoding = CogEncoding()
+    assemble_semantic_overview_cog(
+        vrt,
+        cog,
+        block_size=encoding.block_size,
+        compression_level=encoding.compression_level,
+        big_tiff=encoding.big_tiff,
+    )
+    record = artifact.manifest()
+    support = {
+        "pixelSha256": _block_digest(base),
+        "rawAdvectablePixelCount": 4,
+        "representableAdvectablePixelCount": 4,
+        "roundedZeroPixelCount": 0,
+        "bilinearSafePixelCount": 4,
+        "overviewPolicy": encoding.manifest()["overviewPolicy"],
+        "overviewLevels": [record],
+    }
+    grid = CogGrid(
+        matrix_id=0,
+        min_tile_row=0,
+        max_tile_row=1,
+        min_tile_col=0,
+        max_tile_col=1,
+        width=512,
+        height=512,
+        pixel_size_meters=2.0,
+        transform=base_transform,
+        projected_bounds=bounds,
+    )
+
+    valid, errors, warnings = cog_validate(cog, strict=True, quiet=True)
+    assert valid, {"errors": errors, "warnings": warnings}
+    with pytest.raises(RuntimeError, match="recursive semantic reduction"):
+        _validate_cog(
+            cog,
+            grid,
+            encoding,
+            support["pixelSha256"],
+            support,
+            (record,),
+            expected_source_hash="a" * 64,
+            expected_time_index=0,
+        )

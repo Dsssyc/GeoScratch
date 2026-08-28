@@ -74,6 +74,22 @@ def test_vector_cancellation_becomes_non_advectable_and_cannot_revive():
     assert not np.signbit(reduced.values).any()
 
 
+def test_float32_underflow_is_non_advectable_before_support_erosion():
+    tiny = np.nextafter(np.float32(0.0), np.float32(1.0))
+    child = np.empty((10, 10, 2), dtype=np.float32)
+    child[..., 0] = tiny
+    child[..., 1] = tiny
+    child[1::2, 1::2] = -2.0 * tiny
+
+    reduced = reduce_semantic_overview(child)
+
+    assert reduced.candidate_valid_count == 0
+    assert reduced.bilinear_safe_count == 0
+    assert reduced.cancellation_to_zero_count == 25
+    assert np.array_equal(reduced.values, np.zeros((5, 5, 2), dtype=np.float32))
+    assert not np.signbit(reduced.values).any()
+
+
 def test_odd_missing_edge_children_are_invalid():
     child = np.ones((9, 9, 2), dtype=np.float32)
 

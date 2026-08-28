@@ -93,7 +93,7 @@ def test_snapshot_builds_one_valid_two_band_float32_cog_with_semantic_overviews(
         assert np.isfinite(overview.read((1, 2))).all()
 
 
-def test_cog_manifest_records_selected_snapshot_override_and_unapproved_role(built_cog):
+def test_cog_manifest_records_statistical_selection_and_unapproved_role(built_cog):
     manifest = json.loads(built_cog.manifest_path.read_text(encoding="utf-8"))
     marker = json.loads(
         built_cog.output_directory.joinpath(COG_ARTIFACT_MARKER).read_text(
@@ -112,6 +112,12 @@ def test_cog_manifest_records_selected_snapshot_override_and_unapproved_role(bui
     assert manifest["construction"]["facts"]["encoding"]["overviewPolicy"][
         "kind"
     ] == "recursive-conservative-vector-box-v1"
+    assert manifest["construction"]["facts"]["encoding"]["pixelDigestLayout"] == {
+        "blockOrder": "top-to-bottom-left-to-right",
+        "withinBlock": "band-first-north-up-row-major",
+        "sampleEncoding": "float32-le",
+        "partialBlocks": "logical-window-only",
+    }
     assert manifest["construction"]["facts"]["support"]["overviewLevels"][0][
         "nominalFactor"
     ] == 2
@@ -121,7 +127,7 @@ def test_cog_manifest_records_selected_snapshot_override_and_unapproved_role(bui
     assert manifest["quality"] == {
         "artifactRole": "reconstruction-prototype",
         "particleSimulation": "not-approved",
-        "approvalReason": "single-snapshot-statistical-resolution-unvalidated",
+        "approvalReason": "inferred-topology-and-source-semantics-unapproved",
     }
     assert marker == {
         "kind": "geoscratch-flow-field-cog-artifact",
@@ -193,6 +199,29 @@ def test_verifier_rejects_self_consistent_false_validation_facts(
     )
 
     with pytest.raises(ValueError, match="validation facts"):
+        verify_velocity_cog_snapshot(output)
+
+
+@pytest.mark.parametrize("scope", ("base", "overview"))
+def test_verifier_rejects_self_consistent_false_support_counts(
+    built_cog,
+    tmp_path,
+    scope,
+):
+    output = tmp_path / scope / "cog-cache"
+    output.parent.mkdir()
+    shutil.copytree(built_cog.output_directory, output)
+
+    def mutate(manifest):
+        support = manifest["construction"]["facts"]["support"]
+        if scope == "base":
+            support["bilinearSafePixelCount"] += 1
+        else:
+            support["overviewLevels"][0]["bilinearSafePixelCount"] += 1
+
+    _rewrite_construction_identity(output, mutate)
+
+    with pytest.raises(ValueError, match="support"):
         verify_velocity_cog_snapshot(output)
 
 

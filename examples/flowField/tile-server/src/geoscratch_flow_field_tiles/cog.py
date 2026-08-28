@@ -28,6 +28,7 @@ from .cog_overviews import (
     SemanticOverviewLevel,
     assemble_semantic_overview_cog,
     plan_semantic_overview_levels,
+    reduce_semantic_overview_block,
     write_explicit_overview_vrt,
     write_semantic_overviews,
 )
@@ -49,6 +50,7 @@ from .topology import WEB_MERCATOR_RADIUS, prepare_topology
 
 COG_BLOCK_SIZE = 256
 COG_BYTES_PER_PIXEL = 2 * np.dtype("<f4").itemsize
+STAGING_OBSERVATION_BLOCK_INTERVAL = 64
 COG_ARTIFACT_MARKER = ".flow-field-cog-artifact.json"
 TILE_SERVER_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_COG_OUTPUT_DIRECTORY = TILE_SERVER_ROOT / "cog-cache"
@@ -121,6 +123,12 @@ class CogEncoding:
             "bigTiff": self.big_tiff,
             "nodata": None,
             "mask": None,
+            "pixelDigestLayout": {
+                "blockOrder": "top-to-bottom-left-to-right",
+                "withinBlock": "band-first-north-up-row-major",
+                "sampleEncoding": "float32-le",
+                "partialBlocks": "logical-window-only",
+            },
             "overviewPolicy": {
                 "kind": self.overview_policy,
                 "childFootprint": "2x2-nw-ne-sw-se",
@@ -355,6 +363,13 @@ class CogStagingGuard:
             "copyCapacityBytes": self.copy_capacity_bytes or 0,
             "observationCount": self.observation_count,
         }
+
+
+def _staging_observation_due(completed_blocks: int) -> bool:
+    return (
+        completed_blocks > 0
+        and completed_blocks % STAGING_OBSERVATION_BLOCK_INTERVAL == 0
+    )
 
 
 def plan_velocity_cog_snapshot(
@@ -616,6 +631,32 @@ def _write_intermediate_tiff(
     encoding: CogEncoding,
     staging_guard: CogStagingGuard,
 ) -> dict[str, Any]:
+    with rasterio.Env(
+        GDAL_CACHEMAX=256 * 1024 * 1024,
+        GDAL_NUM_THREADS="ALL_CPUS",
+    ):
+        return _write_intermediate_tiff_in_environment(
+            path,
+            snapshot,
+            plan,
+            topology,
+            unique_field,
+            interpolation,
+            encoding,
+            staging_guard,
+        )
+
+
+def _write_intermediate_tiff_in_environment(
+    path: Path,
+    snapshot: SourceSnapshot,
+    plan: CogBuildPlan,
+    topology,
+    unique_field: np.ndarray,
+    interpolation,
+    encoding: CogEncoding,
+    staging_guard: CogStagingGuard,
+) -> dict[str, Any]:
     grid = plan.grid
     transform = Affine(*grid.transform)
     profile = {
@@ -642,6 +683,7 @@ def _write_intermediate_tiff(
     representable_advectable_count = 0
     rounded_zero_count = 0
     bilinear_safe_count = 0
+    completed_blocks = 0
     with rasterio.open(path, "w", **profile) as dataset:
         dataset.set_band_description(1, "U")
         dataset.set_band_description(2, "V")
@@ -698,7 +740,10 @@ def _write_intermediate_tiff(
                 )
                 rounded_zero_count += rendered.rounded_zero_count
                 bilinear_safe_count += rendered.bilinear_safe_count
-            staging_guard.observe(f"base-block-row-{block_row}")
+                completed_blocks += 1
+                if _staging_observation_due(completed_blocks):
+                    staging_guard.observe(f"base-block-{completed_blocks}")
+    staging_guard.observe("base-complete")
     return {
         "pixelSha256": pixel_digest.hexdigest(),
         "rawAdvectablePixelCount": raw_advectable_count,
@@ -713,6 +758,34 @@ def _validate_cog(
     grid: CogGrid,
     encoding: CogEncoding,
     expected_pixel_sha256: str,
+    expected_base_support: dict[str, Any],
+    expected_overviews: tuple[dict[str, Any], ...],
+    *,
+    expected_source_hash: str,
+    expected_time_index: int,
+) -> dict[str, Any]:
+    with rasterio.Env(
+        GDAL_CACHEMAX=256 * 1024 * 1024,
+        GDAL_NUM_THREADS="ALL_CPUS",
+    ):
+        return _validate_cog_in_environment(
+            path,
+            grid,
+            encoding,
+            expected_pixel_sha256,
+            expected_base_support,
+            expected_overviews,
+            expected_source_hash=expected_source_hash,
+            expected_time_index=expected_time_index,
+        )
+
+
+def _validate_cog_in_environment(
+    path: Path,
+    grid: CogGrid,
+    encoding: CogEncoding,
+    expected_pixel_sha256: str,
+    expected_base_support: dict[str, Any],
     expected_overviews: tuple[dict[str, Any], ...],
     *,
     expected_source_hash: str,
@@ -728,6 +801,7 @@ def _validate_cog(
             }, sort_keys=True)
         )
     pixel_digest = hashlib.sha256()
+    base_stored_nonzero_count = 0
     with rasterio.open(path) as dataset:
         root_tags = dataset.tags()
         image_structure = dataset.tags(ns="IMAGE_STRUCTURE")
@@ -777,20 +851,48 @@ def _validate_cog(
             values = dataset.read((1, 2), window=window, out_dtype="float32")
             if not np.isfinite(values).all():
                 raise RuntimeError("Generated Flow Field COG contains non-finite values")
+            if np.signbit(values[values == 0.0]).any():
+                raise RuntimeError(
+                    "Generated Flow Field COG contains non-canonical signed zero"
+                )
             pixel_digest.update(np.asarray(values, dtype="<f4").tobytes(order="C"))
+            base_stored_nonzero_count += int(np.count_nonzero(
+                np.any(values != 0.0, axis=0)
+            ))
     if pixel_digest.hexdigest() != expected_pixel_sha256:
         raise RuntimeError("Generated Flow Field COG pixels changed during translation")
+    _validate_base_support_counts(
+        expected_base_support,
+        total_pixels=grid.width * grid.height,
+        stored_nonzero_count=base_stored_nonzero_count,
+        expected_pixel_sha256=expected_pixel_sha256,
+    )
     validated_overviews: list[dict[str, Any]] = []
+    previous_safe_count = base_stored_nonzero_count
     for index, expected in enumerate(expected_overviews):
         overview_digest = hashlib.sha256()
-        with rasterio.open(path, OVERVIEW_LEVEL=index) as overview:
+        overview_stored_nonzero_count = 0
+        observed_candidate_count = 0
+        observed_cancellation_count = 0
+        finer_options = {} if index == 0 else {"OVERVIEW_LEVEL": index - 1}
+        with (
+            rasterio.open(path, **finer_options) as finer,
+            rasterio.open(path, OVERVIEW_LEVEL=index) as overview,
+        ):
             observed_transform = list(tuple(overview.transform)[:6])
+            overview_image_structure = overview.tags(ns="IMAGE_STRUCTURE")
             if (
                 overview.count != 2
                 or overview.dtypes != ("float32", "float32")
                 or overview.nodata is not None
+                or overview.block_shapes != [
+                    (encoding.block_size, encoding.block_size),
+                    (encoding.block_size, encoding.block_size),
+                ]
                 or overview.width != expected["width"]
                 or overview.height != expected["height"]
+                or overview.width != (finer.width + 1) // 2
+                or overview.height != (finer.height + 1) // 2
                 or not np.allclose(
                     tuple(overview.transform)[:6],
                     expected["transform"],
@@ -801,6 +903,11 @@ def _validate_cog(
                     flags != [MaskFlags.all_valid]
                     for flags in overview.mask_flag_enums
                 )
+                or overview_image_structure.get("COMPRESSION")
+                != encoding.compression
+                or overview_image_structure.get("INTERLEAVE") != "PIXEL"
+                or overview_image_structure.get("PREDICTOR")
+                != str(encoding.predictor)
             ):
                 raise RuntimeError(
                     f"Generated Flow Field COG overview {index} structure is invalid"
@@ -811,14 +918,57 @@ def _validate_cog(
                     raise RuntimeError(
                         f"Generated Flow Field COG overview {index} is non-finite"
                     )
+                if np.signbit(values[values == 0.0]).any():
+                    raise RuntimeError(
+                        f"Generated Flow Field COG overview {index} contains signed zero"
+                    )
+                child_window = Window(
+                    (int(window.col_off) - 1) * 2,
+                    (int(window.row_off) - 1) * 2,
+                    (int(window.width) + 2) * 2,
+                    (int(window.height) + 2) * 2,
+                )
+                child = finer.read(
+                    (1, 2),
+                    window=child_window,
+                    boundless=True,
+                    fill_value=0.0,
+                    out_dtype="float32",
+                )
+                reduced = reduce_semantic_overview_block(
+                    np.moveaxis(child, 0, 2),
+                    output_height=int(window.height),
+                    output_width=int(window.width),
+                )
+                expected_values = np.moveaxis(reduced.values, 2, 0)
+                if not np.array_equal(values, expected_values):
+                    raise RuntimeError(
+                        f"Generated Flow Field COG overview {index} violates "
+                        "the recursive semantic reduction"
+                    )
+                observed_candidate_count += reduced.candidate_valid_count
+                observed_cancellation_count += (
+                    reduced.cancellation_to_zero_count
+                )
                 overview_digest.update(
                     np.asarray(values, dtype="<f4").tobytes(order="C")
                 )
+                overview_stored_nonzero_count += int(np.count_nonzero(
+                    np.any(values != 0.0, axis=0)
+                ))
         digest = overview_digest.hexdigest()
         if digest != expected["pixelSha256"]:
             raise RuntimeError(
                 f"Generated Flow Field COG overview {index} pixels changed"
             )
+        _validate_overview_support_counts(
+            expected,
+            stored_nonzero_count=overview_stored_nonzero_count,
+            previous_safe_count=previous_safe_count,
+            observed_candidate_count=observed_candidate_count,
+            observed_cancellation_count=observed_cancellation_count,
+        )
+        previous_safe_count = overview_stored_nonzero_count
         validated_overviews.append({
             "index": index,
             "nominalFactor": expected["nominalFactor"],
@@ -836,6 +986,107 @@ def _validate_cog(
         "blockCount": grid.block_count,
         "validationWarnings": warnings,
     }
+
+
+def _validate_base_support_counts(
+    support: dict[str, Any],
+    *,
+    total_pixels: int,
+    stored_nonzero_count: int,
+    expected_pixel_sha256: str,
+) -> None:
+    expected_keys = {
+        "pixelSha256",
+        "rawAdvectablePixelCount",
+        "representableAdvectablePixelCount",
+        "roundedZeroPixelCount",
+        "bilinearSafePixelCount",
+        "overviewPolicy",
+        "overviewLevels",
+    }
+    if set(support) != expected_keys:
+        raise ValueError("Flow Field COG base support facts are invalid")
+    counts = tuple(
+        support.get(key)
+        for key in (
+            "rawAdvectablePixelCount",
+            "representableAdvectablePixelCount",
+            "roundedZeroPixelCount",
+            "bilinearSafePixelCount",
+        )
+    )
+    if any(
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or not 0 <= value <= total_pixels
+        for value in counts
+    ):
+        raise ValueError("Flow Field COG base support counts are invalid")
+    raw, representable, rounded_zero, bilinear_safe = counts
+    if (
+        support.get("pixelSha256") != expected_pixel_sha256
+        or representable + rounded_zero != raw
+        or bilinear_safe > representable
+        or bilinear_safe != stored_nonzero_count
+    ):
+        raise ValueError("Flow Field COG base support identity is invalid")
+
+
+def _validate_overview_support_counts(
+    record: dict[str, Any],
+    *,
+    stored_nonzero_count: int,
+    previous_safe_count: int,
+    observed_candidate_count: int,
+    observed_cancellation_count: int,
+) -> None:
+    expected_keys = {
+        "index",
+        "nominalFactor",
+        "width",
+        "height",
+        "transform",
+        "effectiveDecimationX",
+        "effectiveDecimationY",
+        "rawBytes",
+        "pixelSha256",
+        "candidateValidPixelCount",
+        "bilinearSafePixelCount",
+        "cancellationToZeroPixelCount",
+        "intermediateSizeBytes",
+    }
+    if set(record) != expected_keys:
+        raise ValueError("Flow Field COG overview support facts are invalid")
+    total_pixels = record["width"] * record["height"]
+    counts = tuple(
+        record.get(key)
+        for key in (
+            "candidateValidPixelCount",
+            "bilinearSafePixelCount",
+            "cancellationToZeroPixelCount",
+        )
+    )
+    if any(
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or not 0 <= value <= total_pixels
+        for value in counts
+    ):
+        raise ValueError("Flow Field COG overview support counts are invalid")
+    candidate, bilinear_safe, cancellation = counts
+    intermediate_size = record.get("intermediateSizeBytes")
+    if (
+        isinstance(intermediate_size, bool)
+        or not isinstance(intermediate_size, int)
+        or intermediate_size <= 0
+        or bilinear_safe > candidate
+        or candidate + cancellation > total_pixels
+        or candidate != observed_candidate_count
+        or cancellation != observed_cancellation_count
+        or bilinear_safe != stored_nonzero_count
+        or 4 * (candidate + cancellation) > previous_safe_count
+    ):
+        raise ValueError("Flow Field COG overview support identity is invalid")
 
 
 def _build_manifest(
@@ -916,7 +1167,7 @@ def _build_manifest(
         "quality": {
             "artifactRole": "reconstruction-prototype",
             "particleSimulation": "not-approved",
-            "approvalReason": "single-snapshot-statistical-resolution-unvalidated",
+            "approvalReason": "inferred-topology-and-source-semantics-unapproved",
         },
     }
 
@@ -1083,6 +1334,7 @@ def build_velocity_cog_snapshot(
             plan.grid,
             encoding,
             support["pixelSha256"],
+            support,
             overview_records,
             expected_source_hash=snapshot.source_hash,
             expected_time_index=snapshot.field_descriptor.time_index,
@@ -1144,7 +1396,7 @@ def verify_velocity_cog_snapshot(
         != {
             "artifactRole": "reconstruction-prototype",
             "particleSimulation": "not-approved",
-            "approvalReason": "single-snapshot-statistical-resolution-unvalidated",
+            "approvalReason": "inferred-topology-and-source-semantics-unapproved",
         }
     ):
         raise ValueError("Flow Field COG manifest contract is invalid")
@@ -1297,6 +1549,7 @@ def verify_velocity_cog_snapshot(
         expected_grid,
         encoding,
         cog["pixelSha256"],
+        support_facts,
         tuple(overview_records),
         expected_source_hash=source_facts["sourceHash"],
         expected_time_index=time_index,
@@ -1364,12 +1617,18 @@ def main() -> None:
         "--minimum-free-bytes",
         type=int,
         default=defaults.minimum_free_bytes,
-        help="free-space reserve retained after two raw-size staging estimates",
+        help=(
+            "minimum free-space reserve enforced throughout compressed staging "
+            "and the final COG copy"
+        ),
     )
     parser.add_argument(
         "--plan-only",
         action="store_true",
-        help="inspect selected/output grids and budgets without writing files",
+        help=(
+            "inspect the statistically selected grid, semantic overview plan, "
+            "and budgets without writing files"
+        ),
     )
     parser.add_argument(
         "--verify-existing",
