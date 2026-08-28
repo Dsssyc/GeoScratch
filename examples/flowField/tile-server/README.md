@@ -90,15 +90,14 @@ artifact contains 1,593 pages and 835,190,784 raw page bytes. This is an expecte
 measurement, not an optimization claim. Unit tests use a small synthetic source and do not
 materialize the full artifact.
 
-## Single-snapshot COG prototype
+## Single-snapshot COG
 
 `flow-field-cog-build` builds one selected U/V time as one internally tiled, two-band
-float32 COG. It uses the same Delaunay topology, stationary-triangle rule, and one-pixel
-bilinear-safe support erosion as the RG32F page builder, but samples standard GeoTIFF pixel
-centres instead of the existing RG32F runtime's integer global lattice. The output is
-EPSG:3857, band 1 U, band 2 V, 256 by 256 pixel-interleaved blocks, DEFLATE predictor 3, no
-nodata/mask/alpha, and no overview levels. Exact `(0, 0)` remains the only representation of
-non-advectable support; the COG adds no boundary, wet/dry, depth, SDF, or activity plane.
+float32 COG. It uses the same Delaunay topology and stationary-triangle rule as the RG32F
+page builder, but samples standard GeoTIFF pixel centres. The output is EPSG:3857, band 1 U,
+band 2 V, 256 by 256 pixel-interleaved blocks, DEFLATE predictor 3, and no
+nodata/mask/alpha. Exact `(0, 0)` remains the only representation of non-advectable support;
+the COG adds no boundary, wet/dry, depth, SDF, activity, or third raster plane.
 
 The default resolution strategy does not use the absolute minimum station distance. It:
 
@@ -110,41 +109,56 @@ The default resolution strategy does not use the absolute minimum station distan
 6. chooses the first WebMercatorQuad matrix providing at least two samples per spacing.
 
 For the repository data this resolves `12.504520 m` effective spacing to z15 at
-`4.777314 m/pixel`. Its complete extent is `275 x 301` blocks and
-`43,397,939,200` raw U/V bytes (`40.4175 GiB`) for one time. The default 4,096-block and
-two-GiB raw-byte budgets reject that output. Budgets never choose another matrix.
+`4.777314 m/pixel`. That z15 result is the only accepted COG base grid; the API and CLI have
+no coarser matrix override. Its complete extent is `275 x 301` blocks,
+`70,400 x 77,056` pixels, and `43,397,939,200` raw U/V bytes (`40.4175 GiB`).
 
-An explicit matrix override is a separate, visible prototype decision. The currently verified
-local artifact uses z12: `36 x 39` blocks, `9,216 x 9,984` pixels, and `736,100,352` raw
-bytes. Its manifest still contains the selected z15 grid and rejected selected-grid budget,
-alongside the approved z12 output grid and budget. Both products remain
-`particleSimulation: not-approved` until their reconstruction errors are accepted.
+The COG contains nine recursively generated semantic overviews. A parent candidate requires
+all four child vectors to be finite and nonzero, uses one fixed-order float64 component mean
+and one float32 cast, treats a mean that rounds to `(0, 0)` as non-advectable, then applies a
+new cross-block 3 by 3 support erosion before storing the parent. This prevents ordinary
+bilinear filtering at every overview from leaking velocity across a representable zero
+boundary. The support booleans are temporary construction state and never enter the COG.
 
-Planning is read-only and returns both grid decisions as JSON:
+Nominal overview factors are `2..512`. The first eight levels preserve exact power-of-two
+WebMercator pixel registration; the terminal COG level is `138 x 151` and GDAL reports its
+extent-preserving decimation as 510. All level dimensions, transforms, support counts, and
+pixel SHA-256 values are bound into the manifest. Custom pixels are assembled through VRT
+explicit overviews and GDAL COG `OVERVIEWS=FORCE_USE_EXISTING`; rio-cogeo is used only for
+strict structural validation.
+
+The verified local t00 artifact is schema 2 / package 0.4.0:
+
+- content version `flow-cog-00343edcd11320c9-t00-z15-v2`;
+- `1,584,930,583` compressed bytes;
+- COG SHA-256 `0013f530793c6d209df22a9c46346c52258c6ea13238f35e9b6db983cd3f7333`;
+- 110,658 base-plus-overview blocks and `57,863,864,904` logical raw bytes;
+- `4,792,334,976` peak compressed staging bytes; and
+- strict COG validation with no errors or warnings.
+
+The COG quality record remains `particleSimulation: not-approved` with reason
+`inferred-topology-and-source-semantics-unapproved`. The statistical raster ceiling and
+overview bytes are now settled; model connectivity, physical unit/basis, and time semantics
+remain separate source-authority questions.
+
+Planning is read-only and reports the selected z15 grid, complete pyramid work, and both
+logical-work and compressed-staging budgets:
 
 ```bash
-# Reports selected z15 and its rejected default budget; writes no artifact.
 examples/flowField/tile-server/.venv/bin/flow-field-cog-build --plan-only
 
-# Reports selected z15 plus the explicit, budget-approved z12 output.
-examples/flowField/tile-server/.venv/bin/flow-field-cog-build \
-  --plan-only --matrix 12
-
-# Builds only uv_0 as the explicit z12 prototype.
-examples/flowField/tile-server/.venv/bin/flow-field-cog-build \
-  --time-index 0 --matrix 12
+# Builds only uv_0 at the statistically selected source ceiling.
+examples/flowField/tile-server/.venv/bin/flow-field-cog-build --time-index 0
 
 # Recomputes marker, manifest, container, encoding, file, and pixel identity.
 examples/flowField/tile-server/.venv/bin/flow-field-cog-build --verify-existing
 ```
 
-Building the selected z15 grid requires explicitly raising `--max-blocks` and
-`--max-raw-bytes` after reviewing the plan's staging-space requirement; the CLI never raises
-those limits automatically. COG internal tiling permits range reads but does not avoid
-interpolating and writing every selected pixel. No overview is generated because ordinary
-averaging would blur exact-zero support into motion; a future overview policy needs its own
-support-preserving numerical contract. See
-[ADR-091](../../../docs/decisions/ADR-091-statistical-flow-cog-snapshot.md).
+COG internal tiling and compression do not avoid interpolating every selected base pixel.
+Preflight bounds total blocks and raw pyramid work; construction separately monitors actual
+compressed staging and a free-space reserve. The verified local build completed in roughly
+28 minutes without exceeding 0.8 GiB RSS during generation. See
+[ADR-092](../../../docs/decisions/ADR-092-statistical-ceiling-flow-cog-overviews.md).
 
 ```bash
 python3 -m venv examples/flowField/tile-server/.venv
@@ -218,13 +232,11 @@ plan = plan_velocity_cog_snapshot(
     snapshot.stations,
     snapshot.geographic_bounds,
     output_parent="examples/flowField/tile-server",
-    matrix_override=12,
 )
 plan.require_output_approved()
 
 result = build_velocity_cog_snapshot(
     time_index=0,
-    matrix_override=12,
     budget=CogBuildBudget(),
 )
 ```

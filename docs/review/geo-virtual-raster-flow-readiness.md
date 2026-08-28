@@ -8,15 +8,15 @@ WebGPU proof advances 262,144 canonical dynamic positions while sampling a three
 multi-page virtual vector field through the same public Geo and Scratch APIs used by
 DEM. This review does not modify or migrate the visible `examples/flowLayer` page.
 
-The visible-migration matrix below was revised on 2026-08-27 by ADR-090 and ADR-091.
+The visible-migration matrix below was revised on 2026-08-28 by ADR-090 and ADR-092.
 `Flow Layer` remains frozen reference code; the independent `Flow Field` example owns a
 velocity-only Virtual Raster path. The normal payload has no support/mask plane.
 Non-advectable support is lowered conservatively to exact zero U/V by the example-owned
-builder, while presentation extent remains an application policy. ADR-091 additionally
-creates one statistically resolved, two-band COG snapshot as an offline reconstruction
-prototype. Its selected z15 and explicit z12 output are both recorded independently from
-budget policy and remain `particleSimulation: not-approved`; the COG is not yet a browser
-source or a completed temporal product.
+builder, while presentation extent remains an application policy. ADR-092 supersedes the
+earlier z12/no-overview prototype: the verified offline snapshot now uses the statistically
+selected z15 grid as its only base resolution and carries nine recursively conservative U/V
+overviews in the same COG. It remains `particleSimulation: not-approved`; the COG is not yet
+a browser source or a completed temporal product.
 
 ## Executable Proof Facts
 

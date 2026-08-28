@@ -4,8 +4,8 @@
 
 Accepted. Supersedes the D3-specific, fixed-degree support, texel-center storage, and
 recursive coarse-reduction clauses in the Flow Field implementation plan. It does not
-change the frozen `Flow Layer` example or add a Geo/Scratch public API. ADR-091 extends the
-example-owned backend with a statistically resolved single-snapshot COG prototype.
+change the frozen `Flow Layer` example or add a Geo/Scratch public API. ADR-091 records the
+historical single-snapshot COG prototype; ADR-092 defines the current statistical-ceiling COG.
 
 ## Date
 
@@ -148,4 +148,5 @@ SciPy documents Delaunay simplices, omitted/coplanar inputs, `find_simplex()` ou
 <https://docs.scipy.org/doc/scipy/reference/generated/scipy.spatial.Delaunay.html>.
 
 The single-snapshot statistical resolution and COG contract is recorded by
-[ADR-091](./ADR-091-statistical-flow-cog-snapshot.md).
+[ADR-091](./ADR-091-statistical-flow-cog-snapshot.md) and its accepted replacement,
+[ADR-092](./ADR-092-statistical-ceiling-flow-cog-overviews.md).

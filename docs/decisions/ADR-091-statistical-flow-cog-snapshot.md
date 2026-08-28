@@ -2,9 +2,8 @@
 
 ## Status
 
-Accepted for the example-owned reconstruction prototype. This extends ADR-090 without
-approving the generated raster for particle simulation and without changing the frozen
-`Flow Layer` example or the public Geo/Scratch packages.
+Superseded by ADR-092. This document remains the historical record of the explicit z12,
+no-overview prototype.
 
 ## Date
 
