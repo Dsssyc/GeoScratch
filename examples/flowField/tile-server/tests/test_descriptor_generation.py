@@ -180,3 +180,24 @@ def test_generator_refuses_existing_output_without_explicit_overwrite(tmp_path):
         overwrite=True,
     )
     assert read_source_descriptor(output).schema_version == 3
+
+
+@pytest.mark.parametrize("filename", ("station.bin", "uv_2.bin"))
+def test_generator_never_overwrites_station_or_velocity_input(
+    tmp_path,
+    filename,
+):
+    source, _station_hash, _field_hashes = _source_files(tmp_path)
+    output = source / filename
+    original = output.read_bytes()
+
+    with pytest.raises(ValueError, match="cannot replace station or velocity input"):
+        generate_source_descriptor(
+            source,
+            output,
+            dataset_id="generated-flow",
+            source_revision="generated-v1",
+            overwrite=True,
+        )
+
+    assert output.read_bytes() == original

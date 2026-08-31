@@ -156,6 +156,27 @@ def _write_descriptor_atomically(
             temporary.unlink()
 
 
+def _reject_source_output_alias(output: Path, sources: Sequence[Path]) -> None:
+    if not output.parent.is_dir():
+        raise FileNotFoundError(
+            f"source descriptor output parent does not exist: {output.parent}"
+        )
+    canonical_output = output.parent.resolve(strict=True) / output.name
+    output_exists = os.path.lexists(output)
+    for source in sources:
+        canonical_source = source.resolve(strict=True)
+        same_file = False
+        if output_exists:
+            try:
+                same_file = os.path.samefile(output, source)
+            except OSError:
+                same_file = False
+        if canonical_output == canonical_source or same_file:
+            raise ValueError(
+                "source descriptor output cannot replace station or velocity input"
+            )
+
+
 def generate_source_descriptor(
     data_directory: str | Path,
     output_path: str | Path,
@@ -198,6 +219,13 @@ def generate_source_descriptor(
     if station.pair_count < 3:
         raise ValueError("station source must contain at least three coordinate pairs")
     velocity_files = _velocity_files(source_directory)
+    _reject_source_output_alias(
+        output,
+        (
+            source_directory / station_filename,
+            *(path for _time_index, path in velocity_files),
+        ),
+    )
     times = _model_times(velocity_files, model_times)
     fields = []
     for time_index, ((numeric_index, path), model_time) in enumerate(
