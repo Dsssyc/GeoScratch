@@ -587,6 +587,57 @@ def test_batch_cleanup_does_not_remove_a_recreated_completed_staging_path(
     assert not items[1].output_directory.exists()
 
 
+def test_batch_cleanup_does_not_remove_a_replaced_active_staging_path(
+    synthetic_source,
+    tmp_path,
+    monkeypatch,
+):
+    items = []
+    for time_index in (0, 1):
+        parent = tmp_path / f"active-replaced-t{time_index:02d}"
+        parent.mkdir()
+        items.append(CogSnapshotBatchItem(time_index, parent / "cog-cache"))
+    original_finalize = batch_module._finalize_velocity_cog_snapshot
+    moved_staging = []
+    recreated_staging = []
+
+    def replace_active_then_fail(**kwargs):
+        if kwargs["snapshot"].field_descriptor.time_index == 0:
+            return original_finalize(**kwargs)
+        staged = kwargs["staged"]
+        moved = staged.with_name(f"{staged.name}.moved")
+        staged.rename(moved)
+        staged.mkdir()
+        staged.joinpath("belongs-to-other-work.txt").write_text(
+            "preserve me\n",
+            encoding="utf-8",
+        )
+        moved_staging.append(moved)
+        recreated_staging.append(staged)
+        raise RuntimeError("second active staging was replaced")
+
+    monkeypatch.setattr(
+        batch_module,
+        "_finalize_velocity_cog_snapshot",
+        replace_active_then_fail,
+    )
+
+    with pytest.raises(RuntimeError, match="active staging was replaced"):
+        build_velocity_cog_snapshot_batch(
+            synthetic_source.directory,
+            items=tuple(items),
+            descriptor_path=synthetic_source.descriptor_path,
+            resolution=_test_resolution(),
+        )
+
+    sentinel = recreated_staging[0] / "belongs-to-other-work.txt"
+    assert sentinel.read_text(encoding="utf-8") == "preserve me\n"
+    assert moved_staging[0].is_dir()
+    assert verify_velocity_cog_snapshot(items[0].output_directory)[
+        "contentVersion"
+    ].endswith("-t00-z9-v2")
+
+
 def test_batch_records_each_output_parents_available_bytes(
     synthetic_source,
     tmp_path,

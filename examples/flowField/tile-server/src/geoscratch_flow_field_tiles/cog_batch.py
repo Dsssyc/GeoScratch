@@ -468,14 +468,15 @@ def build_velocity_cog_snapshot_batch(
         value.emitter.emit("stage.completed", stage="topology")
 
     aggregate_guard = CogBatchStagingGuard(selected, execution_budget)
-    active_staging: set[Path] = set()
+    active_staging: dict[Path, tuple[int, int]] = {}
     try:
         for value in prepared:
             staged = Path(tempfile.mkdtemp(
                 prefix=f".{value.output.name}.build-",
                 dir=value.output.parent,
             ))
-            active_staging.add(staged)
+            staged_stat = staged.stat(follow_symlinks=False)
+            active_staging[staged] = (staged_stat.st_dev, staged_stat.st_ino)
             aggregate_guard.register(staged)
             value.staged = staged
             value.source_tiff = staged / "base.tif"
@@ -539,11 +540,18 @@ def build_velocity_cog_snapshot_batch(
                 support=value.support,
                 emitter=value.emitter,
             )
-            active_staging.remove(value.staged)
+            active_staging.pop(value.staged)
             aggregate_guard.unregister(value.staged)
             results.append(result)
         return tuple(results)
     finally:
-        for staged in active_staging:
-            if staged.exists():
+        for staged, expected_identity in active_staging.items():
+            try:
+                staged_stat = staged.stat(follow_symlinks=False)
+            except FileNotFoundError:
+                continue
+            if (
+                stat.S_ISDIR(staged_stat.st_mode)
+                and (staged_stat.st_dev, staged_stat.st_ino) == expected_identity
+            ):
                 shutil.rmtree(staged)
