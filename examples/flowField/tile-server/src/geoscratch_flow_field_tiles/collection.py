@@ -18,6 +18,7 @@ import rasterio
 import rio_cogeo
 import scipy
 
+from ._version import PACKAGE_VERSION
 from .cog import (
     CogBuildBudget,
     CogBuildPlan,
@@ -837,6 +838,8 @@ def _validate_collection_manifest_identity(
         or not isinstance(shared.get("dependencies"), dict)
         or not isinstance(shared.get("topology"), dict)
         or not isinstance(request.get("toolchain"), dict)
+        or not isinstance(request["toolchain"].get("flowFieldTools"), str)
+        or not request["toolchain"]["flowFieldTools"]
         or any(
             request["toolchain"].get(key) != shared.get("dependencies", {}).get(key)
             for key in ("numpy", "rasterio", "gdal", "rioCogeo")
@@ -1758,6 +1761,7 @@ def plan_velocity_cog_collection(
         "encoding": encoding.manifest(),
         "adapterVersion": COG_COLLECTION_ADAPTER_VERSION,
         "toolchain": {
+            "flowFieldTools": PACKAGE_VERSION,
             "python": platform.python_version(),
             "numpy": np.__version__,
             "scipy": scipy.__version__,

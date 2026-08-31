@@ -1,5 +1,6 @@
 """Deterministic velocity-only artifacts for the GeoScratch Flow Field example."""
 
+from ._version import PACKAGE_VERSION
 from .contracts import (
     BuildBudget,
     DelaunayTopology,
@@ -15,7 +16,7 @@ from .resolution import (
 from .source import SourceAuthority, SourceDescriptor, source_descriptor_hash
 
 
-__version__ = "0.4.0"
+__version__ = PACKAGE_VERSION
 
 __all__ = [
     "DelaunayTopology",
