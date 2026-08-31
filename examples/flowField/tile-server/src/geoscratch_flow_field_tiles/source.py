@@ -398,6 +398,64 @@ def _aggregate_snapshot_hash(
     return hashlib.sha256(payload).hexdigest()
 
 
+def _canonical_snapshot_time_indices(
+    values: tuple[int, ...],
+    field_count: int,
+) -> tuple[int, ...]:
+    requested = tuple(values)
+    if not requested:
+        raise ValueError("time_indices must contain at least one index")
+    if any(isinstance(value, bool) or not isinstance(value, int) for value in requested):
+        raise ValueError("time_indices must contain integers")
+    if len(set(requested)) != len(requested):
+        raise ValueError("time_indices must not contain duplicates")
+    if any(value < 0 or value >= field_count for value in requested):
+        raise ValueError("time_indices contain an index outside the source descriptor")
+    return tuple(sorted(requested))
+
+
+def load_source_snapshots(
+    data_directory: str | Path = DEFAULT_DATA_DIRECTORY,
+    *,
+    time_indices: tuple[int, ...],
+    descriptor_path: str | Path = DEFAULT_DESCRIPTOR_PATH,
+) -> tuple[SourceSnapshot, ...]:
+    requested = tuple(time_indices)
+    source_directory = Path(data_directory).resolve()
+    descriptor = read_source_descriptor(descriptor_path)
+    selected = _canonical_snapshot_time_indices(requested, len(descriptor.fields))
+    stations = _read_float32_pairs(
+        source_directory / descriptor.station_filename,
+        descriptor.station_count,
+        descriptor.station_sha256,
+        "station",
+    )
+    stations.setflags(write=False)
+    bounds = (
+        float(stations[:, 0].min()),
+        float(stations[:, 1].min()),
+        float(stations[:, 0].max()),
+        float(stations[:, 1].max()),
+    )
+    snapshots: list[SourceSnapshot] = []
+    for time_index in selected:
+        field_descriptor = descriptor.fields[time_index]
+        snapshots.append(SourceSnapshot(
+            descriptor=descriptor,
+            field_descriptor=field_descriptor,
+            stations=stations,
+            field=_read_float32_pairs(
+                source_directory / field_descriptor.filename,
+                descriptor.station_count,
+                field_descriptor.sha256,
+                f"time {time_index}",
+            ),
+            geographic_bounds=bounds,
+            source_hash=_aggregate_snapshot_hash(descriptor, field_descriptor),
+        ))
+    return tuple(snapshots)
+
+
 def load_source_snapshot(
     data_directory: str | Path = DEFAULT_DATA_DIRECTORY,
     *,
@@ -406,37 +464,16 @@ def load_source_snapshot(
 ) -> SourceSnapshot:
     if isinstance(time_index, bool) or not isinstance(time_index, int):
         raise ValueError("time_index must be an integer")
-    source_directory = Path(data_directory).resolve()
-    descriptor = read_source_descriptor(descriptor_path)
-    if not 0 <= time_index < len(descriptor.fields):
-        raise ValueError("time_index is outside the source descriptor")
-    field_descriptor = descriptor.fields[time_index]
-    stations = _read_float32_pairs(
-        source_directory / descriptor.station_filename,
-        descriptor.station_count,
-        descriptor.station_sha256,
-        "station",
-    )
-    field = _read_float32_pairs(
-        source_directory / field_descriptor.filename,
-        descriptor.station_count,
-        field_descriptor.sha256,
-        f"time {time_index}",
-    )
-    bounds = (
-        float(stations[:, 0].min()),
-        float(stations[:, 1].min()),
-        float(stations[:, 0].max()),
-        float(stations[:, 1].max()),
-    )
-    return SourceSnapshot(
-        descriptor=descriptor,
-        field_descriptor=field_descriptor,
-        stations=stations,
-        field=field,
-        geographic_bounds=bounds,
-        source_hash=_aggregate_snapshot_hash(descriptor, field_descriptor),
-    )
+    try:
+        return load_source_snapshots(
+            data_directory,
+            time_indices=(time_index,),
+            descriptor_path=descriptor_path,
+        )[0]
+    except ValueError as error:
+        if str(error) == "time_indices contain an index outside the source descriptor":
+            raise ValueError("time_index is outside the source descriptor") from error
+        raise
 
 
 def load_source_dataset(

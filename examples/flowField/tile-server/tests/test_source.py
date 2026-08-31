@@ -15,6 +15,7 @@ from geoscratch_flow_field_tiles.source import (
     SourceAuthority,
     load_source_dataset,
     load_source_snapshot,
+    load_source_snapshots,
     read_source_descriptor,
     source_descriptor_hash,
 )
@@ -330,10 +331,139 @@ def test_snapshot_loads_only_the_selected_velocity_file(synthetic_source, tmp_pa
     ).source_hash
 
 
+def test_snapshot_batch_reads_shared_station_and_each_selected_velocity_once(
+    synthetic_source,
+    monkeypatch,
+):
+    expected_hashes = {
+        time_index: load_source_snapshot(
+            synthetic_source.directory,
+            time_index=time_index,
+            descriptor_path=synthetic_source.descriptor_path,
+        ).source_hash
+        for time_index in (0, 1)
+    }
+    descriptor_reads = 0
+    pair_reads: list[str] = []
+    original_descriptor_reader = source_module.read_source_descriptor
+    original_pair_reader = source_module._read_float32_pairs
+
+    def counted_descriptor_reader(*args, **kwargs):
+        nonlocal descriptor_reads
+        descriptor_reads += 1
+        return original_descriptor_reader(*args, **kwargs)
+
+    def counted_pair_reader(path, *args, **kwargs):
+        pair_reads.append(path.name)
+        return original_pair_reader(path, *args, **kwargs)
+
+    monkeypatch.setattr(source_module, "read_source_descriptor", counted_descriptor_reader)
+    monkeypatch.setattr(source_module, "_read_float32_pairs", counted_pair_reader)
+
+    snapshots = load_source_snapshots(
+        synthetic_source.directory,
+        time_indices=(1, 0),
+        descriptor_path=synthetic_source.descriptor_path,
+    )
+
+    assert descriptor_reads == 1
+    assert pair_reads == ["station.bin", "uv_0.bin", "uv_1.bin"]
+    assert [snapshot.field_descriptor.time_index for snapshot in snapshots] == [0, 1]
+    assert snapshots[0].descriptor is snapshots[1].descriptor
+    assert snapshots[0].stations is snapshots[1].stations
+    assert not snapshots[0].stations.flags.writeable
+    assert [snapshot.source_hash for snapshot in snapshots] == [
+        expected_hashes[0],
+        expected_hashes[1],
+    ]
+    assert np.array_equal(snapshots[0].field, synthetic_source.fields[0])
+    assert np.array_equal(snapshots[1].field, synthetic_source.fields[1])
+
+
+@pytest.mark.parametrize(
+    ("time_indices", "message"),
+    (
+        ((), "at least one"),
+        ((0, 0), "duplicates"),
+        ((True,), "integers"),
+        (("0",), "integers"),
+        ((-1,), "outside"),
+        ((2,), "outside"),
+    ),
+)
+def test_snapshot_batch_rejects_invalid_selection(
+    synthetic_source,
+    time_indices,
+    message,
+):
+    with pytest.raises(ValueError, match=message):
+        load_source_snapshots(
+            synthetic_source.directory,
+            time_indices=time_indices,
+            descriptor_path=synthetic_source.descriptor_path,
+        )
+
+
+def test_schema_3_snapshot_batch_preserves_float_times_and_single_hashes(
+    synthetic_source,
+    tmp_path,
+):
+    raw = json.loads(synthetic_source.descriptor_path.read_text(encoding="utf-8"))
+    raw.update({
+        "schemaVersion": 3,
+        "timeUnit": "hour",
+        "authority": {
+            "unit": "unconfirmed",
+            "basis": "unconfirmed",
+            "time": "authoritative",
+            "phase": "unconfirmed",
+            "topology": "inferred",
+        },
+    })
+    raw["fields"][0]["modelTime"] = 0.25
+    raw["fields"][1]["modelTime"] = 1.75
+    descriptor_path = tmp_path / "batch-v3.json"
+    descriptor_path.write_text(json.dumps(raw), encoding="utf-8")
+
+    snapshots = load_source_snapshots(
+        synthetic_source.directory,
+        time_indices=(1, 0),
+        descriptor_path=descriptor_path,
+    )
+    singles = tuple(
+        load_source_snapshot(
+            synthetic_source.directory,
+            time_index=time_index,
+            descriptor_path=descriptor_path,
+        )
+        for time_index in (0, 1)
+    )
+
+    assert [snapshot.field_descriptor.model_time for snapshot in snapshots] == [
+        0.25,
+        1.75,
+    ]
+    assert [snapshot.source_hash for snapshot in snapshots] == [
+        snapshot.source_hash for snapshot in singles
+    ]
+    assert snapshots[0].stations is snapshots[1].stations
+    assert not snapshots[0].stations.flags.writeable
+
+
 def test_snapshot_rejects_invalid_time_index(synthetic_source):
     with pytest.raises(ValueError, match="time_index"):
         load_source_snapshot(
             synthetic_source.directory,
             time_index=2,
+            descriptor_path=synthetic_source.descriptor_path,
+        )
+
+
+@pytest.mark.parametrize("time_index", (True, "0", 0.0))
+def test_single_snapshot_preserves_integer_type_error(synthetic_source, time_index):
+    with pytest.raises(ValueError, match="time_index must be an integer"):
+        load_source_snapshot(
+            synthetic_source.directory,
+            time_index=time_index,
             descriptor_path=synthetic_source.descriptor_path,
         )
