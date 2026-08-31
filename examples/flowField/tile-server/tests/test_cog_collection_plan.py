@@ -123,6 +123,100 @@ def test_collection_plan_rejects_capacity_without_lowering_resolution(
         plan.require_output_approved()
 
 
+def test_collection_plan_rejects_a_base_below_the_runtime_matrix_contract(
+    synthetic_source,
+    tmp_path,
+):
+    plan = plan_velocity_cog_collection(
+        synthetic_source.directory,
+        tmp_path / "cog-collection",
+        time_indices=(0,),
+        descriptor_path=synthetic_source.descriptor_path,
+        resolution=StationSpacingResolution(
+            minimum_support_points=3,
+            minimum_support_fraction=0.10,
+            minimum_matrix=8,
+            maximum_matrix=8,
+        ),
+        snapshot_budget=_snapshot_budget(),
+    )
+
+    assert plan.snapshot_plan.grid.matrix_id == 8
+    assert plan.budget.violations == ("runtime adapter base matrix 8 < 9",)
+    with pytest.raises(ValueError, match="base matrix 8 < 9"):
+        plan.require_output_approved()
+
+
+def test_collection_plan_uses_the_same_read_only_output_path_contract(
+    synthetic_source,
+    tmp_path,
+):
+    with pytest.raises(ValueError, match="explicit cog-collection"):
+        plan_velocity_cog_collection(
+            synthetic_source.directory,
+            tmp_path / "not-a-cog-collection",
+            time_indices=(0,),
+            descriptor_path=synthetic_source.descriptor_path,
+            resolution=_resolution(),
+            snapshot_budget=_snapshot_budget(),
+        )
+
+    target = tmp_path / "target"
+    target.mkdir()
+    alias = tmp_path / "cog-collection"
+    alias.symlink_to(target, target_is_directory=True)
+    with pytest.raises(ValueError, match="symbolic link"):
+        plan_velocity_cog_collection(
+            synthetic_source.directory,
+            alias,
+            time_indices=(0,),
+            descriptor_path=synthetic_source.descriptor_path,
+            resolution=_resolution(),
+            snapshot_budget=_snapshot_budget(),
+        )
+
+
+def test_collection_work_marker_cannot_be_a_symbolic_link(
+    synthetic_source,
+    tmp_path,
+):
+    output = tmp_path / "cog-collection"
+    plan = plan_velocity_cog_collection(
+        synthetic_source.directory,
+        output,
+        time_indices=(0,),
+        descriptor_path=synthetic_source.descriptor_path,
+        resolution=_resolution(),
+        snapshot_budget=_snapshot_budget(),
+    )
+    work = output.parent / f".{output.name}.work-{plan.request_sha256[:24]}"
+    work.mkdir()
+    external = tmp_path / "external-marker.json"
+    external.write_text(json.dumps({
+        "kind": "geoscratch-flow-field-cog-collection-work",
+        "requestSha256": plan.request_sha256,
+    }), encoding="utf-8")
+    marker = work / collection_module.COG_COLLECTION_WORK_MARKER
+    marker.symlink_to(external)
+
+    with pytest.raises(ValueError, match="marker cannot be a symbolic link"):
+        plan_velocity_cog_collection(
+            synthetic_source.directory,
+            output,
+            time_indices=(0,),
+            descriptor_path=synthetic_source.descriptor_path,
+            resolution=_resolution(),
+            snapshot_budget=_snapshot_budget(),
+        )
+    with pytest.raises(ValueError, match="marker cannot be a symbolic link"):
+        collection_module._prepare_collection_work(output, plan, resume=True)
+
+    assert marker.is_symlink()
+    assert json.loads(external.read_text(encoding="utf-8"))["requestSha256"] == (
+        plan.request_sha256
+    )
+
+
 def test_collection_plan_accounts_batch_execution_without_changing_request_identity(
     synthetic_source,
     tmp_path,
@@ -172,6 +266,30 @@ def test_collection_plan_accounts_batch_execution_without_changing_request_ident
         "minimumFreeBytes": 64 * 1024 * 1024,
     }
     assert "batchExecution" not in custom.request_facts
+
+
+def test_collection_plan_uses_the_larger_snapshot_or_batch_execution_peak(
+    synthetic_source,
+    tmp_path,
+    monkeypatch,
+):
+    snapshot_peak = 40 * 1024**3
+    monkeypatch.setattr(
+        collection_module.shutil,
+        "disk_usage",
+        lambda _path: SimpleNamespace(free=snapshot_peak - 1),
+    )
+    plan = plan_velocity_cog_collection(
+        synthetic_source.directory,
+        tmp_path / "cog-collection",
+        time_indices=(0,),
+        descriptor_path=synthetic_source.descriptor_path,
+        resolution=_resolution(),
+    )
+
+    assert plan.budget.execution_peak_bytes == snapshot_peak
+    assert plan.budget.required_available_bytes == snapshot_peak
+    assert any("free-space budget" in value for value in plan.budget.violations)
 
 
 def test_collection_plan_reserves_batch_capacity_without_a_snapshot_estimate(
@@ -312,3 +430,23 @@ def test_collection_replacement_preserves_backup_and_later_content(tmp_path):
     assert backup is not None and backup.is_dir()
     assert backup.joinpath("later-user-content.txt").read_text(encoding="utf-8") == "keep\n"
     assert _capture_collection_output_state(output).kind == "owned"
+
+
+def test_collection_install_refuses_a_later_dangling_symlink(tmp_path):
+    output = tmp_path / "cog-collection"
+    expected = _capture_collection_output_state(output)
+    output.symlink_to(tmp_path / "missing-target", target_is_directory=True)
+    staged = tmp_path / "staged"
+    _write_minimal_owned_collection(staged, "new")
+
+    with pytest.raises(ValueError, match="symbolic link"):
+        _install_collection_directory(
+            staged,
+            output,
+            expected,
+            replace_existing=False,
+        )
+
+    assert output.is_symlink()
+    assert not output.exists()
+    assert staged.is_dir()

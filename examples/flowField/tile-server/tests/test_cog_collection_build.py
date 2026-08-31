@@ -53,6 +53,14 @@ def _collection_budget() -> CogCollectionBudget:
     )
 
 
+class RecordingSink:
+    def __init__(self):
+        self.events = []
+
+    def emit(self, event):
+        self.events.append(event)
+
+
 @pytest.fixture(scope="module")
 def built_collection(synthetic_source, tmp_path_factory):
     output = tmp_path_factory.mktemp("flow-cog-collection") / "cog-collection"
@@ -112,6 +120,7 @@ def test_fresh_full_collection_uses_one_batch_two_call(
     monkeypatch,
 ):
     calls = []
+    sink = RecordingSink()
     real_builder = collection_module.build_velocity_cog_snapshot_batch
 
     def record_builder(*args, **kwargs):
@@ -132,9 +141,20 @@ def test_fresh_full_collection_uses_one_batch_two_call(
         resolution=_resolution(),
         snapshot_budget=_snapshot_budget(),
         collection_budget=_collection_budget(),
+        progress=sink,
     )
 
     assert calls == [(0, 1)]
+    snapshot_events = [
+        event
+        for event in sink.events
+        if event.stage == "snapshot" and event.event == "stage.completed"
+    ]
+    assert [(event.time_index, event.sequence) for event in snapshot_events] == [
+        (0, 1),
+        (1, 1),
+    ]
+    assert len({event.job_id for event in snapshot_events}) == 2
     assert verify_velocity_cog_collection(result.output_directory, deep=True)[
         "timeIndices"
     ] == (0, 1)
@@ -200,6 +220,7 @@ def test_same_collection_is_verified_and_skipped_without_rewriting(
         path: path.stat().st_mtime_ns
         for path in built_collection.output_directory.rglob("*")
     }
+    sink = RecordingSink()
 
     repeated = build_velocity_cog_collection(
         synthetic_source.directory,
@@ -212,10 +233,15 @@ def test_same_collection_is_verified_and_skipped_without_rewriting(
             max_collection_bytes=1,
             estimated_snapshot_bytes=1,
         ),
+        progress=sink,
     )
 
     assert repeated.status == "already-published"
     assert repeated.content_version == built_collection.content_version
+    assert [
+        (event.event, event.stage, event.sequence)
+        for event in sink.events
+    ] == [("job.skipped", "collection", 1)]
     assert before == {
         path: path.stat().st_mtime_ns
         for path in built_collection.output_directory.rglob("*")
@@ -541,6 +567,52 @@ def test_progress_sink_failure_during_install_leaves_no_published_collection(
     assert work_directories[0].joinpath("payload").is_dir()
 
 
+def test_collection_progress_emits_one_failed_terminal_after_started_error(
+    synthetic_source,
+    tmp_path,
+    monkeypatch,
+):
+    sink = RecordingSink()
+
+    def fail_runtime_index(*_args, **_kwargs):
+        raise RuntimeError("synthetic runtime index failure")
+
+    monkeypatch.setattr(
+        collection_module,
+        "build_cog_runtime_page_index",
+        fail_runtime_index,
+    )
+
+    with pytest.raises(RuntimeError, match="runtime index failure"):
+        build_velocity_cog_collection(
+            synthetic_source.directory,
+            tmp_path / "cog-collection",
+            time_indices=(0,),
+            descriptor_path=synthetic_source.descriptor_path,
+            resolution=_resolution(),
+            snapshot_budget=_snapshot_budget(),
+            collection_budget=_collection_budget(),
+            progress=sink,
+        )
+
+    started = next(
+        event
+        for event in sink.events
+        if event.event == "job.started" and event.stage == "collection"
+    )
+    job_events = [event for event in sink.events if event.job_id == started.job_id]
+    terminals = [
+        event for event in job_events if event.event in {"job.completed", "job.failed"}
+    ]
+    assert [event.sequence for event in job_events] == list(
+        range(1, len(job_events) + 1)
+    )
+    assert [(event.event, event.sequence) for event in terminals] == [
+        ("job.failed", job_events[-1].sequence),
+    ]
+    assert job_events[-1].event == "job.failed"
+
+
 def test_actual_snapshot_bytes_cannot_overrun_an_underestimated_collection_cap(
     built_collection,
     synthetic_source,
@@ -657,25 +729,108 @@ def test_resume_refuses_symlinked_owned_work_subdirectories(
     assert list(external.iterdir()) == []
 
 
-def test_resume_never_deletes_unmarked_incomplete_staging_by_name(tmp_path):
+def test_resume_preserves_a_dangling_snapshot_target(
+    synthetic_source,
+    tmp_path,
+):
+    output = tmp_path / "cog-collection"
+    plan = plan_velocity_cog_collection(
+        synthetic_source.directory,
+        output,
+        time_indices=(0,),
+        descriptor_path=synthetic_source.descriptor_path,
+        resolution=_resolution(),
+        snapshot_budget=_snapshot_budget(),
+    )
+    work = _prepare_collection_work(output, plan, resume=False)
+    target = work / "payload" / "snapshots" / "t00"
+    target.symlink_to(tmp_path / "missing-target", target_is_directory=True)
+
+    with pytest.raises(ValueError, match="snapshot target is invalid"):
+        build_velocity_cog_collection(
+            synthetic_source.directory,
+            output,
+            time_indices=(0,),
+            descriptor_path=synthetic_source.descriptor_path,
+            resolution=_resolution(),
+            snapshot_budget=_snapshot_budget(),
+            resume=True,
+        )
+
+    assert target.is_symlink()
+    assert not target.exists()
+
+
+def test_batch_promotion_preserves_a_snapshot_target_that_appears_later(
+    synthetic_source,
+    tmp_path,
+    monkeypatch,
+):
+    output = tmp_path / "cog-collection"
+    plan = plan_velocity_cog_collection(
+        synthetic_source.directory,
+        output,
+        time_indices=(0,),
+        descriptor_path=synthetic_source.descriptor_path,
+        resolution=_resolution(),
+        snapshot_budget=_snapshot_budget(),
+    )
+    work = output.parent / f".{output.name}.work-{plan.request_sha256[:24]}"
+    target = work / "payload" / "snapshots" / "t00"
+    real_batch = collection_module.build_velocity_cog_snapshot_batch
+
+    def inject_target(*args, **kwargs):
+        result = real_batch(*args, **kwargs)
+        target.symlink_to(tmp_path / "later-missing", target_is_directory=True)
+        return result
+
+    monkeypatch.setattr(
+        collection_module,
+        "build_velocity_cog_snapshot_batch",
+        inject_target,
+    )
+
+    with pytest.raises(
+        collection_module.CogCollectionConflictError,
+        match="appeared during build",
+    ):
+        build_velocity_cog_collection(
+            synthetic_source.directory,
+            output,
+            time_indices=(0,),
+            descriptor_path=synthetic_source.descriptor_path,
+            resolution=_resolution(),
+            snapshot_budget=_snapshot_budget(),
+        )
+
+    assert target.is_symlink()
+    assert not target.exists()
+    assert work.joinpath("snapshot-builds", "t00", "cog-cache").is_dir()
+
+
+@pytest.mark.parametrize("discard_incomplete", (False, True))
+def test_resume_never_deletes_unmarked_incomplete_staging_by_name(
+    tmp_path,
+    discard_incomplete,
+):
     build_parent = tmp_path / "snapshot-build"
     build_parent.mkdir()
     residue = build_parent / ".cog-cache.build-user-data"
     residue.mkdir()
     residue.joinpath("keep.txt").write_text("belongs to user\n", encoding="utf-8")
 
-    with pytest.raises(
-        collection_module.CogCollectionConflictError,
-        match="preserved",
-    ):
+    with pytest.raises(ValueError, match="unmarked"):
         _recover_snapshot_build(
             build_parent,
             resume=True,
             request_sha256="a" * 64,
             time_index=0,
-            discard_incomplete=False,
+            discard_incomplete=discard_incomplete,
         )
 
+    assert not build_parent.joinpath(
+        collection_module.COG_SNAPSHOT_WORK_MARKER
+    ).exists()
     assert residue.joinpath("keep.txt").read_text(encoding="utf-8") == (
         "belongs to user\n"
     )

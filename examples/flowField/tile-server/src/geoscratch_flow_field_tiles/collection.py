@@ -20,6 +20,7 @@ import scipy
 
 from ._version import PACKAGE_VERSION
 from .cog import (
+    COG_ARTIFACT_MARKER,
     CogBuildBudget,
     CogBuildPlan,
     CogEncoding,
@@ -46,6 +47,7 @@ from .runtime_manifest import (
     validate_cog_runtime_manifest,
 )
 from .job_control import (
+    JobProgressEvent,
     OutputLock,
     ProgressEmitter,
     ProgressSink,
@@ -132,16 +134,29 @@ def _encoded_json(value: object) -> bytes:
     ).encode("utf-8")
 
 
-def _safe_collection_output(output_directory: str | Path) -> Path:
+def _collection_output_path(
+    output_directory: str | Path,
+    *,
+    create_parent: bool,
+) -> Path:
     requested = Path(os.path.abspath(os.fspath(output_directory)))
     if requested.name != "cog-collection" or requested.parent == Path(requested.anchor):
         raise ValueError(
             "Flow Field COG collection output must be an explicit cog-collection directory"
         )
-    requested.parent.mkdir(parents=True, exist_ok=True)
+    if create_parent:
+        requested.parent.mkdir(parents=True, exist_ok=True)
+    elif not requested.parent.is_dir():
+        raise FileNotFoundError(
+            f"COG collection output parent does not exist: {requested.parent}"
+        )
     if requested.is_symlink():
         raise ValueError("Flow Field COG collection output cannot be a symbolic link")
     return requested.parent.resolve(strict=True) / requested.name
+
+
+def _safe_collection_output(output_directory: str | Path) -> Path:
+    return _collection_output_path(output_directory, create_parent=True)
 
 
 def _safe_child_path(root: Path, value: object, label: str) -> Path:
@@ -260,7 +275,9 @@ def _collection_tree_fingerprint(output: Path) -> str:
 
 
 def _capture_collection_output_state(output: Path) -> CogCollectionOutputState:
-    if not output.exists():
+    if output.is_symlink():
+        raise ValueError("Flow Field COG collection output cannot be a symbolic link")
+    if not os.path.lexists(output):
         return CogCollectionOutputState("absent", None, None, None, None, (), None)
     if not _is_owned_collection_directory(output):
         raise ValueError("Flow Field refuses an unowned COG collection directory")
@@ -500,7 +517,10 @@ def _measure_resume_snapshots(
         return 0, 0
     if work.is_symlink() or not work.is_dir():
         raise ValueError("Flow Field COG collection work path is invalid")
-    marker = _read_json_object(work / COG_COLLECTION_WORK_MARKER, "collection work marker")
+    marker_path = work / COG_COLLECTION_WORK_MARKER
+    if marker_path.is_symlink():
+        raise ValueError("Flow Field COG collection work marker cannot be a symbolic link")
+    marker = _read_json_object(marker_path, "collection work marker")
     if marker != {
         "kind": "geoscratch-flow-field-cog-collection-work",
         "requestSha256": request_sha256,
@@ -525,10 +545,17 @@ def _measure_resume_snapshots(
     size_bytes = 0
     for time_index in time_indices:
         directory = snapshots / f"t{time_index:02d}"
-        if not directory.exists() and builds.exists():
+        if os.path.lexists(directory):
+            if directory.is_symlink() or not directory.is_dir():
+                raise ValueError("Flow Field COG collection snapshot target is invalid")
+        elif builds.exists():
             build_parent = builds / f"t{time_index:02d}"
+            if os.path.lexists(build_parent) and (
+                build_parent.is_symlink() or not build_parent.is_dir()
+            ):
+                raise ValueError("Flow Field COG snapshot work directory is invalid")
             staged = build_parent / "cog-cache"
-            if staged.exists():
+            if os.path.lexists(staged):
                 expected_marker = {
                     "kind": "geoscratch-flow-field-cog-snapshot-work",
                     "requestSha256": request_sha256,
@@ -1010,6 +1037,19 @@ def _validate_declared_snapshot(
     if directory.is_symlink() or not directory.is_dir() or not manifest_path.is_file():
         raise ValueError("Flow Field COG collection snapshot artifact is missing")
     manifest = _read_json_object(manifest_path, "snapshot manifest")
+    marker_path = _safe_child_path(
+        root,
+        f"{expected_directory}/{COG_ARTIFACT_MARKER}",
+        "snapshot marker",
+    )
+    if marker_path.is_symlink() or _read_json_object(
+        marker_path,
+        "snapshot marker",
+    ) != {
+        "kind": "geoscratch-flow-field-cog-artifact",
+        "contentVersion": record.get("contentVersion"),
+    }:
+        raise ValueError("Flow Field COG collection snapshot marker is invalid")
     construction = manifest.get("construction")
     facts = construction.get("facts") if isinstance(construction, dict) else None
     snapshot = facts.get("snapshot") if isinstance(facts, dict) else None
@@ -1148,6 +1188,10 @@ def _prepare_collection_work(
             raise CogCollectionConflictError(
                 "Flow Field COG collection work already exists; use resume"
             )
+        if marker_path.is_symlink():
+            raise ValueError(
+                "Flow Field COG collection work marker cannot be a symbolic link"
+            )
         if _read_json_object(marker_path, "collection work marker") != expected_marker:
             raise CogCollectionConflictError("FLOW_COG_COLLECTION_RESUME_IDENTITY_MISMATCH")
     else:
@@ -1182,7 +1226,7 @@ def _recover_snapshot_build(
         "requestSha256": request_sha256,
         "timeIndex": time_index,
     }
-    if marker_path.exists():
+    if os.path.lexists(marker_path):
         if marker_path.is_symlink() or _read_json_object(
             marker_path,
             "snapshot work marker",
@@ -1191,6 +1235,10 @@ def _recover_snapshot_build(
                 "FLOW_COG_COLLECTION_RESUME_IDENTITY_MISMATCH"
             )
     else:
+        if any(build_parent.iterdir()):
+            raise ValueError(
+                "Flow Field COG snapshot work is unmarked and contains user content"
+            )
         atomic_write_json(marker_path, expected_marker)
     staged = build_parent / "cog-cache"
     residue = tuple(build_parent.glob(".cog-cache.build-*"))
@@ -1252,7 +1300,40 @@ def _require_descriptor_matches_plan(
         raise CogCollectionConflictError("FLOW_COG_SOURCE_CHANGED_DURING_BUILD")
 
 
-def build_velocity_cog_collection(
+class _CollectionProgressTracker:
+    def __init__(self, delegate: ProgressSink | None) -> None:
+        self.delegate = delegate
+        self.started: JobProgressEvent | None = None
+        self.last_sequence = 0
+        self.completed = False
+
+    def emit(self, event: JobProgressEvent) -> None:
+        if self.delegate is not None:
+            self.delegate.emit(event)
+        if event.event == "job.started" and event.stage == "collection":
+            self.started = event
+        if self.started is not None and event.job_id == self.started.job_id:
+            self.last_sequence = event.sequence
+            if event.event == "job.completed" and event.stage == "collection":
+                self.completed = True
+
+    def emit_failure(self) -> None:
+        if self.delegate is None or self.started is None or self.completed:
+            return
+        failure = JobProgressEvent(
+            job_id=self.started.job_id,
+            sequence=self.last_sequence + 1,
+            event="job.failed",
+            stage="collection",
+            time_index=self.started.time_index,
+        )
+        try:
+            self.delegate.emit(failure)
+        except BaseException:
+            pass
+
+
+def _build_velocity_cog_collection(
     data_directory: str | Path = DEFAULT_DATA_DIRECTORY,
     output_directory: str | Path = DEFAULT_COG_COLLECTION_DIRECTORY,
     *,
@@ -1307,6 +1388,13 @@ def build_velocity_cog_collection(
         if initial_state.kind == "owned":
             installed = verify_velocity_cog_collection(output, deep=False)
             if installed["requestSha256"] == plan.request_sha256:
+                emitter.emit(
+                    "job.skipped",
+                    stage="collection",
+                    completed=1,
+                    total=1,
+                    unit="collections",
+                )
                 return CogCollectionBuildResult(
                     output_directory=output,
                     manifest_path=output / "manifest.json",
@@ -1340,6 +1428,14 @@ def build_velocity_cog_collection(
         accumulated_cog_bytes = 0
         verified_time_indices: set[int] = set()
         missing_items: list[CogSnapshotBatchItem] = []
+        promotion_emitters = {
+            time_index: ProgressEmitter(
+                f"{job_id}-promotion-t{time_index:02d}",
+                time_index,
+                progress,
+            )
+            for time_index in plan.time_indices
+        }
 
         def record_verified_snapshot(
             directory: Path,
@@ -1362,6 +1458,10 @@ def build_velocity_cog_collection(
                 collection_budget,
             )
             if directory != target:
+                if os.path.lexists(target):
+                    raise CogCollectionConflictError(
+                        "Flow Field COG snapshot target appeared during build"
+                    )
                 os.replace(directory, target)
             verified_time_indices.add(time_index)
             atomic_write_json(work / "state.json", {
@@ -1373,9 +1473,16 @@ def build_velocity_cog_collection(
                     if value in verified_time_indices
                 ],
             })
-            emitter.emit(
+            promotion_emitters[time_index].emit(
                 "job.skipped" if skipped else "stage.completed",
                 stage="snapshot",
+                completed=1,
+                total=1,
+                unit="snapshots",
+            )
+            emitter.emit(
+                "stage.progress",
+                stage="snapshots",
                 completed=len(verified_time_indices),
                 total=len(plan.time_indices),
                 unit="snapshots",
@@ -1388,7 +1495,9 @@ def build_velocity_cog_collection(
                 descriptor,
             )
             target = snapshots_directory / f"t{time_index:02d}"
-            if target.exists():
+            if os.path.lexists(target):
+                if target.is_symlink() or not target.is_dir():
+                    raise ValueError("Flow Field COG collection snapshot target is invalid")
                 verify_velocity_cog_snapshot(target)
                 record_verified_snapshot(
                     target,
@@ -1398,7 +1507,7 @@ def build_velocity_cog_collection(
                 )
                 continue
             build_parent = work / "snapshot-builds" / f"t{time_index:02d}"
-            if build_parent.exists():
+            if os.path.lexists(build_parent):
                 if build_parent.is_symlink() or not build_parent.is_dir():
                     raise ValueError("Flow Field COG snapshot work directory is invalid")
             else:
@@ -1540,6 +1649,50 @@ def build_velocity_cog_collection(
     )
 
 
+def build_velocity_cog_collection(
+    data_directory: str | Path = DEFAULT_DATA_DIRECTORY,
+    output_directory: str | Path = DEFAULT_COG_COLLECTION_DIRECTORY,
+    *,
+    time_indices: tuple[int, ...],
+    descriptor_path: str | Path = DEFAULT_DESCRIPTOR_PATH,
+    topology: TopologySpec | None = None,
+    interpolation: InterpolationSpec | None = None,
+    resolution: ResolutionSpec | None = None,
+    encoding: CogEncoding = CogEncoding(),
+    snapshot_budget: CogBuildBudget = CogBuildBudget(),
+    batch_execution_budget: CogSnapshotBatchExecutionBudget = (
+        CogSnapshotBatchExecutionBudget()
+    ),
+    collection_budget: CogCollectionBudget | None = None,
+    resume: bool = False,
+    replace_existing: bool = False,
+    discard_incomplete: bool = False,
+    progress: ProgressSink | None = None,
+) -> CogCollectionBuildResult:
+    tracker = _CollectionProgressTracker(progress)
+    try:
+        return _build_velocity_cog_collection(
+            data_directory,
+            output_directory,
+            time_indices=time_indices,
+            descriptor_path=descriptor_path,
+            topology=topology,
+            interpolation=interpolation,
+            resolution=resolution,
+            encoding=encoding,
+            snapshot_budget=snapshot_budget,
+            batch_execution_budget=batch_execution_budget,
+            collection_budget=collection_budget,
+            resume=resume,
+            replace_existing=replace_existing,
+            discard_incomplete=discard_incomplete,
+            progress=tracker,
+        )
+    except BaseException:
+        tracker.emit_failure()
+        raise
+
+
 @dataclass(frozen=True, slots=True)
 class CogCollectionBudget:
     """Bounds final temporal storage without changing snapshot resolution."""
@@ -1573,6 +1726,7 @@ class CogCollectionBudgetAssessment:
     existing_snapshot_count: int
     existing_snapshot_bytes: int
     remaining_snapshot_count: int
+    execution_peak_bytes: int
     projected_final_bytes: int | None
     required_available_bytes: int | None
     violations: tuple[str, ...]
@@ -1603,6 +1757,7 @@ class CogCollectionBudgetAssessment:
                 "existingSnapshotCount": self.existing_snapshot_count,
                 "existingSnapshotBytes": self.existing_snapshot_bytes,
                 "remainingSnapshotCount": self.remaining_snapshot_count,
+                "executionPeakBytes": self.execution_peak_bytes,
                 "availableBytes": self.available_bytes,
                 "projectedFinalBytes": self.projected_final_bytes,
                 "requiredAvailableBytes": self.required_available_bytes,
@@ -1724,9 +1879,7 @@ def plan_velocity_cog_collection(
         raise TypeError(
             "batch_execution_budget must be a CogSnapshotBatchExecutionBudget"
         )
-    output = Path(os.path.abspath(os.fspath(output_directory)))
-    if not output.parent.is_dir():
-        raise FileNotFoundError(f"COG collection output parent does not exist: {output.parent}")
+    output = _collection_output_path(output_directory, create_parent=False)
     snapshot = load_source_snapshot(
         data_directory,
         time_index=selected[0],
@@ -1794,6 +1947,13 @@ def plan_velocity_cog_collection(
         snapshot_budget.minimum_free_bytes,
         batch_execution_budget.minimum_free_bytes,
     )
+    execution_peak_bytes = max(
+        snapshot_budget.max_staged_bytes + snapshot_budget.minimum_free_bytes,
+        (
+            batch_execution_budget.max_staged_bytes
+            + batch_execution_budget.minimum_free_bytes
+        ),
+    )
     estimated = collection_budget.estimated_snapshot_bytes
     projected = (
         existing_bytes + estimated * remaining_count
@@ -1805,11 +1965,15 @@ def plan_velocity_cog_collection(
         if remaining_count == 0
         else (
             (0 if estimated is None else estimated * remaining_count)
-            + batch_execution_budget.max_staged_bytes
-            + minimum_free_bytes
+            + execution_peak_bytes
         )
     )
     violations: list[str] = []
+    if snapshot_plan.grid.matrix_id < RUNTIME_MAXIMUM_MATRIX:
+        violations.append(
+            "runtime adapter base matrix "
+            f"{snapshot_plan.grid.matrix_id} < {RUNTIME_MAXIMUM_MATRIX}"
+        )
     if remaining_count > 1 and estimated is None:
         violations.append("compressed snapshot estimate is required for multi-time output")
     if projected is not None and projected > collection_budget.max_collection_bytes:
@@ -1828,6 +1992,7 @@ def plan_velocity_cog_collection(
         existing_snapshot_count=existing_count,
         existing_snapshot_bytes=existing_bytes,
         remaining_snapshot_count=remaining_count,
+        execution_peak_bytes=execution_peak_bytes,
         projected_final_bytes=projected,
         required_available_bytes=required,
         violations=tuple(violations),
