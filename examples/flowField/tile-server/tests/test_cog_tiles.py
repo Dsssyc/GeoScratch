@@ -13,7 +13,10 @@ from geoscratch_flow_field_tiles.cog_overviews import reduce_semantic_overview_b
 from geoscratch_flow_field_tiles.cog_tiles import (
     TILE_BYTE_LENGTH,
     CogVelocityTileReader,
+    _ArrayLevel,
     _global_pixel_origin,
+    _parse_manifest,
+    _reduce_global_level,
     _validate_values,
 )
 from geoscratch_flow_field_tiles.resolution import StationSpacingResolution
@@ -217,6 +220,84 @@ def test_terminal_nominal_factor_is_the_global_address_authority():
     assert _global_pixel_origin(27_310, 13_278, 512) == (13_655, 6_639)
     with pytest.raises(ValueError, match="not aligned"):
         _global_pixel_origin(27_311, 13_279, 512)
+
+
+def test_unaligned_terminal_ifd_is_not_address_authority_and_z6_is_derived_globally(
+    tmp_path,
+):
+    cog_path = tmp_path / "flow-t00.cog.tif"
+    cog_path.write_bytes(b"test")
+    overview_levels = []
+    width = 512
+    height = 512
+    for index in range(9):
+        width = (width + 1) // 2
+        height = (height + 1) // 2
+        overview_levels.append({
+            "index": index,
+            "nominalFactor": 1 << (index + 1),
+            "width": width,
+            "height": height,
+        })
+    facts = {
+        "source": {
+            "geographicBounds": [120.0, 31.0, 120.1, 31.1],
+        },
+        "snapshot": {"timeIndex": 0},
+        "plan": {
+            "grid": {
+                "matrixId": "15",
+                "width": 512,
+                "height": 512,
+                "sampleRegistration": "pixel-center",
+                "tileLimits": {
+                    "minTileRow": 13_279,
+                    "maxTileRow": 13_280,
+                    "minTileCol": 27_311,
+                    "maxTileCol": 27_312,
+                },
+            },
+            "overviewLevels": overview_levels,
+        },
+        "encoding": {
+            "bands": 2,
+            "sampleType": "float32",
+            "componentOrder": ["u", "v"],
+            "overviewPolicy": {"kind": "recursive-conservative-vector-box-v1"},
+        },
+        "cog": {"path": cog_path.name, "sizeBytes": cog_path.stat().st_size},
+    }
+    manifest = {
+        "schemaVersion": 2,
+        "artifactType": "flow-field-cog-snapshot",
+        "construction": {
+            "facts": facts,
+            "sha256": hashlib.sha256(
+                json.dumps(facts, sort_keys=True, separators=(",", ":")).encode(
+                    "utf-8"
+                )
+            ).hexdigest(),
+        },
+    }
+
+    parsed = _parse_manifest(manifest, cog_path)
+
+    assert min(parsed["physical_levels"]) == 7
+    assert 6 not in parsed["physical_levels"]
+    assert len(parsed["overview_shapes"]) == 9
+    source = _ArrayLevel(
+        matrix=7,
+        global_col=27_311,
+        global_row=13_279,
+        values=np.broadcast_to(
+            np.asarray([1.0, 2.0], dtype="<f4"),
+            (8, 8, 2),
+        ).copy(),
+    )
+    derived = _reduce_global_level(source, 6)
+    assert (derived.global_col, derived.global_row) == (13_655, 6_639)
+    assert derived.values.shape == (5, 5, 2)
+    assert np.array_equal(derived.values[2, 2], np.asarray([1.0, 2.0], dtype="<f4"))
 
 
 def test_reader_rejects_matrices_and_coordinates_outside_coverage(cog_reader_fixture):

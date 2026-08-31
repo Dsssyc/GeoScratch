@@ -6,6 +6,7 @@ import os
 import shutil
 
 import pytest
+import rasterio
 from fastapi.testclient import TestClient
 
 from geoscratch_flow_field_tiles.cog import CogBuildBudget
@@ -13,6 +14,7 @@ from geoscratch_flow_field_tiles.cog_tiles import CogVelocityTileReader
 from geoscratch_flow_field_tiles.collection import (
     CogCollectionBudget,
     build_velocity_cog_collection,
+    verify_velocity_cog_collection,
 )
 from geoscratch_flow_field_tiles.resolution import StationSpacingResolution
 from geoscratch_flow_field_tiles.service import create_app
@@ -92,7 +94,7 @@ def test_collection_health_and_runtime_manifest_contract(served_collection):
     assert manifest.status_code == 200
     assert manifest.content == runtime_bytes
     assert manifest.json() == runtime
-    assert manifest.headers["cache-control"] == "public, max-age=31536000, immutable"
+    assert manifest.headers["cache-control"] == "public, no-cache"
     assert manifest.headers["access-control-allow-origin"] == "*"
     assert conditional.status_code == 304
     assert conditional.content == b""
@@ -133,7 +135,7 @@ def test_collection_tile_is_read_from_cog_and_matches_runtime_page_identity(
     assert expected.maximum_speed == page["maximumSpeed"]
     assert response.headers["content-type"] == "application/vnd.geoscratch.flow-rg32f"
     assert response.headers["etag"] == f'"{page["sha256"]}"'
-    assert response.headers["cache-control"] == "public, max-age=31536000, immutable"
+    assert response.headers["cache-control"] == "public, no-cache"
     assert "accept-ranges" not in response.headers
     assert "content-range" not in response.headers
     assert conditional.status_code == 304
@@ -177,6 +179,24 @@ def test_collection_service_keeps_structured_404_and_bounded_cog_stats(
     }
 
 
+def test_first_conditional_request_materializes_once_then_uses_verified_page_cache(
+    served_collection,
+):
+    _collection, runtime = _manifests(served_collection)
+    page = runtime["pages"][0]
+    headers = {"If-None-Match": f'"{page["sha256"]}"'}
+
+    with TestClient(create_app(served_collection.output_directory)) as client:
+        first = client.get(_route(page), headers=headers)
+        second = client.get(_route(page), headers=headers)
+        stats = client.get("/stats").json()
+
+    assert first.status_code == 304
+    assert second.status_code == 304
+    assert stats["tileNotModified"] == 2
+    assert stats["cogWindowReads"] == 1
+
+
 @pytest.mark.parametrize("change", ("missing", "fingerprint"))
 def test_conditional_request_cannot_hide_missing_or_changed_cog(
     served_collection,
@@ -217,3 +237,77 @@ def test_conditional_request_cannot_hide_missing_or_changed_cog(
 def test_collection_service_rejects_invalid_window_concurrency(served_collection):
     with pytest.raises(ValueError, match="max_window_reads"):
         create_app(served_collection.output_directory, max_cog_window_reads=0)
+
+
+def test_identity_and_service_reject_snapshot_marker_drift(
+    served_collection,
+    tmp_path,
+):
+    output = tmp_path / "cog-collection"
+    shutil.copytree(served_collection.output_directory, output)
+    collection = json.loads(output.joinpath("manifest.json").read_text(encoding="utf-8"))
+    marker = output / collection["snapshots"][0]["directory"] / (
+        ".flow-field-cog-artifact.json"
+    )
+    original = marker.read_bytes()
+    changed = original.replace(b"cog-artifact", b"cog-artifacx")
+    assert len(changed) == len(original) and changed != original
+    marker.write_bytes(changed)
+
+    with pytest.raises(ValueError, match="snapshot marker"):
+        verify_velocity_cog_collection(output, deep=False)
+    with pytest.raises(ValueError, match="snapshot marker"):
+        create_app(output)
+
+
+def test_first_conditional_request_cannot_hide_same_length_cog_corruption(
+    served_collection,
+    tmp_path,
+):
+    output = tmp_path / "cog-collection"
+    shutil.copytree(served_collection.output_directory, output)
+    collection = json.loads(output.joinpath("manifest.json").read_text(encoding="utf-8"))
+    runtime = json.loads(
+        output.joinpath("runtime-manifest.json").read_text(encoding="utf-8")
+    )
+    record = collection["snapshots"][0]
+    snapshot_manifest = json.loads(
+        output.joinpath(record["manifestPath"]).read_text(encoding="utf-8")
+    )
+    base_matrix = snapshot_manifest["construction"]["facts"]["plan"]["grid"][
+        "matrixId"
+    ]
+    page = next(
+        value
+        for value in runtime["pages"]
+        if value["timeIndex"] == 0 and value["matrixId"] == base_matrix
+    )
+    cog_path = output / record["cogPath"]
+    with rasterio.open(cog_path) as dataset:
+        offset = int(dataset.get_tag_item("BLOCK_OFFSET_0_0", "TIFF", bidx=1))
+        size = int(dataset.get_tag_item("BLOCK_SIZE_0_0", "TIFF", bidx=1))
+    position = offset + min(7, size // 2)
+    original_size = cog_path.stat().st_size
+    with cog_path.open("r+b") as stream:
+        stream.seek(position)
+        original = stream.read(1)
+        assert original
+        stream.seek(position)
+        stream.write(bytes([original[0] ^ 1]))
+        stream.flush()
+        os.fsync(stream.fileno())
+    assert cog_path.stat().st_size == original_size == record["cogSizeBytes"]
+    app = create_app(output)
+
+    with TestClient(app) as client:
+        conditional = client.get(
+            _route(page),
+            headers={"If-None-Match": f'"{page["sha256"]}"'},
+        )
+        plain = client.get(_route(page))
+
+    assert conditional.status_code == 503
+    assert plain.status_code == 503
+    assert conditional.json()["detail"]["code"] == (
+        "FLOW_FIELD_TILE_ARTIFACT_UNAVAILABLE"
+    )

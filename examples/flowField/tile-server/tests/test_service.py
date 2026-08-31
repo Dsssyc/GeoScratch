@@ -16,7 +16,7 @@ def _route(page: dict) -> str:
     return "/" + page["path"]
 
 
-def test_health_and_manifest_are_immutable_and_conditional(built_tiles):
+def test_health_and_manifest_are_revalidated_conditionally(built_tiles):
     with TestClient(create_app(built_tiles.output_directory)) as client:
         health = client.get("/health")
         manifest = client.get("/manifest.json", headers={"Origin": "http://localhost:5173"})
@@ -34,7 +34,7 @@ def test_health_and_manifest_are_immutable_and_conditional(built_tiles):
     }
     assert health.headers["cache-control"] == "no-store"
     assert manifest.status_code == 200
-    assert manifest.headers["cache-control"] == "public, max-age=31536000, immutable"
+    assert manifest.headers["cache-control"] == "public, no-cache"
     assert manifest.headers["access-control-allow-origin"] == "*"
     assert conditional.status_code == 304
     assert conditional.content == b""
@@ -54,7 +54,7 @@ def test_tile_returns_exact_rg32f_bytes_hash_etag_and_304(built_tiles):
     assert first.content == expected
     assert first.headers["content-type"] == "application/vnd.geoscratch.flow-rg32f"
     assert first.headers["content-length"] == str(page["byteLength"])
-    assert first.headers["cache-control"] == "public, max-age=31536000, immutable"
+    assert first.headers["cache-control"] == "public, no-cache"
     assert first.headers["etag"] == f'"{page["sha256"]}"'
     assert second.status_code == 304
     assert second.content == b""

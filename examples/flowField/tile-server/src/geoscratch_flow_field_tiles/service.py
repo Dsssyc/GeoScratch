@@ -18,7 +18,8 @@ from .build import (
     PAGE_BYTE_LENGTH,
     validate_artifact_manifest,
 )
-from .cog_tiles import CogVelocityTileReader
+from .cog import COG_ARTIFACT_MARKER
+from .cog_tiles import CogVelocityTile, CogVelocityTileReader
 from .collection import (
     COG_COLLECTION_MARKER,
     _shared_snapshot_contract,
@@ -27,7 +28,7 @@ from .collection import (
 
 
 FLOW_RG32F_MEDIA_TYPE = "application/vnd.geoscratch.flow-rg32f"
-IMMUTABLE_CACHE_CONTROL = "public, max-age=31536000, immutable"
+REVALIDATED_CACHE_CONTROL = "public, no-cache"
 
 
 @dataclass
@@ -61,9 +62,11 @@ class AggregateStats:
         with self.lock:
             self.tile_failures += 1
 
-    def record_not_modified(self) -> None:
+    def record_not_modified(self, *, cog_window: bool = False) -> None:
         with self.lock:
             self.tile_not_modified += 1
+            if cog_window:
+                self.cog_window_reads += 1
 
     def record_success(
         self,
@@ -185,11 +188,11 @@ class VelocityTileStore:
             stat.st_ctime_ns,
         )
 
-    def verify_tile(self, page: dict[str, Any]) -> None:
+    def verify_tile(self, page: dict[str, Any]) -> bool:
         path, fingerprint = self.ensure_tile_available(page)
         with self._verified_tiles_lock:
             if self._verified_tiles.get(path) == fingerprint:
-                return
+                return False
         content = path.read_bytes()
         if hashlib.sha256(content).hexdigest() != page["sha256"]:
             raise FileNotFoundError(
@@ -202,6 +205,7 @@ class VelocityTileStore:
             )
         with self._verified_tiles_lock:
             self._verified_tiles[path] = fingerprint
+        return False
 
     def read_tile(
         self,
@@ -299,6 +303,11 @@ class CogCollectionTileStore:
         self._readers: dict[str, CogVelocityTileReader] = {}
         self._cog_paths: dict[str, Path] = {}
         self._cog_fingerprints: dict[str, tuple[int, int, int, int, int]] = {}
+        self._verified_pages: dict[
+            tuple[str, str, int, int, str],
+            tuple[int, int, int, int, int],
+        ] = {}
+        self._verified_pages_lock = threading.Lock()
 
         facts = collection_manifest["construction"]["facts"]
         records = facts["snapshots"]
@@ -332,15 +341,27 @@ class CogCollectionTileStore:
             record.get("cogPath"),
             "snapshot COG",
         )
+        marker_path = _safe_collection_path(
+            self.output_directory,
+            f"{expected_directory}/{COG_ARTIFACT_MARKER}",
+            "snapshot marker",
+        )
         if (
             manifest_path.is_symlink()
             or cog_path.is_symlink()
+            or marker_path.is_symlink()
             or not manifest_path.is_file()
             or not cog_path.is_file()
+            or not marker_path.is_file()
             or _sha256_file(manifest_path) != record.get("manifestSha256")
         ):
             raise ValueError("Flow Field COG collection snapshot artifact is invalid")
         snapshot_manifest = _read_json(manifest_path, "Flow Field COG snapshot manifest")
+        if _read_json(marker_path, "Flow Field COG snapshot marker") != {
+            "kind": "geoscratch-flow-field-cog-artifact",
+            "contentVersion": record.get("contentVersion"),
+        }:
+            raise ValueError("Flow Field COG collection snapshot marker is invalid")
         construction = snapshot_manifest.get("construction")
         snapshot_facts = (
             construction.get("facts")
@@ -397,8 +418,23 @@ class CogCollectionTileStore:
     def etag(self, page: dict[str, Any]) -> str:
         return f'"{page["sha256"]}"'
 
-    def verify_tile(self, page: dict[str, Any]) -> None:
-        self._ensure_cog_available(page)
+    def verify_tile(self, page: dict[str, Any]) -> bool:
+        time_id = f"t{page['timeIndex']:02d}"
+        key = (
+            time_id,
+            page["matrixId"],
+            page["tileRow"],
+            page["tileCol"],
+            page["sha256"],
+        )
+        fingerprint = self._ensure_cog_available(page)
+        with self._verified_pages_lock:
+            if self._verified_pages.get(key) == fingerprint:
+                return False
+        tile = self._read_cog_tile(page, time_id)
+        with self._verified_pages_lock:
+            self._verified_pages[key] = fingerprint
+        return True
 
     def read_tile(
         self,
@@ -410,24 +446,44 @@ class CogCollectionTileStore:
         page = self.tile_facts(time_id, matrix_id, tile_row, tile_col)
         if page is None:
             raise KeyError((time_id, matrix_id, tile_row, tile_col))
-        self._ensure_cog_available(page)
+        tile = self._read_cog_tile(page, time_id)
+        key = (time_id, matrix_id, tile_row, tile_col, page["sha256"])
+        fingerprint = self._cog_fingerprints[time_id]
+        with self._verified_pages_lock:
+            self._verified_pages[key] = fingerprint
+        return TileRead(content=tile.content, page=page, time_id=time_id)
+
+    def _read_cog_tile(
+        self,
+        page: dict[str, Any],
+        time_id: str,
+    ) -> CogVelocityTile:
         reader = self._readers[time_id]
         try:
             with self._window_reads:
-                self._ensure_cog_available(page)
-                tile = reader.read_tile(matrix_id, tile_row, tile_col)
-                self._ensure_cog_available(page)
+                before = self._ensure_cog_available(page)
+                tile = reader.read_tile(
+                    page["matrixId"],
+                    page["tileRow"],
+                    page["tileCol"],
+                )
+                after = self._ensure_cog_available(page)
         except (OSError, RuntimeError, ValueError) as error:
             raise OSError(f"Flow Field COG window read failed: {error}") from error
+        if before != after:
+            raise OSError("Flow Field COG changed during its window read")
         if (
             len(tile.content) != page["byteLength"]
             or tile.sha256 != page["sha256"]
             or tile.maximum_speed != page["maximumSpeed"]
         ):
             raise OSError("Flow Field COG runtime page identity changed")
-        return TileRead(content=tile.content, page=page, time_id=time_id)
+        return tile
 
-    def _ensure_cog_available(self, page: dict[str, Any]) -> None:
+    def _ensure_cog_available(
+        self,
+        page: dict[str, Any],
+    ) -> tuple[int, int, int, int, int]:
         time_id = f"t{page['timeIndex']:02d}"
         path = self._cog_paths.get(time_id)
         expected = self._cog_fingerprints.get(time_id)
@@ -441,6 +497,7 @@ class CogCollectionTileStore:
             ) from error
         if observed != expected:
             raise FileNotFoundError(f"Flow Field COG snapshot {time_id} changed after startup")
+        return observed
 
 
 def _page_records(
@@ -557,7 +614,7 @@ def create_app(
     @app.get("/manifest.json")
     def manifest(request: Request) -> Response:
         headers = {
-            "Cache-Control": IMMUTABLE_CACHE_CONTROL,
+            "Cache-Control": REVALIDATED_CACHE_CONTROL,
             "ETag": store.manifest_etag,
         }
         if request.headers.get("if-none-match") == store.manifest_etag:
@@ -595,13 +652,14 @@ def create_app(
                 },
             )
         etag = store.etag(page)
-        headers = {"Cache-Control": IMMUTABLE_CACHE_CONTROL, "ETag": etag}
+        headers = {"Cache-Control": REVALIDATED_CACHE_CONTROL, "ETag": etag}
         conditional = request.headers.get("if-none-match") == etag
         try:
             if conditional:
-                store.verify_tile(page)
+                conditional_cog_window = store.verify_tile(page)
                 tile_read = None
             else:
+                conditional_cog_window = False
                 tile_read = store.read_tile(time_id, matrix_id, tile_row, tile_col)
         except (FileNotFoundError, OSError) as error:
             stats.record_failure()
@@ -613,7 +671,7 @@ def create_app(
                 },
             ) from error
         if conditional:
-            stats.record_not_modified()
+            stats.record_not_modified(cog_window=conditional_cog_window)
             return Response(status_code=304, headers=headers)
         if tile_read is None:
             raise RuntimeError("Flow Field tile read unexpectedly missing")

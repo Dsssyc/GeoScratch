@@ -66,6 +66,7 @@ class CogVelocityTileReader:
         self.base_matrix = parsed["base_matrix"]
         self.source_bounds = parsed["source_bounds"]
         self._physical_levels = parsed["physical_levels"]
+        self._overview_shapes = parsed["overview_shapes"]
         self.minimum_physical_matrix = min(self._physical_levels)
         self._coverage = _coverage(self.source_bounds, self.base_matrix)
         self._validate_container()
@@ -142,14 +143,24 @@ class CogVelocityTileReader:
     def _validate_container(self) -> None:
         base = self._physical_levels[self.base_matrix]
         with rasterio.open(self.cog_path) as dataset:
-            _validate_dataset(dataset, base, "Flow Field COG base")
-            if len(dataset.overviews(1)) != len(self._physical_levels) - 1:
+            _validate_dataset(
+                dataset,
+                base.width,
+                base.height,
+                "Flow Field COG base",
+                require_descriptions=True,
+            )
+            if len(dataset.overviews(1)) != len(self._overview_shapes):
                 raise ValueError("Flow Field COG overview count does not match its manifest")
-        for level in self._physical_levels.values():
-            if level.overview_index is None:
-                continue
-            with rasterio.open(self.cog_path, OVERVIEW_LEVEL=level.overview_index) as dataset:
-                _validate_dataset(dataset, level, f"Flow Field COG overview {level.overview_index}")
+        for overview_index, width, height in self._overview_shapes:
+            with rasterio.open(self.cog_path, OVERVIEW_LEVEL=overview_index) as dataset:
+                _validate_dataset(
+                    dataset,
+                    width,
+                    height,
+                    f"Flow Field COG overview {overview_index}",
+                    require_descriptions=False,
+                )
 
     def _read_physical_window(
         self,
@@ -290,6 +301,7 @@ def _parse_manifest(manifest: object, cog_path: Path) -> dict[str, Any]:
     )
     previous_width = width
     previous_height = height
+    overview_shapes: list[tuple[int, int, int]] = []
     for index, value in enumerate(overviews):
         if not isinstance(value, dict):
             raise ValueError("Flow Field COG overview facts are invalid")
@@ -306,16 +318,18 @@ def _parse_manifest(manifest: object, cog_path: Path) -> dict[str, Any]:
             or matrix < 0
         ):
             raise ValueError("Flow Field COG overview sequence is invalid")
-        global_col, global_row = _global_pixel_origin(min_col, min_row, factor)
-        physical_levels[matrix] = _PhysicalLevel(
-            matrix=matrix,
-            overview_index=index,
-            nominal_factor=factor,
-            width=level_width,
-            height=level_height,
-            global_col=global_col,
-            global_row=global_row,
-        )
+        overview_shapes.append((index, level_width, level_height))
+        if factor <= 256:
+            global_col, global_row = _global_pixel_origin(min_col, min_row, factor)
+            physical_levels[matrix] = _PhysicalLevel(
+                matrix=matrix,
+                overview_index=index,
+                nominal_factor=factor,
+                width=level_width,
+                height=level_height,
+                global_col=global_col,
+                global_row=global_row,
+            )
         previous_width = level_width
         previous_height = level_height
 
@@ -334,20 +348,25 @@ def _parse_manifest(manifest: object, cog_path: Path) -> dict[str, Any]:
         "base_matrix": base_matrix,
         "source_bounds": tuple(float(value) for value in source_bounds),
         "physical_levels": physical_levels,
+        "overview_shapes": tuple(overview_shapes),
     }
 
 
-def _validate_dataset(dataset: Any, level: _PhysicalLevel, label: str) -> None:
+def _validate_dataset(
+    dataset: Any,
+    width: int,
+    height: int,
+    label: str,
+    *,
+    require_descriptions: bool,
+) -> None:
     if (
-        dataset.width != level.width
-        or dataset.height != level.height
+        dataset.width != width
+        or dataset.height != height
         or dataset.count != CHANNEL_COUNT
         or dataset.dtypes != ("float32", "float32")
         or dataset.nodata is not None
-        or (
-            level.overview_index is None
-            and dataset.descriptions != ("U", "V")
-        )
+        or (require_descriptions and dataset.descriptions != ("U", "V"))
         or any(flags != [MaskFlags.all_valid] for flags in dataset.mask_flag_enums)
     ):
         raise ValueError(f"{label} structure is invalid")
