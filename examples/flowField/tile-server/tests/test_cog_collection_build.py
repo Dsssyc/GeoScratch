@@ -328,6 +328,18 @@ def test_resume_promotes_batch_partial_success_and_only_builds_remaining_time(
         "-t00-z9-v2"
     )
     assert not (work / "snapshot-builds" / "t01" / "cog-cache").exists()
+    deep_verify_calls = []
+    real_snapshot_verifier = collection_module.verify_velocity_cog_snapshot
+
+    def count_snapshot_verify(path):
+        deep_verify_calls.append(path)
+        return real_snapshot_verifier(path)
+
+    monkeypatch.setattr(
+        collection_module,
+        "verify_velocity_cog_snapshot",
+        count_snapshot_verify,
+    )
     partial_plan = plan_velocity_cog_collection(
         synthetic_source.directory,
         output,
@@ -337,6 +349,7 @@ def test_resume_promotes_batch_partial_success_and_only_builds_remaining_time(
         snapshot_budget=_snapshot_budget(),
         collection_budget=CogCollectionBudget(max_collection_bytes=1024**3),
     )
+    assert deep_verify_calls == []
     assert partial_plan.budget.existing_snapshot_count == 1
     assert partial_plan.budget.remaining_snapshot_count == 1
     assert partial_plan.budget.required_available_bytes == (
@@ -375,6 +388,7 @@ def test_resume_promotes_batch_partial_success_and_only_builds_remaining_time(
 
     assert resumed.status == "published"
     assert calls == [(1,)]
+    assert deep_verify_calls == [completed_t00]
     assert verify_velocity_cog_collection(output, deep=True)["timeIndices"] == (0, 1)
 
 

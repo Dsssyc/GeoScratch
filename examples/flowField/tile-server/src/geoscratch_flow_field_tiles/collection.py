@@ -58,6 +58,7 @@ from .source import (
     load_source_snapshot,
     read_source_descriptor,
     source_descriptor_hash,
+    source_snapshot_hash,
 )
 
 
@@ -393,6 +394,8 @@ def _snapshot_record(
         or source.get("sourceRevision") != descriptor.source_revision
         or source.get("stationCount") != descriptor.station_count
         or source.get("stationHash") != descriptor.station_sha256
+        or source.get("sourceHash") != source_snapshot_hash(descriptor, field)
+        or manifest.get("sourceHash") != source_snapshot_hash(descriptor, field)
         or facts.get("plan") != expected_plan.construction_manifest()
         or facts.get("encoding") != expected_encoding.manifest()
     ):
@@ -546,7 +549,6 @@ def _measure_resume_snapshots(
                     raise ValueError(
                         "Flow Field COG complete snapshot work identity is invalid"
                     )
-                verify_velocity_cog_snapshot(staged)
                 directory = staged
         if not directory.exists():
             continue

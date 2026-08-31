@@ -354,10 +354,15 @@ def source_descriptor_hash(descriptor: SourceDescriptor) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
-def _aggregate_snapshot_hash(
+def source_snapshot_hash(
     descriptor: SourceDescriptor,
     field: FieldSourceDescriptor,
 ) -> str:
+    """Return one descriptor-bound snapshot identity without reading payload bytes."""
+    if not isinstance(descriptor, SourceDescriptor):
+        raise TypeError("descriptor must be a SourceDescriptor")
+    if not isinstance(field, FieldSourceDescriptor) or field not in descriptor.fields:
+        raise ValueError("field must belong to the source descriptor")
     if descriptor.schema_version == 2:
         facts = [
             descriptor.dataset_id,
@@ -451,7 +456,7 @@ def load_source_snapshots(
                 f"time {time_index}",
             ),
             geographic_bounds=bounds,
-            source_hash=_aggregate_snapshot_hash(descriptor, field_descriptor),
+            source_hash=source_snapshot_hash(descriptor, field_descriptor),
         ))
     return tuple(snapshots)
 

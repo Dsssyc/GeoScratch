@@ -18,6 +18,7 @@ from geoscratch_flow_field_tiles.source import (
     load_source_snapshots,
     read_source_descriptor,
     source_descriptor_hash,
+    source_snapshot_hash,
 )
 
 
@@ -376,6 +377,10 @@ def test_snapshot_batch_reads_shared_station_and_each_selected_velocity_once(
         expected_hashes[0],
         expected_hashes[1],
     ]
+    assert [
+        source_snapshot_hash(snapshot.descriptor, snapshot.field_descriptor)
+        for snapshot in snapshots
+    ] == [expected_hashes[0], expected_hashes[1]]
     assert np.array_equal(snapshots[0].field, synthetic_source.fields[0])
     assert np.array_equal(snapshots[1].field, synthetic_source.fields[1])
 

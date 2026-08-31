@@ -13,7 +13,12 @@ from .resolution import (
     StationSpacingResolution,
     UnsupportedResolutionError,
 )
-from .source import SourceAuthority, SourceDescriptor, source_descriptor_hash
+from .source import (
+    SourceAuthority,
+    SourceDescriptor,
+    source_descriptor_hash,
+    source_snapshot_hash,
+)
 
 
 __version__ = PACKAGE_VERSION
@@ -30,4 +35,5 @@ __all__ = [
     "UnsupportedResolutionError",
     "UnsupportedTopologyError",
     "source_descriptor_hash",
+    "source_snapshot_hash",
 ]
