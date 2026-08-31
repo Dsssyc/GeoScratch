@@ -3,8 +3,42 @@ from __future__ import annotations
 import os
 import shutil
 import stat
+import tempfile
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
+
+import numpy as np
+
+from .cog import (
+    CogBuildBudget,
+    CogBuildPlan,
+    CogBuildResult,
+    CogEncoding,
+    CogStagingGuard,
+    _CogBaseWriteItem,
+    _assess_cog_budget,
+    _finalize_velocity_cog_snapshot,
+    _safe_cog_output,
+    _write_intermediate_tiff_batch,
+    plan_velocity_cog_snapshot,
+)
+from .contracts import (
+    InterpolationSpec,
+    TopologySpec,
+    resolve_interpolation,
+    resolve_topology,
+)
+from .job_control import ProgressEmitter, ProgressSink
+from .resolution import ResolutionSpec
+from .source import (
+    DEFAULT_DATA_DIRECTORY,
+    DEFAULT_DESCRIPTOR_PATH,
+    SourceSnapshot,
+    load_source_snapshots,
+)
+from .topology import DuplicateStatistics, prepare_topology
 
 
 MAX_SUPPORTED_BATCH_SNAPSHOTS = 2
@@ -97,6 +131,11 @@ def validate_snapshot_batch_items(
     time_indices = tuple(item.time_index for item in selected)
     if len(set(time_indices)) != len(time_indices):
         raise ValueError("snapshot batch time indices must be unique")
+    explicit_job_ids = tuple(
+        item.job_id for item in selected if item.job_id is not None
+    )
+    if len(set(explicit_job_ids)) != len(explicit_job_ids):
+        raise ValueError("snapshot batch explicit job IDs must be unique")
     outputs = tuple(Path(item.output_directory) for item in selected)
     if len(set(outputs)) != len(outputs):
         raise ValueError("snapshot batch canonical output directories must be unique")
@@ -154,6 +193,13 @@ class CogBatchStagingGuard:
         self._roots.append(registered)
         return registered
 
+    def unregister(self, root: str | Path) -> None:
+        requested = Path(os.path.abspath(os.fspath(root)))
+        canonical = requested.parent.resolve(strict=True) / requested.name
+        if canonical not in self._roots:
+            raise ValueError("batch staging root is not registered")
+        self._roots.remove(canonical)
+
     def observe(self, stage: str) -> CogBatchStagingObservation:
         if not isinstance(stage, str) or not stage:
             raise ValueError("stage must be a non-empty string")
@@ -187,6 +233,34 @@ class CogBatchStagingGuard:
             minimum_available_bytes=minimum_available_bytes,
             observation_count=observation_count,
         )
+
+    def require_additional_capacity(
+        self,
+        additional_bytes: int,
+        stage: str,
+    ) -> CogBatchStagingObservation:
+        if (
+            isinstance(additional_bytes, bool)
+            or not isinstance(additional_bytes, int)
+            or additional_bytes <= 0
+        ):
+            raise ValueError("additional_bytes must be a positive integer")
+        observation = self.observe(stage)
+        projected_staged_bytes = observation.staged_bytes + additional_bytes
+        if projected_staged_bytes > self.budget.max_staged_bytes:
+            raise OSError(
+                f"Flow Field COG batch staging budget cannot hold the final copy "
+                f"during {stage}: {projected_staged_bytes} > "
+                f"{self.budget.max_staged_bytes}"
+            )
+        required_available_bytes = additional_bytes + self.budget.minimum_free_bytes
+        if observation.available_bytes < required_available_bytes:
+            raise OSError(
+                f"Flow Field COG batch does not have enough free space for the final "
+                f"copy during {stage}: {required_available_bytes} > "
+                f"{observation.available_bytes}"
+            )
+        return observation
 
 
 def _filesystem_device(path: Path) -> int:
@@ -222,3 +296,254 @@ def _regular_file_bytes(root: Path) -> int:
                         f"directories: {entry.path}"
                     )
     return total
+
+
+class _BatchSnapshotStagingGuard(CogStagingGuard):
+    def __init__(
+        self,
+        *,
+        root: Path,
+        budget: CogBuildBudget,
+        time_index: int,
+        aggregate_guard: CogBatchStagingGuard | None = None,
+    ) -> None:
+        super().__init__(
+            root=root,
+            budget=budget,
+            initial_available_bytes=shutil.disk_usage(root).free,
+        )
+        self.time_index = time_index
+        self.aggregate_guard = aggregate_guard
+
+    def observe(self, stage: str) -> None:
+        super().observe(stage)
+        if self.aggregate_guard is not None:
+            self.aggregate_guard.observe(f"t{self.time_index:02d}:{stage}")
+
+    def require_copy_capacity(self) -> None:
+        super().require_copy_capacity()
+        if self.aggregate_guard is not None:
+            self.aggregate_guard.require_additional_capacity(
+                self.copy_capacity_bytes,
+                f"t{self.time_index:02d}:before-cog-copy",
+            )
+
+
+@dataclass(slots=True)
+class _PreparedBatchSnapshot:
+    item: CogSnapshotBatchItem
+    snapshot: SourceSnapshot
+    output: Path
+    plan: CogBuildPlan
+    unique_field: np.ndarray
+    duplicate_statistics: DuplicateStatistics
+    emitter: ProgressEmitter
+    staged: Path | None = None
+    staging_guard: _BatchSnapshotStagingGuard | None = None
+    source_tiff: Path | None = None
+    support: dict[str, Any] | None = None
+
+
+def build_velocity_cog_snapshot_batch(
+    data_directory: str | Path = DEFAULT_DATA_DIRECTORY,
+    *,
+    items: tuple[CogSnapshotBatchItem, ...],
+    descriptor_path: str | Path = DEFAULT_DESCRIPTOR_PATH,
+    topology: TopologySpec | None = None,
+    interpolation: InterpolationSpec | None = None,
+    resolution: ResolutionSpec | None = None,
+    encoding: CogEncoding = CogEncoding(),
+    budget: CogBuildBudget = CogBuildBudget(),
+    execution_budget: CogSnapshotBatchExecutionBudget = (
+        CogSnapshotBatchExecutionBudget()
+    ),
+    progress: ProgressSink | None = None,
+) -> tuple[CogBuildResult, ...]:
+    """Build at most two byte-equivalent snapshots through one shared base pass."""
+    selected = validate_snapshot_batch_items(items, execution_budget)
+    if not isinstance(encoding, CogEncoding):
+        raise TypeError("encoding must be a CogEncoding")
+    if not isinstance(budget, CogBuildBudget):
+        raise TypeError("budget must be a CogBuildBudget")
+    outputs = tuple(_safe_cog_output(item.output_directory) for item in selected)
+    emitters = tuple(
+        ProgressEmitter(
+            item.job_id or f"flow-cog-{uuid.uuid4().hex}",
+            item.time_index,
+            progress,
+        )
+        for item in selected
+    )
+    for emitter in emitters:
+        emitter.emit("stage.started", stage="source")
+    snapshots_by_time = {
+        snapshot.field_descriptor.time_index: snapshot
+        for snapshot in load_source_snapshots(
+            data_directory,
+            time_indices=tuple(item.time_index for item in selected),
+            descriptor_path=descriptor_path,
+        )
+    }
+    snapshots = tuple(snapshots_by_time[item.time_index] for item in selected)
+    for emitter in emitters:
+        emitter.emit(
+            "stage.progress",
+            stage="source",
+            completed=2,
+            total=2,
+            unit="files",
+        )
+        emitter.emit("stage.completed", stage="source")
+        emitter.emit("stage.started", stage="planning")
+
+    first_plan = plan_velocity_cog_snapshot(
+        snapshots[0].stations,
+        snapshots[0].geographic_bounds,
+        outputs[0].parent,
+        resolution=resolution,
+        budget=budget,
+    )
+    plans = [first_plan]
+    for output in outputs[1:]:
+        assessment = _assess_cog_budget(
+            first_plan.grid,
+            first_plan.overview_levels,
+            budget,
+            shutil.disk_usage(output.parent).free,
+        )
+        plans.append(CogBuildPlan(
+            selection=first_plan.selection,
+            grid=first_plan.grid,
+            budget=assessment,
+            overview_levels=first_plan.overview_levels,
+        ))
+    for emitter, plan in zip(emitters, plans, strict=True):
+        plan.require_output_approved()
+        emitter.emit(
+            "stage.progress",
+            stage="planning",
+            completed=1,
+            total=1,
+            unit="plans",
+        )
+        emitter.emit("stage.completed", stage="planning")
+        emitter.emit("stage.started", stage="topology")
+
+    topology_spec = resolve_topology(
+        snapshots[0].descriptor.topology if topology is None else topology
+    )
+    interpolation_spec = resolve_interpolation(
+        snapshots[0].descriptor.interpolation
+        if interpolation is None
+        else interpolation
+    )
+    prepared_topology = prepare_topology(snapshots[0].stations, topology_spec)
+    prepared = tuple(
+        _PreparedBatchSnapshot(
+            item=item,
+            snapshot=snapshot,
+            output=output,
+            plan=plan,
+            unique_field=prepared_topology.aggregate_field(snapshot.field),
+            duplicate_statistics=prepared_topology.duplicate_statistics((snapshot.field,)),
+            emitter=emitter,
+        )
+        for item, snapshot, output, plan, emitter in zip(
+            selected,
+            snapshots,
+            outputs,
+            plans,
+            emitters,
+            strict=True,
+        )
+    )
+    for value in prepared:
+        value.emitter.emit(
+            "stage.progress",
+            stage="topology",
+            completed=1,
+            total=1,
+            unit="topologies",
+        )
+        value.emitter.emit("stage.completed", stage="topology")
+
+    aggregate_guard = CogBatchStagingGuard(selected, execution_budget)
+    active_staging: set[Path] = set()
+    try:
+        for value in prepared:
+            staged = Path(tempfile.mkdtemp(
+                prefix=f".{value.output.name}.build-",
+                dir=value.output.parent,
+            ))
+            active_staging.add(staged)
+            aggregate_guard.register(staged)
+            value.staged = staged
+            value.source_tiff = staged / "base.tif"
+        for index, value in enumerate(prepared):
+            value.staging_guard = _BatchSnapshotStagingGuard(
+                root=value.staged,
+                budget=budget,
+                time_index=value.item.time_index,
+                aggregate_guard=aggregate_guard if index == 0 else None,
+            )
+            value.staging_guard.observe("staging-created")
+            value.emitter.emit("stage.started", stage="base")
+
+        aggregate_guard.observe("batch-staging-created")
+        base_items = tuple(
+            _CogBaseWriteItem(
+                path=value.source_tiff,
+                snapshot=value.snapshot,
+                unique_field=value.unique_field,
+                staging_guard=value.staging_guard,
+                progress_callback=(
+                    lambda completed, total, emitter=value.emitter: emitter.emit(
+                        "stage.progress",
+                        stage="base",
+                        completed=completed,
+                        total=total,
+                        unit="blocks",
+                    )
+                ),
+            )
+            for value in prepared
+        )
+        supports = _write_intermediate_tiff_batch(
+            base_items,
+            first_plan,
+            prepared_topology,
+            interpolation_spec,
+            encoding,
+        )
+        aggregate_guard.observe("base-complete")
+        for value, support in zip(prepared, supports, strict=True):
+            value.support = support
+            value.emitter.emit("stage.completed", stage="base")
+
+        results: list[CogBuildResult] = []
+        for value in prepared:
+            for other in prepared:
+                other.staging_guard.aggregate_guard = None
+            value.staging_guard.aggregate_guard = aggregate_guard
+            result = _finalize_velocity_cog_snapshot(
+                snapshot=value.snapshot,
+                plan=value.plan,
+                prepared_topology=prepared_topology,
+                duplicate_statistics=value.duplicate_statistics,
+                interpolation=interpolation_spec,
+                encoding=encoding,
+                staging_guard=value.staging_guard,
+                staged=value.staged,
+                output=value.output,
+                source_tiff=value.source_tiff,
+                support=value.support,
+                emitter=value.emitter,
+            )
+            active_staging.remove(value.staged)
+            aggregate_guard.unregister(value.staged)
+            results.append(result)
+        return tuple(results)
+    finally:
+        for staged in active_staging:
+            if staged.exists():
+                shutil.rmtree(staged)
