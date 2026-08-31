@@ -10,7 +10,7 @@ import tempfile
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import morecantile
 import numpy as np
@@ -26,6 +26,7 @@ from .cog_overviews import (
     SEMANTIC_OVERVIEW_POLICY,
     SemanticOverviewArtifact,
     SemanticOverviewLevel,
+    SemanticOverviewProgress,
     assemble_semantic_overview_cog,
     plan_semantic_overview_levels,
     reduce_semantic_overview_block,
@@ -33,6 +34,7 @@ from .cog_overviews import (
     write_semantic_overviews,
 )
 from .interpolation import apply_bilinear_safe_block, prepare_triangle_linear_stencil
+from .job_control import ProgressEmitter, ProgressSink
 from .resolution import (
     ResolutionSelection,
     ResolutionSpec,
@@ -592,6 +594,32 @@ def _is_sha256(value: object) -> bool:
     )
 
 
+def _finite_model_time(value: object) -> bool:
+    return (
+        not isinstance(value, bool)
+        and isinstance(value, (int, float))
+        and (not isinstance(value, float) or math.isfinite(value))
+    )
+
+
+def _valid_source_authority(value: object) -> bool:
+    if not isinstance(value, dict) or set(value) != {
+        "unit",
+        "basis",
+        "time",
+        "phase",
+        "topology",
+    }:
+        return False
+    return (
+        all(
+            value[key] in {"authoritative", "unconfirmed"}
+            for key in ("unit", "basis", "time", "phase")
+        )
+        and value["topology"] in {"authoritative", "inferred"}
+    )
+
+
 def _cog_pixel_centers_window(
     matrix_id: int,
     tile_row: int,
@@ -630,6 +658,7 @@ def _write_intermediate_tiff(
     interpolation,
     encoding: CogEncoding,
     staging_guard: CogStagingGuard,
+    progress_callback: Callable[[int, int], None] | None = None,
 ) -> dict[str, Any]:
     with rasterio.Env(
         GDAL_CACHEMAX=256 * 1024 * 1024,
@@ -644,6 +673,7 @@ def _write_intermediate_tiff(
             interpolation,
             encoding,
             staging_guard,
+            progress_callback,
         )
 
 
@@ -656,6 +686,7 @@ def _write_intermediate_tiff_in_environment(
     interpolation,
     encoding: CogEncoding,
     staging_guard: CogStagingGuard,
+    progress_callback: Callable[[int, int], None] | None = None,
 ) -> dict[str, Any]:
     grid = plan.grid
     transform = Affine(*grid.transform)
@@ -743,6 +774,11 @@ def _write_intermediate_tiff_in_environment(
                 completed_blocks += 1
                 if _staging_observation_due(completed_blocks):
                     staging_guard.observe(f"base-block-{completed_blocks}")
+                if progress_callback is not None and (
+                    _staging_observation_due(completed_blocks)
+                    or completed_blocks == grid.block_count
+                ):
+                    progress_callback(completed_blocks, grid.block_count)
     staging_guard.observe("base-complete")
     return {
         "pixelSha256": pixel_digest.hexdigest(),
@@ -1119,6 +1155,22 @@ def _build_manifest(
         "basis": snapshot.descriptor.basis,
         "phase": snapshot.descriptor.phase,
     }
+    if snapshot.descriptor.schema_version == 3:
+        semantics = {
+            "unit": snapshot.descriptor.unit,
+            "basis": snapshot.descriptor.basis,
+            "timeUnit": snapshot.descriptor.time_unit,
+            "phase": snapshot.descriptor.phase,
+            "authority": snapshot.descriptor.authority.manifest(),
+        }
+        source_facts.update({
+            "descriptorSchemaVersion": 3,
+            **semantics,
+        })
+        snapshot_facts.update({
+            "timeUnit": snapshot.descriptor.time_unit,
+            "authority": snapshot.descriptor.authority.manifest(),
+        })
     construction = {
         "source": source_facts,
         "snapshot": snapshot_facts,
@@ -1223,15 +1275,30 @@ def _is_owned_cog_directory(output: Path) -> bool:
     return {entry.name for entry in output.iterdir()} == allowed_names
 
 
-def _install_cog_directory(staged: Path, output: Path) -> None:
+def _install_cog_directory(
+    staged: Path,
+    output: Path,
+    *,
+    commit_callback: Callable[[], None] | None = None,
+) -> None:
     if not output.exists():
         os.replace(staged, output)
+        try:
+            if commit_callback is not None:
+                commit_callback()
+        except BaseException:
+            os.replace(output, staged)
+            raise
         return
     backup = output.parent / f".{output.name}.backup-{uuid.uuid4().hex}"
     os.replace(output, backup)
     try:
         os.replace(staged, output)
+        if commit_callback is not None:
+            commit_callback()
     except BaseException:
+        if output.exists():
+            os.replace(output, staged)
         os.replace(backup, output)
         raise
     shutil.rmtree(backup)
@@ -1248,15 +1315,32 @@ def build_velocity_cog_snapshot(
     resolution: ResolutionSpec | None = None,
     encoding: CogEncoding = CogEncoding(),
     budget: CogBuildBudget = CogBuildBudget(),
+    progress: ProgressSink | None = None,
+    job_id: str | None = None,
 ) -> CogBuildResult:
     if not isinstance(encoding, CogEncoding):
         raise TypeError("encoding must be a CogEncoding")
     output = _safe_cog_output(output_directory)
+    emitter = ProgressEmitter(
+        f"flow-cog-{uuid.uuid4().hex}" if job_id is None else job_id,
+        time_index,
+        progress,
+    )
+    emitter.emit("stage.started", stage="source")
     snapshot = load_source_snapshot(
         data_directory,
         time_index=time_index,
         descriptor_path=descriptor_path,
     )
+    emitter.emit(
+        "stage.progress",
+        stage="source",
+        completed=2,
+        total=2,
+        unit="files",
+    )
+    emitter.emit("stage.completed", stage="source")
+    emitter.emit("stage.started", stage="planning")
     plan = plan_velocity_cog_snapshot(
         snapshot.stations,
         snapshot.geographic_bounds,
@@ -1265,6 +1349,15 @@ def build_velocity_cog_snapshot(
         budget=budget,
     )
     plan.require_output_approved()
+    emitter.emit(
+        "stage.progress",
+        stage="planning",
+        completed=1,
+        total=1,
+        unit="plans",
+    )
+    emitter.emit("stage.completed", stage="planning")
+    emitter.emit("stage.started", stage="topology")
     topology_spec = resolve_topology(
         snapshot.descriptor.topology if topology is None else topology
     )
@@ -1274,6 +1367,14 @@ def build_velocity_cog_snapshot(
     prepared_topology = prepare_topology(snapshot.stations, topology_spec)
     unique_field = prepared_topology.aggregate_field(snapshot.field)
     duplicate_statistics = prepared_topology.duplicate_statistics((snapshot.field,))
+    emitter.emit(
+        "stage.progress",
+        stage="topology",
+        completed=1,
+        total=1,
+        unit="topologies",
+    )
+    emitter.emit("stage.completed", stage="topology")
 
     staged = Path(tempfile.mkdtemp(prefix=f".{output.name}.build-", dir=output.parent))
     try:
@@ -1287,6 +1388,17 @@ def build_velocity_cog_snapshot(
         source_vrt = staged / "semantic-overviews.vrt"
         cog_path = staged / f"flow-t{time_index:02d}.cog.tif"
         manifest_path = staged / "manifest.json"
+        emitter.emit("stage.started", stage="base")
+
+        def report_base(completed: int, total: int) -> None:
+            emitter.emit(
+                "stage.progress",
+                stage="base",
+                completed=completed,
+                total=total,
+                unit="blocks",
+            )
+
         support = _write_intermediate_tiff(
             source_tiff,
             snapshot,
@@ -1296,7 +1408,23 @@ def build_velocity_cog_snapshot(
             interpolation_spec,
             encoding,
             staging_guard,
+            report_base,
         )
+        emitter.emit("stage.completed", stage="base")
+
+        def report_overview(value: SemanticOverviewProgress) -> None:
+            stage = f"overview-{value.level_index:02d}"
+            if value.event == "progress":
+                emitter.emit(
+                    "stage.progress",
+                    stage=stage,
+                    completed=value.completed_blocks,
+                    total=value.total_blocks,
+                    unit="blocks",
+                )
+            else:
+                emitter.emit(f"stage.{value.event}", stage=stage)
+
         overview_artifacts = write_semantic_overviews(
             source_tiff,
             staged,
@@ -1304,6 +1432,7 @@ def build_velocity_cog_snapshot(
             block_size=encoding.block_size,
             temporary_compression_level=encoding.temporary_compression_level,
             staging_observer=staging_guard.observe,
+            progress_callback=report_overview,
         )
         overview_records = tuple(
             artifact.manifest() for artifact in overview_artifacts
@@ -1315,6 +1444,7 @@ def build_velocity_cog_snapshot(
             source_tiff,
             overview_artifacts,
         )
+        emitter.emit("stage.started", stage="cog-copy")
         staging_guard.require_copy_capacity()
         # VRT explicit overviews and COG FORCE_USE_EXISTING are the documented
         # GDAL path for copying project-computed overview pixels without invoking
@@ -1329,6 +1459,15 @@ def build_velocity_cog_snapshot(
             big_tiff=encoding.big_tiff,
         )
         staging_guard.observe("cog-copy-complete")
+        emitter.emit(
+            "stage.progress",
+            stage="cog-copy",
+            completed=1,
+            total=1,
+            unit="copies",
+        )
+        emitter.emit("stage.completed", stage="cog-copy")
+        emitter.emit("stage.started", stage="semantic-verification")
         validation = _validate_cog(
             cog_path,
             plan.grid,
@@ -1339,10 +1478,19 @@ def build_velocity_cog_snapshot(
             expected_source_hash=snapshot.source_hash,
             expected_time_index=snapshot.field_descriptor.time_index,
         )
+        emitter.emit(
+            "stage.progress",
+            stage="semantic-verification",
+            completed=1,
+            total=1,
+            unit="datasets",
+        )
+        emitter.emit("stage.completed", stage="semantic-verification")
         source_tiff.unlink()
         source_vrt.unlink()
         for artifact in overview_artifacts:
             artifact.path.unlink()
+        emitter.emit("stage.started", stage="manifest")
         manifest = _build_manifest(
             snapshot,
             plan,
@@ -1365,7 +1513,31 @@ def build_velocity_cog_snapshot(
             }, sort_keys=True) + "\n",
             encoding="utf-8",
         )
-        _install_cog_directory(staged, output)
+        emitter.emit(
+            "stage.progress",
+            stage="manifest",
+            completed=2,
+            total=2,
+            unit="files",
+        )
+        emitter.emit("stage.completed", stage="manifest")
+        emitter.emit("stage.started", stage="install")
+
+        def complete_install() -> None:
+            emitter.emit(
+                "stage.progress",
+                stage="install",
+                completed=1,
+                total=1,
+                unit="directories",
+            )
+            emitter.emit("stage.completed", stage="install")
+
+        _install_cog_directory(
+            staged,
+            output,
+            commit_callback=complete_install,
+        )
     finally:
         if staged.exists():
             shutil.rmtree(staged)
@@ -1446,6 +1618,44 @@ def verify_velocity_cog_snapshot(
         )
     except (KeyError, TypeError, ValueError, OverflowError) as error:
         raise ValueError("Flow Field COG source, snapshot, or grid facts are invalid") from error
+    descriptor_schema_version = source_facts.get("descriptorSchemaVersion", 2)
+    if descriptor_schema_version == 2:
+        semantic_identity_valid = (
+            isinstance(model_time, int)
+            and not isinstance(model_time, bool)
+            and not any(
+                key in source_facts
+                for key in (
+                    "descriptorSchemaVersion",
+                    "unit",
+                    "basis",
+                    "timeUnit",
+                    "phase",
+                    "authority",
+                )
+            )
+            and "timeUnit" not in snapshot_facts
+            and "authority" not in snapshot_facts
+        )
+    elif descriptor_schema_version == 3:
+        authority = source_facts.get("authority")
+        semantic_identity_valid = (
+            _finite_model_time(model_time)
+            and _valid_source_authority(authority)
+            and all(
+                isinstance(source_facts.get(key), str) and source_facts[key]
+                for key in ("unit", "basis", "timeUnit", "phase")
+            )
+            and snapshot_facts.get("unit") == source_facts.get("unit")
+            and snapshot_facts.get("basis") == source_facts.get("basis")
+            and snapshot_facts.get("timeUnit") == source_facts.get("timeUnit")
+            and snapshot_facts.get("phase") == source_facts.get("phase")
+            and snapshot_facts.get("authority") == authority
+            and topology_facts.get("resolved") == "delaunay"
+            and authority.get("topology") == "inferred"
+        )
+    else:
+        semantic_identity_valid = False
     if (
         isinstance(station_count, bool)
         or not isinstance(station_count, int)
@@ -1453,8 +1663,7 @@ def verify_velocity_cog_snapshot(
         or isinstance(time_index, bool)
         or not isinstance(time_index, int)
         or time_index < 0
-        or isinstance(model_time, bool)
-        or not isinstance(model_time, int)
+        or not semantic_identity_valid
         or not _is_sha256(source_facts.get("sourceHash"))
         or not _is_sha256(source_facts.get("stationHash"))
         or not _is_sha256(snapshot_facts.get("velocityHash"))

@@ -13,6 +13,7 @@ from rio_cogeo.cogeo import cog_validate
 from geoscratch_flow_field_tiles.cog_overviews import (
     SEMANTIC_OVERVIEW_POLICY,
     SemanticOverviewArtifact,
+    SemanticOverviewProgress,
     assemble_semantic_overview_cog,
     plan_semantic_overview_levels,
     reduce_semantic_overview,
@@ -132,6 +133,41 @@ def test_streamed_overviews_equal_the_recursive_whole_array_reference(
                 digest.update(dataset.read((1, 2), window=window).tobytes(order="C"))
         assert artifact.pixel_sha256 == digest.hexdigest()
         assert not np.signbit(actual[actual == 0.0]).any()
+
+
+def test_overview_writer_reports_typed_per_level_progress(tmp_path):
+    base = tmp_path / "base.tif"
+    _write_base(base, _base_values())
+    with rasterio.open(base) as source:
+        levels = plan_semantic_overview_levels(
+            source.width,
+            source.height,
+            tuple(source.transform)[:6],
+            block_size=256,
+        )
+    events: list[SemanticOverviewProgress] = []
+
+    write_semantic_overviews(
+        base,
+        tmp_path,
+        levels,
+        block_size=256,
+        progress_callback=events.append,
+    )
+
+    assert [(event.level_index, event.event) for event in events] == [
+        (0, "started"),
+        (0, "progress"),
+        (0, "completed"),
+        (1, "started"),
+        (1, "progress"),
+        (1, "completed"),
+    ]
+    for level in levels:
+        per_level = [event for event in events if event.level_index == level.index]
+        assert per_level[0].completed_blocks == 0
+        assert per_level[-1].completed_blocks == per_level[-1].total_blocks
+        assert all(event.nominal_factor == level.nominal_factor for event in per_level)
 
 
 def test_vrt_and_cog_preserve_every_custom_overview_pixel(semantic_pyramid):

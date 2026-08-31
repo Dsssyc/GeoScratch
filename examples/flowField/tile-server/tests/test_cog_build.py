@@ -17,6 +17,24 @@ from geoscratch_flow_field_tiles.cog import (
 from geoscratch_flow_field_tiles.resolution import StationSpacingResolution
 
 
+class RecordingProgressSink:
+    def __init__(self):
+        self.events = []
+
+    def emit(self, event):
+        self.events.append(event)
+
+
+class FailingProgressSink:
+    def __init__(self, stage, event):
+        self.stage = stage
+        self.event = event
+
+    def emit(self, value):
+        if value.stage == self.stage and value.event == self.event:
+            raise RuntimeError("progress sink failed")
+
+
 def _test_resolution() -> StationSpacingResolution:
     return StationSpacingResolution(
         minimum_support_points=3,
@@ -103,6 +121,7 @@ def test_cog_manifest_records_statistical_selection_and_unapproved_role(built_co
 
     assert manifest["artifactType"] == "flow-field-cog-snapshot"
     assert manifest["schemaVersion"] == 2
+    assert manifest["contentVersion"] == "flow-cog-f0a7774998ebe7cf-t00-z9-v2"
     assert manifest["snapshot"]["timeIndex"] == 0
     assert manifest["construction"]["facts"]["plan"]["matrixDecision"] == {
         "selectedMatrixId": "9",
@@ -135,6 +154,53 @@ def test_cog_manifest_records_statistical_selection_and_unapproved_role(built_co
     }
 
 
+def test_schema_3_float_time_and_authority_round_trip_through_cog_manifest(
+    synthetic_source,
+    tmp_path,
+):
+    raw = json.loads(synthetic_source.descriptor_path.read_text(encoding="utf-8"))
+    raw.update({
+        "schemaVersion": 3,
+        "unit": "meter-per-second",
+        "basis": "east-north",
+        "timeUnit": "hour",
+        "phase": "cold-start",
+        "authority": {
+            "unit": "authoritative",
+            "basis": "authoritative",
+            "time": "authoritative",
+            "phase": "authoritative",
+            "topology": "inferred",
+        },
+    })
+    raw["fields"][0]["modelTime"] = 0.25
+    raw["fields"][1]["modelTime"] = 1.75
+    descriptor_path = tmp_path / "source-v3.json"
+    descriptor_path.write_text(json.dumps(raw), encoding="utf-8")
+    result = build_velocity_cog_snapshot(
+        synthetic_source.directory,
+        tmp_path / "v3" / "cog-cache",
+        time_index=0,
+        descriptor_path=descriptor_path,
+        resolution=_test_resolution(),
+    )
+
+    manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
+    authority = raw["authority"]
+    assert manifest["source"]["descriptorSchemaVersion"] == 3
+    assert manifest["source"]["unit"] == "meter-per-second"
+    assert manifest["source"]["basis"] == "east-north"
+    assert manifest["source"]["timeUnit"] == "hour"
+    assert manifest["source"]["phase"] == "cold-start"
+    assert manifest["source"]["authority"] == authority
+    assert manifest["snapshot"]["modelTime"] == 0.25
+    assert manifest["snapshot"]["timeUnit"] == "hour"
+    assert manifest["snapshot"]["authority"] == authority
+    assert verify_velocity_cog_snapshot(result.output_directory)["contentVersion"] == (
+        result.content_version
+    )
+
+
 def test_cog_verifier_checks_container_and_pixel_identity(built_cog):
     facts = verify_velocity_cog_snapshot(built_cog.output_directory)
 
@@ -148,6 +214,7 @@ def test_repeated_snapshot_build_preserves_pixels_and_content_identity(
     built_cog,
     synthetic_source,
     tmp_path,
+    capsys,
 ):
     rebuilt = build_velocity_cog_snapshot(
         synthetic_source.directory,
@@ -157,6 +224,7 @@ def test_repeated_snapshot_build_preserves_pixels_and_content_identity(
         resolution=_test_resolution(),
     )
 
+    assert capsys.readouterr() == ("", "")
     assert rebuilt.content_version == built_cog.content_version
     with rasterio.open(built_cog.cog_path) as first, rasterio.open(rebuilt.cog_path) as second:
         assert first.profile == second.profile
@@ -168,6 +236,106 @@ def test_repeated_snapshot_build_preserves_pixels_and_content_identity(
         rasterio.open(rebuilt.cog_path, OVERVIEW_LEVEL=0) as second,
     ):
         assert np.array_equal(first.read((1, 2)), second.read((1, 2)))
+
+
+def test_snapshot_build_reports_ordered_structured_stage_progress(
+    synthetic_source,
+    tmp_path,
+):
+    sink = RecordingProgressSink()
+    result = build_velocity_cog_snapshot(
+        synthetic_source.directory,
+        tmp_path / "progress" / "cog-cache",
+        time_index=0,
+        descriptor_path=synthetic_source.descriptor_path,
+        resolution=_test_resolution(),
+        progress=sink,
+        job_id="snapshot-job-7",
+    )
+
+    assert result.content_version == "flow-cog-f0a7774998ebe7cf-t00-z9-v2"
+    assert [event.sequence for event in sink.events] == list(
+        range(1, len(sink.events) + 1)
+    )
+    assert all(event.job_id == "snapshot-job-7" for event in sink.events)
+    expected_stages = [
+        "source",
+        "planning",
+        "topology",
+        "base",
+        "overview-00",
+        "cog-copy",
+        "semantic-verification",
+        "manifest",
+        "install",
+    ]
+    assert list(dict.fromkeys(event.stage for event in sink.events)) == expected_stages
+    for stage in expected_stages:
+        stage_events = [event for event in sink.events if event.stage == stage]
+        assert stage_events[0].event == "stage.started"
+        assert any(event.event == "stage.progress" for event in stage_events)
+        assert stage_events[-1].event == "stage.completed"
+        progress_events = [
+            event for event in stage_events if event.event == "stage.progress"
+        ]
+        assert all(event.completed <= event.total for event in progress_events)
+    base_progress = [
+        event
+        for event in sink.events
+        if event.stage == "base" and event.event == "stage.progress"
+    ]
+    assert base_progress[-1].completed == base_progress[-1].total == 2
+
+
+def test_progress_sink_failure_before_install_leaves_no_artifact(
+    synthetic_source,
+    tmp_path,
+):
+    output = tmp_path / "preinstall-failure" / "cog-cache"
+
+    with pytest.raises(RuntimeError, match="progress sink failed"):
+        build_velocity_cog_snapshot(
+            synthetic_source.directory,
+            output,
+            time_index=0,
+            descriptor_path=synthetic_source.descriptor_path,
+            resolution=_test_resolution(),
+            progress=FailingProgressSink("manifest", "stage.completed"),
+            job_id="failed-before-install",
+        )
+
+    assert not output.exists()
+
+
+def test_progress_sink_failure_during_install_rolls_back_previous_artifact(
+    synthetic_source,
+    tmp_path,
+):
+    output = tmp_path / "install-failure" / "cog-cache"
+    original = build_velocity_cog_snapshot(
+        synthetic_source.directory,
+        output,
+        time_index=0,
+        descriptor_path=synthetic_source.descriptor_path,
+        resolution=_test_resolution(),
+    )
+    original_manifest = original.manifest_path.read_bytes()
+
+    with pytest.raises(RuntimeError, match="progress sink failed"):
+        build_velocity_cog_snapshot(
+            synthetic_source.directory,
+            output,
+            time_index=0,
+            descriptor_path=synthetic_source.descriptor_path,
+            resolution=_test_resolution(),
+            progress=FailingProgressSink("install", "stage.completed"),
+            job_id="failed-during-install",
+        )
+
+    assert original.manifest_path.read_bytes() == original_manifest
+    assert verify_velocity_cog_snapshot(output)["contentVersion"] == (
+        original.content_version
+    )
 
 
 def test_verifier_rejects_self_consistent_path_traversal(built_cog, tmp_path):

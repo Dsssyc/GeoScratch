@@ -5,6 +5,7 @@ import hashlib
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal, TypeAlias
 from xml.etree import ElementTree
 
 import numpy as np
@@ -79,6 +80,40 @@ class SemanticOverviewArtifact:
             "cancellationToZeroPixelCount": self.cancellation_to_zero_count,
             "intermediateSizeBytes": self.size_bytes,
         }
+
+
+@dataclass(frozen=True, slots=True)
+class SemanticOverviewProgress:
+    """Typed construction progress for one semantic overview level."""
+
+    event: Literal["started", "progress", "completed"]
+    level_index: int
+    nominal_factor: int
+    completed_blocks: int
+    total_blocks: int
+
+    def __post_init__(self) -> None:
+        if self.event not in {"started", "progress", "completed"}:
+            raise ValueError("semantic overview progress event is invalid")
+        for name, value in (
+            ("level_index", self.level_index),
+            ("nominal_factor", self.nominal_factor),
+            ("completed_blocks", self.completed_blocks),
+            ("total_blocks", self.total_blocks),
+        ):
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise ValueError(f"{name} must be a non-negative integer")
+        if self.nominal_factor <= 0 or self.total_blocks <= 0:
+            raise ValueError("nominal_factor and total_blocks must be positive")
+        if self.completed_blocks > self.total_blocks:
+            raise ValueError("completed_blocks cannot exceed total_blocks")
+        if self.event == "started" and self.completed_blocks != 0:
+            raise ValueError("started overview progress must begin at zero")
+        if self.event == "completed" and self.completed_blocks != self.total_blocks:
+            raise ValueError("completed overview progress must reach total_blocks")
+
+
+SemanticOverviewProgressCallback: TypeAlias = Callable[[SemanticOverviewProgress], None]
 
 
 def plan_semantic_overview_levels(
@@ -187,6 +222,7 @@ def write_semantic_overviews(
     block_size: int,
     temporary_compression_level: int = 1,
     staging_observer: Callable[[str], None] | None = None,
+    progress_callback: SemanticOverviewProgressCallback | None = None,
 ) -> tuple[SemanticOverviewArtifact, ...]:
     with rasterio.Env(
         GDAL_CACHEMAX=256 * 1024 * 1024,
@@ -199,6 +235,7 @@ def write_semantic_overviews(
             block_size=block_size,
             temporary_compression_level=temporary_compression_level,
             staging_observer=staging_observer,
+            progress_callback=progress_callback,
         )
 
 
@@ -210,6 +247,7 @@ def _write_semantic_overviews_in_environment(
     block_size: int,
     temporary_compression_level: int = 1,
     staging_observer: Callable[[str], None] | None = None,
+    progress_callback: SemanticOverviewProgressCallback | None = None,
 ) -> tuple[SemanticOverviewArtifact, ...]:
     _require_positive_integer(block_size, "block_size")
     if (
@@ -234,6 +272,15 @@ def _write_semantic_overviews_in_environment(
     for expected_index, level in enumerate(levels):
         if level.index != expected_index:
             raise ValueError("semantic overview indices must be contiguous from zero")
+        total_blocks = level.block_count(block_size)
+        if progress_callback is not None:
+            progress_callback(SemanticOverviewProgress(
+                event="started",
+                level_index=level.index,
+                nominal_factor=level.nominal_factor,
+                completed_blocks=0,
+                total_blocks=total_blocks,
+            ))
         with rasterio.open(previous_path, NUM_THREADS="ALL_CPUS") as source:
             _validate_velocity_dataset(source, "semantic overview source")
             if previous_width is not None and (
@@ -324,13 +371,33 @@ def _write_semantic_overviews_in_environment(
                     candidate_count += reduced.candidate_valid_count
                     bilinear_safe_count += reduced.bilinear_safe_count
                     cancellation_count += reduced.cancellation_to_zero_count
-                    if staging_observer is not None and block_index % 64 == 63:
+                    completed_blocks = block_index + 1
+                    if staging_observer is not None and completed_blocks % 64 == 0:
                         staging_observer(
                             f"overview-{level.index}-block-{block_index}"
                         )
+                    if progress_callback is not None and (
+                        completed_blocks % 64 == 0
+                        or completed_blocks == total_blocks
+                    ):
+                        progress_callback(SemanticOverviewProgress(
+                            event="progress",
+                            level_index=level.index,
+                            nominal_factor=level.nominal_factor,
+                            completed_blocks=completed_blocks,
+                            total_blocks=total_blocks,
+                        ))
 
             if staging_observer is not None:
                 staging_observer(f"overview-{level.index}-complete")
+            if progress_callback is not None:
+                progress_callback(SemanticOverviewProgress(
+                    event="completed",
+                    level_index=level.index,
+                    nominal_factor=level.nominal_factor,
+                    completed_blocks=total_blocks,
+                    total_blocks=total_blocks,
+                ))
 
         artifacts.append(SemanticOverviewArtifact(
             level=level,
