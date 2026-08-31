@@ -161,6 +161,7 @@ def test_stats_are_bounded_aggregates_without_request_history(built_tiles):
     assert payload["tileSuccesses"] == 1
     assert payload["tileNotFound"] == 1
     assert payload["tileFailures"] == 0
+    assert payload["cogWindowReads"] == 0
     assert payload["bytesServed"] == page["byteLength"]
     assert set(payload["matrixReads"]) == {str(level) for level in range(4, 10)}
     assert set(payload["timeReads"]) == {"t00", "t01"}
