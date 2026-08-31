@@ -191,6 +191,10 @@ examples/flowField/tile-server/.venv/bin/flow-field-cog-build --time-index 0
 examples/flowField/tile-server/.venv/bin/flow-field-cog-build --verify-existing
 ```
 
+Replacing an existing owned `cog-cache` retains the previous snapshot as a sibling backup and
+reports it as `replacedBackup`; inspect or restore that directory before manually removing it.
+The snapshot builder never recursively deletes a replaced backup.
+
 COG internal tiling and compression do not avoid interpolating every selected base pixel.
 Preflight bounds total blocks and raw pyramid work; construction separately monitors actual
 compressed staging and a free-space reserve. The verified local build completed in roughly
@@ -239,8 +243,10 @@ the builder measures every regular file in the payload, enforces `--max-collecti
 records exact snapshot, runtime-manifest, collection-manifest, marker, and total bytes under
 `manifest.storage`. For the current source, simply multiplying the measured t00 COG size by 27
 projects `42,793,125,741` compressed COG bytes before child manifests and collection metadata.
-The default staging/free-space reserve can therefore reject the complete collection on this
-workstation; capacity rejection never lowers z15 or silently omits times.
+Preflight adds the larger of the per-snapshot and aggregate-batch execution peaks. With defaults,
+the per-snapshot `32 GiB` staging cap plus `8 GiB` reserve governs, so this estimate requires at
+least `85,742,798,701` available bytes before metadata. It therefore rejects the complete
+collection on this workstation; capacity rejection never lowers z15 or silently omits times.
 
 The output lock is acquired before reading mutable resume state and is held for the whole job.
 Verified children are skipped, and a complete child left in request-owned work is verified
@@ -259,6 +265,10 @@ examples/flowField/tile-server/.venv/bin/flow-field-cog-collection-build \
   --estimated-snapshot-bytes 1584930583 \
   --resume --discard-incomplete-work
 ```
+
+The lock is cooperative. Keep the output parent exclusive to this job; device/inode checks
+prevent observed pathname reuse during cleanup but do not defend against another local process
+that can maliciously rewrite the parent in the final filesystem-operation window.
 
 `--replace-existing` is also explicit. It installs the new verified collection but retains the
 previous owned collection as a sibling backup and returns its path as `replacedBackup`. Inspect
@@ -422,15 +432,21 @@ Both backends expose:
 - `GET /tiles/WebMercatorQuad/tNN/{matrix}/{row}/{col}.rg32f`
 - `GET /stats`
 
-Manifest and page responses use immutable SHA-256 ETags. An address outside the manifest is a
+Manifest and page responses use SHA-256 ETags with `Cache-Control: public, no-cache`, because
+the stable URLs can be replaced and must revalidate before reuse. An address outside the manifest is a
 404 `FLOW_FIELD_TILE_OUT_OF_RANGE`; a declared page whose artifact is unavailable is a 503
 `FLOW_FIELD_TILE_ARTIFACT_UNAVAILABLE`. `/stats` retains bounded aggregate counters only and
 reports `cogWindowReads` for the collection backend.
 
-The collection service returns the exact page bytes and SHA declared at publication. z6-z15
-physical values are addressed by nominal overview factors rather than the terminal extent
-transform; z4-z5 use the same conservative recursive vector reducer on the global WMQ lattice.
+The collection service returns the exact page bytes and SHA declared at publication. z7-z15
+physical values use exact integer IFD windows. z6-z4 are recursively derived from the globally
+aligned z7 values with the same conservative vector reducer; the terminal z6 COG IFD is validated
+as container content but never treated as WebMercator address authority.
 It never invokes generic image resampling, exposes the `.tif`, or returns partial Range data.
 `runtime-manifest.json` declares `sampleRegistration: pixel-center`; the current browser still
 uses the historical integer-lattice sampler, so frontend half-texel migration remains required
 before switching the active Flow Field example to this backend.
+
+The server snapshots collection identity and COG fingerprints at startup; it does not hot reload.
+Replacing a collection while its old process is running makes that process fail requests with 503
+after the fingerprint changes. Restart the service to admit and serve the new collection.

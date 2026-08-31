@@ -109,6 +109,10 @@ Construction occurs in a stable sibling work directory. A sibling advisory lock 
 the whole job, not only installation. The lock file is retained so two processes cannot lock
 different inodes after an unlink. Before publication the builder revalidates the originally
 captured output ownership and inventory; later user content is never moved or deleted.
+This is a cooperative local-build contract rather than a defence against a hostile process with
+write access to the output parent. The operator must keep that parent exclusive during a job;
+device/inode cleanup guards prevent observed pathname reuse but do not claim adversarial
+filesystem isolation.
 
 Recovery is snapshot-granular in this version. A completed child is verified and skipped.
 An owned, completed child left in work after a crash is promoted after verification. An
@@ -145,7 +149,10 @@ every regular file in the final payload, rejects the exact total when it exceeds
 `maxCollectionBytes`, and records snapshot, runtime-manifest, collection-manifest, marker, and
 total byte counts in the collection manifest's `storage` contract. Batch execution separately
 bounds aggregate staged bytes and reserves free space for the transient final COG copy; these
-limits and observations remain outside request and content identity.
+limits and observations remain outside request and content identity. Required free space adds
+the estimated remaining final bytes to the larger of the per-snapshot and aggregate-batch
+staging-plus-reserve peaks, so a later child cannot fail merely because earlier final COGs have
+consumed space that preflight counted twice or not at all.
 
 ### COG window to RG32F adapter
 
@@ -156,13 +163,14 @@ GET /manifest.json
 GET /tiles/WebMercatorQuad/tNN/{matrix}/{row}/{col}.rg32f
 ```
 
-It does not expose the COG file and does not use an image resampler. For z15 through z6 it
-opens the exact physical IFD selected by nominal factors 1 through 512 and reads an integer
-window. The terminal IFD's physical transform is not treated as a WebMercator authority;
-global pixel origin and window indices come from the base grid and nominal recursive factor.
+It does not expose the COG file and does not use an image resampler. For z15 through z7 it
+opens the exact physical IFD selected by nominal factors 1 through 256 and reads an integer
+window. The terminal nominal-512 IFD remains structurally and cryptographically validated but
+is never a WebMercator address authority, because an arbitrary z15 tile-aligned crop need not
+start on an even tile.
 
-The historical runtime still requests z4-z9. z5 and z4 are therefore derived on demand from
-the immediately finer stored values with ADR-092's same four-child Float64 mean, one Float32
+The historical runtime still requests z4-z9. z6, z5, and z4 are therefore derived on demand
+from globally aligned z7 values with ADR-092's same four-child Float64 mean, one Float32
 cast, cancellation-to-zero rule, and 3 by 3 erosion. Recursion is aligned in global
 WebMercator pixel coordinates and uses positive zero outside the COG extent. Generic average,
 nearest, `out_shape`, `Reader.tile()`, and the terminal extent transform are not allowed to
@@ -171,15 +179,23 @@ choose these values.
 The published `runtime-manifest.json` enumerates only the bounded z4-z9 address product needed
 by the current example. Publication computes each exact 524,288-byte payload SHA-256 and
 maximum speed once, so the existing browser checksum and persistent-cache contract can remain
-unchanged during backend migration. The underlying reader validates physical z6-z15 levels,
+unchanged during backend migration. The underlying reader validates every physical IFD and
+uses z7-z15 as addressable physical levels,
 but the first service contract answers only the z4-z9 pages declared by this bounded runtime
 manifest.
 
 Every response is little-endian, pixel-interleaved RG32F with finite values and canonical
-positive zero. ETags use the actual payload digest recorded at publication. A conditional
-request must still prove that the declared COG exists with its startup fingerprint; `304`
-cannot hide a missing or replaced artifact. Window concurrency is bounded and the service
-retains aggregate counters only.
+positive zero. ETags use the actual payload digest recorded at publication. Stable manifest
+and tile URLs use `Cache-Control: public, no-cache` and revalidate on every reuse; a truly
+immutable cache URL would need the content version in its path. Before the first conditional
+`304` for a page, the adapter materializes and verifies that page's byte length, digest, and
+maximum speed, then caches the result only for the unchanged COG fingerprint. Thus `304` cannot
+hide a missing, replaced, or same-length-corrupted COG. Window concurrency is bounded and the
+service retains aggregate counters only.
+
+The service captures collection identity and COG fingerprints at startup rather than hot
+reloading. A running process returns 503 after replacement changes an admitted fingerprint;
+the operator restarts it to serve the new collection.
 
 The runtime manifest declares `sampleRegistration: pixel-center`. The service does not shift
 or resample bytes to imitate the historical integer-lattice product. The later frontend
