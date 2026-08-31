@@ -182,6 +182,88 @@ compressed staging and a free-space reserve. The verified local build completed 
 28 minutes without exceeding 0.8 GiB RSS during generation. See
 [ADR-092](../../../docs/decisions/ADR-092-statistical-ceiling-flow-cog-overviews.md).
 
+## Temporal COG collection
+
+`flow-field-cog-collection-build` composes independently verifiable snapshot COGs into one
+temporal product without changing their pixels or three-file snapshot contract. Its output is:
+
+```text
+cog-collection/
+  .flow-field-cog-collection.json
+  manifest.json
+  runtime-manifest.json
+  snapshots/tNN/{.flow-field-cog-artifact.json,manifest.json,flow-tNN.cog.tif}
+```
+
+Time selection is explicit and canonical. Choose exactly one of all descriptor fields, a
+half-open range, or a comma-separated list:
+
+```bash
+# Read-only full-product plan. The estimate must come from a measured or justified snapshot.
+examples/flowField/tile-server/.venv/bin/flow-field-cog-collection-build \
+  --all-times \
+  --plan-only \
+  --estimated-snapshot-bytes 1584930583
+
+# Build every time only after the plan is capacity-approved.
+examples/flowField/tile-server/.venv/bin/flow-field-cog-collection-build \
+  --all-times \
+  --estimated-snapshot-bytes 1584930583 \
+  --events-stderr
+
+# Other legal selections create explicit subset collections.
+examples/flowField/tile-server/.venv/bin/flow-field-cog-collection-build \
+  --time-range 0:4 --estimated-snapshot-bytes 1584930583
+examples/flowField/tile-server/.venv/bin/flow-field-cog-collection-build \
+  --time-indices 0,4,9 --estimated-snapshot-bytes 1584930583
+```
+
+The compressed estimate is planning input, not permission to exceed storage. Before publish,
+the builder measures every regular file in the payload, enforces `--max-collection-bytes`, and
+records exact snapshot, runtime-manifest, collection-manifest, marker, and total bytes under
+`manifest.storage`. For the current source, simply multiplying the measured t00 COG size by 27
+projects `42,793,125,741` compressed COG bytes before child manifests and collection metadata.
+The default staging/free-space reserve can therefore reject the complete collection on this
+workstation; capacity rejection never lowers z15 or silently omits times.
+
+The output lock is acquired before reading mutable resume state and is held for the whole job.
+Verified children are skipped, and a complete child left in request-owned work is verified
+before promotion. Incomplete GDAL staging is never deleted because its name looks temporary.
+The default is fail-closed and preserve; rebuilding it requires explicit authorization:
+
+```bash
+examples/flowField/tile-server/.venv/bin/flow-field-cog-collection-build \
+  --all-times \
+  --estimated-snapshot-bytes 1584930583 \
+  --resume
+
+# Only use after inspecting the matching request-owned incomplete work.
+examples/flowField/tile-server/.venv/bin/flow-field-cog-collection-build \
+  --all-times \
+  --estimated-snapshot-bytes 1584930583 \
+  --resume --discard-incomplete-work
+```
+
+`--replace-existing` is also explicit. It installs the new verified collection but retains the
+previous owned collection as a sibling backup and returns its path as `replacedBackup`. Inspect
+or restore that backup before manually removing it; the builder never recursively deletes it.
+
+Verification has two levels. Identity verification re-hashes every child COG and validates all
+containers/contracts. Deep verification additionally recomputes every child semantic overview
+and every advertised RG32F runtime page:
+
+```bash
+examples/flowField/tile-server/.venv/bin/flow-field-cog-collection-build \
+  --verify-existing --identity-only
+examples/flowField/tile-server/.venv/bin/flow-field-cog-collection-build \
+  --verify-existing
+```
+
+The current collection orchestrator builds missing snapshots sequentially. It is bounded and
+recoverable, but the 27-time production run still repeats station topology and block point
+location per snapshot; sharing each block stencil across a bounded time batch remains a separate
+performance phase and is not encoded in the artifact contract.
+
 ```bash
 python3 -m venv examples/flowField/tile-server/.venv
 examples/flowField/tile-server/.venv/bin/python -m pip install -e \
@@ -263,13 +345,49 @@ result = build_velocity_cog_snapshot(
 )
 ```
 
-## Static service
+The temporal API uses the same typed strategies and makes selection, resume, replacement, and
+budgets explicit:
 
-```bash
-examples/flowField/tile-server/.venv/bin/flow-field-tile-serve --port 8788
+```python
+from geoscratch_flow_field_tiles.collection import (
+    CogCollectionBudget,
+    build_velocity_cog_collection,
+    plan_velocity_cog_collection,
+    verify_velocity_cog_collection,
+)
+
+times = tuple(range(27))
+plan = plan_velocity_cog_collection(
+    time_indices=times,
+    collection_budget=CogCollectionBudget(
+        estimated_snapshot_bytes=1_584_930_583,
+    ),
+)
+plan.require_output_approved()
+
+result = build_velocity_cog_collection(
+    time_indices=times,
+    collection_budget=CogCollectionBudget(
+        estimated_snapshot_bytes=1_584_930_583,
+    ),
+    resume=True,
+)
+verify_velocity_cog_collection(result.output_directory)
 ```
 
-The service performs no interpolation or downsampling. It exposes:
+## RG32F service
+
+```bash
+# Historical pre-cut page artifact.
+examples/flowField/tile-server/.venv/bin/flow-field-tile-serve \
+  --output examples/flowField/tile-server/cache --port 8788
+
+# Temporal COG collection through the same network paths.
+examples/flowField/tile-server/.venv/bin/flow-field-tile-serve \
+  --output examples/flowField/tile-server/cog-collection --port 8788
+```
+
+Both backends expose:
 
 - `GET /health`
 - `GET /manifest.json`
@@ -278,4 +396,13 @@ The service performs no interpolation or downsampling. It exposes:
 
 Manifest and page responses use immutable SHA-256 ETags. An address outside the manifest is a
 404 `FLOW_FIELD_TILE_OUT_OF_RANGE`; a declared page whose artifact is unavailable is a 503
-`FLOW_FIELD_TILE_ARTIFACT_UNAVAILABLE`. `/stats` retains bounded aggregate counters only.
+`FLOW_FIELD_TILE_ARTIFACT_UNAVAILABLE`. `/stats` retains bounded aggregate counters only and
+reports `cogWindowReads` for the collection backend.
+
+The collection service returns the exact page bytes and SHA declared at publication. z6-z15
+physical values are addressed by nominal overview factors rather than the terminal extent
+transform; z4-z5 use the same conservative recursive vector reducer on the global WMQ lattice.
+It never invokes generic image resampling, exposes the `.tif`, or returns partial Range data.
+`runtime-manifest.json` declares `sampleRegistration: pixel-center`; the current browser still
+uses the historical integer-lattice sampler, so frontend half-texel migration remains required
+before switching the active Flow Field example to this backend.

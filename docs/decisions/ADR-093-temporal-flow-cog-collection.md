@@ -105,10 +105,16 @@ captured output ownership and inventory; later user content is never moved or de
 
 Recovery is snapshot-granular in this version. A completed child is verified and skipped.
 An owned, completed child left in work after a crash is promoted after verification. An
-incomplete GDAL file is not trusted as a checkpoint and is rebuilt. The collection payload is
+incomplete GDAL file is not trusted as a checkpoint. By default it and every unrecognized
+entry are preserved and construction fails closed; only the explicit combination
+`--resume --discard-incomplete-work` authorizes deletion of incomplete staging inside the
+matching request-owned snapshot work directory before rebuilding. The collection payload is
 published with one same-filesystem rename only after every selected child and both manifests
 verify. An existing published collection is never replaced without an explicit replacement
-policy.
+policy. Replacement moves the previous owned collection to a sibling backup and reports that
+path as `replacedBackup`; the tool does not recursively delete the backup because content may
+have appeared after the final ownership observation. The operator owns inspection, recovery,
+and eventual cleanup of that backup.
 
 Progress is opt-in JSONL on stderr or a caller-selected file. Stdout retains one final JSON
 result. Events have stable job/stage/sequence fields and are excluded from content identity.
@@ -118,7 +124,10 @@ during GDAL `CreateCopy` is observed after the copy returns and before publicati
 Preflight reports both per-snapshot work and collection storage. A full build requires an
 explicit compressed-size estimate or already verified child measurements. Budgets may reject
 construction, but they never reduce the statistically selected matrix, remove a model time,
-or change overview semantics.
+or change overview semantics. The estimate is only planning input. Publication also measures
+every regular file in the final payload, rejects the exact total when it exceeds
+`maxCollectionBytes`, and records snapshot, runtime-manifest, collection-manifest, marker, and
+total byte counts in the collection manifest's `storage` contract.
 
 ### COG window to RG32F adapter
 
@@ -144,8 +153,9 @@ choose these values.
 The published `runtime-manifest.json` enumerates only the bounded z4-z9 address product needed
 by the current example. Publication computes each exact 524,288-byte payload SHA-256 and
 maximum speed once, so the existing browser checksum and persistent-cache contract can remain
-unchanged during backend migration. The service may also answer declared z10-z15 addresses,
-but they are not advertised to the frozen browser manifest.
+unchanged during backend migration. The underlying reader validates physical z6-z15 levels,
+but the first service contract answers only the z4-z9 pages declared by this bounded runtime
+manifest.
 
 Every response is little-endian, pixel-interleaved RG32F with finite values and canonical
 positive zero. ETags use the actual payload digest recorded at publication. A conditional
@@ -180,10 +190,13 @@ collection becomes the active particle source.
   algorithm or future topology parameter surface.
 - Interrupted jobs resume at verified snapshot boundaries and cannot silently overwrite user
   content or a conflicting published collection.
+- Incomplete unmarked staging and replaced backups are retained by default; destructive
+  cleanup is never inferred from a filename.
 - Current free disk may legitimately reject a 27-time build. That is a capacity result, not a
   request to lower z15 or omit times.
-- The COG-backed service can be completed and tested before changing the renderer, temporal
-  state machine, or Geo/Scratch packages.
+- The COG-backed service is example-local and testable without changing the renderer,
+  temporal state machine, or Geo/Scratch packages.
+- Missing snapshots are currently built sequentially; bounded time-batch stencil reuse is an
+  execution optimization that must preserve every child identity and remains a later phase.
 - Scientific approval remains blocked until the upstream model supplies authoritative unit,
   basis, time/phase, and topology facts and the numerical error budget is accepted.
-
