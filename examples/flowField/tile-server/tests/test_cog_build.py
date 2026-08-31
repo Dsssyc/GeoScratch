@@ -9,6 +9,7 @@ import pytest
 import rasterio
 from rio_cogeo.cogeo import cog_validate
 
+import geoscratch_flow_field_tiles.cog as cog_module
 from geoscratch_flow_field_tiles.cog import (
     COG_ARTIFACT_MARKER,
     build_velocity_cog_snapshot,
@@ -41,6 +42,56 @@ def _test_resolution() -> StationSpacingResolution:
         minimum_support_fraction=0.10,
         minimum_matrix=9,
         maximum_matrix=9,
+    )
+
+
+def _test_cog_budget():
+    return cog_module.CogBuildBudget(
+        max_blocks=128,
+        max_raw_pyramid_bytes=256 * 1024 * 1024,
+        max_staged_bytes=64 * 1024 * 1024,
+        minimum_free_bytes=32 * 1024 * 1024,
+    )
+
+
+def _base_batch_inputs(synthetic_source, output_parent):
+    snapshots = tuple(
+        cog_module.load_source_snapshot(
+            synthetic_source.directory,
+            time_index=time_index,
+            descriptor_path=synthetic_source.descriptor_path,
+        )
+        for time_index in (0, 1)
+    )
+    budget = _test_cog_budget()
+    plan = cog_module.plan_velocity_cog_snapshot(
+        snapshots[0].stations,
+        snapshots[0].geographic_bounds,
+        output_parent,
+        resolution=_test_resolution(),
+        budget=budget,
+    )
+    topology_spec = cog_module.resolve_topology(snapshots[0].descriptor.topology)
+    interpolation = cog_module.resolve_interpolation(
+        snapshots[0].descriptor.interpolation
+    )
+    topology = cog_module.prepare_topology(snapshots[0].stations, topology_spec)
+    unique_fields = tuple(topology.aggregate_field(snapshot.field) for snapshot in snapshots)
+    return snapshots, plan, topology, unique_fields, interpolation, budget
+
+
+def _base_write_item(root, snapshot, unique_field, budget, progress_callback=None):
+    root.mkdir(parents=True)
+    return cog_module._CogBaseWriteItem(
+        path=root / "base.tif",
+        snapshot=snapshot,
+        unique_field=unique_field,
+        staging_guard=cog_module.CogStagingGuard(
+            root=root,
+            budget=budget,
+            initial_available_bytes=shutil.disk_usage(root).free,
+        ),
+        progress_callback=progress_callback,
     )
 
 
@@ -236,6 +287,167 @@ def test_repeated_snapshot_build_preserves_pixels_and_content_identity(
         rasterio.open(rebuilt.cog_path, OVERVIEW_LEVEL=0) as second,
     ):
         assert np.array_equal(first.read((1, 2)), second.read((1, 2)))
+
+
+def test_batch_base_writer_reuses_spatial_stencils_and_preserves_each_snapshot(
+    synthetic_source,
+    tmp_path,
+    monkeypatch,
+):
+    snapshots, plan, topology, unique_fields, interpolation, budget = (
+        _base_batch_inputs(synthetic_source, tmp_path)
+    )
+    real_centers = cog_module._cog_pixel_centers_window
+    real_prepare = cog_module.prepare_triangle_linear_stencil
+    real_apply = cog_module.apply_bilinear_safe_block
+    calls = {"centers": 0, "prepare": 0, "apply": 0}
+
+    def counted_centers(*args, **kwargs):
+        calls["centers"] += 1
+        return real_centers(*args, **kwargs)
+
+    def counted_prepare(*args, **kwargs):
+        calls["prepare"] += 1
+        return real_prepare(*args, **kwargs)
+
+    def counted_apply(*args, **kwargs):
+        calls["apply"] += 1
+        return real_apply(*args, **kwargs)
+
+    monkeypatch.setattr(cog_module, "_cog_pixel_centers_window", counted_centers)
+    monkeypatch.setattr(cog_module, "prepare_triangle_linear_stencil", counted_prepare)
+    monkeypatch.setattr(cog_module, "apply_bilinear_safe_block", counted_apply)
+
+    sequential_items = tuple(
+        _base_write_item(
+            tmp_path / "sequential" / f"t{time_index:02d}",
+            snapshot,
+            unique_field,
+            budget,
+        )
+        for time_index, (snapshot, unique_field) in enumerate(
+            zip(snapshots, unique_fields, strict=True)
+        )
+    )
+    sequential_support = tuple(
+        cog_module._write_intermediate_tiff(
+            item.path,
+            item.snapshot,
+            plan,
+            topology,
+            item.unique_field,
+            interpolation,
+            cog_module.CogEncoding(),
+            item.staging_guard,
+            item.progress_callback,
+        )
+        for item in sequential_items
+    )
+    assert calls == {
+        "centers": plan.grid.block_count * 2,
+        "prepare": plan.grid.block_count * 2,
+        "apply": plan.grid.block_count * 2,
+    }
+
+    calls.update(centers=0, prepare=0, apply=0)
+    batch_progress = ([], [])
+    batch_items = tuple(
+        _base_write_item(
+            tmp_path / "batch" / f"t{time_index:02d}",
+            snapshot,
+            unique_field,
+            budget,
+            lambda completed, total, records=batch_progress[time_index]: records.append(
+                (completed, total)
+            ),
+        )
+        for time_index, (snapshot, unique_field) in enumerate(
+            zip(snapshots, unique_fields, strict=True)
+        )
+    )
+    batch_support = cog_module._write_intermediate_tiff_batch(
+        batch_items,
+        plan,
+        topology,
+        interpolation,
+        cog_module.CogEncoding(),
+    )
+
+    assert calls == {
+        "centers": plan.grid.block_count,
+        "prepare": plan.grid.block_count,
+        "apply": plan.grid.block_count * 2,
+    }
+    assert batch_support == sequential_support
+    assert batch_progress == (
+        [(plan.grid.block_count, plan.grid.block_count)],
+        [(plan.grid.block_count, plan.grid.block_count)],
+    )
+    for sequential, batch in zip(sequential_items, batch_items, strict=True):
+        assert (
+            batch.staging_guard.observation_count
+            == sequential.staging_guard.observation_count
+        )
+        with rasterio.open(sequential.path) as expected, rasterio.open(batch.path) as actual:
+            assert actual.profile == expected.profile
+            assert actual.tags() == expected.tags()
+            assert actual.tags(1) == expected.tags(1)
+            assert actual.tags(2) == expected.tags(2)
+            assert np.array_equal(actual.read((1, 2)), expected.read((1, 2)))
+
+
+def test_batch_base_writer_closes_and_removes_every_output_on_failure(
+    synthetic_source,
+    tmp_path,
+    monkeypatch,
+):
+    snapshots, plan, topology, unique_fields, interpolation, budget = (
+        _base_batch_inputs(synthetic_source, tmp_path)
+    )
+    items = tuple(
+        _base_write_item(
+            tmp_path / "failure" / f"t{time_index:02d}",
+            snapshot,
+            unique_field,
+            budget,
+        )
+        for time_index, (snapshot, unique_field) in enumerate(
+            zip(snapshots, unique_fields, strict=True)
+        )
+    )
+    real_apply = cog_module.apply_bilinear_safe_block
+    real_rasterio_open = cog_module.rasterio.open
+    apply_count = 0
+    opened_writers = []
+
+    def record_open_writer(*args, **kwargs):
+        writer = real_rasterio_open(*args, **kwargs)
+        opened_writers.append(writer)
+        return writer
+
+    def fail_second_apply(*args, **kwargs):
+        nonlocal apply_count
+        apply_count += 1
+        if apply_count == 2:
+            raise RuntimeError("synthetic batch base failure")
+        return real_apply(*args, **kwargs)
+
+    monkeypatch.setattr(cog_module.rasterio, "open", record_open_writer)
+    monkeypatch.setattr(cog_module, "apply_bilinear_safe_block", fail_second_apply)
+
+    with pytest.raises(RuntimeError, match="synthetic batch base failure"):
+        cog_module._write_intermediate_tiff_batch(
+            items,
+            plan,
+            topology,
+            interpolation,
+            cog_module.CogEncoding(),
+        )
+
+    assert apply_count == 2
+    assert len(opened_writers) == 2
+    assert all(writer.closed for writer in opened_writers)
+    assert all(not item.path.exists() for item in items)
 
 
 def test_snapshot_build_reports_ordered_structured_stage_progress(

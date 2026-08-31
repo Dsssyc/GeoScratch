@@ -8,6 +8,7 @@ import os
 import shutil
 import tempfile
 import uuid
+from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -367,6 +368,37 @@ class CogStagingGuard:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class _CogBaseWriteItem:
+    path: Path
+    snapshot: SourceSnapshot
+    unique_field: np.ndarray
+    staging_guard: CogStagingGuard
+    progress_callback: Callable[[int, int], None] | None = None
+
+
+@dataclass(slots=True)
+class _CogBaseWriteState:
+    item: _CogBaseWriteItem
+    dataset: Any
+    pixel_digest: Any
+    raw_advectable_count: int = 0
+    representable_advectable_count: int = 0
+    rounded_zero_count: int = 0
+    bilinear_safe_count: int = 0
+
+    def support_manifest(self) -> dict[str, Any]:
+        return {
+            "pixelSha256": self.pixel_digest.hexdigest(),
+            "rawAdvectablePixelCount": self.raw_advectable_count,
+            "representableAdvectablePixelCount": (
+                self.representable_advectable_count
+            ),
+            "roundedZeroPixelCount": self.rounded_zero_count,
+            "bilinearSafePixelCount": self.bilinear_safe_count,
+        }
+
+
 def _staging_observation_due(completed_blocks: int) -> bool:
     return (
         completed_blocks > 0
@@ -660,34 +692,60 @@ def _write_intermediate_tiff(
     staging_guard: CogStagingGuard,
     progress_callback: Callable[[int, int], None] | None = None,
 ) -> dict[str, Any]:
+    return _write_intermediate_tiff_batch(
+        (_CogBaseWriteItem(
+            path=path,
+            snapshot=snapshot,
+            unique_field=unique_field,
+            staging_guard=staging_guard,
+            progress_callback=progress_callback,
+        ),),
+        plan,
+        topology,
+        interpolation,
+        encoding,
+    )[0]
+
+
+def _write_intermediate_tiff_batch(
+    items: tuple[_CogBaseWriteItem, ...],
+    plan: CogBuildPlan,
+    topology,
+    interpolation,
+    encoding: CogEncoding,
+) -> tuple[dict[str, Any], ...]:
+    batch = tuple(items)
+    if not batch:
+        raise ValueError("Flow Field COG base batch cannot be empty")
+    paths = tuple(item.path for item in batch)
+    if len(set(paths)) != len(paths):
+        raise ValueError("Flow Field COG base batch paths must be unique")
     with rasterio.Env(
         GDAL_CACHEMAX=256 * 1024 * 1024,
         GDAL_NUM_THREADS="ALL_CPUS",
     ):
-        return _write_intermediate_tiff_in_environment(
-            path,
-            snapshot,
-            plan,
-            topology,
-            unique_field,
-            interpolation,
-            encoding,
-            staging_guard,
-            progress_callback,
-        )
+        try:
+            return _write_intermediate_tiff_batch_in_environment(
+                batch,
+                plan,
+                topology,
+                interpolation,
+                encoding,
+            )
+        except BaseException:
+            for item in batch:
+                if item.path.is_file() or item.path.is_symlink():
+                    item.path.unlink()
+            raise
 
 
-def _write_intermediate_tiff_in_environment(
-    path: Path,
-    snapshot: SourceSnapshot,
+def _write_intermediate_tiff_batch_in_environment(
+    items: tuple[_CogBaseWriteItem, ...],
     plan: CogBuildPlan,
     topology,
-    unique_field: np.ndarray,
     interpolation,
     encoding: CogEncoding,
-    staging_guard: CogStagingGuard,
-    progress_callback: Callable[[int, int], None] | None = None,
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], ...]:
     grid = plan.grid
     transform = Affine(*grid.transform)
     profile = {
@@ -709,24 +767,29 @@ def _write_intermediate_tiff_in_environment(
         "BIGTIFF": "IF_SAFER",
         "NUM_THREADS": "ALL_CPUS",
     }
-    pixel_digest = hashlib.sha256()
-    raw_advectable_count = 0
-    representable_advectable_count = 0
-    rounded_zero_count = 0
-    bilinear_safe_count = 0
     completed_blocks = 0
-    with rasterio.open(path, "w", **profile) as dataset:
-        dataset.set_band_description(1, "U")
-        dataset.set_band_description(2, "V")
-        dataset.update_tags(
-            AREA_OR_POINT="Point",
-            GEOSCRATCH_ARTIFACT="flow-field-cog-snapshot",
-            GEOSCRATCH_SOURCE_HASH=snapshot.source_hash,
-            GEOSCRATCH_TIME_INDEX=str(snapshot.field_descriptor.time_index),
-            GEOSCRATCH_SAMPLE_REGISTRATION="pixel-center",
-        )
-        dataset.update_tags(1, GEOSCRATCH_COMPONENT="u")
-        dataset.update_tags(2, GEOSCRATCH_COMPONENT="v")
+    states: list[_CogBaseWriteState] = []
+    with ExitStack() as stack:
+        for item in items:
+            dataset = stack.enter_context(rasterio.open(item.path, "w", **profile))
+            dataset.set_band_description(1, "U")
+            dataset.set_band_description(2, "V")
+            dataset.update_tags(
+                AREA_OR_POINT="Point",
+                GEOSCRATCH_ARTIFACT="flow-field-cog-snapshot",
+                GEOSCRATCH_SOURCE_HASH=item.snapshot.source_hash,
+                GEOSCRATCH_TIME_INDEX=str(
+                    item.snapshot.field_descriptor.time_index
+                ),
+                GEOSCRATCH_SAMPLE_REGISTRATION="pixel-center",
+            )
+            dataset.update_tags(1, GEOSCRATCH_COMPONENT="u")
+            dataset.update_tags(2, GEOSCRATCH_COMPONENT="v")
+            states.append(_CogBaseWriteState(
+                item=item,
+                dataset=dataset,
+                pixel_digest=hashlib.sha256(),
+            ))
         for block_row, tile_row in enumerate(
             range(grid.min_tile_row, grid.max_tile_row + 1)
         ):
@@ -745,48 +808,53 @@ def _write_intermediate_tiff_in_environment(
                     latitudes,
                     interpolation,
                 )
-                rendered = apply_bilinear_safe_block(
-                    stencil,
-                    unique_field,
-                    block_size=COG_BLOCK_SIZE,
-                    require_representable_motion=True,
+                window = Window(
+                    block_col * COG_BLOCK_SIZE,
+                    block_row * COG_BLOCK_SIZE,
+                    COG_BLOCK_SIZE,
+                    COG_BLOCK_SIZE,
                 )
-                band_first = np.moveaxis(rendered.values, 2, 0).astype(
-                    "<f4",
-                    copy=False,
-                )
-                dataset.write(
-                    band_first,
-                    window=Window(
-                        block_col * COG_BLOCK_SIZE,
-                        block_row * COG_BLOCK_SIZE,
-                        COG_BLOCK_SIZE,
-                        COG_BLOCK_SIZE,
-                    ),
-                )
-                pixel_digest.update(band_first.tobytes(order="C"))
-                raw_advectable_count += rendered.raw_advectable_count
-                representable_advectable_count += (
-                    rendered.representable_advectable_count
-                )
-                rounded_zero_count += rendered.rounded_zero_count
-                bilinear_safe_count += rendered.bilinear_safe_count
+                for state in states:
+                    rendered = apply_bilinear_safe_block(
+                        stencil,
+                        state.item.unique_field,
+                        block_size=COG_BLOCK_SIZE,
+                        require_representable_motion=True,
+                    )
+                    band_first = np.moveaxis(rendered.values, 2, 0).astype(
+                        "<f4",
+                        copy=False,
+                    )
+                    state.dataset.write(
+                        band_first,
+                        window=window,
+                    )
+                    state.pixel_digest.update(band_first.tobytes(order="C"))
+                    state.raw_advectable_count += rendered.raw_advectable_count
+                    state.representable_advectable_count += (
+                        rendered.representable_advectable_count
+                    )
+                    state.rounded_zero_count += rendered.rounded_zero_count
+                    state.bilinear_safe_count += rendered.bilinear_safe_count
                 completed_blocks += 1
                 if _staging_observation_due(completed_blocks):
-                    staging_guard.observe(f"base-block-{completed_blocks}")
-                if progress_callback is not None and (
+                    for state in states:
+                        state.item.staging_guard.observe(
+                            f"base-block-{completed_blocks}"
+                        )
+                if (
                     _staging_observation_due(completed_blocks)
                     or completed_blocks == grid.block_count
                 ):
-                    progress_callback(completed_blocks, grid.block_count)
-    staging_guard.observe("base-complete")
-    return {
-        "pixelSha256": pixel_digest.hexdigest(),
-        "rawAdvectablePixelCount": raw_advectable_count,
-        "representableAdvectablePixelCount": representable_advectable_count,
-        "roundedZeroPixelCount": rounded_zero_count,
-        "bilinearSafePixelCount": bilinear_safe_count,
-    }
+                    for state in states:
+                        if state.item.progress_callback is not None:
+                            state.item.progress_callback(
+                                completed_blocks,
+                                grid.block_count,
+                            )
+    for state in states:
+        state.item.staging_guard.observe("base-complete")
+    return tuple(state.support_manifest() for state in states)
 
 
 def _validate_cog(
