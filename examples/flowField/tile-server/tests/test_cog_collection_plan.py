@@ -1,10 +1,16 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from geoscratch_flow_field_tiles.cog import CogBuildBudget
 from geoscratch_flow_field_tiles.collection import (
+    COG_COLLECTION_MARKER,
     CogCollectionBudget,
+    _capture_collection_output_state,
+    _install_collection_directory,
+    _safe_collection_output,
     canonical_time_indices,
     parse_time_indices,
     parse_time_range,
@@ -110,3 +116,64 @@ def test_collection_plan_rejects_capacity_without_lowering_resolution(
     assert plan.snapshot_plan.grid.matrix_id == 9
     with pytest.raises(ValueError, match="collection byte budget"):
         plan.require_output_approved()
+
+
+def _write_minimal_owned_collection(path, version="flow-test-v1"):
+    path.mkdir()
+    path.joinpath("snapshots").mkdir()
+    manifest = {
+        "schemaVersion": 1,
+        "artifactType": "flow-field-cog-collection",
+        "contentVersion": version,
+    }
+    path.joinpath("manifest.json").write_text(
+        json.dumps(manifest),
+        encoding="utf-8",
+    )
+    path.joinpath("runtime-manifest.json").write_text("{}\n", encoding="utf-8")
+    path.joinpath(COG_COLLECTION_MARKER).write_text(
+        json.dumps({
+            "kind": "geoscratch-flow-field-cog-collection",
+            "contentVersion": version,
+        }),
+        encoding="utf-8",
+    )
+
+
+def test_collection_output_is_explicit_owned_and_atomically_installed(tmp_path):
+    output = _safe_collection_output(tmp_path / "cog-collection")
+    expected = _capture_collection_output_state(output)
+    staged = tmp_path / "staged"
+    _write_minimal_owned_collection(staged)
+
+    _install_collection_directory(
+        staged,
+        output,
+        expected,
+        replace_existing=False,
+    )
+
+    assert _capture_collection_output_state(output).kind == "owned"
+    assert not staged.exists()
+    with pytest.raises(ValueError, match="explicit cog-collection"):
+        _safe_collection_output(tmp_path / "other")
+
+
+def test_collection_install_refuses_content_added_during_build(tmp_path):
+    output = tmp_path / "cog-collection"
+    _write_minimal_owned_collection(output, "old")
+    expected = _capture_collection_output_state(output)
+    output.joinpath("belongs-to-user.txt").write_text("keep\n", encoding="utf-8")
+    staged = tmp_path / "staged"
+    _write_minimal_owned_collection(staged, "new")
+
+    with pytest.raises(ValueError, match="unowned"):
+        _install_collection_directory(
+            staged,
+            output,
+            expected,
+            replace_existing=True,
+        )
+
+    assert output.joinpath("belongs-to-user.txt").read_text(encoding="utf-8") == "keep\n"
+    assert staged.is_dir()

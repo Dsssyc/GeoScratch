@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import shutil
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
@@ -38,6 +39,150 @@ COG_COLLECTION_SCHEMA_VERSION = 1
 COG_COLLECTION_ADAPTER_VERSION = "flow-cog-wmq-rg32f-v1"
 RUNTIME_MINIMUM_MATRIX = 4
 RUNTIME_MAXIMUM_MATRIX = 9
+
+
+@dataclass(frozen=True, slots=True)
+class CogCollectionOutputState:
+    kind: str
+    device: int | None
+    inode: int | None
+    marker_sha256: str | None
+    manifest_sha256: str | None
+    inventory: tuple[str, ...]
+
+
+class CogCollectionConflictError(RuntimeError):
+    code = "FLOW_COG_COLLECTION_CONFLICT"
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _canonical_sha256(value: object) -> str:
+    return hashlib.sha256(
+        json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
+def _safe_collection_output(output_directory: str | Path) -> Path:
+    requested = Path(os.path.abspath(os.fspath(output_directory)))
+    if requested.name != "cog-collection" or requested.parent == Path(requested.anchor):
+        raise ValueError(
+            "Flow Field COG collection output must be an explicit cog-collection directory"
+        )
+    requested.parent.mkdir(parents=True, exist_ok=True)
+    if requested.is_symlink():
+        raise ValueError("Flow Field COG collection output cannot be a symbolic link")
+    return requested.parent.resolve(strict=True) / requested.name
+
+
+def _safe_child_path(root: Path, value: object, label: str) -> Path:
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"{label} must be a non-empty relative path")
+    relative = Path(value)
+    if relative.is_absolute() or ".." in relative.parts or relative.as_posix() != value:
+        raise ValueError(f"{label} must be a canonical relative path")
+    resolved = root.joinpath(relative)
+    if resolved.is_symlink():
+        raise ValueError(f"{label} cannot be a symbolic link")
+    return resolved
+
+
+def _read_json_object(path: Path, label: str) -> dict[str, Any]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError(f"{label} is unreadable") from error
+    if not isinstance(value, dict):
+        raise ValueError(f"{label} must be an object")
+    return value
+
+
+def _is_owned_collection_directory(output: Path) -> bool:
+    if output.is_symlink() or not output.is_dir():
+        return False
+    marker_path = output / COG_COLLECTION_MARKER
+    manifest_path = output / "manifest.json"
+    runtime_manifest_path = output / "runtime-manifest.json"
+    snapshots_path = output / "snapshots"
+    if (
+        not marker_path.is_file()
+        or not manifest_path.is_file()
+        or not runtime_manifest_path.is_file()
+        or snapshots_path.is_symlink()
+        or not snapshots_path.is_dir()
+    ):
+        return False
+    try:
+        marker = _read_json_object(marker_path, "collection marker")
+        manifest = _read_json_object(manifest_path, "collection manifest")
+    except ValueError:
+        return False
+    if marker != {
+        "kind": "geoscratch-flow-field-cog-collection",
+        "contentVersion": manifest.get("contentVersion"),
+    }:
+        return False
+    if (
+        manifest.get("schemaVersion") != COG_COLLECTION_SCHEMA_VERSION
+        or manifest.get("artifactType") != "flow-field-cog-collection"
+    ):
+        return False
+    return {entry.name for entry in output.iterdir()} == {
+        COG_COLLECTION_MARKER,
+        "manifest.json",
+        "runtime-manifest.json",
+        "snapshots",
+    }
+
+
+def _capture_collection_output_state(output: Path) -> CogCollectionOutputState:
+    if not output.exists():
+        return CogCollectionOutputState("absent", None, None, None, None, ())
+    if not _is_owned_collection_directory(output):
+        raise ValueError("Flow Field refuses an unowned COG collection directory")
+    stat_result = output.stat()
+    return CogCollectionOutputState(
+        kind="owned",
+        device=stat_result.st_dev,
+        inode=stat_result.st_ino,
+        marker_sha256=_sha256(output / COG_COLLECTION_MARKER),
+        manifest_sha256=_sha256(output / "manifest.json"),
+        inventory=tuple(sorted(entry.name for entry in output.iterdir())),
+    )
+
+
+def _install_collection_directory(
+    staged: Path,
+    output: Path,
+    expected_state: CogCollectionOutputState,
+    *,
+    replace_existing: bool,
+) -> None:
+    if _capture_collection_output_state(output) != expected_state:
+        raise CogCollectionConflictError(
+            "FLOW_COG_COLLECTION_CHANGED_DURING_BUILD"
+        )
+    if expected_state.kind == "absent":
+        os.replace(staged, output)
+        return
+    if not replace_existing:
+        raise CogCollectionConflictError(
+            "published Flow Field COG collection already exists"
+        )
+    backup = output.parent / f".{output.name}.backup-{uuid.uuid4().hex}"
+    os.replace(output, backup)
+    try:
+        os.replace(staged, output)
+    except BaseException:
+        os.replace(backup, output)
+        raise
+    shutil.rmtree(backup)
 
 
 @dataclass(frozen=True, slots=True)
