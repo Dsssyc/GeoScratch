@@ -12,9 +12,11 @@ from geoscratch_flow_field_tiles import (
     TriangleLinearInterpolation,
 )
 from geoscratch_flow_field_tiles.source import (
+    SourceAuthority,
     load_source_dataset,
     load_source_snapshot,
     read_source_descriptor,
+    source_descriptor_hash,
 )
 
 
@@ -97,6 +99,156 @@ def test_source_loads_little_endian_pairs_and_typed_build_strategies(
     assert np.array_equal(dataset.stations, synthetic_source.stations.astype(np.float32))
     assert len(dataset.fields) == 2
     assert all(field.dtype == np.dtype("<f4") for field in dataset.fields)
+
+
+def test_schema_2_descriptor_and_existing_source_identities_remain_unchanged():
+    descriptor = read_source_descriptor()
+
+    assert descriptor.schema_version == 2
+    assert descriptor.time_unit is None
+    assert descriptor.authority == SourceAuthority()
+    assert source_descriptor_hash(descriptor) == (
+        "377405f75a361a5ac165530884db7e6885938510f41d857f72e555dc1eb095c0"
+    )
+    assert load_source_snapshot(time_index=0).source_hash == (
+        "284eec65ca4d6e0d0cef7ddff06527bf5a89657e3c5427b893a76af63285550b"
+    )
+
+
+def test_schema_3_accepts_strictly_increasing_finite_model_times(
+    synthetic_source,
+    tmp_path,
+):
+    raw = json.loads(synthetic_source.descriptor_path.read_text(encoding="utf-8"))
+    raw.update({
+        "schemaVersion": 3,
+        "unit": "meter-per-second",
+        "basis": "east-north",
+        "timeUnit": "hour",
+        "phase": "cold-start",
+        "authority": {
+            "unit": "authoritative",
+            "basis": "authoritative",
+            "time": "authoritative",
+            "phase": "unconfirmed",
+            "topology": "inferred",
+        },
+    })
+    raw["fields"][0]["modelTime"] = 0.25
+    raw["fields"][1]["modelTime"] = 1.75
+    descriptor_path = tmp_path / "source-dataset-v3.json"
+    descriptor_path.write_text(json.dumps(raw), encoding="utf-8")
+
+    descriptor = read_source_descriptor(descriptor_path)
+
+    assert descriptor.schema_version == 3
+    assert descriptor.time_unit == "hour"
+    assert descriptor.authority == SourceAuthority(
+        unit="authoritative",
+        basis="authoritative",
+        time="authoritative",
+        phase="unconfirmed",
+        topology="inferred",
+    )
+    assert [field.time_index for field in descriptor.fields] == [0, 1]
+    assert [field.model_time for field in descriptor.fields] == [0.25, 1.75]
+
+
+@pytest.mark.parametrize(
+    ("model_times", "message"),
+    (
+        ((0.0, 0.0), "strictly increasing"),
+        ((2.0, 1.0), "strictly increasing"),
+        ((0.0, float("inf")), "finite number"),
+        ((0.0, True), "finite number"),
+    ),
+)
+def test_schema_3_rejects_invalid_model_times(
+    synthetic_source,
+    tmp_path,
+    model_times,
+    message,
+):
+    raw = json.loads(synthetic_source.descriptor_path.read_text(encoding="utf-8"))
+    raw.update({
+        "schemaVersion": 3,
+        "timeUnit": "unspecified",
+        "authority": {
+            "unit": "unconfirmed",
+            "basis": "unconfirmed",
+            "time": "unconfirmed",
+            "phase": "unconfirmed",
+            "topology": "inferred",
+        },
+    })
+    for field, model_time in zip(raw["fields"], model_times, strict=True):
+        field["modelTime"] = model_time
+    descriptor_path = tmp_path / "invalid-v3.json"
+    descriptor_path.write_text(json.dumps(raw), encoding="utf-8")
+
+    with pytest.raises(ValueError, match=message):
+        read_source_descriptor(descriptor_path)
+
+
+def test_schema_3_requires_inferred_authority_for_current_delaunay(
+    synthetic_source,
+    tmp_path,
+):
+    raw = json.loads(synthetic_source.descriptor_path.read_text(encoding="utf-8"))
+    raw.update({
+        "schemaVersion": 3,
+        "timeUnit": "unspecified",
+        "authority": {
+            "unit": "unconfirmed",
+            "basis": "unconfirmed",
+            "time": "unconfirmed",
+            "phase": "unconfirmed",
+            "topology": "authoritative",
+        },
+    })
+    descriptor_path = tmp_path / "authoritative-delaunay.json"
+    descriptor_path.write_text(json.dumps(raw), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Delaunay topology authority must be inferred"):
+        read_source_descriptor(descriptor_path)
+
+
+def test_schema_3_source_hash_binds_time_unit_authority_and_exact_model_time(
+    synthetic_source,
+    tmp_path,
+):
+    raw = json.loads(synthetic_source.descriptor_path.read_text(encoding="utf-8"))
+    raw.update({
+        "schemaVersion": 3,
+        "timeUnit": "second",
+        "authority": {
+            "unit": "unconfirmed",
+            "basis": "unconfirmed",
+            "time": "unconfirmed",
+            "phase": "unconfirmed",
+            "topology": "inferred",
+        },
+    })
+
+    def digest(value):
+        path = tmp_path / f"descriptor-{len(list(tmp_path.iterdir()))}.json"
+        path.write_text(json.dumps(value), encoding="utf-8")
+        return source_descriptor_hash(read_source_descriptor(path))
+
+    baseline = digest(raw)
+    changed_time_unit = json.loads(json.dumps(raw))
+    changed_time_unit["timeUnit"] = "hour"
+    changed_authority = json.loads(json.dumps(raw))
+    changed_authority["authority"]["time"] = "authoritative"
+    changed_model_time = json.loads(json.dumps(raw))
+    changed_model_time["fields"][1]["modelTime"] = 1.5
+
+    assert len({
+        baseline,
+        digest(changed_time_unit),
+        digest(changed_authority),
+        digest(changed_model_time),
+    }) == 4
 
 
 def test_source_rejects_hash_drift_before_triangulation(

@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 
@@ -28,20 +29,48 @@ SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 @dataclass(frozen=True)
 class FieldSourceDescriptor:
     time_index: int
-    model_time: int
+    model_time: int | float
     filename: str
     sha256: str
 
 
 @dataclass(frozen=True)
+class SourceAuthority:
+    unit: Literal["authoritative", "unconfirmed"] = "unconfirmed"
+    basis: Literal["authoritative", "unconfirmed"] = "unconfirmed"
+    time: Literal["authoritative", "unconfirmed"] = "unconfirmed"
+    phase: Literal["authoritative", "unconfirmed"] = "unconfirmed"
+    topology: Literal["authoritative", "inferred"] = "inferred"
+
+    def __post_init__(self) -> None:
+        for name in ("unit", "basis", "time", "phase"):
+            if getattr(self, name) not in {"authoritative", "unconfirmed"}:
+                raise ValueError(f"authority.{name} must be authoritative or unconfirmed")
+        if self.topology not in {"authoritative", "inferred"}:
+            raise ValueError("authority.topology must be authoritative or inferred")
+
+    def manifest(self) -> dict[str, str]:
+        return {
+            "unit": self.unit,
+            "basis": self.basis,
+            "time": self.time,
+            "phase": self.phase,
+            "topology": self.topology,
+        }
+
+
+@dataclass(frozen=True)
 class SourceDescriptor:
+    schema_version: Literal[2, 3]
     dataset_id: str
     source_revision: str
     station_count: int
     field_count: int
     unit: str
     basis: str
+    time_unit: str | None
     phase: str
+    authority: SourceAuthority
     station_filename: str
     station_sha256: str
     fields: tuple[FieldSourceDescriptor, ...]
@@ -94,11 +123,40 @@ def _require_sha256(value: Any, name: str) -> str:
     return digest
 
 
+def _require_finite_number(value: Any, name: str) -> int | float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{name} must be a finite number")
+    if isinstance(value, float) and not math.isfinite(value):
+        raise ValueError(f"{name} must be a finite number")
+    return value
+
+
+def _read_authority(value: Any) -> SourceAuthority:
+    if not isinstance(value, dict) or set(value) != {
+        "unit",
+        "basis",
+        "time",
+        "phase",
+        "topology",
+    }:
+        raise ValueError(
+            "authority must contain exactly unit, basis, time, phase, and topology"
+        )
+    return SourceAuthority(
+        unit=value["unit"],
+        basis=value["basis"],
+        time=value["time"],
+        phase=value["phase"],
+        topology=value["topology"],
+    )
+
+
 def read_source_descriptor(path: str | Path = DEFAULT_DESCRIPTOR_PATH) -> SourceDescriptor:
     descriptor_path = Path(path).resolve()
     raw = json.loads(descriptor_path.read_text(encoding="utf-8"))
-    if not isinstance(raw, dict) or raw.get("schemaVersion") != 2:
-        raise ValueError("Flow Field source descriptor schemaVersion must be 2")
+    if not isinstance(raw, dict) or raw.get("schemaVersion") not in {2, 3}:
+        raise ValueError("Flow Field source descriptor schemaVersion must be 2 or 3")
+    schema_version = raw["schemaVersion"]
     allowed = {
         "schemaVersion",
         "datasetId",
@@ -113,6 +171,8 @@ def read_source_descriptor(path: str | Path = DEFAULT_DESCRIPTOR_PATH) -> Source
         "topology",
         "interpolation",
     }
+    if schema_version == 3:
+        allowed |= {"timeUnit", "authority"}
     unknown = set(raw) - allowed
     if unknown:
         raise ValueError(
@@ -120,12 +180,6 @@ def read_source_descriptor(path: str | Path = DEFAULT_DESCRIPTOR_PATH) -> Source
         )
     station_count = _require_integer(raw.get("stationCount"), "stationCount", 3)
     field_count = _require_integer(raw.get("fieldCount"), "fieldCount", 1)
-    if raw.get("unit") != "legacy-flow-unit":
-        raise ValueError("Flow Field source unit must be legacy-flow-unit")
-    if raw.get("basis") != "source-u-v":
-        raise ValueError("Flow Field source basis must be source-u-v")
-    if raw.get("phase") != "unspecified":
-        raise ValueError("Flow Field source phase must be unspecified")
     station = raw.get("station")
     if not isinstance(station, dict):
         raise ValueError("station must be an object")
@@ -135,6 +189,7 @@ def read_source_descriptor(path: str | Path = DEFAULT_DESCRIPTOR_PATH) -> Source
     if not isinstance(raw_fields, list) or len(raw_fields) != field_count:
         raise ValueError("fields length must equal fieldCount")
     fields: list[FieldSourceDescriptor] = []
+    previous_model_time: int | float | None = None
     for expected_time_index, field in enumerate(raw_fields):
         if not isinstance(field, dict):
             raise ValueError(f"fields[{expected_time_index}] must be an object")
@@ -146,12 +201,27 @@ def read_source_descriptor(path: str | Path = DEFAULT_DESCRIPTOR_PATH) -> Source
             field.get("timeIndex"),
             f"fields[{expected_time_index}].timeIndex",
         )
-        model_time = _require_integer(
-            field.get("modelTime"),
-            f"fields[{expected_time_index}].modelTime",
-        )
-        if time_index != expected_time_index or model_time != expected_time_index:
-            raise ValueError("Flow Field source times must be the ordered ordinals 0..N-1")
+        if schema_version == 2:
+            model_time = _require_integer(
+                field.get("modelTime"),
+                f"fields[{expected_time_index}].modelTime",
+            )
+            if time_index != expected_time_index or model_time != expected_time_index:
+                raise ValueError(
+                    "Flow Field schema 2 source times must be the ordered ordinals 0..N-1"
+                )
+        else:
+            model_time = _require_finite_number(
+                field.get("modelTime"),
+                f"fields[{expected_time_index}].modelTime",
+            )
+            if time_index != expected_time_index:
+                raise ValueError("Flow Field source timeIndex values must be dense from zero")
+            if previous_model_time is not None and model_time <= previous_model_time:
+                raise ValueError(
+                    "Flow Field schema 3 modelTime values must be strictly increasing"
+                )
+            previous_model_time = model_time
         fields.append(FieldSourceDescriptor(
             time_index=time_index,
             model_time=model_time,
@@ -164,19 +234,44 @@ def read_source_descriptor(path: str | Path = DEFAULT_DESCRIPTOR_PATH) -> Source
                 f"fields[{expected_time_index}].sha256",
             ),
         ))
+    topology = read_topology_spec(raw.get("topology"))
+    interpolation = read_interpolation_spec(raw.get("interpolation"))
+    if schema_version == 2:
+        if raw.get("unit") != "legacy-flow-unit":
+            raise ValueError("Flow Field source unit must be legacy-flow-unit")
+        if raw.get("basis") != "source-u-v":
+            raise ValueError("Flow Field source basis must be source-u-v")
+        if raw.get("phase") != "unspecified":
+            raise ValueError("Flow Field source phase must be unspecified")
+        unit = raw["unit"]
+        basis = raw["basis"]
+        time_unit = None
+        phase = raw["phase"]
+        authority = SourceAuthority()
+    else:
+        unit = _require_string(raw.get("unit"), "unit")
+        basis = _require_string(raw.get("basis"), "basis")
+        time_unit = _require_string(raw.get("timeUnit"), "timeUnit")
+        phase = _require_string(raw.get("phase"), "phase")
+        authority = _read_authority(raw.get("authority"))
+        if topology.kind == "delaunay" and authority.topology != "inferred":
+            raise ValueError("Delaunay topology authority must be inferred")
     return SourceDescriptor(
+        schema_version=schema_version,
         dataset_id=_require_string(raw.get("datasetId"), "datasetId"),
         source_revision=_require_string(raw.get("sourceRevision"), "sourceRevision"),
         station_count=station_count,
         field_count=field_count,
-        unit=raw["unit"],
-        basis=raw["basis"],
-        phase=raw["phase"],
+        unit=unit,
+        basis=basis,
+        time_unit=time_unit,
+        phase=phase,
+        authority=authority,
         station_filename=_require_filename(station.get("file"), "station.file"),
         station_sha256=_require_sha256(station.get("sha256"), "station.sha256"),
         fields=tuple(fields),
-        topology=read_topology_spec(raw.get("topology")),
-        interpolation=read_interpolation_spec(raw.get("interpolation")),
+        topology=topology,
+        interpolation=interpolation,
     )
 
 
@@ -206,39 +301,101 @@ def _read_float32_pairs(
     return values
 
 
-def _aggregate_source_hash(descriptor: SourceDescriptor) -> str:
-    facts = [
-        descriptor.dataset_id,
-        descriptor.source_revision,
-        str(descriptor.station_count),
-        str(descriptor.field_count),
-        descriptor.station_sha256,
-        *(
-            f"{field.time_index}:{field.model_time}:{field.filename}:{field.sha256}"
-            for field in descriptor.fields
-        ),
-        descriptor.unit,
-        descriptor.basis,
-        descriptor.phase,
-    ]
-    return hashlib.sha256("\n".join(facts).encode("utf-8")).hexdigest()
+def source_descriptor_hash(descriptor: SourceDescriptor) -> str:
+    """Return the descriptor-only source identity without reading field payloads."""
+    if not isinstance(descriptor, SourceDescriptor):
+        raise TypeError("descriptor must be a SourceDescriptor")
+    if descriptor.schema_version == 2:
+        # Preserve the exact schema-v2 identity used by every existing artifact.
+        facts = [
+            descriptor.dataset_id,
+            descriptor.source_revision,
+            str(descriptor.station_count),
+            str(descriptor.field_count),
+            descriptor.station_sha256,
+            *(
+                f"{field.time_index}:{field.model_time}:{field.filename}:{field.sha256}"
+                for field in descriptor.fields
+            ),
+            descriptor.unit,
+            descriptor.basis,
+            descriptor.phase,
+        ]
+        payload = "\n".join(facts).encode("utf-8")
+    else:
+        payload = json.dumps(
+            {
+                "schemaVersion": descriptor.schema_version,
+                "datasetId": descriptor.dataset_id,
+                "sourceRevision": descriptor.source_revision,
+                "stationCount": descriptor.station_count,
+                "fieldCount": descriptor.field_count,
+                "stationSha256": descriptor.station_sha256,
+                "fields": [
+                    {
+                        "timeIndex": field.time_index,
+                        "modelTime": field.model_time,
+                        "file": field.filename,
+                        "sha256": field.sha256,
+                    }
+                    for field in descriptor.fields
+                ],
+                "unit": descriptor.unit,
+                "basis": descriptor.basis,
+                "timeUnit": descriptor.time_unit,
+                "phase": descriptor.phase,
+                "authority": descriptor.authority.manifest(),
+            },
+            allow_nan=False,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
 
 
 def _aggregate_snapshot_hash(
     descriptor: SourceDescriptor,
     field: FieldSourceDescriptor,
 ) -> str:
-    facts = [
-        descriptor.dataset_id,
-        descriptor.source_revision,
-        str(descriptor.station_count),
-        descriptor.station_sha256,
-        f"{field.time_index}:{field.model_time}:{field.filename}:{field.sha256}",
-        descriptor.unit,
-        descriptor.basis,
-        descriptor.phase,
-    ]
-    return hashlib.sha256("\n".join(facts).encode("utf-8")).hexdigest()
+    if descriptor.schema_version == 2:
+        facts = [
+            descriptor.dataset_id,
+            descriptor.source_revision,
+            str(descriptor.station_count),
+            descriptor.station_sha256,
+            f"{field.time_index}:{field.model_time}:{field.filename}:{field.sha256}",
+            descriptor.unit,
+            descriptor.basis,
+            descriptor.phase,
+        ]
+        payload = "\n".join(facts).encode("utf-8")
+    else:
+        payload = json.dumps(
+            {
+                "schemaVersion": descriptor.schema_version,
+                "datasetId": descriptor.dataset_id,
+                "sourceRevision": descriptor.source_revision,
+                "stationCount": descriptor.station_count,
+                "stationSha256": descriptor.station_sha256,
+                "field": {
+                    "timeIndex": field.time_index,
+                    "modelTime": field.model_time,
+                    "file": field.filename,
+                    "sha256": field.sha256,
+                },
+                "unit": descriptor.unit,
+                "basis": descriptor.basis,
+                "timeUnit": descriptor.time_unit,
+                "phase": descriptor.phase,
+                "authority": descriptor.authority.manifest(),
+            },
+            allow_nan=False,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
 
 
 def load_source_snapshot(
@@ -315,5 +472,5 @@ def load_source_dataset(
             float(stations[:, 0].max()),
             float(stations[:, 1].max()),
         ),
-        source_hash=_aggregate_source_hash(descriptor),
+        source_hash=source_descriptor_hash(descriptor),
     )

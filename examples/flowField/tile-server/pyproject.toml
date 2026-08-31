@@ -26,6 +26,7 @@ test = [
 [project.scripts]
 flow-field-tile-build = "geoscratch_flow_field_tiles.build:main"
 flow-field-cog-build = "geoscratch_flow_field_tiles.cog:main"
+flow-field-source-describe = "geoscratch_flow_field_tiles.descriptor:main"
 flow-field-tile-serve = "geoscratch_flow_field_tiles.service:main"
 
 [tool.setuptools]

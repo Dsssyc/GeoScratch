@@ -12,6 +12,7 @@ from .resolution import (
     StationSpacingResolution,
     UnsupportedResolutionError,
 )
+from .source import SourceAuthority, SourceDescriptor, source_descriptor_hash
 
 
 __version__ = "0.4.0"
@@ -19,10 +20,13 @@ __version__ = "0.4.0"
 __all__ = [
     "DelaunayTopology",
     "ResolutionSelection",
+    "SourceAuthority",
+    "SourceDescriptor",
     "StationSpacingResolution",
     "BuildBudget",
     "TriangleLinearInterpolation",
     "UnsupportedInterpolationError",
     "UnsupportedResolutionError",
     "UnsupportedTopologyError",
+    "source_descriptor_hash",
 ]

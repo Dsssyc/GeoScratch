@@ -12,13 +12,35 @@ U/V files named `uv_0.bin` through `uv_26.bin`. `source-dataset.json` freezes th
 counts, station count, field order, SHA-256 values, topology request, and interpolation
 request before construction starts.
 
-The files do not establish physical units, an east/north basis, or model phase. The manifest
-therefore records `legacy-flow-unit`, `source-u-v`, ordinal model times `0..26`, and
-`phase: unspecified` without making a stronger claim.
+The repository descriptor remains strict schema version 2. Those files do not establish
+physical units, an east/north basis, or model phase, so it records `legacy-flow-unit`,
+`source-u-v`, ordinal model times `0..26`, and `phase: unspecified` without making a stronger
+claim. The reader also accepts schema version 3, which adds `timeUnit` plus explicit authority
+for unit, basis, time, phase, and topology. Version 3 keeps dense `timeIndex` values while
+allowing finite, strictly increasing numeric `modelTime` values. The currently implemented
+Delaunay topology is always `inferred`.
+
+`flow-field-source-describe` generates a schema-v3 descriptor from `station.bin` and
+numerically ordered `uv_N.bin` files. It hashes and validates every file, requires matching
+finite little-endian float32-pair counts, and defaults all scientific labels to `unspecified`
+with `unconfirmed` authority; it never promotes inferred file conventions to authoritative
+model semantics. Administrative dataset identity remains explicit:
+
+```bash
+examples/flowField/tile-server/.venv/bin/flow-field-source-describe \
+  --source /path/to/source \
+  --output /path/to/source-dataset.json \
+  --dataset-id example-flow \
+  --source-revision source-files-v1
+```
+
+Use `--model-times`, `--unit`, `--basis`, `--time-unit`, `--phase`, and their authority flags
+only when those facts come from the source model. Existing output is never replaced without
+`--overwrite`.
 
 ## Deterministic construction
 
-The source descriptor is schema version 2. Its current strategy is explicitly:
+The repository source descriptor is schema version 2. Its current strategy is explicitly:
 
 ```json
 {
