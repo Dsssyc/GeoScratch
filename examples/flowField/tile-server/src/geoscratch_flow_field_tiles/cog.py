@@ -48,7 +48,12 @@ from .source import (
     SourceSnapshot,
     load_source_snapshot,
 )
-from .topology import WEB_MERCATOR_RADIUS, prepare_topology
+from .topology import (
+    DuplicateStatistics,
+    PreparedDelaunayTopology,
+    WEB_MERCATOR_RADIUS,
+    prepare_topology,
+)
 
 
 COG_BLOCK_SIZE = 256
@@ -1372,6 +1377,165 @@ def _install_cog_directory(
     shutil.rmtree(backup)
 
 
+def _finalize_velocity_cog_snapshot(
+    *,
+    snapshot: SourceSnapshot,
+    plan: CogBuildPlan,
+    prepared_topology: PreparedDelaunayTopology,
+    duplicate_statistics: DuplicateStatistics,
+    interpolation: InterpolationSpec,
+    encoding: CogEncoding,
+    staging_guard: CogStagingGuard,
+    staged: Path,
+    output: Path,
+    source_tiff: Path,
+    support: dict[str, Any],
+    emitter: ProgressEmitter,
+) -> CogBuildResult:
+    """Finalize one prepared base; the caller owns staging cleanup on failure."""
+
+    time_index = snapshot.field_descriptor.time_index
+    source_vrt = staged / "semantic-overviews.vrt"
+    cog_path = staged / f"flow-t{time_index:02d}.cog.tif"
+    manifest_path = staged / "manifest.json"
+
+    def report_overview(value: SemanticOverviewProgress) -> None:
+        stage = f"overview-{value.level_index:02d}"
+        if value.event == "progress":
+            emitter.emit(
+                "stage.progress",
+                stage=stage,
+                completed=value.completed_blocks,
+                total=value.total_blocks,
+                unit="blocks",
+            )
+        else:
+            emitter.emit(f"stage.{value.event}", stage=stage)
+
+    overview_artifacts = write_semantic_overviews(
+        source_tiff,
+        staged,
+        plan.overview_levels,
+        block_size=encoding.block_size,
+        temporary_compression_level=encoding.temporary_compression_level,
+        staging_observer=staging_guard.observe,
+        progress_callback=report_overview,
+    )
+    overview_records = tuple(
+        artifact.manifest() for artifact in overview_artifacts
+    )
+    support["overviewPolicy"] = encoding.manifest()["overviewPolicy"]
+    support["overviewLevels"] = list(overview_records)
+    write_explicit_overview_vrt(
+        source_vrt,
+        source_tiff,
+        overview_artifacts,
+    )
+    emitter.emit("stage.started", stage="cog-copy")
+    staging_guard.require_copy_capacity()
+    # VRT explicit overviews and COG FORCE_USE_EXISTING are the documented
+    # GDAL path for copying project-computed overview pixels without invoking
+    # a generic resampler:
+    # https://gdal.org/en/stable/drivers/raster/vrt.html#vrtrasterband
+    # https://gdal.org/en/stable/drivers/raster/cog.html#creation-options
+    assemble_semantic_overview_cog(
+        source_vrt,
+        cog_path,
+        block_size=encoding.block_size,
+        compression_level=encoding.compression_level,
+        big_tiff=encoding.big_tiff,
+    )
+    staging_guard.observe("cog-copy-complete")
+    emitter.emit(
+        "stage.progress",
+        stage="cog-copy",
+        completed=1,
+        total=1,
+        unit="copies",
+    )
+    emitter.emit("stage.completed", stage="cog-copy")
+    emitter.emit("stage.started", stage="semantic-verification")
+    validation = _validate_cog(
+        cog_path,
+        plan.grid,
+        encoding,
+        support["pixelSha256"],
+        support,
+        overview_records,
+        expected_source_hash=snapshot.source_hash,
+        expected_time_index=time_index,
+    )
+    emitter.emit(
+        "stage.progress",
+        stage="semantic-verification",
+        completed=1,
+        total=1,
+        unit="datasets",
+    )
+    emitter.emit("stage.completed", stage="semantic-verification")
+    source_tiff.unlink()
+    source_vrt.unlink()
+    for artifact in overview_artifacts:
+        artifact.path.unlink()
+    emitter.emit("stage.started", stage="manifest")
+    manifest = _build_manifest(
+        snapshot,
+        plan,
+        encoding,
+        prepared_topology.manifest(duplicate_statistics),
+        interpolation.manifest(),
+        support,
+        cog_path,
+        validation,
+        staging_guard.manifest(),
+    )
+    manifest_path.write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    staged.joinpath(COG_ARTIFACT_MARKER).write_text(
+        json.dumps({
+            "kind": "geoscratch-flow-field-cog-artifact",
+            "contentVersion": manifest["contentVersion"],
+        }, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    emitter.emit(
+        "stage.progress",
+        stage="manifest",
+        completed=2,
+        total=2,
+        unit="files",
+    )
+    emitter.emit("stage.completed", stage="manifest")
+    emitter.emit("stage.started", stage="install")
+
+    def complete_install() -> None:
+        emitter.emit(
+            "stage.progress",
+            stage="install",
+            completed=1,
+            total=1,
+            unit="directories",
+        )
+        emitter.emit("stage.completed", stage="install")
+
+    _install_cog_directory(
+        staged,
+        output,
+        commit_callback=complete_install,
+    )
+    installed_cog = output / f"flow-t{time_index:02d}.cog.tif"
+    return CogBuildResult(
+        output_directory=output,
+        cog_path=installed_cog,
+        manifest_path=output / "manifest.json",
+        content_version=manifest["contentVersion"],
+        cog_sha256=manifest["construction"]["facts"]["cog"]["sha256"],
+        cog_size_bytes=installed_cog.stat().st_size,
+    )
+
+
 def build_velocity_cog_snapshot(
     data_directory: str | Path = DEFAULT_DATA_DIRECTORY,
     output_directory: str | Path = DEFAULT_COG_OUTPUT_DIRECTORY,
@@ -1453,9 +1617,6 @@ def build_velocity_cog_snapshot(
         )
         staging_guard.observe("staging-created")
         source_tiff = staged / "base.tif"
-        source_vrt = staged / "semantic-overviews.vrt"
-        cog_path = staged / f"flow-t{time_index:02d}.cog.tif"
-        manifest_path = staged / "manifest.json"
         emitter.emit("stage.started", stage="base")
 
         def report_base(completed: int, total: int) -> None:
@@ -1479,145 +1640,24 @@ def build_velocity_cog_snapshot(
             report_base,
         )
         emitter.emit("stage.completed", stage="base")
-
-        def report_overview(value: SemanticOverviewProgress) -> None:
-            stage = f"overview-{value.level_index:02d}"
-            if value.event == "progress":
-                emitter.emit(
-                    "stage.progress",
-                    stage=stage,
-                    completed=value.completed_blocks,
-                    total=value.total_blocks,
-                    unit="blocks",
-                )
-            else:
-                emitter.emit(f"stage.{value.event}", stage=stage)
-
-        overview_artifacts = write_semantic_overviews(
-            source_tiff,
-            staged,
-            plan.overview_levels,
-            block_size=encoding.block_size,
-            temporary_compression_level=encoding.temporary_compression_level,
-            staging_observer=staging_guard.observe,
-            progress_callback=report_overview,
-        )
-        overview_records = tuple(
-            artifact.manifest() for artifact in overview_artifacts
-        )
-        support["overviewPolicy"] = encoding.manifest()["overviewPolicy"]
-        support["overviewLevels"] = list(overview_records)
-        write_explicit_overview_vrt(
-            source_vrt,
-            source_tiff,
-            overview_artifacts,
-        )
-        emitter.emit("stage.started", stage="cog-copy")
-        staging_guard.require_copy_capacity()
-        # VRT explicit overviews and COG FORCE_USE_EXISTING are the documented
-        # GDAL path for copying project-computed overview pixels without invoking
-        # a generic resampler:
-        # https://gdal.org/en/stable/drivers/raster/vrt.html#vrtrasterband
-        # https://gdal.org/en/stable/drivers/raster/cog.html#creation-options
-        assemble_semantic_overview_cog(
-            source_vrt,
-            cog_path,
-            block_size=encoding.block_size,
-            compression_level=encoding.compression_level,
-            big_tiff=encoding.big_tiff,
-        )
-        staging_guard.observe("cog-copy-complete")
-        emitter.emit(
-            "stage.progress",
-            stage="cog-copy",
-            completed=1,
-            total=1,
-            unit="copies",
-        )
-        emitter.emit("stage.completed", stage="cog-copy")
-        emitter.emit("stage.started", stage="semantic-verification")
-        validation = _validate_cog(
-            cog_path,
-            plan.grid,
-            encoding,
-            support["pixelSha256"],
-            support,
-            overview_records,
-            expected_source_hash=snapshot.source_hash,
-            expected_time_index=snapshot.field_descriptor.time_index,
-        )
-        emitter.emit(
-            "stage.progress",
-            stage="semantic-verification",
-            completed=1,
-            total=1,
-            unit="datasets",
-        )
-        emitter.emit("stage.completed", stage="semantic-verification")
-        source_tiff.unlink()
-        source_vrt.unlink()
-        for artifact in overview_artifacts:
-            artifact.path.unlink()
-        emitter.emit("stage.started", stage="manifest")
-        manifest = _build_manifest(
-            snapshot,
-            plan,
-            encoding,
-            prepared_topology.manifest(duplicate_statistics),
-            interpolation_spec.manifest(),
-            support,
-            cog_path,
-            validation,
-            staging_guard.manifest(),
-        )
-        manifest_path.write_text(
-            json.dumps(manifest, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
-        staged.joinpath(COG_ARTIFACT_MARKER).write_text(
-            json.dumps({
-                "kind": "geoscratch-flow-field-cog-artifact",
-                "contentVersion": manifest["contentVersion"],
-            }, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
-        emitter.emit(
-            "stage.progress",
-            stage="manifest",
-            completed=2,
-            total=2,
-            unit="files",
-        )
-        emitter.emit("stage.completed", stage="manifest")
-        emitter.emit("stage.started", stage="install")
-
-        def complete_install() -> None:
-            emitter.emit(
-                "stage.progress",
-                stage="install",
-                completed=1,
-                total=1,
-                unit="directories",
-            )
-            emitter.emit("stage.completed", stage="install")
-
-        _install_cog_directory(
-            staged,
-            output,
-            commit_callback=complete_install,
+        result = _finalize_velocity_cog_snapshot(
+            snapshot=snapshot,
+            plan=plan,
+            prepared_topology=prepared_topology,
+            duplicate_statistics=duplicate_statistics,
+            interpolation=interpolation_spec,
+            encoding=encoding,
+            staging_guard=staging_guard,
+            staged=staged,
+            output=output,
+            source_tiff=source_tiff,
+            support=support,
+            emitter=emitter,
         )
     finally:
         if staged.exists():
             shutil.rmtree(staged)
-    installed_cog = output / f"flow-t{time_index:02d}.cog.tif"
-    return CogBuildResult(
-        output_directory=output,
-        cog_path=installed_cog,
-        manifest_path=output / "manifest.json",
-        content_version=manifest["contentVersion"],
-        cog_sha256=manifest["construction"]["facts"]["cog"]["sha256"],
-        cog_size_bytes=installed_cog.stat().st_size,
-    )
+    return result
 
 
 def verify_velocity_cog_snapshot(

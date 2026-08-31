@@ -277,6 +277,8 @@ def test_repeated_snapshot_build_preserves_pixels_and_content_identity(
 
     assert capsys.readouterr() == ("", "")
     assert rebuilt.content_version == built_cog.content_version
+    assert rebuilt.cog_sha256 == built_cog.cog_sha256
+    assert rebuilt.cog_size_bytes == built_cog.cog_size_bytes
     with rasterio.open(built_cog.cog_path) as first, rasterio.open(rebuilt.cog_path) as second:
         assert first.profile == second.profile
         assert first.tags() == second.tags()
@@ -517,6 +519,63 @@ def test_progress_sink_failure_before_install_leaves_no_artifact(
         )
 
     assert not output.exists()
+
+
+def test_finalizer_failure_preserves_prepared_inputs_and_cleans_staging(
+    synthetic_source,
+    tmp_path,
+    monkeypatch,
+):
+    output = tmp_path / "finalizer-failure" / "cog-cache"
+    captured = {}
+
+    def fail_finalizer(**kwargs):
+        captured.update(kwargs)
+        assert kwargs["source_tiff"].is_file()
+        raise RuntimeError("synthetic finalizer failure")
+
+    monkeypatch.setattr(
+        cog_module,
+        "_finalize_velocity_cog_snapshot",
+        fail_finalizer,
+    )
+
+    with pytest.raises(RuntimeError, match="synthetic finalizer failure"):
+        build_velocity_cog_snapshot(
+            synthetic_source.directory,
+            output,
+            time_index=0,
+            descriptor_path=synthetic_source.descriptor_path,
+            resolution=_test_resolution(),
+        )
+
+    assert set(captured) == {
+        "snapshot",
+        "plan",
+        "prepared_topology",
+        "duplicate_statistics",
+        "interpolation",
+        "encoding",
+        "staging_guard",
+        "staged",
+        "output",
+        "source_tiff",
+        "support",
+        "emitter",
+    }
+    assert captured["snapshot"].field_descriptor.time_index == 0
+    assert captured["plan"].grid.matrix_id == 9
+    assert captured["prepared_topology"].source_station_count == 4
+    assert captured["duplicate_statistics"].location_count == 0
+    assert captured["interpolation"].kind == "triangle-linear"
+    assert captured["encoding"] == cog_module.CogEncoding()
+    assert captured["staging_guard"].root == captured["staged"]
+    assert captured["source_tiff"].parent == captured["staged"]
+    assert captured["output"] == output
+    assert captured["support"]["pixelSha256"]
+    assert captured["emitter"].time_index == 0
+    assert not output.exists()
+    assert tuple(output.parent.glob(".cog-cache.build-*")) == ()
 
 
 def test_progress_sink_failure_during_install_rolls_back_previous_artifact(
