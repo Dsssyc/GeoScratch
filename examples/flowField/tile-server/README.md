@@ -209,6 +209,7 @@ examples/flowField/tile-server/.venv/bin/flow-field-cog-collection-build \
 examples/flowField/tile-server/.venv/bin/flow-field-cog-collection-build \
   --all-times \
   --estimated-snapshot-bytes 1584930583 \
+  --batch-size 2 \
   --events-stderr
 
 # Other legal selections create explicit subset collections.
@@ -259,10 +260,22 @@ examples/flowField/tile-server/.venv/bin/flow-field-cog-collection-build \
   --verify-existing
 ```
 
-The current collection orchestrator builds missing snapshots sequentially. It is bounded and
-recoverable, but the 27-time production run still repeats station topology and block point
-location per snapshot; sharing each block stencil across a bounded time batch remains a separate
-performance phase and is not encoded in the artifact contract.
+Missing snapshots are built in bounded batches of at most two by default. Each batch reads and
+validates station coordinates once, prepares one Delaunay topology, and traverses the spatial
+blocks once. Pixel centres and the triangle-linear stencil are shared for that block; U/V
+application, support counts, overview construction, COG validation, manifest, and installation
+remain independent per time. Completed children survive a later child failure and are recovered
+before the next batch. `--batch-size 1|2`, `--max-batch-staged-bytes`, and
+`--batch-minimum-free-bytes` control execution only; no batch field enters a snapshot or
+collection construction identity.
+
+Synthetic parity freezes batch-size one and two to the same child construction facts, support
+and overview digests, COG SHA/size, and content version. A collection additionally binds each
+complete child manifest SHA. Honest preflight facts inside that child manifest include observed
+free space and staging values, so builds performed under different operational observations can
+produce different child-manifest SHA and therefore a different collection content version even
+when the COG bytes are identical. With fixed preflight observations, batch-size one and two
+produce the same collection identity.
 
 ```bash
 python3 -m venv examples/flowField/tile-server/.venv

@@ -92,6 +92,13 @@ The collection content version is a SHA-256-derived identity over canonical cons
 facts. A full collection exactly covers the descriptor; an explicitly selected subset is a
 different, valid collection and is labelled `coverage: subset`.
 
+Each ordered child record includes the complete child manifest SHA. Child construction facts,
+support/overview digests, COG SHA/size, and content version are invariant between batch-size one
+and two. The child manifest also contains honest operational preflight observations such as
+available bytes and compressed staging facts. Different observations may therefore change the
+child manifest SHA and collection content version even when the COG bytes are identical; fixed
+preflight observations produce the same collection identity for batch-size one and two.
+
 ### Build, locking, progress, and recovery
 
 The collection command exposes mutually exclusive `--all-times`, half-open
@@ -116,6 +123,15 @@ path as `replacedBackup`; the tool does not recursively delete the backup becaus
 have appeared after the final ownership observation. The operator owns inspection, recovery,
 and eventual cleanup of that backup.
 
+Missing children execute in bounded batches of at most two. One batch loads station coordinates
+once, creates one Delaunay topology, and traverses each spatial block once. Pixel centres and the
+triangle-linear stencil are shared across the batch while field application, duplicate-velocity
+statistics, support facts, semantic overviews, COG validation, manifests, progress streams, and
+installation remain independent per child. Batching is execution policy only and contributes no
+artifact construction field. A completed earlier child remains valid if a later child fails;
+the next resume scan promotes every complete request-owned child before forming missing-only
+batches.
+
 Progress is opt-in JSONL on stderr or a caller-selected file. Stdout retains one final JSON
 result. Events have stable job/stage/sequence fields and are excluded from content identity.
 Ctrl-C closes current raster handles and leaves only owned recoverable work; cancellation
@@ -127,7 +143,9 @@ construction, but they never reduce the statistically selected matrix, remove a 
 or change overview semantics. The estimate is only planning input. Publication also measures
 every regular file in the final payload, rejects the exact total when it exceeds
 `maxCollectionBytes`, and records snapshot, runtime-manifest, collection-manifest, marker, and
-total byte counts in the collection manifest's `storage` contract.
+total byte counts in the collection manifest's `storage` contract. Batch execution separately
+bounds aggregate staged bytes and reserves free space for the transient final COG copy; these
+limits and observations remain outside request and content identity.
 
 ### COG window to RG32F adapter
 
@@ -196,7 +214,7 @@ collection becomes the active particle source.
   request to lower z15 or omit times.
 - The COG-backed service is example-local and testable without changing the renderer,
   temporal state machine, or Geo/Scratch packages.
-- Missing snapshots are currently built sequentially; bounded time-batch stencil reuse is an
-  execution optimization that must preserve every child identity and remains a later phase.
+- Bounded two-time batches reuse each spatial stencil without changing any child artifact
+  identity, and partial batch success remains recoverable at the child boundary.
 - Scientific approval remains blocked until the upstream model supplies authoritative unit,
   basis, time/phase, and topology facts and the numerical error budget is accepted.
