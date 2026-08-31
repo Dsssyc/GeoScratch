@@ -22,9 +22,13 @@ from .cog import (
     CogBuildBudget,
     CogBuildPlan,
     CogEncoding,
-    build_velocity_cog_snapshot,
     plan_velocity_cog_snapshot,
     verify_velocity_cog_snapshot,
+)
+from .cog_batch import (
+    CogSnapshotBatchExecutionBudget,
+    CogSnapshotBatchItem,
+    build_velocity_cog_snapshot_batch,
 )
 from .cog_tiles import CogVelocityTileReader
 from .contracts import (
@@ -499,17 +503,50 @@ def _measure_resume_snapshots(
     }:
         raise CogCollectionConflictError("FLOW_COG_COLLECTION_RESUME_IDENTITY_MISMATCH")
     snapshots = work / "payload" / "snapshots"
-    if not snapshots.exists():
-        return 0, 0
-    if snapshots.is_symlink() or not snapshots.is_dir():
+    builds = work / "snapshot-builds"
+    if snapshots.exists() and (snapshots.is_symlink() or not snapshots.is_dir()):
         raise ValueError("Flow Field COG collection work snapshots are invalid")
+    if builds.exists() and (builds.is_symlink() or not builds.is_dir()):
+        raise ValueError("Flow Field COG collection snapshot builds are invalid")
     expected_names = {f"t{time_index:02d}" for time_index in time_indices}
-    if any(entry.name not in expected_names for entry in snapshots.iterdir()):
+    if snapshots.exists() and any(
+        entry.name not in expected_names for entry in snapshots.iterdir()
+    ):
         raise ValueError("Flow Field COG collection work has an unexpected snapshot")
+    if builds.exists() and any(
+        entry.name not in expected_names for entry in builds.iterdir()
+    ):
+        raise ValueError("Flow Field COG collection work has an unexpected snapshot build")
     count = 0
     size_bytes = 0
     for time_index in time_indices:
         directory = snapshots / f"t{time_index:02d}"
+        if not directory.exists() and builds.exists():
+            build_parent = builds / f"t{time_index:02d}"
+            staged = build_parent / "cog-cache"
+            if staged.exists():
+                expected_marker = {
+                    "kind": "geoscratch-flow-field-cog-snapshot-work",
+                    "requestSha256": request_sha256,
+                    "timeIndex": time_index,
+                }
+                marker_path = build_parent / COG_SNAPSHOT_WORK_MARKER
+                residue = tuple(build_parent.glob(".cog-cache.build-*"))
+                if (
+                    build_parent.is_symlink()
+                    or not build_parent.is_dir()
+                    or marker_path.is_symlink()
+                    or _read_json_object(marker_path, "snapshot work marker")
+                    != expected_marker
+                    or residue
+                    or {entry.name for entry in build_parent.iterdir()}
+                    != {COG_SNAPSHOT_WORK_MARKER, "cog-cache"}
+                ):
+                    raise ValueError(
+                        "Flow Field COG complete snapshot work identity is invalid"
+                    )
+                verify_velocity_cog_snapshot(staged)
+                directory = staged
         if not directory.exists():
             continue
         _snapshot_record(
@@ -1221,6 +1258,9 @@ def build_velocity_cog_collection(
     resolution: ResolutionSpec | None = None,
     encoding: CogEncoding = CogEncoding(),
     snapshot_budget: CogBuildBudget = CogBuildBudget(),
+    batch_execution_budget: CogSnapshotBatchExecutionBudget = (
+        CogSnapshotBatchExecutionBudget()
+    ),
     collection_budget: CogCollectionBudget | None = None,
     resume: bool = False,
     replace_existing: bool = False,
@@ -1248,6 +1288,7 @@ def build_velocity_cog_collection(
             resolution=resolution,
             encoding=encoding,
             snapshot_budget=snapshot_budget,
+            batch_execution_budget=batch_execution_budget,
             collection_budget=collection_budget,
         )
         atomic_write_json(lock.metadata_path, {
@@ -1292,7 +1333,50 @@ def build_velocity_cog_collection(
         snapshots_directory = payload / "snapshots"
         emitter.emit("job.started", stage="collection")
         accumulated_cog_bytes = 0
-        for completed, time_index in enumerate(plan.time_indices, start=1):
+        verified_time_indices: set[int] = set()
+        missing_items: list[CogSnapshotBatchItem] = []
+
+        def record_verified_snapshot(
+            directory: Path,
+            time_index: int,
+            *,
+            target: Path,
+            skipped: bool,
+        ) -> None:
+            nonlocal accumulated_cog_bytes
+            record, _shared = _snapshot_record(
+                directory,
+                descriptor,
+                time_index,
+                plan.snapshot_plan,
+                encoding,
+            )
+            accumulated_cog_bytes += record["cogSizeBytes"]
+            _require_collection_size_budget(
+                accumulated_cog_bytes,
+                collection_budget,
+            )
+            if directory != target:
+                os.replace(directory, target)
+            verified_time_indices.add(time_index)
+            atomic_write_json(work / "state.json", {
+                "kind": "geoscratch-flow-field-cog-collection-state",
+                "requestSha256": plan.request_sha256,
+                "verifiedTimeIndices": [
+                    value
+                    for value in plan.time_indices
+                    if value in verified_time_indices
+                ],
+            })
+            emitter.emit(
+                "job.skipped" if skipped else "stage.completed",
+                stage="snapshot",
+                completed=len(verified_time_indices),
+                total=len(plan.time_indices),
+                unit="snapshots",
+            )
+
+        for time_index in plan.time_indices:
             _require_descriptor_matches_plan(
                 read_source_descriptor(descriptor_path),
                 plan,
@@ -1301,24 +1385,11 @@ def build_velocity_cog_collection(
             target = snapshots_directory / f"t{time_index:02d}"
             if target.exists():
                 verify_velocity_cog_snapshot(target)
-                record, _shared = _snapshot_record(
+                record_verified_snapshot(
                     target,
-                    descriptor,
                     time_index,
-                    plan.snapshot_plan,
-                    encoding,
-                )
-                accumulated_cog_bytes += record["cogSizeBytes"]
-                _require_collection_size_budget(
-                    accumulated_cog_bytes,
-                    collection_budget,
-                )
-                emitter.emit(
-                    "job.skipped",
-                    stage="snapshot",
-                    completed=completed,
-                    total=len(plan.time_indices),
-                    unit="snapshots",
+                    target=target,
+                    skipped=True,
                 )
                 continue
             build_parent = work / "snapshot-builds" / f"t{time_index:02d}"
@@ -1334,46 +1405,53 @@ def build_velocity_cog_collection(
                 time_index=time_index,
                 discard_incomplete=discard_incomplete,
             )
-            if recovered is None:
-                result = build_velocity_cog_snapshot(
-                    data_directory,
-                    build_parent / "cog-cache",
-                    time_index=time_index,
-                    descriptor_path=descriptor_path,
-                    topology=topology,
-                    interpolation=interpolation,
-                    resolution=resolution,
-                    encoding=encoding,
-                    budget=snapshot_budget,
-                    progress=progress,
-                    job_id=f"{job_id}-t{time_index:02d}",
+            if recovered is not None:
+                record_verified_snapshot(
+                    recovered,
+                    time_index,
+                    target=target,
+                    skipped=True,
                 )
-                recovered = result.output_directory
-            record, _shared = _snapshot_record(
-                recovered,
+                continue
+            missing_items.append(CogSnapshotBatchItem(
+                time_index=time_index,
+                output_directory=build_parent / "cog-cache",
+                job_id=f"{job_id}-t{time_index:02d}",
+            ))
+
+        chunk_size = batch_execution_budget.max_snapshots
+        for start in range(0, len(missing_items), chunk_size):
+            chunk = tuple(missing_items[start:start + chunk_size])
+            _require_descriptor_matches_plan(
+                read_source_descriptor(descriptor_path),
+                plan,
                 descriptor,
-                time_index,
-                plan.snapshot_plan,
-                encoding,
             )
-            accumulated_cog_bytes += record["cogSizeBytes"]
-            _require_collection_size_budget(
-                accumulated_cog_bytes,
-                collection_budget,
+            results = build_velocity_cog_snapshot_batch(
+                data_directory,
+                items=chunk,
+                descriptor_path=descriptor_path,
+                topology=topology,
+                interpolation=interpolation,
+                resolution=resolution,
+                encoding=encoding,
+                budget=snapshot_budget,
+                execution_budget=batch_execution_budget,
+                progress=progress,
             )
-            os.replace(recovered, target)
-            atomic_write_json(work / "state.json", {
-                "kind": "geoscratch-flow-field-cog-collection-state",
-                "requestSha256": plan.request_sha256,
-                "verifiedTimeIndices": list(plan.time_indices[:completed]),
-            })
-            emitter.emit(
-                "stage.completed",
-                stage="snapshot",
-                completed=completed,
-                total=len(plan.time_indices),
-                unit="snapshots",
+            _require_descriptor_matches_plan(
+                read_source_descriptor(descriptor_path),
+                plan,
+                descriptor,
             )
+            for item, result in zip(chunk, results, strict=True):
+                target = snapshots_directory / f"t{item.time_index:02d}"
+                record_verified_snapshot(
+                    result.output_directory,
+                    item.time_index,
+                    target=target,
+                    skipped=False,
+                )
         records, shared = _collect_snapshot_records(
             snapshots_directory,
             descriptor,
@@ -1486,6 +1564,7 @@ class CogCollectionBudgetAssessment:
     selected_snapshot_count: int
     snapshot_staging_bytes: int
     minimum_free_bytes: int
+    batch_execution_budget: CogSnapshotBatchExecutionBudget
     existing_snapshot_count: int
     existing_snapshot_bytes: int
     remaining_snapshot_count: int
@@ -1506,6 +1585,13 @@ class CogCollectionBudgetAssessment:
                 "estimatedSnapshotBytes": self.budget.estimated_snapshot_bytes,
                 "snapshotMaxStagedBytes": self.snapshot_staging_bytes,
                 "minimumFreeBytes": self.minimum_free_bytes,
+                "batchExecution": {
+                    "maxSnapshots": self.batch_execution_budget.max_snapshots,
+                    "maxStagedBytes": self.batch_execution_budget.max_staged_bytes,
+                    "minimumFreeBytes": (
+                        self.batch_execution_budget.minimum_free_bytes
+                    ),
+                },
             },
             "observed": {
                 "selectedSnapshotCount": self.selected_snapshot_count,
@@ -1619,6 +1705,9 @@ def plan_velocity_cog_collection(
     encoding: CogEncoding = CogEncoding(),
     snapshot_budget: CogBuildBudget = CogBuildBudget(),
     collection_budget: CogCollectionBudget = CogCollectionBudget(),
+    batch_execution_budget: CogSnapshotBatchExecutionBudget = (
+        CogSnapshotBatchExecutionBudget()
+    ),
 ) -> CogCollectionPlan:
     descriptor = read_source_descriptor(descriptor_path)
     selected = canonical_time_indices(time_indices, descriptor.field_count)
@@ -1626,6 +1715,10 @@ def plan_velocity_cog_collection(
         raise TypeError("encoding must be a CogEncoding")
     if not isinstance(collection_budget, CogCollectionBudget):
         raise TypeError("collection_budget must be a CogCollectionBudget")
+    if not isinstance(batch_execution_budget, CogSnapshotBatchExecutionBudget):
+        raise TypeError(
+            "batch_execution_budget must be a CogSnapshotBatchExecutionBudget"
+        )
     output = Path(os.path.abspath(os.fspath(output_directory)))
     if not output.parent.is_dir():
         raise FileNotFoundError(f"COG collection output parent does not exist: {output.parent}")
@@ -1691,6 +1784,10 @@ def plan_velocity_cog_collection(
     )
     remaining_count = len(selected) - existing_count
     available_bytes = shutil.disk_usage(output.parent).free
+    minimum_free_bytes = max(
+        snapshot_budget.minimum_free_bytes,
+        batch_execution_budget.minimum_free_bytes,
+    )
     estimated = collection_budget.estimated_snapshot_bytes
     projected = (
         existing_bytes + estimated * remaining_count
@@ -1698,16 +1795,12 @@ def plan_velocity_cog_collection(
         else (existing_bytes if remaining_count == 0 else None)
     )
     required = (
-        snapshot_budget.minimum_free_bytes
+        minimum_free_bytes
         if remaining_count == 0
         else (
-            None
-            if estimated is None
-            else (
-                estimated * remaining_count
-                + snapshot_budget.max_staged_bytes
-                + snapshot_budget.minimum_free_bytes
-            )
+            (0 if estimated is None else estimated * remaining_count)
+            + batch_execution_budget.max_staged_bytes
+            + minimum_free_bytes
         )
     )
     violations: list[str] = []
@@ -1724,7 +1817,8 @@ def plan_velocity_cog_collection(
         available_bytes=available_bytes,
         selected_snapshot_count=len(selected),
         snapshot_staging_bytes=snapshot_budget.max_staged_bytes,
-        minimum_free_bytes=snapshot_budget.minimum_free_bytes,
+        minimum_free_bytes=minimum_free_bytes,
+        batch_execution_budget=batch_execution_budget,
         existing_snapshot_count=existing_count,
         existing_snapshot_bytes=existing_bytes,
         remaining_snapshot_count=remaining_count,
@@ -1762,6 +1856,7 @@ def _selected_times(arguments: argparse.Namespace, field_count: int) -> tuple[in
 
 def main() -> None:
     snapshot_defaults = CogBuildBudget()
+    batch_defaults = CogSnapshotBatchExecutionBudget()
     collection_defaults = CogCollectionBudget()
     parser = argparse.ArgumentParser(
         description="Plan, build, resume, or verify a temporal Flow Field COG collection"
@@ -1809,6 +1904,22 @@ def main() -> None:
         type=int,
         default=snapshot_defaults.minimum_free_bytes,
     )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        choices=(1, 2),
+        default=batch_defaults.max_snapshots,
+    )
+    parser.add_argument(
+        "--max-batch-staged-bytes",
+        type=int,
+        default=batch_defaults.max_staged_bytes,
+    )
+    parser.add_argument(
+        "--batch-minimum-free-bytes",
+        type=int,
+        default=batch_defaults.minimum_free_bytes,
+    )
     events = parser.add_mutually_exclusive_group()
     events.add_argument("--events-stderr", action="store_true")
     events.add_argument("--events-file", type=Path)
@@ -1853,6 +1964,11 @@ def main() -> None:
         max_collection_bytes=arguments.max_collection_bytes,
         estimated_snapshot_bytes=arguments.estimated_snapshot_bytes,
     )
+    batch_execution_budget = CogSnapshotBatchExecutionBudget(
+        max_snapshots=arguments.batch_size,
+        max_staged_bytes=arguments.max_batch_staged_bytes,
+        minimum_free_bytes=arguments.batch_minimum_free_bytes,
+    )
     if arguments.plan_only:
         if (
             arguments.resume
@@ -1867,6 +1983,7 @@ def main() -> None:
             time_indices=selected,
             descriptor_path=arguments.descriptor,
             snapshot_budget=snapshot_budget,
+            batch_execution_budget=batch_execution_budget,
             collection_budget=collection_budget,
         )
         print(json.dumps(result.manifest(), sort_keys=True))
@@ -1890,6 +2007,7 @@ def main() -> None:
             time_indices=selected,
             descriptor_path=arguments.descriptor,
             snapshot_budget=snapshot_budget,
+            batch_execution_budget=batch_execution_budget,
             collection_budget=collection_budget,
             resume=arguments.resume,
             replace_existing=arguments.replace_existing,
@@ -1900,6 +2018,11 @@ def main() -> None:
         if close_stream and stream is not None:
             stream.close()
     print(json.dumps({
+        "batchExecution": {
+            "maxSnapshots": batch_execution_budget.max_snapshots,
+            "maxStagedBytes": batch_execution_budget.max_staged_bytes,
+            "minimumFreeBytes": batch_execution_budget.minimum_free_bytes,
+        },
         "contentVersion": result.content_version,
         "manifest": str(result.manifest_path),
         "output": str(result.output_directory),

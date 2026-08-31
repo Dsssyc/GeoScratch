@@ -3,11 +3,14 @@ from __future__ import annotations
 import json
 import shutil
 import hashlib
+from types import SimpleNamespace
 
 import pytest
 
 import geoscratch_flow_field_tiles.collection as collection_module
-from geoscratch_flow_field_tiles.cog import CogBuildBudget
+import geoscratch_flow_field_tiles.cog_batch as batch_module
+from geoscratch_flow_field_tiles.cog import CogBuildBudget, verify_velocity_cog_snapshot
+from geoscratch_flow_field_tiles.cog_batch import CogSnapshotBatchExecutionBudget
 from geoscratch_flow_field_tiles.collection import (
     COG_COLLECTION_MARKER,
     CogCollectionBudget,
@@ -103,6 +106,92 @@ def test_collection_publishes_immutable_snapshots_runtime_pages_and_identity(
     }
 
 
+def test_fresh_full_collection_uses_one_batch_two_call(
+    synthetic_source,
+    tmp_path,
+    monkeypatch,
+):
+    calls = []
+    real_builder = collection_module.build_velocity_cog_snapshot_batch
+
+    def record_builder(*args, **kwargs):
+        calls.append(tuple(item.time_index for item in kwargs["items"]))
+        return real_builder(*args, **kwargs)
+
+    monkeypatch.setattr(
+        collection_module,
+        "build_velocity_cog_snapshot_batch",
+        record_builder,
+    )
+
+    result = build_velocity_cog_collection(
+        synthetic_source.directory,
+        tmp_path / "cog-collection",
+        time_indices=(0, 1),
+        descriptor_path=synthetic_source.descriptor_path,
+        resolution=_resolution(),
+        snapshot_budget=_snapshot_budget(),
+        collection_budget=_collection_budget(),
+    )
+
+    assert calls == [(0, 1)]
+    assert verify_velocity_cog_collection(result.output_directory, deep=True)[
+        "timeIndices"
+    ] == (0, 1)
+
+
+def test_batch_size_one_and_two_preserve_collection_identity(
+    synthetic_source,
+    tmp_path,
+    monkeypatch,
+):
+    fixed_free_bytes = 100 * 1024**3
+    monkeypatch.setattr(
+        collection_module.shutil,
+        "disk_usage",
+        lambda _path: SimpleNamespace(free=fixed_free_bytes),
+    )
+    execution_one = CogSnapshotBatchExecutionBudget(
+        max_snapshots=1,
+        max_staged_bytes=64 * 1024 * 1024,
+        minimum_free_bytes=32 * 1024 * 1024,
+    )
+    execution_two = CogSnapshotBatchExecutionBudget(
+        max_snapshots=2,
+        max_staged_bytes=64 * 1024 * 1024,
+        minimum_free_bytes=32 * 1024 * 1024,
+    )
+    first = build_velocity_cog_collection(
+        synthetic_source.directory,
+        tmp_path / "one" / "cog-collection",
+        time_indices=(0, 1),
+        descriptor_path=synthetic_source.descriptor_path,
+        resolution=_resolution(),
+        snapshot_budget=_snapshot_budget(),
+        batch_execution_budget=execution_one,
+        collection_budget=_collection_budget(),
+    )
+    second = build_velocity_cog_collection(
+        synthetic_source.directory,
+        tmp_path / "two" / "cog-collection",
+        time_indices=(0, 1),
+        descriptor_path=synthetic_source.descriptor_path,
+        resolution=_resolution(),
+        snapshot_budget=_snapshot_budget(),
+        batch_execution_budget=execution_two,
+        collection_budget=_collection_budget(),
+    )
+
+    first_manifest = json.loads(first.manifest_path.read_text(encoding="utf-8"))
+    second_manifest = json.loads(second.manifest_path.read_text(encoding="utf-8"))
+    assert first.content_version == second.content_version
+    assert first_manifest["construction"] == second_manifest["construction"]
+    assert first.runtime_manifest_path.read_bytes() == (
+        second.runtime_manifest_path.read_bytes()
+    )
+    assert "batch" not in first_manifest["construction"]["facts"]
+
+
 def test_same_collection_is_verified_and_skipped_without_rewriting(
     built_collection,
     synthetic_source,
@@ -166,14 +255,18 @@ def test_resume_skips_verified_snapshot_and_builds_only_missing_time(
     assert resumed_plan.budget.existing_snapshot_count == 1
     assert resumed_plan.budget.remaining_snapshot_count == 1
     assert resumed_plan.budget.approved
-    called: list[int] = []
-    real_builder = collection_module.build_velocity_cog_snapshot
+    called: list[tuple[int, ...]] = []
+    real_builder = collection_module.build_velocity_cog_snapshot_batch
 
     def record_builder(*args, **kwargs):
-        called.append(kwargs["time_index"])
+        called.append(tuple(item.time_index for item in kwargs["items"]))
         return real_builder(*args, **kwargs)
 
-    monkeypatch.setattr(collection_module, "build_velocity_cog_snapshot", record_builder)
+    monkeypatch.setattr(
+        collection_module,
+        "build_velocity_cog_snapshot_batch",
+        record_builder,
+    )
 
     resumed = build_velocity_cog_collection(
         synthetic_source.directory,
@@ -187,8 +280,158 @@ def test_resume_skips_verified_snapshot_and_builds_only_missing_time(
     )
 
     assert resumed.status == "published"
-    assert called == [1]
+    assert called == [(1,)]
     assert verify_velocity_cog_collection(output, deep=True)["timeIndices"] == (0, 1)
+
+
+def test_resume_promotes_batch_partial_success_and_only_builds_remaining_time(
+    synthetic_source,
+    tmp_path,
+    monkeypatch,
+):
+    output = tmp_path / "cog-collection"
+    plan = plan_velocity_cog_collection(
+        synthetic_source.directory,
+        output,
+        time_indices=(0, 1),
+        descriptor_path=synthetic_source.descriptor_path,
+        resolution=_resolution(),
+        snapshot_budget=_snapshot_budget(),
+        collection_budget=_collection_budget(),
+    )
+    real_finalize = batch_module._finalize_velocity_cog_snapshot
+
+    def fail_second(**kwargs):
+        if kwargs["snapshot"].field_descriptor.time_index == 1:
+            raise RuntimeError("batch t01 finalize failed")
+        return real_finalize(**kwargs)
+
+    monkeypatch.setattr(
+        batch_module,
+        "_finalize_velocity_cog_snapshot",
+        fail_second,
+    )
+    with pytest.raises(RuntimeError, match="t01 finalize failed"):
+        build_velocity_cog_collection(
+            synthetic_source.directory,
+            output,
+            time_indices=(0, 1),
+            descriptor_path=synthetic_source.descriptor_path,
+            resolution=_resolution(),
+            snapshot_budget=_snapshot_budget(),
+            collection_budget=_collection_budget(),
+        )
+
+    work = output.parent / f".{output.name}.work-{plan.request_sha256[:24]}"
+    completed_t00 = work / "snapshot-builds" / "t00" / "cog-cache"
+    assert verify_velocity_cog_snapshot(completed_t00)["contentVersion"].endswith(
+        "-t00-z9-v2"
+    )
+    assert not (work / "snapshot-builds" / "t01" / "cog-cache").exists()
+    partial_plan = plan_velocity_cog_collection(
+        synthetic_source.directory,
+        output,
+        time_indices=(0, 1),
+        descriptor_path=synthetic_source.descriptor_path,
+        resolution=_resolution(),
+        snapshot_budget=_snapshot_budget(),
+        collection_budget=CogCollectionBudget(max_collection_bytes=1024**3),
+    )
+    assert partial_plan.budget.existing_snapshot_count == 1
+    assert partial_plan.budget.remaining_snapshot_count == 1
+    assert partial_plan.budget.required_available_bytes == (
+        CogSnapshotBatchExecutionBudget().max_staged_bytes
+        + CogSnapshotBatchExecutionBudget().minimum_free_bytes
+    )
+    assert partial_plan.budget.approved
+
+    monkeypatch.setattr(
+        batch_module,
+        "_finalize_velocity_cog_snapshot",
+        real_finalize,
+    )
+    calls = []
+    real_batch = collection_module.build_velocity_cog_snapshot_batch
+
+    def record_batch(*args, **kwargs):
+        calls.append(tuple(item.time_index for item in kwargs["items"]))
+        return real_batch(*args, **kwargs)
+
+    monkeypatch.setattr(
+        collection_module,
+        "build_velocity_cog_snapshot_batch",
+        record_batch,
+    )
+    resumed = build_velocity_cog_collection(
+        synthetic_source.directory,
+        output,
+        time_indices=(0, 1),
+        descriptor_path=synthetic_source.descriptor_path,
+        resolution=_resolution(),
+        snapshot_budget=_snapshot_budget(),
+        collection_budget=_collection_budget(),
+        resume=True,
+    )
+
+    assert resumed.status == "published"
+    assert calls == [(1,)]
+    assert verify_velocity_cog_collection(output, deep=True)["timeIndices"] == (0, 1)
+
+
+def test_resume_state_uses_verified_set_for_nonprefix_existing_snapshot(
+    built_collection,
+    synthetic_source,
+    tmp_path,
+    monkeypatch,
+):
+    output = tmp_path / "cog-collection"
+    plan = plan_velocity_cog_collection(
+        synthetic_source.directory,
+        output,
+        time_indices=(0, 1),
+        descriptor_path=synthetic_source.descriptor_path,
+        resolution=_resolution(),
+        snapshot_budget=_snapshot_budget(),
+        collection_budget=_collection_budget(),
+    )
+    work = _prepare_collection_work(output, plan, resume=False)
+    shutil.copytree(
+        built_collection.output_directory / "snapshots" / "t01",
+        work / "payload" / "snapshots" / "t01",
+    )
+    observed_state = []
+    calls = []
+    real_batch = collection_module.build_velocity_cog_snapshot_batch
+
+    def inspect_state(*args, **kwargs):
+        calls.append(tuple(item.time_index for item in kwargs["items"]))
+        observed_state.append(json.loads(
+            work.joinpath("state.json").read_text(encoding="utf-8")
+        )["verifiedTimeIndices"])
+        return real_batch(*args, **kwargs)
+
+    monkeypatch.setattr(
+        collection_module,
+        "build_velocity_cog_snapshot_batch",
+        inspect_state,
+    )
+
+    result = build_velocity_cog_collection(
+        synthetic_source.directory,
+        output,
+        time_indices=(0, 1),
+        descriptor_path=synthetic_source.descriptor_path,
+        resolution=_resolution(),
+        snapshot_budget=_snapshot_budget(),
+        collection_budget=_collection_budget(),
+        resume=True,
+    )
+
+    assert calls == [(0,)]
+    assert observed_state == [[1]]
+    assert verify_velocity_cog_collection(result.output_directory, deep=True)[
+        "timeIndices"
+    ] == (0, 1)
 
 
 def test_collection_verifier_rejects_runtime_manifest_drift(

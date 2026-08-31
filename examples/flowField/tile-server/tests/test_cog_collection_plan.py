@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 import pytest
 
+import geoscratch_flow_field_tiles.collection as collection_module
 from geoscratch_flow_field_tiles.cog import CogBuildBudget
+from geoscratch_flow_field_tiles.cog_batch import CogSnapshotBatchExecutionBudget
 from geoscratch_flow_field_tiles.collection import (
     COG_COLLECTION_MARKER,
     CogCollectionBudget,
@@ -117,6 +120,100 @@ def test_collection_plan_rejects_capacity_without_lowering_resolution(
     assert not plan.budget.approved
     assert plan.snapshot_plan.grid.matrix_id == 9
     with pytest.raises(ValueError, match="collection byte budget"):
+        plan.require_output_approved()
+
+
+def test_collection_plan_accounts_batch_execution_without_changing_request_identity(
+    synthetic_source,
+    tmp_path,
+):
+    output = tmp_path / "cog-collection"
+    custom_execution = CogSnapshotBatchExecutionBudget(
+        max_snapshots=1,
+        max_staged_bytes=128 * 1024 * 1024,
+        minimum_free_bytes=64 * 1024 * 1024,
+    )
+    custom = plan_velocity_cog_collection(
+        synthetic_source.directory,
+        output,
+        time_indices=(0, 1),
+        descriptor_path=synthetic_source.descriptor_path,
+        resolution=_resolution(),
+        snapshot_budget=_snapshot_budget(),
+        collection_budget=CogCollectionBudget(
+            max_collection_bytes=1024**3,
+            estimated_snapshot_bytes=4 * 1024 * 1024,
+        ),
+        batch_execution_budget=custom_execution,
+    )
+    default = plan_velocity_cog_collection(
+        synthetic_source.directory,
+        output,
+        time_indices=(0, 1),
+        descriptor_path=synthetic_source.descriptor_path,
+        resolution=_resolution(),
+        snapshot_budget=_snapshot_budget(),
+        collection_budget=CogCollectionBudget(
+            max_collection_bytes=1024**3,
+            estimated_snapshot_bytes=4 * 1024 * 1024,
+        ),
+    )
+
+    assert custom.request_sha256 == default.request_sha256
+    assert custom.request_facts == default.request_facts
+    assert custom.budget.required_available_bytes == (
+        2 * 4 * 1024 * 1024
+        + custom_execution.max_staged_bytes
+        + custom_execution.minimum_free_bytes
+    )
+    assert custom.manifest()["collectionBudget"]["limits"]["batchExecution"] == {
+        "maxSnapshots": 1,
+        "maxStagedBytes": 128 * 1024 * 1024,
+        "minimumFreeBytes": 64 * 1024 * 1024,
+    }
+    assert "batchExecution" not in custom.request_facts
+
+
+def test_collection_plan_reserves_batch_capacity_without_a_snapshot_estimate(
+    synthetic_source,
+    tmp_path,
+    monkeypatch,
+):
+    available_bytes = 100 * 1024 * 1024
+    monkeypatch.setattr(
+        collection_module.shutil,
+        "disk_usage",
+        lambda _path: SimpleNamespace(free=available_bytes),
+    )
+    snapshot_budget = CogBuildBudget(
+        max_blocks=128,
+        max_raw_pyramid_bytes=256 * 1024 * 1024,
+        max_staged_bytes=1 * 1024 * 1024,
+        minimum_free_bytes=1 * 1024 * 1024,
+    )
+    batch_budget = CogSnapshotBatchExecutionBudget(
+        max_snapshots=1,
+        max_staged_bytes=128 * 1024 * 1024,
+        minimum_free_bytes=64 * 1024 * 1024,
+    )
+
+    plan = plan_velocity_cog_collection(
+        synthetic_source.directory,
+        tmp_path / "cog-collection",
+        time_indices=(0,),
+        descriptor_path=synthetic_source.descriptor_path,
+        resolution=_resolution(),
+        snapshot_budget=snapshot_budget,
+        collection_budget=CogCollectionBudget(max_collection_bytes=1024**3),
+        batch_execution_budget=batch_budget,
+    )
+
+    assert plan.snapshot_plan.budget.approved
+    assert plan.budget.required_available_bytes == 192 * 1024 * 1024
+    assert plan.budget.violations == (
+        f"collection free-space budget {192 * 1024 * 1024} > {available_bytes}",
+    )
+    with pytest.raises(ValueError, match="collection free-space budget"):
         plan.require_output_approved()
 
 
