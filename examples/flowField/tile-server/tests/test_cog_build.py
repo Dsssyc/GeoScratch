@@ -578,6 +578,49 @@ def test_finalizer_failure_preserves_prepared_inputs_and_cleans_staging(
     assert tuple(output.parent.glob(".cog-cache.build-*")) == ()
 
 
+def test_snapshot_cleanup_preserves_a_recreated_active_staging_path(
+    synthetic_source,
+    tmp_path,
+    monkeypatch,
+):
+    output = tmp_path / "recreated-staging" / "cog-cache"
+    recreated = None
+
+    def replace_staging_then_fail(**kwargs):
+        nonlocal recreated
+        staged = kwargs["staged"]
+        moved = staged.with_name(f"{staged.name}.moved")
+        staged.rename(moved)
+        staged.mkdir()
+        staged.joinpath("belongs-to-later-work.txt").write_text(
+            "preserve me\n",
+            encoding="utf-8",
+        )
+        recreated = staged
+        raise RuntimeError("synthetic recreated staging failure")
+
+    monkeypatch.setattr(
+        cog_module,
+        "_finalize_velocity_cog_snapshot",
+        replace_staging_then_fail,
+    )
+
+    with pytest.raises(RuntimeError, match="recreated staging failure"):
+        build_velocity_cog_snapshot(
+            synthetic_source.directory,
+            output,
+            time_index=0,
+            descriptor_path=synthetic_source.descriptor_path,
+            resolution=_test_resolution(),
+        )
+
+    assert recreated is not None
+    assert recreated.joinpath("belongs-to-later-work.txt").read_text(
+        encoding="utf-8"
+    ) == "preserve me\n"
+    assert not output.exists()
+
+
 def test_progress_sink_failure_during_install_rolls_back_previous_artifact(
     synthetic_source,
     tmp_path,
@@ -622,6 +665,37 @@ def test_verifier_rejects_self_consistent_path_traversal(built_cog, tmp_path):
 
     with pytest.raises(ValueError, match="ownership"):
         verify_velocity_cog_snapshot(output)
+
+
+@pytest.mark.parametrize("filename", (COG_ARTIFACT_MARKER, "manifest.json"))
+def test_verifier_rejects_symlinked_snapshot_identity_files(
+    built_cog,
+    tmp_path,
+    filename,
+):
+    output = tmp_path / "cog-cache"
+    shutil.copytree(built_cog.output_directory, output)
+    path = output / filename
+    external = tmp_path / f"external-{filename.lstrip('.')}"
+    path.rename(external)
+    path.symlink_to(external)
+    original = external.read_bytes()
+
+    with pytest.raises(ValueError, match="ownership"):
+        verify_velocity_cog_snapshot(output)
+
+    assert path.is_symlink()
+    assert external.read_bytes() == original
+
+
+def test_verifier_rejects_a_snapshot_root_symlink(built_cog, tmp_path):
+    alias = tmp_path / "cog-cache-alias"
+    alias.symlink_to(built_cog.output_directory, target_is_directory=True)
+
+    with pytest.raises(ValueError, match="ownership"):
+        verify_velocity_cog_snapshot(alias)
+
+    assert alias.is_symlink()
 
 
 def test_verifier_rejects_self_consistent_false_validation_facts(
@@ -684,3 +758,59 @@ def test_replacement_refuses_owned_marker_with_unrelated_residue(
         )
 
     assert residue.read_text(encoding="utf-8") == "belongs to the user\n"
+
+
+def test_successful_snapshot_replacement_retains_the_previous_owned_backup(
+    synthetic_source,
+    tmp_path,
+):
+    output = tmp_path / "cog-cache"
+    first = build_velocity_cog_snapshot(
+        synthetic_source.directory,
+        output,
+        time_index=0,
+        descriptor_path=synthetic_source.descriptor_path,
+        resolution=_test_resolution(),
+    )
+    second = build_velocity_cog_snapshot(
+        synthetic_source.directory,
+        output,
+        time_index=1,
+        descriptor_path=synthetic_source.descriptor_path,
+        resolution=_test_resolution(),
+    )
+
+    backup = second.replaced_backup_directory
+    assert backup is not None and backup.is_dir()
+    assert verify_velocity_cog_snapshot(backup)["contentVersion"] == (
+        first.content_version
+    )
+    assert verify_velocity_cog_snapshot(output)["contentVersion"] == (
+        second.content_version
+    )
+
+
+def test_snapshot_install_preserves_a_dangling_target_that_appears_later(
+    synthetic_source,
+    tmp_path,
+):
+    output = tmp_path / "cog-cache"
+
+    class InjectDanglingTarget:
+        def emit(self, event):
+            if event.event == "stage.started" and event.stage == "install":
+                output.symlink_to(tmp_path / "missing-target", target_is_directory=True)
+
+    with pytest.raises(ValueError, match="changed to unowned content"):
+        build_velocity_cog_snapshot(
+            synthetic_source.directory,
+            output,
+            time_index=0,
+            descriptor_path=synthetic_source.descriptor_path,
+            resolution=_test_resolution(),
+            progress=InjectDanglingTarget(),
+        )
+
+    assert output.is_symlink()
+    assert not output.exists()
+    assert tuple(tmp_path.glob(".cog-cache.build-*")) == ()

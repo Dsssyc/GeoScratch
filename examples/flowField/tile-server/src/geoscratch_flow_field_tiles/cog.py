@@ -6,6 +6,7 @@ import json
 import math
 import os
 import shutil
+import stat
 import tempfile
 import uuid
 from contextlib import ExitStack
@@ -307,6 +308,7 @@ class CogBuildResult:
     content_version: str
     cog_sha256: str
     cog_size_bytes: int
+    replaced_backup_directory: Path | None = None
 
 
 @dataclass(slots=True)
@@ -1315,7 +1317,12 @@ def _is_owned_cog_directory(output: Path) -> bool:
         return False
     marker_path = output / COG_ARTIFACT_MARKER
     manifest_path = output / "manifest.json"
-    if not marker_path.is_file() or not manifest_path.is_file():
+    if (
+        marker_path.is_symlink()
+        or manifest_path.is_symlink()
+        or not marker_path.is_file()
+        or not manifest_path.is_file()
+    ):
         return False
     try:
         marker = json.loads(marker_path.read_text(encoding="utf-8"))
@@ -1344,6 +1351,9 @@ def _is_owned_cog_directory(output: Path) -> bool:
         or not cog_name.endswith(".cog.tif")
     ):
         return False
+    cog_path = output / cog_name
+    if cog_path.is_symlink() or not cog_path.is_file():
+        return False
     allowed_names = {COG_ARTIFACT_MARKER, "manifest.json", cog_name}
     return {entry.name for entry in output.iterdir()} == allowed_names
 
@@ -1353,8 +1363,8 @@ def _install_cog_directory(
     output: Path,
     *,
     commit_callback: Callable[[], None] | None = None,
-) -> None:
-    if not output.exists():
+) -> Path | None:
+    if not os.path.lexists(output):
         os.replace(staged, output)
         try:
             if commit_callback is not None:
@@ -1362,7 +1372,9 @@ def _install_cog_directory(
         except BaseException:
             os.replace(output, staged)
             raise
-        return
+        return None
+    if output.is_symlink() or not _is_owned_cog_directory(output):
+        raise ValueError("Flow Field COG output changed to unowned content during build")
     backup = output.parent / f".{output.name}.backup-{uuid.uuid4().hex}"
     os.replace(output, backup)
     try:
@@ -1374,7 +1386,7 @@ def _install_cog_directory(
             os.replace(output, staged)
         os.replace(backup, output)
         raise
-    shutil.rmtree(backup)
+    return backup
 
 
 def _finalize_velocity_cog_snapshot(
@@ -1520,7 +1532,7 @@ def _finalize_velocity_cog_snapshot(
         )
         emitter.emit("stage.completed", stage="install")
 
-    _install_cog_directory(
+    replaced_backup = _install_cog_directory(
         staged,
         output,
         commit_callback=complete_install,
@@ -1533,6 +1545,7 @@ def _finalize_velocity_cog_snapshot(
         content_version=manifest["contentVersion"],
         cog_sha256=manifest["construction"]["facts"]["cog"]["sha256"],
         cog_size_bytes=installed_cog.stat().st_size,
+        replaced_backup_directory=replaced_backup,
     )
 
 
@@ -1609,6 +1622,8 @@ def build_velocity_cog_snapshot(
     emitter.emit("stage.completed", stage="topology")
 
     staged = Path(tempfile.mkdtemp(prefix=f".{output.name}.build-", dir=output.parent))
+    staged_stat = staged.stat(follow_symlinks=False)
+    staged_identity = (staged_stat.st_dev, staged_stat.st_ino)
     try:
         staging_guard = CogStagingGuard(
             root=staged,
@@ -1655,7 +1670,15 @@ def build_velocity_cog_snapshot(
             emitter=emitter,
         )
     finally:
-        if staged.exists():
+        try:
+            current_stat = staged.stat(follow_symlinks=False)
+        except FileNotFoundError:
+            current_stat = None
+        if (
+            current_stat is not None
+            and stat.S_ISDIR(current_stat.st_mode)
+            and (current_stat.st_dev, current_stat.st_ino) == staged_identity
+        ):
             shutil.rmtree(staged)
     return result
 
@@ -1663,7 +1686,10 @@ def build_velocity_cog_snapshot(
 def verify_velocity_cog_snapshot(
     output_directory: str | Path = DEFAULT_COG_OUTPUT_DIRECTORY,
 ) -> dict[str, Any]:
-    output = Path(output_directory).resolve()
+    requested = Path(os.path.abspath(os.fspath(output_directory)))
+    if requested.is_symlink():
+        raise ValueError("Flow Field COG directory ownership is invalid")
+    output = requested.resolve()
     if not _is_owned_cog_directory(output):
         raise ValueError("Flow Field COG directory ownership is invalid")
     manifest_path = output / "manifest.json"
@@ -1998,6 +2024,11 @@ def main() -> None:
         "cogSizeBytes": result.cog_size_bytes,
         "contentVersion": result.content_version,
         "manifest": str(result.manifest_path),
+        "replacedBackup": (
+            None
+            if result.replaced_backup_directory is None
+            else str(result.replaced_backup_directory)
+        ),
     }, sort_keys=True))
 
 
