@@ -38,6 +38,21 @@ Use `--model-times`, `--unit`, `--basis`, `--time-unit`, `--phase`, and their au
 only when those facts come from the source model. Existing output is never replaced without
 `--overwrite`.
 
+The generator's Delaunay default rejects duplicate coordinates. The repository source is a
+reviewed exception: it contains 11 coincident pairs and therefore requires the same explicit
+duplicate/bridge policy as the committed descriptor when regenerating it:
+
+```bash
+examples/flowField/tile-server/.venv/bin/flow-field-source-describe \
+  --source examples/public/json/examples/flow \
+  --output /path/to/source-dataset.json \
+  --dataset-id geoscratch-flow-field-velocity \
+  --source-revision station-uv-sha256-v1 \
+  --duplicate-policy mean \
+  --maximum-edge-ratio 16 \
+  --maximum-edge-length-meters 5000
+```
+
 ## Deterministic construction
 
 The repository source descriptor is schema version 2. Its current strategy is explicitly:
