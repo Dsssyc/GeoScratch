@@ -21,7 +21,10 @@ from geoscratch_flow_field_tiles.collection import (
     plan_velocity_cog_collection,
     verify_velocity_cog_collection,
 )
-from geoscratch_flow_field_tiles.resolution import StationSpacingResolution
+from geoscratch_flow_field_tiles.resolution import (
+    FixedWebMercatorResolution,
+    StationSpacingResolution,
+)
 from geoscratch_flow_field_tiles.job_control import (
     OutputLock,
     OutputLockConflictError,
@@ -70,6 +73,20 @@ def built_collection(synthetic_source, tmp_path_factory):
         time_indices=(0, 1),
         descriptor_path=synthetic_source.descriptor_path,
         resolution=_resolution(),
+        snapshot_budget=_snapshot_budget(),
+        collection_budget=_collection_budget(),
+    )
+
+
+@pytest.fixture(scope="module")
+def fixed_collection(synthetic_source, tmp_path_factory):
+    output = tmp_path_factory.mktemp("flow-fixed-cog-collection") / "cog-collection"
+    return build_velocity_cog_collection(
+        synthetic_source.directory,
+        output,
+        time_indices=(0,),
+        descriptor_path=synthetic_source.descriptor_path,
+        resolution=FixedWebMercatorResolution(10),
         snapshot_budget=_snapshot_budget(),
         collection_budget=_collection_budget(),
     )
@@ -160,10 +177,16 @@ def test_fresh_full_collection_uses_one_batch_two_call(
     ] == (0, 1)
 
 
+@pytest.mark.parametrize(
+    "resolution",
+    (_resolution(), FixedWebMercatorResolution(10)),
+    ids=("statistical", "explicit-z10"),
+)
 def test_batch_size_one_and_two_preserve_collection_identity(
     synthetic_source,
     tmp_path,
     monkeypatch,
+    resolution,
 ):
     fixed_free_bytes = 100 * 1024**3
     monkeypatch.setattr(
@@ -186,7 +209,7 @@ def test_batch_size_one_and_two_preserve_collection_identity(
         tmp_path / "one" / "cog-collection",
         time_indices=(0, 1),
         descriptor_path=synthetic_source.descriptor_path,
-        resolution=_resolution(),
+        resolution=resolution,
         snapshot_budget=_snapshot_budget(),
         batch_execution_budget=execution_one,
         collection_budget=_collection_budget(),
@@ -196,7 +219,7 @@ def test_batch_size_one_and_two_preserve_collection_identity(
         tmp_path / "two" / "cog-collection",
         time_indices=(0, 1),
         descriptor_path=synthetic_source.descriptor_path,
-        resolution=_resolution(),
+        resolution=resolution,
         snapshot_budget=_snapshot_budget(),
         batch_execution_budget=execution_two,
         collection_budget=_collection_budget(),
@@ -498,6 +521,35 @@ def test_collection_verifier_rejects_root_symlink_alias(
 
     with pytest.raises(ValueError, match="symbolic link"):
         verify_velocity_cog_collection(alias, deep=False)
+
+
+def test_fixed_collection_identity_only_verification_cross_checks_resolution(
+    fixed_collection,
+    tmp_path,
+):
+    verified = verify_velocity_cog_collection(
+        fixed_collection.output_directory,
+        deep=False,
+    )
+    assert verified["contentVersion"] == fixed_collection.content_version
+
+    output = tmp_path / "cog-collection"
+    shutil.copytree(fixed_collection.output_directory, output)
+    manifest_path = output / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    plan = manifest["construction"]["facts"]["sharedSnapshotContract"]["plan"]
+    plan["resolution"]["requested"]["matrixId"] = "09"
+    manifest["construction"]["sha256"] = hashlib.sha256(
+        json.dumps(
+            manifest["construction"]["facts"],
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="resolution identity"):
+        verify_velocity_cog_collection(output, deep=False)
 
 
 def test_collection_validator_rejects_self_consistent_adapter_drift(

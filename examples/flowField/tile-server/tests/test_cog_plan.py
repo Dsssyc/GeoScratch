@@ -13,7 +13,10 @@ from geoscratch_flow_field_tiles.cog import (
     build_velocity_cog_snapshot,
     plan_velocity_cog_snapshot,
 )
-from geoscratch_flow_field_tiles.resolution import StationSpacingResolution
+from geoscratch_flow_field_tiles.resolution import (
+    FixedWebMercatorResolution,
+    StationSpacingResolution,
+)
 from geoscratch_flow_field_tiles.topology import project_lon_lat
 
 
@@ -92,6 +95,37 @@ def test_statistical_matrix_and_semantic_overviews_are_visible_and_budgeted(
     ] == (
         plan.grid.raw_bytes + plan.overview_levels[0].raw_bytes
     )
+
+
+def test_fixed_matrix_is_explicit_and_does_not_claim_spacing_evidence(
+    synthetic_source,
+    tmp_path,
+):
+    plan = plan_velocity_cog_snapshot(
+        synthetic_source.stations,
+        (
+            float(synthetic_source.stations[:, 0].min()),
+            float(synthetic_source.stations[:, 1].min()),
+            float(synthetic_source.stations[:, 0].max()),
+            float(synthetic_source.stations[:, 1].max()),
+        ),
+        tmp_path,
+        resolution=FixedWebMercatorResolution(10),
+    )
+
+    assert plan.grid.matrix_id == plan.selection.matrix_id == 10
+    manifest = plan.manifest()
+    assert manifest["resolution"]["requested"] == {
+        "kind": "fixed-web-mercator-matrix",
+        "matrixSet": "WebMercatorQuad",
+        "matrixId": "10",
+    }
+    assert "selectedMode" not in manifest["resolution"]
+    assert manifest["matrixDecision"] == {
+        "selectedMatrixId": "10",
+        "outputMatrixId": "10",
+        "relation": "explicitly-requested",
+    }
 
 
 def test_build_enforces_a_rejected_default_plan_without_writing(

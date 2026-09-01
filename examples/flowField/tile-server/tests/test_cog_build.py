@@ -15,7 +15,10 @@ from geoscratch_flow_field_tiles.cog import (
     build_velocity_cog_snapshot,
     verify_velocity_cog_snapshot,
 )
-from geoscratch_flow_field_tiles.resolution import StationSpacingResolution
+from geoscratch_flow_field_tiles.resolution import (
+    FixedWebMercatorResolution,
+    StationSpacingResolution,
+)
 
 
 class RecordingProgressSink:
@@ -133,6 +136,18 @@ def built_cog(synthetic_source, tmp_path_factory):
         time_index=0,
         descriptor_path=synthetic_source.descriptor_path,
         resolution=_test_resolution(),
+    )
+
+
+@pytest.fixture(scope="module")
+def fixed_cog(synthetic_source, tmp_path_factory):
+    output = tmp_path_factory.mktemp("flow-fixed-cog-parent") / "cog-cache"
+    return build_velocity_cog_snapshot(
+        synthetic_source.directory,
+        output,
+        time_index=0,
+        descriptor_path=synthetic_source.descriptor_path,
+        resolution=FixedWebMercatorResolution(10),
     )
 
 
@@ -259,6 +274,48 @@ def test_cog_verifier_checks_container_and_pixel_identity(built_cog):
     assert facts["cogSha256"] == built_cog.cog_sha256
     assert facts["matrixId"] == "9"
     assert facts["particleSimulation"] == "not-approved"
+
+
+def test_fixed_resolution_build_round_trips_through_deep_verification(fixed_cog):
+    manifest = json.loads(fixed_cog.manifest_path.read_text(encoding="utf-8"))
+    plan = manifest["construction"]["facts"]["plan"]
+
+    assert plan["resolution"]["requested"] == {
+        "kind": "fixed-web-mercator-matrix",
+        "matrixSet": "WebMercatorQuad",
+        "matrixId": "10",
+    }
+    assert plan["matrixDecision"] == {
+        "selectedMatrixId": "10",
+        "outputMatrixId": "10",
+        "relation": "explicitly-requested",
+    }
+    assert verify_velocity_cog_snapshot(fixed_cog.output_directory)["matrixId"] == "10"
+
+
+@pytest.mark.parametrize("field", ("requested", "resolved", "matrixDecision"))
+def test_verifier_rejects_self_consistent_fixed_resolution_tampering(
+    fixed_cog,
+    tmp_path,
+    field,
+):
+    output = tmp_path / field / "cog-cache"
+    output.parent.mkdir()
+    shutil.copytree(fixed_cog.output_directory, output)
+
+    def mutate(manifest):
+        plan = manifest["construction"]["facts"]["plan"]
+        if field == "requested":
+            plan["resolution"]["requested"]["matrixId"] = "09"
+        elif field == "resolved":
+            plan["resolution"]["resolved"]["matrixPixelSizeMeters"] += 1.0
+        else:
+            plan["matrixDecision"]["relation"] = "statistically-selected"
+
+    _rewrite_construction_identity(output, mutate)
+
+    with pytest.raises(ValueError, match="resolution|matrix decision"):
+        verify_velocity_cog_snapshot(output)
 
 
 def test_repeated_snapshot_build_preserves_pixels_and_content_identity(

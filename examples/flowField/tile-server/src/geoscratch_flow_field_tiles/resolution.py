@@ -93,7 +93,33 @@ class StationSpacingResolution:
         }
 
 
-ResolutionSpec: TypeAlias = StationSpacingResolution
+@dataclass(frozen=True, slots=True)
+class FixedWebMercatorResolution:
+    """Selects one explicit OGC WebMercatorQuad matrix as the COG base grid."""
+
+    matrix_id: int
+    kind: Literal["fixed-web-mercator-matrix"] = field(
+        default="fixed-web-mercator-matrix",
+        init=False,
+    )
+
+    def __post_init__(self) -> None:
+        if (
+            isinstance(self.matrix_id, bool)
+            or not isinstance(self.matrix_id, int)
+            or not 0 <= self.matrix_id <= 24
+        ):
+            raise ValueError("matrix_id must be an integer in [0, 24]")
+
+    def manifest(self) -> dict[str, Any]:
+        return {
+            "kind": self.kind,
+            "matrixSet": "WebMercatorQuad",
+            "matrixId": str(self.matrix_id),
+        }
+
+
+ResolutionSpec: TypeAlias = StationSpacingResolution | FixedWebMercatorResolution
 
 
 @dataclass(frozen=True, slots=True)
@@ -160,11 +186,206 @@ class ResolutionSelection:
             },
         }
 
+    @property
+    def matrix_relation(self) -> Literal["statistically-selected"]:
+        return "statistically-selected"
 
-def resolve_resolution(value: object | None) -> StationSpacingResolution:
+
+@dataclass(frozen=True, slots=True)
+class FixedResolutionSelection:
+    """Immutable evidence for one explicitly selected WebMercator resolution."""
+
+    strategy: FixedWebMercatorResolution
+    source_station_count: int
+    unique_station_count: int
+    duplicate_station_count: int
+    matrix_id: int
+    matrix_pixel_size_meters: float
+
+    def manifest(self) -> dict[str, Any]:
+        return {
+            "requested": self.strategy.manifest(),
+            "resolved": {
+                "matrixSet": "WebMercatorQuad",
+                "matrixId": str(self.matrix_id),
+                "matrixPixelSizeMeters": self.matrix_pixel_size_meters,
+            },
+            "sourceStationCount": self.source_station_count,
+            "uniqueStationCount": self.unique_station_count,
+            "duplicateStationCount": self.duplicate_station_count,
+        }
+
+    @property
+    def matrix_relation(self) -> Literal["explicitly-requested"]:
+        return "explicitly-requested"
+
+
+SelectedResolution: TypeAlias = ResolutionSelection | FixedResolutionSelection
+
+
+def validate_resolution_selection_manifest(
+    value: object,
+    *,
+    source_station_count: object,
+) -> tuple[int, str]:
+    """Validates a persisted resolution choice and returns its matrix and relation."""
+
+    if not isinstance(value, dict):
+        raise ValueError("Flow Field COG resolution selection is invalid")
+    requested = value.get("requested")
+    resolved = value.get("resolved")
+    if not isinstance(requested, dict) or not isinstance(resolved, dict):
+        raise ValueError("Flow Field COG resolution selection is invalid")
+    kind = requested.get("kind")
+    if kind == "fixed-web-mercator-matrix":
+        expected_keys = {
+            "requested",
+            "resolved",
+            "sourceStationCount",
+            "uniqueStationCount",
+            "duplicateStationCount",
+        }
+        if set(value) != expected_keys:
+            raise ValueError("Flow Field COG fixed resolution selection is invalid")
+        try:
+            matrix_id = _manifest_matrix_id(requested["matrixId"])
+            strategy = FixedWebMercatorResolution(matrix_id)
+        except (KeyError, TypeError, ValueError) as error:
+            raise ValueError(
+                "Flow Field COG fixed resolution selection is invalid"
+            ) from error
+        expected_resolved = {
+            "matrixSet": "WebMercatorQuad",
+            "matrixId": str(matrix_id),
+            "matrixPixelSizeMeters": web_mercator_matrix_pixel_size(matrix_id),
+        }
+        if requested != strategy.manifest() or resolved != expected_resolved:
+            raise ValueError("Flow Field COG fixed resolution selection is invalid")
+        _validate_station_counts(value, source_station_count)
+        return matrix_id, "explicitly-requested"
+    if kind != "station-spacing-supported-mode":
+        raise ValueError("Flow Field COG resolution strategy is unsupported")
+    expected_keys = {
+        "requested",
+        "resolved",
+        "sourceStationCount",
+        "uniqueStationCount",
+        "duplicateStationCount",
+        "localSpacingStatistic",
+        "supportThreshold",
+        "selectedMode",
+        "candidateModes",
+        "targetPixelSizeMeters",
+        "spacingQuantilesMeters",
+    }
+    if set(value) != expected_keys:
+        raise ValueError("Flow Field COG statistical resolution selection is invalid")
+    try:
+        strategy = StationSpacingResolution(
+            histogram_bin_width_octaves=requested["histogramBinWidthOctaves"],
+            support_half_width_octaves=requested["supportHalfWidthOctaves"],
+            minimum_support_fraction=requested["minimumSupportFraction"],
+            minimum_support_points=requested["minimumSupportPoints"],
+            minimum_prominence_ratio=requested["minimumProminenceRatio"],
+            samples_per_spacing=requested["samplesPerSpacing"],
+            snap=requested["snap"],
+            minimum_matrix=requested["minimumMatrix"],
+            maximum_matrix=requested["maximumMatrix"],
+        )
+        matrix_id = _manifest_matrix_id(resolved["matrixId"])
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError(
+            "Flow Field COG statistical resolution selection is invalid"
+        ) from error
+    if requested != strategy.manifest():
+        raise ValueError("Flow Field COG statistical resolution selection is invalid")
+    unique_station_count = _validate_station_counts(value, source_station_count)
+    selected_mode = value["selectedMode"]
+    candidate_modes = value["candidateModes"]
+    if (
+        value["localSpacingStatistic"] != "nearest-non-self"
+        or not isinstance(candidate_modes, list)
+        or not candidate_modes
+        or selected_mode != candidate_modes[0]
+    ):
+        raise ValueError("Flow Field COG statistical resolution selection is invalid")
+    validated_modes = tuple(
+        _validate_spacing_mode(mode, unique_station_count=unique_station_count)
+        for mode in candidate_modes
+    )
+    selected_spacing = validated_modes[0][0]
+    support_threshold = value["supportThreshold"]
+    expected_support_threshold = max(
+        strategy.minimum_support_points,
+        math.ceil(strategy.minimum_support_fraction * unique_station_count),
+    )
+    target_pixel_size = selected_spacing / strategy.samples_per_spacing
+    try:
+        expected_matrix = _select_matrix_for_target_pixel_size(
+            target_pixel_size,
+            minimum_matrix=strategy.minimum_matrix,
+            maximum_matrix=strategy.maximum_matrix,
+        )
+    except ValueError as error:
+        raise ValueError(
+            "Flow Field COG statistical resolution selection is invalid"
+        ) from error
+    matrix_pixel_size = web_mercator_matrix_pixel_size(matrix_id)
+    resolved_samples_per_spacing = selected_spacing / matrix_pixel_size
+    if not _finite_positive(resolved_samples_per_spacing):
+        raise ValueError("Flow Field COG statistical resolution selection is invalid")
+    expected_resolved = {
+        "matrixSet": "WebMercatorQuad",
+        "matrixId": str(matrix_id),
+        "matrixPixelSizeMeters": matrix_pixel_size,
+        "resolvedSamplesPerSpacing": resolved_samples_per_spacing,
+    }
+    quantiles = value["spacingQuantilesMeters"]
+    quantile_keys = (
+        "minimum",
+        "p01",
+        "p05",
+        "p10",
+        "p25",
+        "p50",
+        "p90",
+        "p99",
+        "maximum",
+    )
+    if (
+        isinstance(support_threshold, bool)
+        or not isinstance(support_threshold, int)
+        or support_threshold != expected_support_threshold
+        or any(mode[1] < support_threshold for mode in validated_modes)
+        or any(
+            mode[2] < strategy.minimum_prominence_ratio
+            or abs(math.log2(mode[0]) - math.log2(mode[3]))
+            > strategy.support_half_width_octaves
+            for mode in validated_modes
+        )
+        or any(
+            left[3] >= right[3]
+            for left, right in zip(validated_modes, validated_modes[1:])
+        )
+        or matrix_id != expected_matrix
+        or resolved != expected_resolved
+        or value["targetPixelSizeMeters"] != target_pixel_size
+        or not isinstance(quantiles, dict)
+        or set(quantiles) != set(quantile_keys)
+        or not all(_finite_positive(quantiles[key]) for key in quantile_keys)
+        or any(
+            quantiles[left] > quantiles[right]
+            for left, right in zip(quantile_keys, quantile_keys[1:])
+        )
+    ):
+        raise ValueError("Flow Field COG statistical resolution selection is invalid")
+    return matrix_id, "statistically-selected"
+
+
+def resolve_resolution(value: object | None) -> ResolutionSpec:
     if value is None:
         return StationSpacingResolution()
-    if isinstance(value, StationSpacingResolution):
+    if isinstance(value, (StationSpacingResolution, FixedWebMercatorResolution)):
         return value
     raise UnsupportedResolutionError(
         f"unsupported Flow Field resolution specification: {type(value).__name__}"
@@ -174,7 +395,7 @@ def resolve_resolution(value: object | None) -> StationSpacingResolution:
 def select_resolution(
     stations: np.ndarray,
     resolution: ResolutionSpec | None = None,
-) -> ResolutionSelection:
+) -> SelectedResolution:
     strategy = resolve_resolution(resolution)
     coordinates = np.asarray(stations, dtype=np.float64)
     if coordinates.ndim != 2 or coordinates.shape[1] != 2:
@@ -184,6 +405,18 @@ def select_resolution(
     unique = np.unique(coordinates, axis=0)
     if unique.shape[0] < 3:
         raise ValueError("resolution selection requires at least three unique stations")
+    source_station_count = int(coordinates.shape[0])
+    unique_station_count = int(unique.shape[0])
+    duplicate_station_count = source_station_count - unique_station_count
+    if isinstance(strategy, FixedWebMercatorResolution):
+        return FixedResolutionSelection(
+            strategy=strategy,
+            source_station_count=source_station_count,
+            unique_station_count=unique_station_count,
+            duplicate_station_count=duplicate_station_count,
+            matrix_id=strategy.matrix_id,
+            matrix_pixel_size_meters=web_mercator_matrix_pixel_size(strategy.matrix_id),
+        )
     projected = project_lon_lat(unique)
     distances, _indices = cKDTree(projected).query(projected, k=2, workers=-1)
     nearest = distances[:, 1]
@@ -241,13 +474,12 @@ def select_resolution(
         raise ValueError("no statistically supported station-spacing mode was found")
     selected = candidates[0]
     target_pixel_size = selected.effective_spacing_meters / strategy.samples_per_spacing
-    matrix_id = math.ceil(math.log2(
-        web_mercator_matrix_pixel_size(0) / target_pixel_size
-    ))
-    matrix_id = max(strategy.minimum_matrix, min(strategy.maximum_matrix, matrix_id))
+    matrix_id = _select_matrix_for_target_pixel_size(
+        target_pixel_size,
+        minimum_matrix=strategy.minimum_matrix,
+        maximum_matrix=strategy.maximum_matrix,
+    )
     matrix_pixel_size = web_mercator_matrix_pixel_size(matrix_id)
-    if matrix_pixel_size > target_pixel_size and matrix_id == strategy.maximum_matrix:
-        raise ValueError("maximum_matrix is too coarse for the selected station spacing")
     quantile_records = tuple(
         (label, float(np.quantile(nearest, quantile, method="linear")))
         for label, quantile in (
@@ -264,9 +496,9 @@ def select_resolution(
     )
     return ResolutionSelection(
         strategy=strategy,
-        source_station_count=int(coordinates.shape[0]),
-        unique_station_count=int(unique.shape[0]),
-        duplicate_station_count=int(coordinates.shape[0] - unique.shape[0]),
+        source_station_count=source_station_count,
+        unique_station_count=unique_station_count,
+        duplicate_station_count=duplicate_station_count,
         support_threshold=support_threshold,
         selected_mode=selected,
         candidate_modes=tuple(candidates),
@@ -283,12 +515,103 @@ def web_mercator_matrix_pixel_size(matrix_id: int) -> float:
     return 2.0 * math.pi * WEB_MERCATOR_RADIUS / (256 * (1 << matrix_id))
 
 
+def _select_matrix_for_target_pixel_size(
+    target_pixel_size: float,
+    *,
+    minimum_matrix: int,
+    maximum_matrix: int,
+) -> int:
+    if not _finite_positive(target_pixel_size):
+        raise ValueError("target pixel size must be finite and positive")
+    for matrix_id in range(minimum_matrix, maximum_matrix + 1):
+        if web_mercator_matrix_pixel_size(matrix_id) <= target_pixel_size:
+            return matrix_id
+    raise ValueError("maximum_matrix is too coarse for the selected station spacing")
+
+
 def _finite_positive(value: object) -> bool:
     return (
         not isinstance(value, bool)
         and isinstance(value, (int, float))
         and math.isfinite(value)
         and value > 0.0
+    )
+
+
+def _manifest_matrix_id(value: object) -> int:
+    if not isinstance(value, str) or not value.isascii() or not value.isdecimal():
+        raise ValueError("matrixId must be an unsigned decimal string")
+    matrix_id = int(value)
+    if str(matrix_id) != value or not 0 <= matrix_id <= 24:
+        raise ValueError("matrixId must identify a matrix in [0, 24]")
+    return matrix_id
+
+
+def _validate_station_counts(value: dict[str, Any], source_station_count: object) -> int:
+    unique_station_count = value.get("uniqueStationCount")
+    duplicate_station_count = value.get("duplicateStationCount")
+    if (
+        isinstance(source_station_count, bool)
+        or not isinstance(source_station_count, int)
+        or source_station_count < 3
+        or value.get("sourceStationCount") != source_station_count
+        or isinstance(unique_station_count, bool)
+        or not isinstance(unique_station_count, int)
+        or unique_station_count < 3
+        or unique_station_count > source_station_count
+        or isinstance(duplicate_station_count, bool)
+        or not isinstance(duplicate_station_count, int)
+        or duplicate_station_count != source_station_count - unique_station_count
+    ):
+        raise ValueError("Flow Field COG resolution station counts are invalid")
+    return unique_station_count
+
+
+def _validate_spacing_mode(
+    value: object,
+    *,
+    unique_station_count: int,
+) -> tuple[float, int, float, float]:
+    expected_keys = {
+        "peakCenterMeters",
+        "effectiveSpacingMeters",
+        "supportCount",
+        "supportFraction",
+        "prominenceRatio",
+    }
+    if not isinstance(value, dict) or set(value) != expected_keys:
+        raise ValueError("Flow Field COG statistical spacing mode is invalid")
+    support_count = value["supportCount"]
+    support_fraction = value["supportFraction"]
+    prominence_ratio = value["prominenceRatio"]
+    peak_center = value["peakCenterMeters"]
+    effective_spacing = value["effectiveSpacingMeters"]
+    if (
+        not _finite_positive(peak_center)
+        or not _finite_positive(effective_spacing)
+        or isinstance(support_count, bool)
+        or not isinstance(support_count, int)
+        or support_count <= 0
+        or support_count > unique_station_count
+        or not _finite_positive_at_most_one(support_fraction)
+        or support_fraction != support_count / unique_station_count
+        or not _finite_positive_at_most_one(prominence_ratio)
+    ):
+        raise ValueError("Flow Field COG statistical spacing mode is invalid")
+    return (
+        float(effective_spacing),
+        support_count,
+        float(prominence_ratio),
+        float(peak_center),
+    )
+
+
+def _finite_positive_at_most_one(value: object) -> bool:
+    return (
+        not isinstance(value, bool)
+        and isinstance(value, (int, float))
+        and math.isfinite(value)
+        and 0.0 < value <= 1.0
     )
 
 

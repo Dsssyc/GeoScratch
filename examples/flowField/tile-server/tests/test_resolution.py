@@ -1,16 +1,21 @@
 from __future__ import annotations
 
+import copy
+
 import numpy as np
 import pytest
 import geoscratch_flow_field_tiles.resolution as resolution_module
 
 from geoscratch_flow_field_tiles import (
+    FixedWebMercatorResolution,
     StationSpacingResolution,
     UnsupportedResolutionError,
 )
 from geoscratch_flow_field_tiles.resolution import (
+    _select_matrix_for_target_pixel_size,
     resolve_resolution,
     select_resolution,
+    validate_resolution_selection_manifest,
     web_mercator_matrix_pixel_size,
 )
 
@@ -61,6 +66,39 @@ def test_selection_is_invariant_to_station_order():
     assert first == second
 
 
+def test_fixed_web_mercator_resolution_skips_spacing_statistics(monkeypatch):
+    class UnexpectedTree:
+        def __init__(self, _points):
+            raise AssertionError("fixed resolution must not construct a spacing tree")
+
+    monkeypatch.setattr(resolution_module, "cKDTree", UnexpectedTree)
+    stations = np.vstack((_regular_grid(0.001), _regular_grid(0.001)[0]))
+
+    selection = select_resolution(stations, FixedWebMercatorResolution(10))
+
+    assert selection.matrix_id == 10
+    assert selection.matrix_pixel_size_meters == web_mercator_matrix_pixel_size(10)
+    assert selection.source_station_count == 145
+    assert selection.unique_station_count == 144
+    assert selection.duplicate_station_count == 1
+    assert selection.manifest() == {
+        "requested": {
+            "kind": "fixed-web-mercator-matrix",
+            "matrixSet": "WebMercatorQuad",
+            "matrixId": "10",
+        },
+        "resolved": {
+            "matrixSet": "WebMercatorQuad",
+            "matrixId": "10",
+            "matrixPixelSizeMeters": web_mercator_matrix_pixel_size(10),
+        },
+        "sourceStationCount": 145,
+        "uniqueStationCount": 144,
+        "duplicateStationCount": 1,
+    }
+    assert selection.matrix_relation == "explicitly-requested"
+
+
 def test_supported_nested_fine_grid_resolves_a_finer_matrix():
     coarse = _regular_grid(0.004, 16)
     fine = _regular_grid(0.0005, 10) + [0.02, 0.02]
@@ -80,6 +118,33 @@ def test_selected_matrix_is_not_coarser_than_the_target_pixel_size():
     if selection.matrix_id > selection.strategy.minimum_matrix:
         assert web_mercator_matrix_pixel_size(selection.matrix_id - 1) > (
             selection.target_pixel_size_meters
+        )
+
+
+def test_matrix_selection_is_exact_at_adjacent_float_thresholds():
+    for matrix_id in range(24):
+        threshold = web_mercator_matrix_pixel_size(matrix_id)
+        assert _select_matrix_for_target_pixel_size(
+            threshold,
+            minimum_matrix=0,
+            maximum_matrix=24,
+        ) == matrix_id
+        assert _select_matrix_for_target_pixel_size(
+            np.nextafter(threshold, 0.0),
+            minimum_matrix=0,
+            maximum_matrix=24,
+        ) == matrix_id + 1
+        assert _select_matrix_for_target_pixel_size(
+            np.nextafter(threshold, np.inf),
+            minimum_matrix=0,
+            maximum_matrix=24,
+        ) == matrix_id
+
+    with pytest.raises(ValueError, match="maximum_matrix"):
+        _select_matrix_for_target_pixel_size(
+            np.nextafter(web_mercator_matrix_pixel_size(24), 0.0),
+            minimum_matrix=0,
+            maximum_matrix=24,
         )
 
 
@@ -126,13 +191,70 @@ def test_resolution_manifest_freezes_the_supported_mode_algorithm():
     assert requested["peakSelection"] == "leftmost-supported"
 
 
+def test_statistical_manifest_validator_rejects_self_consistent_false_evidence():
+    stations = _regular_grid(0.001)
+    manifest = select_resolution(stations, _test_strategy()).manifest()
+    assert validate_resolution_selection_manifest(
+        manifest,
+        source_station_count=stations.shape[0],
+    )[1] == "statistically-selected"
+
+    false_fraction = copy.deepcopy(manifest)
+    false_fraction["selectedMode"]["supportFraction"] = 0.5
+    false_fraction["candidateModes"][0]["supportFraction"] = 0.5
+    with pytest.raises(ValueError, match="statistical"):
+        validate_resolution_selection_manifest(
+            false_fraction,
+            source_station_count=stations.shape[0],
+        )
+
+    false_prominence = copy.deepcopy(manifest)
+    false_prominence["selectedMode"]["prominenceRatio"] = 0.01
+    false_prominence["candidateModes"][0]["prominenceRatio"] = 0.01
+    with pytest.raises(ValueError, match="statistical"):
+        validate_resolution_selection_manifest(
+            false_prominence,
+            source_station_count=stations.shape[0],
+        )
+
+    clipped_too_coarse = copy.deepcopy(manifest)
+    spacing = clipped_too_coarse["selectedMode"]["effectiveSpacingMeters"]
+    z0_pixel_size = web_mercator_matrix_pixel_size(0)
+    clipped_too_coarse["requested"]["maximumMatrix"] = 0
+    clipped_too_coarse["resolved"] = {
+        "matrixSet": "WebMercatorQuad",
+        "matrixId": "0",
+        "matrixPixelSizeMeters": z0_pixel_size,
+        "resolvedSamplesPerSpacing": spacing / z0_pixel_size,
+    }
+    with pytest.raises(ValueError, match="statistical"):
+        validate_resolution_selection_manifest(
+            clipped_too_coarse,
+            source_station_count=stations.shape[0],
+        )
+
+    for tiny_spacing in (5.0e-324, 1.0e-323):
+        underflowed = copy.deepcopy(manifest)
+        underflowed["selectedMode"]["effectiveSpacingMeters"] = tiny_spacing
+        underflowed["candidateModes"][0]["effectiveSpacingMeters"] = tiny_spacing
+        with pytest.raises(ValueError):
+            validate_resolution_selection_manifest(
+                underflowed,
+                source_station_count=stations.shape[0],
+            )
+
+
 def test_resolution_contract_rejects_invalid_and_unimplemented_modes():
+    assert resolve_resolution(None) == StationSpacingResolution()
     with pytest.raises(ValueError, match="histogram_bin_width_octaves"):
         StationSpacingResolution(histogram_bin_width_octaves=0.0)
     with pytest.raises(ValueError, match="minimum_support_fraction"):
         StationSpacingResolution(minimum_support_fraction=1.0)
     with pytest.raises(ValueError, match="samples_per_spacing"):
         StationSpacingResolution(samples_per_spacing=0.0)
+    for matrix_id in (True, -1, 25, 10.0):
+        with pytest.raises(ValueError, match="matrix_id"):
+            FixedWebMercatorResolution(matrix_id)  # type: ignore[arg-type]
     with pytest.raises(UnsupportedResolutionError) as error:
         resolve_resolution({"kind": "minimum-distance"})
 

@@ -9,6 +9,8 @@ from .contracts import (
     UnsupportedTopologyError,
 )
 from .resolution import (
+    FixedResolutionSelection,
+    FixedWebMercatorResolution,
     ResolutionSelection,
     StationSpacingResolution,
     UnsupportedResolutionError,
@@ -25,6 +27,8 @@ __version__ = PACKAGE_VERSION
 
 __all__ = [
     "DelaunayTopology",
+    "FixedResolutionSelection",
+    "FixedWebMercatorResolution",
     "ResolutionSelection",
     "SourceAuthority",
     "SourceDescriptor",

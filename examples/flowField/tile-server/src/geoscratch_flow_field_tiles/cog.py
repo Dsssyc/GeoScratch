@@ -38,9 +38,11 @@ from .cog_overviews import (
 from .interpolation import apply_bilinear_safe_block, prepare_triangle_linear_stencil
 from .job_control import ProgressEmitter, ProgressSink
 from .resolution import (
-    ResolutionSelection,
+    FixedWebMercatorResolution,
     ResolutionSpec,
+    SelectedResolution,
     select_resolution,
+    validate_resolution_selection_manifest,
     web_mercator_matrix_pixel_size,
 )
 from .source import (
@@ -258,10 +260,14 @@ class CogBudgetAssessment:
 
 @dataclass(frozen=True, slots=True)
 class CogBuildPlan:
-    selection: ResolutionSelection
+    selection: SelectedResolution
     grid: CogGrid
     budget: CogBudgetAssessment
     overview_levels: tuple[SemanticOverviewLevel, ...]
+
+    def __post_init__(self) -> None:
+        if self.selection.matrix_id != self.grid.matrix_id:
+            raise ValueError("COG grid must use the selected resolution matrix")
 
     def construction_manifest(self) -> dict[str, Any]:
         return {
@@ -269,7 +275,7 @@ class CogBuildPlan:
             "matrixDecision": {
                 "selectedMatrixId": str(self.selection.matrix_id),
                 "outputMatrixId": str(self.grid.matrix_id),
-                "relation": "statistically-selected",
+                "relation": self.selection.matrix_relation,
             },
             "grid": self.grid.manifest(),
             "overviewLevels": [
@@ -1747,9 +1753,6 @@ def verify_velocity_cog_snapshot(
         model_time = snapshot_facts["modelTime"]
         grid_facts = plan_facts["grid"]
         matrix_id = int(grid_facts["matrixId"])
-        selected_matrix_id = int(
-            plan_facts["resolution"]["resolved"]["matrixId"]
-        )
     except (KeyError, TypeError, ValueError, OverflowError) as error:
         raise ValueError("Flow Field COG source, snapshot, or grid facts are invalid") from error
     descriptor_schema_version = source_facts.get("descriptorSchemaVersion", 2)
@@ -1813,11 +1816,18 @@ def verify_velocity_cog_snapshot(
         or topology_facts.get("sourceStationCount") != station_count
     ):
         raise ValueError("Flow Field COG source or snapshot facts are invalid")
+    try:
+        selected_matrix_id, matrix_relation = validate_resolution_selection_manifest(
+            plan_facts.get("resolution"),
+            source_station_count=station_count,
+        )
+    except ValueError as error:
+        raise ValueError("Flow Field COG resolution identity is invalid") from error
     expected_grid = _cog_grid(source_bounds, matrix_id)
     if not isinstance(grid_facts, dict) or grid_facts != expected_grid.manifest():
         raise ValueError("Flow Field COG grid identity is invalid")
     if matrix_id != selected_matrix_id:
-        raise ValueError("Flow Field COG output must use the statistically selected grid")
+        raise ValueError("Flow Field COG output must use the selected grid")
     expected_overview_plan = plan_semantic_overview_levels(
         expected_grid.width,
         expected_grid.height,
@@ -1831,7 +1841,7 @@ def verify_velocity_cog_snapshot(
     if plan_facts.get("matrixDecision") != {
         "selectedMatrixId": str(selected_matrix_id),
         "outputMatrixId": str(matrix_id),
-        "relation": "statistically-selected",
+        "relation": matrix_relation,
     }:
         raise ValueError("Flow Field COG matrix decision is invalid")
     preflight = manifest.get("preflight")
@@ -1912,7 +1922,7 @@ def verify_velocity_cog_snapshot(
 def main() -> None:
     defaults = CogBuildBudget()
     parser = argparse.ArgumentParser(
-        description="Plan or build one statistically resolved Flow Field COG snapshot"
+        description="Plan or build one resolved Flow Field COG snapshot"
     )
     parser.add_argument(
         "--source",
@@ -1937,6 +1947,14 @@ def main() -> None:
         type=int,
         default=0,
         help="single ordinal U/V snapshot to build",
+    )
+    parser.add_argument(
+        "--matrix",
+        type=int,
+        help=(
+            "explicit WebMercatorQuad base matrix in [0, 24]; "
+            "omit to use station-spacing statistics"
+        ),
     )
     parser.add_argument(
         "--max-blocks",
@@ -1969,7 +1987,7 @@ def main() -> None:
         "--plan-only",
         action="store_true",
         help=(
-            "inspect the statistically selected grid, semantic overview plan, "
+            "inspect the selected grid, semantic overview plan, "
             "and budgets without writing files"
         ),
     )
@@ -1979,7 +1997,17 @@ def main() -> None:
         help="verify the installed manifest, marker, container, and pixel identity",
     )
     arguments = parser.parse_args()
+    try:
+        resolution = (
+            None
+            if arguments.matrix is None
+            else FixedWebMercatorResolution(arguments.matrix)
+        )
+    except ValueError as error:
+        parser.error(str(error))
     if arguments.verify_existing:
+        if arguments.matrix is not None:
+            parser.error("--verify-existing cannot be combined with --matrix")
         print(json.dumps(
             verify_velocity_cog_snapshot(arguments.output),
             sort_keys=True,
@@ -2001,6 +2029,7 @@ def main() -> None:
             snapshot.stations,
             snapshot.geographic_bounds,
             arguments.output.parent,
+            resolution=resolution,
             budget=budget,
         )
         print(json.dumps(result.manifest(), sort_keys=True))
@@ -2016,6 +2045,7 @@ def main() -> None:
         arguments.output,
         time_index=arguments.time_index,
         descriptor_path=arguments.descriptor,
+        resolution=resolution,
         budget=budget,
     )
     print(json.dumps({

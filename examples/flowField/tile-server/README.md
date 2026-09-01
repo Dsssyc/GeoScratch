@@ -145,24 +145,31 @@ The default resolution strategy does not use the absolute minimum station distan
 5. uses the median original distance in that mode's `+/-0.25`-octave window; and
 6. chooses the first WebMercatorQuad matrix providing at least two samples per spacing.
 
-For the repository data this resolves `12.504520 m` effective spacing to z15 at
-`4.777314 m/pixel`. That z15 result is the only accepted COG base grid; the API and CLI have
-no coarser matrix override. Its complete extent is `275 x 301` blocks,
-`70,400 x 77,056` pixels, and `43,397,939,200` raw U/V bytes (`40.4175 GiB`).
+For the repository data the default strategy resolves `12.504520 m` effective spacing to z15
+at `4.777314 m/pixel`. Its complete extent is `275 x 301` blocks, `70,400 x 77,056` pixels,
+and `43,397,939,200` raw U/V bytes (`40.4175 GiB`).
 
-The COG contains nine recursively generated semantic overviews. A parent candidate requires
-all four child vectors to be finite and nonzero, uses one fixed-order float64 component mean
-and one float32 cast, treats a mean that rounds to `(0, 0)` as non-advectable, then applies a
-new cross-block 3 by 3 support erosion before storing the parent. This prevents ordinary
-bilinear filtering at every overview from leaking velocity across a representable zero
-boundary. The support booleans are temporary construction state and never enter the COG.
+Callers may instead select one explicit WebMercatorQuad matrix with
+`FixedWebMercatorResolution(matrix_id=N)` or `--matrix N`. This bypasses station-spacing
+statistics and records `explicitly-requested` in construction identity; it never claims that
+the chosen matrix is the statistical ceiling. Omitting the parameter preserves the default
+statistical strategy. Budgets only approve or reject the selected matrix and never silently
+turn a rejected z15 plan into z10.
 
-Nominal overview factors are `2..512`. The first eight levels preserve exact power-of-two
-WebMercator pixel registration; the terminal COG level is `138 x 151` and GDAL reports its
-extent-preserving decimation as 510. All level dimensions, transforms, support counts, and
-pixel SHA-256 values are bound into the manifest. Custom pixels are assembled through VRT
-explicit overviews and GDAL COG `OVERVIEWS=FORCE_USE_EXISTING`; rio-cogeo is used only for
-strict structural validation.
+The COG contains recursively generated semantic overviews until its terminal level fits the
+COG access requirement. A parent candidate requires all four child vectors to be finite and
+nonzero, uses one fixed-order float64 component mean and one float32 cast, treats a mean that
+rounds to `(0, 0)` as non-advectable, then applies a new cross-block 3 by 3 support erosion
+before storing the parent. This prevents ordinary bilinear filtering at every overview from
+leaking velocity across a representable zero boundary. The support booleans are temporary
+construction state and never enter the COG.
+
+The default z15 artifact has nine nominal factors `2..512`; its first eight levels preserve
+exact power-of-two WebMercator pixel registration, while the terminal `138 x 151` level has
+extent-preserving GDAL decimation 510. The explicit z10 artifact has four exact factors
+`2, 4, 8, 16`. All level dimensions, transforms, support counts, and pixel SHA-256 values are
+bound into the manifest. Custom pixels are assembled through VRT explicit overviews and GDAL
+COG `OVERVIEWS=FORCE_USE_EXISTING`; rio-cogeo is used only for strict structural validation.
 
 The verified local t00 artifact is schema 2 / package 0.4.0:
 
@@ -173,12 +180,28 @@ The verified local t00 artifact is schema 2 / package 0.4.0:
 - `4,792,334,976` peak compressed staging bytes; and
 - strict COG validation with no errors or warnings.
 
+The explicit-z10 t00 proof built with tool package 0.6.0 in 4.94 seconds:
+
+- content version `flow-cog-0ce0c5c0597eeae4-t00-z10-v2`;
+- `2,560 x 2,816` base pixels, 154 base-plus-overview blocks, and `76,820,480`
+  logical raw pyramid bytes;
+- `11,953,369` compressed bytes and `25,139,486` peak compressed staging bytes;
+- COG SHA-256 `4458198552459df68709409dbcd0aa03b9bd174565e6fe8c19ad8b455a08e71f`;
+- pixel SHA-256 `4a10ce75371c4ce5be9c53bf0d25d2fd0393ace5c9dc1ae09f9fa61b0f52d631`;
+  and
+- strict deep verification with no COG warnings.
+
+The same t00 COG was published as a one-time z10 collection with all 59 z4-z9 runtime pages.
+Its total artifact size is `12,012,275` bytes, page-set SHA-256 is
+`7ab9c53e4321cc12b9bd2046f363c625a540cc5636cf7ce869121faa844a822e`, and the collection deep
+verifier passed.
+
 The COG quality record remains `particleSimulation: not-approved` with reason
 `inferred-topology-and-source-semantics-unapproved`. The statistical raster ceiling and
 overview bytes are now settled; model connectivity, physical unit/basis, and time semantics
 remain separate source-authority questions.
 
-Planning is read-only and reports the selected z15 grid, complete pyramid work, and both
+Planning is read-only and reports the selected grid, complete pyramid work, and both
 logical-work and compressed-staging budgets:
 
 ```bash
@@ -186,6 +209,10 @@ examples/flowField/tile-server/.venv/bin/flow-field-cog-build --plan-only
 
 # Builds only uv_0 at the statistically selected source ceiling.
 examples/flowField/tile-server/.venv/bin/flow-field-cog-build --time-index 0
+
+# Explicitly plan or build z10; this is a caller choice, not a budget fallback.
+examples/flowField/tile-server/.venv/bin/flow-field-cog-build --matrix 10 --plan-only
+examples/flowField/tile-server/.venv/bin/flow-field-cog-build --matrix 10 --time-index 0
 
 # Recomputes marker, manifest, container, encoding, file, and pixel identity.
 examples/flowField/tile-server/.venv/bin/flow-field-cog-build --verify-existing
@@ -199,7 +226,8 @@ COG internal tiling and compression do not avoid interpolating every selected ba
 Preflight bounds total blocks and raw pyramid work; construction separately monitors actual
 compressed staging and a free-space reserve. The verified local build completed in roughly
 28 minutes without exceeding 0.8 GiB RSS during generation. See
-[ADR-092](../../../docs/decisions/ADR-092-statistical-ceiling-flow-cog-overviews.md).
+[ADR-092](../../../docs/decisions/ADR-092-statistical-ceiling-flow-cog-overviews.md) and
+[ADR-094](../../../docs/decisions/ADR-094-explicit-flow-cog-resolution.md).
 
 ## Temporal COG collection
 
@@ -246,7 +274,27 @@ projects `42,793,125,741` compressed COG bytes before child manifests and collec
 Preflight adds the larger of the per-snapshot and aggregate-batch execution peaks. With defaults,
 the per-snapshot `32 GiB` staging cap plus `8 GiB` reserve governs, so this estimate requires at
 least `85,742,798,701` available bytes before metadata. It therefore rejects the complete
-collection on this workstation; capacity rejection never lowers z15 or silently omits times.
+default-z15 collection on this workstation; capacity rejection never changes the selected
+matrix or silently omits times.
+
+An explicit z10 collection is legal because the current runtime adapter requires a base matrix
+of at least z9. z8 and below remain valid for standalone COG construction but are rejected by
+the temporal collection plan. Measure one z10 snapshot first, then use that compressed size
+rather than the z15 measurement:
+
+```bash
+examples/flowField/tile-server/.venv/bin/flow-field-cog-collection-build \
+  --all-times \
+  --matrix 10 \
+  --plan-only \
+  --estimated-snapshot-bytes 11953369
+```
+
+Using that t00 measurement projects `322,740,963` compressed COG bytes for all 27 snapshots.
+With the deliberately conservative default staging caps, the current plan requires
+`43,272,413,923` available bytes and is approved on the measured workstation. The projected
+final bytes are the storage estimate; the larger availability requirement includes transient
+construction headroom and the free-space reserve.
 
 The output lock is acquired before reading mutable resume state and is held for the whole job.
 Verified children are skipped, and a complete child left in request-owned work is verified
@@ -367,18 +415,22 @@ from geoscratch_flow_field_tiles.cog import (
     build_velocity_cog_snapshot,
     plan_velocity_cog_snapshot,
 )
+from geoscratch_flow_field_tiles import FixedWebMercatorResolution
 from geoscratch_flow_field_tiles.source import load_source_snapshot
 
 snapshot = load_source_snapshot(time_index=0)
+resolution = FixedWebMercatorResolution(matrix_id=10)
 plan = plan_velocity_cog_snapshot(
     snapshot.stations,
     snapshot.geographic_bounds,
     output_parent="examples/flowField/tile-server",
+    resolution=resolution,
 )
 plan.require_output_approved()
 
 result = build_velocity_cog_snapshot(
     time_index=0,
+    resolution=resolution,
     budget=CogBuildBudget(),
 )
 ```
@@ -387,6 +439,7 @@ The temporal API uses the same typed strategies and makes selection, resume, rep
 budgets explicit:
 
 ```python
+from geoscratch_flow_field_tiles import FixedWebMercatorResolution
 from geoscratch_flow_field_tiles.collection import (
     CogCollectionBudget,
     build_velocity_cog_collection,
@@ -395,18 +448,21 @@ from geoscratch_flow_field_tiles.collection import (
 )
 
 times = tuple(range(27))
+resolution = FixedWebMercatorResolution(matrix_id=10)
 plan = plan_velocity_cog_collection(
     time_indices=times,
+    resolution=resolution,
     collection_budget=CogCollectionBudget(
-        estimated_snapshot_bytes=1_584_930_583,
+        estimated_snapshot_bytes=11_953_369,
     ),
 )
 plan.require_output_approved()
 
 result = build_velocity_cog_collection(
     time_indices=times,
+    resolution=resolution,
     collection_budget=CogCollectionBudget(
-        estimated_snapshot_bytes=1_584_930_583,
+        estimated_snapshot_bytes=11_953_369,
     ),
     resume=True,
 )

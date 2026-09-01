@@ -19,7 +19,10 @@ from geoscratch_flow_field_tiles.collection import (
     parse_time_range,
     plan_velocity_cog_collection,
 )
-from geoscratch_flow_field_tiles.resolution import StationSpacingResolution
+from geoscratch_flow_field_tiles.resolution import (
+    FixedWebMercatorResolution,
+    StationSpacingResolution,
+)
 
 
 def _resolution() -> StationSpacingResolution:
@@ -145,6 +148,60 @@ def test_collection_plan_rejects_a_base_below_the_runtime_matrix_contract(
     assert plan.budget.violations == ("runtime adapter base matrix 8 < 9",)
     with pytest.raises(ValueError, match="base matrix 8 < 9"):
         plan.require_output_approved()
+
+
+def test_collection_plan_accepts_explicit_z10_and_binds_distinct_identity(
+    synthetic_source,
+    tmp_path,
+):
+    fixed_parent = tmp_path / "fixed"
+    statistical_parent = tmp_path / "statistical"
+    fixed_parent.mkdir()
+    statistical_parent.mkdir()
+    fixed = plan_velocity_cog_collection(
+        synthetic_source.directory,
+        fixed_parent / "cog-collection",
+        time_indices=(0,),
+        descriptor_path=synthetic_source.descriptor_path,
+        resolution=FixedWebMercatorResolution(10),
+        snapshot_budget=_snapshot_budget(),
+    )
+    statistical = plan_velocity_cog_collection(
+        synthetic_source.directory,
+        statistical_parent / "cog-collection",
+        time_indices=(0,),
+        descriptor_path=synthetic_source.descriptor_path,
+        resolution=StationSpacingResolution(
+            minimum_support_points=3,
+            minimum_support_fraction=0.10,
+            minimum_matrix=10,
+            maximum_matrix=10,
+        ),
+        snapshot_budget=_snapshot_budget(),
+    )
+
+    assert fixed.budget.approved
+    assert fixed.snapshot_plan.grid.matrix_id == 10
+    assert fixed.snapshot_plan.selection.matrix_relation == "explicitly-requested"
+    assert statistical.snapshot_plan.grid.matrix_id == 10
+    assert fixed.request_sha256 != statistical.request_sha256
+
+
+def test_collection_plan_still_rejects_explicit_z8(
+    synthetic_source,
+    tmp_path,
+):
+    plan = plan_velocity_cog_collection(
+        synthetic_source.directory,
+        tmp_path / "cog-collection",
+        time_indices=(0,),
+        descriptor_path=synthetic_source.descriptor_path,
+        resolution=FixedWebMercatorResolution(8),
+        snapshot_budget=_snapshot_budget(),
+    )
+
+    assert plan.snapshot_plan.grid.matrix_id == 8
+    assert plan.budget.violations == ("runtime adapter base matrix 8 < 9",)
 
 
 def test_collection_plan_uses_the_same_read_only_output_path_contract(

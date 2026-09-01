@@ -2,10 +2,11 @@
 
 ## Status
 
-Accepted for the example-owned `Flow Field` backend. This extends ADR-092 without
-changing the frozen `Flow Layer` example or the public Geo/Scratch packages. The browser
-continues to use the existing pre-cut RG32F artifact until its pixel-centre sampling contract
-is migrated explicitly.
+Accepted for the example-owned `Flow Field` backend. This extends ADR-092; ADR-094 later adds
+an explicit fixed-matrix resolution strategy without changing this collection layout. Neither
+decision changes the frozen `Flow Layer` example or the public Geo/Scratch packages. The
+browser continues to use the existing pre-cut RG32F artifact until its pixel-centre sampling
+contract is migrated explicitly.
 
 ## Date
 

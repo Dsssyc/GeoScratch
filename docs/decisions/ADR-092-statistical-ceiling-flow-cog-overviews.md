@@ -3,8 +3,10 @@
 ## Status
 
 Accepted and implemented for the example-owned offline Flow Field resource tool. This
-supersedes ADR-091's explicit matrix override, z12 artifact, and no-overview clauses. It does
-not change the frozen `Flow Layer` example or the public Geo/Scratch packages, and it does
+supersedes ADR-091's explicit matrix override, z12 artifact, and no-overview clauses. ADR-094
+later supersedes only this decision's requirement that statistical selection be the sole base
+matrix authority; the statistical strategy and semantic-overview algorithm remain current. It
+does not change the frozen `Flow Layer` example or the public Geo/Scratch packages, and it does
 not approve the artifact for particle simulation.
 
 ## Date

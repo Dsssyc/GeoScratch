@@ -39,7 +39,11 @@ from .contracts import (
     resolve_interpolation,
     resolve_topology,
 )
-from .resolution import ResolutionSpec
+from .resolution import (
+    FixedWebMercatorResolution,
+    ResolutionSpec,
+    validate_resolution_selection_manifest,
+)
 from .runtime_manifest import (
     CogRuntimePageIndex,
     build_cog_runtime_page_index,
@@ -751,10 +755,28 @@ def _validate_collection_manifest_identity(
     ):
         raise ValueError("Flow Field COG collection construction identity is invalid")
     try:
-        base_matrix = shared["plan"]["grid"]["matrixId"]
+        shared_plan = shared["plan"]
+        base_matrix = shared_plan["grid"]["matrixId"]
         time_indices = selection["timeIndices"]
     except (KeyError, TypeError) as error:
         raise ValueError("Flow Field COG collection shared contract is invalid") from error
+    try:
+        selected_matrix, matrix_relation = validate_resolution_selection_manifest(
+            shared_plan.get("resolution"),
+            source_station_count=source.get("stationCount"),
+        )
+    except ValueError as error:
+        raise ValueError("Flow Field COG collection resolution identity is invalid") from error
+    if (
+        base_matrix != str(selected_matrix)
+        or shared_plan.get("matrixDecision")
+        != {
+            "selectedMatrixId": str(selected_matrix),
+            "outputMatrixId": str(selected_matrix),
+            "relation": matrix_relation,
+        }
+    ):
+        raise ValueError("Flow Field COG collection matrix decision is invalid")
     source_field_count = selection.get("sourceFieldCount")
     expected_full_selection = (
         list(range(source_field_count))
@@ -2035,6 +2057,14 @@ def main() -> None:
     parser.add_argument("--source", type=Path, default=DEFAULT_DATA_DIRECTORY)
     parser.add_argument("--descriptor", type=Path, default=DEFAULT_DESCRIPTOR_PATH)
     parser.add_argument("--output", type=Path, default=DEFAULT_COG_COLLECTION_DIRECTORY)
+    parser.add_argument(
+        "--matrix",
+        type=int,
+        help=(
+            "explicit WebMercatorQuad base matrix in [0, 24]; "
+            "omit to use station-spacing statistics"
+        ),
+    )
     selection = parser.add_mutually_exclusive_group()
     selection.add_argument("--all-times", action="store_true")
     selection.add_argument("--time-range", metavar="START:STOP")
@@ -2095,6 +2125,14 @@ def main() -> None:
     events.add_argument("--events-stderr", action="store_true")
     events.add_argument("--events-file", type=Path)
     arguments = parser.parse_args()
+    try:
+        resolution = (
+            None
+            if arguments.matrix is None
+            else FixedWebMercatorResolution(arguments.matrix)
+        )
+    except ValueError as error:
+        parser.error(str(error))
     if arguments.verify_existing:
         if (
             arguments.plan_only
@@ -2106,6 +2144,7 @@ def main() -> None:
             or arguments.time_indices is not None
             or arguments.events_stderr
             or arguments.events_file is not None
+            or arguments.matrix is not None
         ):
             parser.error("--verify-existing cannot be combined with build options")
         print(json.dumps(
@@ -2153,6 +2192,7 @@ def main() -> None:
             arguments.output,
             time_indices=selected,
             descriptor_path=arguments.descriptor,
+            resolution=resolution,
             snapshot_budget=snapshot_budget,
             batch_execution_budget=batch_execution_budget,
             collection_budget=collection_budget,
@@ -2177,6 +2217,7 @@ def main() -> None:
             arguments.output,
             time_indices=selected,
             descriptor_path=arguments.descriptor,
+            resolution=resolution,
             snapshot_budget=snapshot_budget,
             batch_execution_budget=batch_execution_budget,
             collection_budget=collection_budget,
