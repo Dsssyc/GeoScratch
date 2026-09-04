@@ -9,7 +9,12 @@ import type {
 
 type FlowFieldProofApi = Readonly<{
     pauseAndDrain(): Promise<FlowFieldApplicationFacts | undefined>
+    play(): void
+    pause(): void
     resume(): void
+    seek(modelTime: number): void
+    setRate(rate: number): void
+    setLoop(loop: 'clamp' | 'loop'): void
     dispose(): Promise<unknown>
     facts(): FlowFieldApplicationFacts | undefined
 }>
@@ -22,15 +27,8 @@ type FailureDetails = Error & {
 const canvas = document.getElementById('GPUFrame') as HTMLCanvasElement
 const lifetime = new LifetimeScope({ label: 'flow-field-page' })
 const parameters = new URLSearchParams(window.location.search)
-const proofMode = parameters.get('proof') === '1'
-const tileServerUrl = parameters.get('tileServer') ?? 'http://127.0.0.1:8788'
-const framesPerTime = boundedInteger(
-    parameters.get('framesPerTime'),
-    proofMode ? 2 : 300,
-    1,
-    3600
-)
 let application: FlowFieldApplication | undefined
+let terminalFlush: Promise<FlowFieldApplicationFacts | undefined> | undefined
 let pageSettlement: Promise<unknown> | undefined
 
 const handlePageHide = () => { void disposePage() }
@@ -43,13 +41,18 @@ lifetime.deferStop({
 const proofApi: FlowFieldProofApi = Object.freeze({
     async pauseAndDrain() {
 
-        application?.setPaused(true)
-        await lifetime.drain()
-        await application?.flush()
-        await lifetime.drain()
-        return application?.facts()
+        if (terminalFlush !== undefined) return await terminalFlush
+        const active = application
+        if (active === undefined) return undefined
+        terminalFlush = active.flush({ wallTime: performance.now() })
+        return await terminalFlush
     },
-    resume() { application?.setPaused(false) },
+    play() { application?.play({ wallTime: performance.now() }) },
+    pause() { application?.pause({ wallTime: performance.now() }) },
+    resume() { application?.play({ wallTime: performance.now() }) },
+    seek(modelTime) { application?.seek({ wallTime: performance.now(), modelTime }) },
+    setRate(rate) { application?.setRate({ wallTime: performance.now(), rate }) },
+    setLoop(loop) { application?.setLoop({ wallTime: performance.now(), loop }) },
     dispose: disposePage,
     facts: () => application?.facts(),
 })
@@ -64,26 +67,37 @@ void lifetime.track(initializePage(), 'flow-field-page-initialization').catch(er
 
 async function initializePage(): Promise<void> {
 
+    const proofMode = parameters.get('proof') === '1'
+    const tileServerUrl = parameters.get('tileServer') ?? 'http://127.0.0.1:8788'
+    const initialRate = finiteRate(parameters.get('rate'), proofMode ? 8 : 0.2)
+    const initialLoop = flowLoop(parameters.get('loop'))
+    const initialZoom = boundedNumber(parameters.get('zoom'), 0, 18)
     application = await startFlowFieldApplication({
         lifetime,
         canvas,
         proofMode,
         tileServerUrl,
         workerModuleManifestUrl: new URL('../scratch-workers/manifest.json', window.location.href),
-        framesPerTime,
-        fail: error => { void failPage(error) },
+        readWallTime: () => performance.now(),
+        initialRate,
+        initialLoop,
+        ...(initialZoom === undefined ? {} : { initialZoom }),
+        fail: failPage,
         setStatus,
     })
 }
 
-async function failPage(error: unknown) {
+async function failPage(error: unknown): Promise<void> {
 
-    if (pageSettlement !== undefined) return pageSettlement
+    if (pageSettlement !== undefined) {
+        await pageSettlement
+        return
+    }
     reportFatalError(error)
     pageSettlement = lifetime.dispose(error).catch(cleanupFailure => {
         console.error(cleanupFailure)
     })
-    return pageSettlement
+    await pageSettlement
 }
 
 async function disposePage() {
@@ -96,19 +110,33 @@ async function disposePage() {
     return pageSettlement
 }
 
-function boundedInteger(
-    value: string | null,
-    fallback: number,
-    minimum: number,
-    maximum: number
-): number {
+function finiteRate(value: string | null, fallback: number): number {
 
     if (value === null) return fallback
     const parsed = Number(value)
-    if (!Number.isSafeInteger(parsed) || parsed < minimum || parsed > maximum) {
-        throw new RangeError(
-            `Flow Field integer parameter must be between ${minimum} and ${maximum}`
-        )
+    if (!Number.isFinite(parsed) || parsed === 0 || Math.abs(parsed) > 1000) {
+        throw new RangeError('Flow Field rate must be finite, non-zero, and within [-1000, 1000]')
+    }
+    return parsed
+}
+
+function flowLoop(value: string | null): 'clamp' | 'loop' {
+
+    if (value === null || value === 'loop') return 'loop'
+    if (value === 'clamp') return 'clamp'
+    throw new TypeError('Flow Field loop must be clamp or loop')
+}
+
+function boundedNumber(
+    value: string | null,
+    minimum: number,
+    maximum: number
+): number | undefined {
+
+    if (value === null) return undefined
+    const parsed = Number(value)
+    if (!Number.isFinite(parsed) || parsed < minimum || parsed > maximum) {
+        throw new RangeError(`Flow Field number must be within [${minimum}, ${maximum}]`)
     }
     return parsed
 }

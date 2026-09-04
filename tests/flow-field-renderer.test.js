@@ -1,7 +1,6 @@
 import { expect } from 'chai'
 import fs from 'node:fs'
 import path from 'node:path'
-import { flowEncodedTemporalSnapshot } from '../examples/flowField/flow-frame-provenance.ts'
 
 const sourcePath = path.join(
     process.cwd(), 'examples', 'flowField', 'flow-renderer.ts'
@@ -9,51 +8,25 @@ const sourcePath = path.join(
 
 describe('Flow Field renderer composition', () => {
 
-    it('binds frame provenance to the publications sampled in the same submission', () => {
-
-        const acknowledged = Object.freeze({
-            generation: 1,
-            currentTimeIndex: 0,
-            nextTimeIndex: 1,
-            prefetchTimeIndex: 2,
-            frameInTime: 0,
-            framesPerTime: 2,
-            progress: 0,
-            temporalResidencyEpoch: 5,
-            currentSnapshotEpoch: 7,
-            nextSnapshotEpoch: 8,
-        })
-        expect(flowEncodedTemporalSnapshot(acknowledged, 9, 8)).to.deep.equal({
-            ...acknowledged,
-            temporalResidencyEpoch: 6,
-            currentSnapshotEpoch: 9,
-            nextSnapshotEpoch: 8,
-        })
-        expect(() => flowEncodedTemporalSnapshot(acknowledged, 6, 8))
-            .to.throw(/backwards/i)
-    })
-
-    it('initializes and acknowledges exactly three bounded temporal runtimes', () => {
+    it('publishes and acknowledges every unique captured runtime exactly once', () => {
 
         const source = fs.readFileSync(sourcePath, 'utf8')
-        expect(source).to.include('temporal.current.initialize()')
-        expect(source).to.include('temporal.next.initialize()')
-        expect(source).to.include('temporal.prefetch.initialize()')
-        expect(source).to.include('temporal.setPendingPublications(')
-        expect(source).to.include('temporal.encodePending(initialBuilder)')
-        expect(source).to.include('temporal.acknowledgePending(initialSubmitted)')
-        expect(source).to.include('temporal.prefetch.acknowledge(')
-        expect(source).to.include('temporal.recordPrefetchPublication(')
+        expect(source).to.include('uniqueCaptureRuntimes(temporal.temporal)')
+        expect(source).to.include('runtime.publish()')
+        expect(source).to.include('active.gpu.encode(builder, publication.update)')
+        expect(source).to.include('runtime.acknowledge(publication, submitted)')
+        expect(source).to.include('Promise.allSettled([')
+        expect(source).to.not.match(/\.prefetch|advanceFrame|framesPerTime/)
     })
 
     it('orders publication support simulation contour history and submission explicitly', () => {
 
         const source = fs.readFileSync(sourcePath, 'utf8')
-        const publish = source.indexOf('temporal.encodePending(builder)')
-        const demand = source.indexOf('const demandFrame = demand.encode(builder, view)')
+        const publish = source.indexOf('encodePublications(builder, publications)')
+        const demand = source.indexOf('const demandFrame = demand.encode(builder, view, prepared.temporal)')
         const pack = source.indexOf('const candidates = packFlowCandidateCells(')
-        const spawn = source.indexOf('spawn.encode(builder, candidates')
-        const particles = source.indexOf('particles.encode(builder, particleSpawn.bindings)')
+        const spawn = source.indexOf('spawn.encode(')
+        const particles = source.indexOf('particles.encode(builder, particleSpawn.bindings, prepared)')
         const contour = source.indexOf('contour.encode(builder, candidates')
         const history = source.indexOf('const historyFrame = history.encode(builder, view')
         const submit = source.indexOf('const submitted = builder.submit()', publish)
@@ -69,20 +42,19 @@ describe('Flow Field renderer composition', () => {
         expect(source.match(/packFlowCandidateCells\(/g)).to.have.length(1)
     })
 
-    it('rotates only after observation and latest demand settlement', () => {
+    it('keeps time selection external and releases its frame capture after all observers', () => {
 
         const source = fs.readFileSync(sourcePath, 'utf8')
-        const native = source.indexOf('observeFlowSubmittedWork(submitted)')
-        const demand = source.indexOf('encodedTemporal.frameInTime ===')
-        const advance = source.indexOf('const advanced = await temporal.advanceFrame()')
-        const initialize = source.indexOf('const publication = await prefetchRuntime.initialize()')
-        const refresh = source.indexOf('await activeBindings.refresh()')
-
-        expect(native).to.be.greaterThan(-1)
-        expect(demand).to.be.greaterThan(native)
-        expect(advance).to.be.greaterThan(demand)
-        expect(initialize).to.be.greaterThan(advance)
-        expect(refresh).to.be.greaterThan(initialize)
+        expect(source).to.include('timeline: FlowTimelineSnapshot')
+        expect(source).to.include('assertFlowTemporalCapture(timeline, prepared.temporal)')
+        expect(source).to.include('await temporalBindings.prepareFrame(requestedLevel)')
+        expect(source).to.include('error instanceof FlowTemporalBindingSupersededError')
+        expect(source).to.include("if (prepared.state === 'failed') throw prepared.error")
+        expect(source).to.include('settleFrameObservations(')
+        expect(source).to.include('prepared.release()')
+        expect(source).to.include('reconciliations.members')
+        expect(source).to.not.include('temporal.advance')
+        expect(source).to.not.include('initialize()')
     })
 
     it('uses only velocity-derived products and public package entrypoints', () => {
@@ -97,7 +69,14 @@ describe('Flow Field renderer composition', () => {
         expect(source).to.include('viewDemandProducer.maxDemands')
         expect(source).to.include('needsFollowUp: false')
         expect(source).to.include('async function flushResidency()')
+        expect(source).to.include('async function suspendTemporal()')
+        expect(source).to.include('await temporalBindings.suspend()')
         expect(source).to.include('residency flush requires an idle renderer')
+        const flush = source.indexOf('async function flushResidency()')
+        const lock = source.indexOf('constructionInFlight = new Promise', flush)
+        const prepare = source.indexOf('temporalBindings.prepareFrame(requestedLevel)', flush)
+        expect(lock).to.be.greaterThan(flush)
+        expect(prepare).to.be.greaterThan(lock)
         expect(source).to.not.match(/runtime\.(?:device|queue)/)
         expect(source).to.not.match(/packages\/geoscratch\/src|flowLayer/)
         expect(source).to.not.match(/boundary(?:Texture|Feature)|depthTexture|wetMask|SDF/)

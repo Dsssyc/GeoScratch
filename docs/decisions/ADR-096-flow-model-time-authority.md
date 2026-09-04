@@ -2,8 +2,8 @@
 
 ## Status
 
-Accepted and implemented as an additive `Flow Field` timeline. The current renderer remains on
-its historical frame-count clock until the selection-driven runtime-window migration is complete.
+Accepted and implemented by the `Flow Field` application and its selection-driven runtime
+window. The historical frame-count clock is no longer on the active application or renderer path.
 This decision does not change the frozen `Flow Layer` example or public Geo/Scratch APIs.
 
 ## Date
@@ -82,8 +82,7 @@ sample interval and the complete axis span must also be finite, not merely their
 - Reverse playback and loop behavior use the same explicit authority as forward playback.
 - Runtime-window readiness remains a separate composition concern; camera-driven fine-LoD page
   settlement must not become clock authority.
-- The old `framesPerTime` path remains temporarily reachable only until the runtime-window clean
-  cut, at which point it will be removed rather than retained as a second clock.
+- `framesPerTime` is absent from the active application and proof API; model time has one clock.
 
 ## Alternatives Rejected
 

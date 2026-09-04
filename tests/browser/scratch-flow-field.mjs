@@ -12,17 +12,18 @@ const viteEntry = resolve(root, 'node_modules/vite/bin/vite.js')
 const tileServer = resolve(
     root, 'examples/flowField/tile-server/.venv/bin/flow-field-tile-serve'
 )
-const tileManifest = resolve(root, 'examples/flowField/tile-server/cache/manifest.json')
+const tileOutput = resolve(root, 'examples/flowField/tile-server/cog-collection')
+const tileManifest = resolve(tileOutput, 'runtime-manifest.json')
 const workerManifest = resolve(root, 'examples/public/scratch-workers/manifest.json')
 const timeout = positiveInteger(process.env.FLOW_FIELD_BROWSER_TIMEOUT_MS, 180_000)
-const requiredFrames = positiveInteger(process.env.FLOW_FIELD_PROOF_FRAMES, 56)
+const requiredFrames = positiveInteger(process.env.FLOW_FIELD_PROOF_FRAMES, 6)
 const headless = process.env.FLOW_FIELD_BROWSER_HEADLESS !== '0'
 const outputDirectory = resolve(
     process.env.FLOW_FIELD_BROWSER_OUTPUT ?? '/tmp/geoscratch-flow-field-browser'
 )
 
-if (requiredFrames < 56) {
-    throw new RangeError('FLOW_FIELD_PROOF_FRAMES must cover two 27-slice cycles')
+if (requiredFrames < 4) {
+    throw new RangeError('FLOW_FIELD_PROOF_FRAMES must cover initial and sought pairs')
 }
 await Promise.all([ access(tileServer), access(tileManifest), access(workerManifest) ])
 await mkdir(outputDirectory, { recursive: true })
@@ -37,7 +38,10 @@ const vite = startProcess(process.execPath, [
     '--host', '127.0.0.1',
     '--port', String(vitePort),
 ], examplesRoot)
-const tiles = startProcess(tileServer, [ '--port', String(tilePort) ], root)
+const tiles = startProcess(tileServer, [
+    '--output', tileOutput,
+    '--port', String(tilePort),
+], root)
 let browser
 let result
 let failure
@@ -111,6 +115,7 @@ async function verify(activeBrowser) {
     const consoleIssues = []
     const pageErrors = []
     const requestFailures = []
+    const expectedRequestAborts = []
     const flowRequests = []
     page.on('console', message => {
         if (message.type() === 'warning' || message.type() === 'error') {
@@ -119,13 +124,19 @@ async function verify(activeBrowser) {
     })
     page.on('pageerror', error => { pageErrors.push(error.message) })
     page.on('requestfailed', request => {
-        requestFailures.push(`${request.url()}:${request.failure()?.errorText ?? 'unknown'}`)
+        const errorText = request.failure()?.errorText ?? 'unknown'
+        const failure = `${request.url()}:${errorText}`
+        if (request.url().startsWith(tileBase) && errorText === 'net::ERR_ABORTED') {
+            expectedRequestAborts.push(failure)
+        } else {
+            requestFailures.push(failure)
+        }
     })
     page.on('request', request => {
         if (request.url().startsWith(tileBase)) flowRequests.push(request.url())
     })
     await page.goto(
-        `${viteBase}/flowField/index.html?proof=1&framesPerTime=1&` +
+        `${viteBase}/flowField/index.html?proof=1&rate=0.2&zoom=10&` +
         `tileServer=${encodeURIComponent(tileBase)}`,
         { waitUntil: 'domcontentloaded', timeout }
     )
@@ -134,12 +145,25 @@ async function verify(activeBrowser) {
         if (status === 'error') return true
         return (window.__FLOW_FIELD_PROOF__?.facts()?.frames?.observedFrameCount ?? 0) >= minimum
     }, requiredFrames, { timeout })
-    const status = await page.locator('#GPUFrame').getAttribute('data-status')
-    const error = await page.locator('#GPUFrame').getAttribute('data-error')
-    const diagnostic = await page.locator('#GPUFrame').getAttribute('data-diagnostic')
+    await page.evaluate(() => {
+        window.__FLOW_FIELD_PROOF__.pause()
+        window.__FLOW_FIELD_PROOF__.seek(10.5)
+    })
+    await page.waitForFunction(() => {
+        const facts = window.__FLOW_FIELD_PROOF__?.facts()
+        return document.body.dataset.status === 'error' || (
+            facts?.lastFrame?.state === 'rendered' &&
+            facts?.timeline?.selection?.kind === 'interpolated' &&
+            facts.timeline.selection.lower.sampleKey === 't10' &&
+            facts.timeline.selection.upper.sampleKey === 't11'
+        )
+    }, undefined, { timeout })
     const drained = await page.evaluate(async() => {
         return await window.__FLOW_FIELD_PROOF__.pauseAndDrain()
     })
+    const status = await page.locator('#GPUFrame').getAttribute('data-status')
+    const error = await page.locator('#GPUFrame').getAttribute('data-error')
+    const diagnostic = await page.locator('#GPUFrame').getAttribute('data-diagnostic')
     const screenshot = await page.locator('#GPUFrame').screenshot()
     const screenshotPath = resolve(outputDirectory, 'flow-field.png')
     await writeFile(screenshotPath, screenshot)
@@ -166,6 +190,9 @@ async function verify(activeBrowser) {
             timeLabels: [ ...new Set(flowRequests.flatMap(url =>
                 /\/WebMercatorQuad\/(t\d{2})\//.exec(url)?.slice(1) ?? []
             )) ].sort(),
+            matrices: [ ...new Set(flowRequests.flatMap(url =>
+                /\/WebMercatorQuad\/t\d{2}\/(\d+)\//.exec(url)?.slice(1) ?? []
+            )) ].sort(),
             forbidden: flowRequests.filter(url =>
                 /boundary|depth|wet|sdf|vector.?feature/i.test(url)
             ),
@@ -174,6 +201,7 @@ async function verify(activeBrowser) {
                 return path !== '/manifest.json' &&
                     !/^\/tiles\/WebMercatorQuad\/t\d{2}\/\d+\/\d+\/\d+\.rg32f$/.test(path)
             }),
+            expectedAbortCount: expectedRequestAborts.length,
         },
         stats,
         consoleIssues,
@@ -198,14 +226,22 @@ function validate(observed, topLevelFailure, cleanupFailures) {
         failures.push(`page:${observed.status}:${observed.error ?? observed.diagnostic}`)
     }
     const renderer = observed.drained?.renderer
-    const temporal = renderer?.temporalWindow
-    if (observed.drained?.paused !== true ||
+    const timeline = observed.drained?.timeline
+    const temporal = observed.drained?.temporalWindow
+    const handshake = observed.drained?.handshake
+    if (timeline?.playing !== false || timeline?.readiness !== 'ready' ||
+        timeline?.selection?.kind !== 'interpolated' ||
+        timeline.selection.lower.sampleKey !== 't10' ||
+        timeline.selection.upper.sampleKey !== 't11' || timeline.selection.alpha !== 0.5 ||
         Number(observed.drained?.frames?.observedFrameCount) < requiredFrames ||
-        Number(temporal?.generation) < 55 ||
-        Number(temporal?.currentSnapshotEpoch) <= 0 ||
-        Number(temporal?.nextSnapshotEpoch) <= 0 ||
-        Number(renderer?.temporal?.refreshCount) < 54) {
-        failures.push('temporal cycles did not remain live and epoch-complete')
+        temporal?.state !== 'ready' || Number(temporal?.pairGeneration) < 3 ||
+        Number(temporal?.ownedRuntimeCount) > 4 || temporal?.pendingCreationCount !== 0 ||
+        handshake?.selectionRevision !== timeline?.selectionRevision ||
+        handshake?.status !== 'ready' || observed.drained?.lastFrame?.state !== 'rendered' ||
+        Number(observed.drained?.lastFrame?.temporal?.lowerSnapshotEpoch) <= 1 ||
+        Number(observed.drained?.lastFrame?.temporal?.upperSnapshotEpoch) <= 1 ||
+        Number(renderer?.temporal?.refreshCount) < 2) {
+        failures.push('timeline, window, and readiness handshake did not converge')
     }
     if (renderer?.spawn?.cpuReadback !== false ||
         renderer?.particles?.cpuMirrorBytes !== 0 ||
@@ -214,10 +250,20 @@ function validate(observed, topLevelFailure, cleanupFailures) {
         renderer?.history?.hasPreviousView !== true) {
         failures.push('GPU-derived support, particle, contour, or history facts are incomplete')
     }
-    for (const runtime of Object.values(renderer?.runtimes ?? {})) {
-        if (runtime.scheduler.activeRequestCount !== 0 || runtime.scheduler.queuedRequestCount !== 0 ||
-            runtime.residency.stagingBytes !== 0) {
-            failures.push(`runtime did not drain:${runtime.id}`)
+    if (observed.drained?.workers?.activeTaskCount !== 0 ||
+        observed.drained?.workers?.queuedTaskCount !== 0) {
+        failures.push('Flow runtime workers did not drain')
+    }
+    const budgets = observed.drained?.budgets
+    for (const key of [
+        'maxRequests',
+        'maxPhysicalPages',
+        'maxStagingBytes',
+        'maxNetworkRequests',
+        'maxDecodeTasks',
+    ]) {
+        if (budgets?.perRuntime?.[key] * 4 !== budgets?.total?.[key]) {
+            failures.push(`Flow runtime budget is not an exact four-way partition:${key}`)
         }
     }
     const diagnostics = observed.drained?.diagnostics
@@ -231,7 +277,10 @@ function validate(observed, topLevelFailure, cleanupFailures) {
     if (observed.pixels.nonDarkPixels < 1_000 || observed.pixels.channelRange < 32) {
         failures.push(`rendered pixels are empty:${JSON.stringify(observed.pixels)}`)
     }
-    if (observed.network.requestCount === 0 || observed.network.timeLabels.length !== 27 ||
+    if (observed.network.requestCount === 0 ||
+        ![ 't00', 't01', 't10', 't11' ].every(label =>
+            observed.network.timeLabels.includes(label)
+        ) || !observed.network.matrices.includes('10') ||
         observed.network.forbidden.length > 0 || observed.network.unexpected.length > 0) {
         failures.push(`velocity-only network contract failed:${JSON.stringify(observed.network)}`)
     }
@@ -243,7 +292,51 @@ function validate(observed, topLevelFailure, cleanupFailures) {
         observed.cleanup?.cleanupFailures?.length !== 0 || observed.terminalStatus !== 'disposed') {
         failures.push('page lifecycle did not drain and dispose exactly')
     }
+    validateLifetimeCleanupOrder(observed.cleanup?.cleanupActions, failures)
+    if (observed.stats?.tileFailures !== 0 || observed.stats?.tileNotFound !== 0 ||
+        Number(observed.stats?.matrixReads?.['10']) <= 0 ||
+        Number(observed.stats?.timeReads?.t10) <= 0 ||
+        Number(observed.stats?.timeReads?.t11) <= 0) {
+        failures.push('COG z10 service proof did not remain successful')
+    }
     return failures
+}
+
+function validateLifetimeCleanupOrder(cleanupActions, failures) {
+
+    if (!Array.isArray(cleanupActions)) {
+        failures.push('page lifecycle did not report Lifetime cleanup actions')
+        return
+    }
+    const expectedStopLabels = [
+        'flow-field-frame-controller',
+        'flow-field-temporal-runtime-window-requests',
+    ]
+    const expectedReleaseLabels = [
+        'flow-field-renderer',
+        'flow-field-temporal-runtime-window',
+        'flow-field-worker-system',
+        'flow-field-runtime',
+        'flow-field-maplibre-map',
+    ]
+    const stopLabels = criticalCleanupLabels(cleanupActions, 'stop', expectedStopLabels)
+    const releaseLabels = criticalCleanupLabels(
+        cleanupActions, 'release', expectedReleaseLabels
+    )
+    if (JSON.stringify(stopLabels) !== JSON.stringify(expectedStopLabels)) {
+        failures.push(`Flow Field stop cleanup order was ${JSON.stringify(stopLabels)}`)
+    }
+    if (JSON.stringify(releaseLabels) !== JSON.stringify(expectedReleaseLabels)) {
+        failures.push(`Flow Field release cleanup order was ${JSON.stringify(releaseLabels)}`)
+    }
+}
+
+function criticalCleanupLabels(cleanupActions, phase, criticalLabels) {
+
+    const critical = new Set(criticalLabels)
+    return cleanupActions
+        .filter(action => action?.phase === phase && critical.has(action.label))
+        .map(action => action.label)
 }
 
 function summarizeResult(observed) {
@@ -256,21 +349,22 @@ function summarizeResult(observed) {
         error: observed.error,
         diagnostic: observed.diagnostic,
         frames: observed.drained?.frames,
-        temporalWindow: renderer?.temporalWindow,
+        timeline: observed.drained?.timeline,
+        temporalWindow: observed.drained?.temporalWindow,
+        handshake: observed.drained?.handshake,
+        lastFrame: summarizeFrame(observed.drained?.lastFrame),
+        budgets: observed.drained?.budgets,
         temporal: renderer?.temporal,
         spawn: renderer?.spawn,
         particles: renderer?.particles,
         contour: renderer?.contour,
         history: renderer?.history,
-        runtimes: Object.fromEntries(Object.entries(renderer?.runtimes ?? {}).map(
-            ([ name, runtime ]) => [ name, {
-                id: runtime.id,
-                activeRequestCount: runtime.scheduler.activeRequestCount,
-                queuedRequestCount: runtime.scheduler.queuedRequestCount,
-                stagingBytes: runtime.residency.stagingBytes,
-                residentCount: runtime.residency.residentCount,
-            } ]
-        )),
+        workers: {
+            workerCount: observed.drained?.workers?.workerCount,
+            groupCount: observed.drained?.workers?.groupCount,
+            queuedTaskCount: observed.drained?.workers?.queuedTaskCount,
+            activeTaskCount: observed.drained?.workers?.activeTaskCount,
+        },
         diagnostics: {
             currentPendingNativeObservations:
                 observed.drained?.diagnostics?.submissionNative?.currentPendingNativeObservations,
@@ -289,6 +383,29 @@ function summarizeResult(observed) {
         consoleIssues: observed.consoleIssues,
         pageErrors: observed.pageErrors,
         requestFailures: observed.requestFailures,
+    }
+}
+
+function summarizeFrame(frame) {
+
+    if (frame === undefined) return undefined
+    if (frame.state !== 'rendered') return frame
+    return {
+        state: frame.state,
+        timelineRevision: frame.temporal?.timelineRevision,
+        selectionRevision: frame.temporal?.selectionRevision,
+        windowRequestRevision: frame.temporal?.windowRequestRevision,
+        pairGeneration: frame.temporal?.pairGeneration,
+        modelTime: frame.temporal?.presentedModelTime,
+        sampleKeys: [
+            frame.temporal?.lowerSampleKey,
+            frame.temporal?.upperSampleKey,
+        ],
+        alpha: frame.temporal?.alpha,
+        lowerSnapshotEpoch: frame.temporal?.lowerSnapshotEpoch,
+        upperSnapshotEpoch: frame.temporal?.upperSnapshotEpoch,
+        candidatePageCount: frame.demand?.candidatePages?.length,
+        candidateCellCount: frame.demand?.candidateCells?.length,
     }
 }
 

@@ -22,6 +22,7 @@ import type {
     UploadCommand,
 } from 'geoscratch/scratch'
 import type { TemporalVelocityWgslModule } from './temporal-velocity-raster.ts'
+import type { FlowTemporalReadyBindingFrame } from './flow-temporal-bindings.ts'
 
 
 export type FlowSpawnSample = Readonly<{
@@ -92,16 +93,11 @@ const FLOW_SPAWN_WORKGROUP_SIZE = 64
 const U32_BYTE_LENGTH = 4
 const U32_MAX = 0xffff_ffff
 
-export type FlowSpawnTemporalFrame = Readonly<{
-    bindSet: BindSet
-    resources: readonly (BufferResource | TextureResource)[]
-    progress: number
-}>
+export type FlowSpawnTemporalFrame = FlowTemporalReadyBindingFrame
 
 export type FlowSpawnTemporalBinding = Readonly<{
     module: TemporalVelocityWgslModule
     layout: BindLayout
-    frame(): FlowSpawnTemporalFrame
 }>
 
 export type FlowSpawnSnapshotParameters = Readonly<{
@@ -156,7 +152,8 @@ export type FlowSpawnIndex = Readonly<{
         builder: SubmissionBuilder,
         candidateBytes: ArrayBufferView,
         candidateCount: number,
-        snapshot: FlowSpawnSnapshotParameters
+        snapshot: FlowSpawnSnapshotParameters,
+        temporal: FlowSpawnTemporalFrame
     ): FlowSpawnIndexFrame
     facts(): FlowSpawnIndexFacts
     dispose(): void
@@ -370,7 +367,8 @@ export async function createFlowSpawnIndex(
         builder: SubmissionBuilder,
         packedCandidates: ArrayBufferView,
         nextCandidateCount: number,
-        snapshot: FlowSpawnSnapshotParameters
+        snapshot: FlowSpawnSnapshotParameters,
+        temporalFrame: FlowSpawnTemporalFrame
     ): FlowSpawnIndexFrame {
         assertActive()
         if (builder?.runtime !== runtime) {
@@ -384,9 +382,9 @@ export async function createFlowSpawnIndex(
             throw new RangeError('Flow spawn candidate bytes must match a bounded record count')
         }
         validateSnapshot(snapshot)
-        const temporalFrame = temporal.frame()
         validateTemporalFrame(runtime, temporal.layout, temporalFrame)
-        if (temporalFrame.progress !== snapshot.progress) {
+        if (temporalFrame.pairGeneration !== snapshot.generation ||
+            temporalFrame.progress !== snapshot.progress) {
             throw new Error('Flow spawn index temporal frame progress is stale')
         }
         if (lastDispatch === undefined || lastTemporalSet !== temporalFrame.bindSet) {
@@ -517,8 +515,7 @@ function validateTemporalBinding(runtime: GPURuntime, temporal: FlowSpawnTempora
         typeof temporal.module.code !== 'string' ||
         !temporal.module.code.includes('fn FlowVelocity_sample(') ||
         temporal.module.bindings.group !== 1 ||
-        temporal.layout?.runtime !== runtime || temporal.layout.group !== 1 ||
-        typeof temporal.frame !== 'function') {
+        temporal.layout?.runtime !== runtime || temporal.layout.group !== 1) {
         throw new TypeError(
             'Flow spawn index requires one stable group-1 temporal sampler provider'
         )
@@ -530,9 +527,13 @@ function validateTemporalFrame(
     layout: BindLayout,
     frame: FlowSpawnTemporalFrame
 ): void {
-    if (frame?.bindSet?.runtime !== runtime || frame.bindSet.layout !== layout ||
+    if (frame?.state !== 'ready' || frame.bindSet?.runtime !== runtime ||
+        frame.bindSet.layout !== layout ||
         !Array.isArray(frame.resources) || frame.resources.length !== 4 ||
         frame.resources.some(resource => resource?.runtime !== runtime) ||
+        !Number.isSafeInteger(frame.requestedRevision) || frame.requestedRevision <= 0 ||
+        !Number.isSafeInteger(frame.pairGeneration) || frame.pairGeneration <= 0 ||
+        !Number.isSafeInteger(frame.requestedLevel) || frame.requestedLevel < 0 ||
         !Number.isFinite(frame.progress) || frame.progress < 0 || frame.progress > 1) {
         throw new TypeError('Flow spawn index temporal frame bindings are invalid')
     }

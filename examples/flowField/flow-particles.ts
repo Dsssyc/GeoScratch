@@ -14,6 +14,7 @@ import type {
     TextureResource,
     UploadCommand,
 } from 'geoscratch/scratch'
+import type { FlowTemporalReadyBindingFrame } from './flow-temporal-bindings.ts'
 
 export const FLOW_PARTICLE_RECORD_BYTES = 56
 export const FLOW_PARTICLE_MAXIMUM_COUNT = 262_144
@@ -21,17 +22,11 @@ export const FLOW_PARTICLE_LEGACY_DISPLACEMENT_SCALE = 50
 
 type FlowParticleGpuResource = BufferResource | TextureResource
 
-export type FlowParticleTemporalFrame = Readonly<{
-    bindSet: BindSet
-    resources: readonly FlowParticleGpuResource[]
-    progress: number
-    requestedLevel: number
-}>
+export type FlowParticleTemporalFrame = FlowTemporalReadyBindingFrame
 
 export type FlowParticleTemporalBindings = Readonly<{
     wgsl: string
     layout: BindLayout
-    frame(): FlowParticleTemporalFrame
 }>
 
 export type FlowParticleSpawnModule = Readonly<{
@@ -93,7 +88,11 @@ export type FlowParticles = Readonly<{
         clearCounters: ClearBufferCommand
         readonly simulation?: DispatchCommand
     }>
-    encode(builder: SubmissionBuilder, spawn: FlowParticleSpawnBindings): void
+    encode(
+        builder: SubmissionBuilder,
+        spawn: FlowParticleSpawnBindings,
+        temporal: FlowParticleTemporalFrame
+    ): void
     facts(): FlowParticleFacts
     dispose(): void
 }>
@@ -291,10 +290,13 @@ export async function createFlowParticles(
         let initialized = false
         let encodedSteps = 0
 
-        function encode(builder: SubmissionBuilder, spawn: FlowParticleSpawnBindings): void {
+        function encode(
+            builder: SubmissionBuilder,
+            spawn: FlowParticleSpawnBindings,
+            temporal: FlowParticleTemporalFrame
+        ): void {
 
             assertActive()
-            const temporal = options.temporal.frame()
             validateFrame(temporal, options.temporal.layout, 'temporal')
             validateSpawn(spawn, options.spawn.layout)
             writeParticleConfig(
@@ -433,7 +435,7 @@ function validateOptions(options: FlowParticlesOptions): void {
         maximumCount > FLOW_PARTICLE_MAXIMUM_COUNT ||
         typeof options.simulationShader !== 'string' || options.simulationShader.length === 0 ||
         typeof options.temporal?.wgsl !== 'string' || options.temporal.wgsl.length === 0 ||
-        options.temporal.layout?.group !== 1 || typeof options.temporal.frame !== 'function' ||
+        options.temporal.layout?.group !== 1 ||
         typeof options.spawn?.wgsl !== 'string' || options.spawn.wgsl.length === 0 ||
         options.spawn.layout?.group !== 2 || !nonNegativeFinite(options.activityKill) ||
         !positiveFinite(options.activitySpawn) ||
@@ -452,8 +454,11 @@ function validateFrame(
     name: string
 ): void {
 
-    if (frame?.bindSet?.layout !== layout || !Array.isArray(frame.resources) ||
+    if (frame?.state !== 'ready' || frame.bindSet?.layout !== layout ||
+        !Array.isArray(frame.resources) ||
         !Number.isFinite(frame.progress) || frame.progress < 0 || frame.progress > 1 ||
+        !Number.isSafeInteger(frame.requestedRevision) || frame.requestedRevision <= 0 ||
+        !Number.isSafeInteger(frame.pairGeneration) || frame.pairGeneration <= 0 ||
         !nonNegativeInteger(frame.requestedLevel)) {
         throw new TypeError(`Flow particle ${name} bindings are invalid`)
     }

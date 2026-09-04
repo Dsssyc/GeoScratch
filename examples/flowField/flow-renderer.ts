@@ -4,7 +4,6 @@ import type {
     GeoViewSnapshot,
     GeoViewSourceCapture,
     MapLibrePlanarCameraState,
-    VirtualRasterFeedbackReconciliation,
     VirtualRasterRuntimePublication,
 } from 'geoscratch/geo'
 import {
@@ -32,6 +31,7 @@ import {
 import type {
     FlowDemandCoordinator,
     FlowDemandFrame,
+    FlowDemandReconciliations,
 } from './flow-demand.ts'
 import {
     createFlowHistory,
@@ -40,7 +40,13 @@ import type {
     FlowHistory,
     FlowHistoryFrame,
 } from './flow-history.ts'
-import { flowEncodedTemporalSnapshot } from './flow-frame-provenance.ts'
+import {
+    assertFlowTemporalCapture,
+    flowTemporalFrameSnapshot,
+} from './flow-frame-provenance.ts'
+import type {
+    FlowTemporalFrameSnapshot,
+} from './flow-frame-provenance.ts'
 import {
     flowActivityThresholds,
 } from './flow-particle-policy.ts'
@@ -71,11 +77,20 @@ import type {
     FlowSpawnIndex,
 } from './flow-spawn-index.ts'
 import {
+    FlowTemporalBindingSupersededError,
     createFlowTemporalBindings,
 } from './flow-temporal-bindings.ts'
 import type {
     FlowTemporalBindings,
+    FlowTemporalReadyBindingFrame,
 } from './flow-temporal-bindings.ts'
+import type {
+    FlowTemporalReadyCapture,
+    FlowTemporalRuntimeWindow,
+} from './flow-temporal-runtime-window.ts'
+import type {
+    FlowTimelineSnapshot,
+} from './flow-timeline.ts'
 import {
     createFlowViewDemandAdapter,
 } from './flow-view-demand.ts'
@@ -86,27 +101,24 @@ import {
     flowFieldViewAdapter,
 } from './map.ts'
 import type {
-    TemporalVelocityRaster,
-    TemporalVelocitySnapshot,
-} from './temporal-velocity-raster.ts'
-import type {
-    FlowVelocityTimeRuntime,
+    FlowVelocitySampleRuntime,
 } from './velocity-source.ts'
 
 export type FlowFieldRendererOptions = Readonly<{
     runtime: GPURuntime
     surface: Surface
     size: SurfaceSize
-    temporal: TemporalVelocityRaster<FlowVelocityTimeRuntime>
+    temporalWindow: FlowTemporalRuntimeWindow<FlowVelocitySampleRuntime>
     maximumSpeed: number
     cellsPerPageEdge?: number
     particleCount?: number
 }>
 
 export type FlowFieldRendererFrame = Readonly<{
+    state: 'rendered'
     submitted: SubmittedWork
     view: GeoViewSnapshot
-    temporal: TemporalVelocitySnapshot
+    temporal: FlowTemporalFrameSnapshot
     demand: FlowDemandFrame
     history: FlowHistoryFrame
 }>
@@ -119,12 +131,7 @@ export type FlowFieldRendererFacts = Readonly<{
     maximumCandidatePages: number
     maximumCandidateCount: number
     maximumSpeed: number
-    temporalWindow: TemporalVelocitySnapshot
-    runtimes: Readonly<{
-        current: ReturnType<FlowVelocityTimeRuntime['inspect']>
-        next: ReturnType<FlowVelocityTimeRuntime['inspect']>
-        prefetch: ReturnType<FlowVelocityTimeRuntime['inspect']>
-    }>
+    temporalWindow: ReturnType<FlowTemporalRuntimeWindow<FlowVelocitySampleRuntime>['snapshot']>
     temporal: ReturnType<FlowTemporalBindings['facts']>
     viewDemand: ReturnType<FlowViewDemandAdapter['facts']>
     spawn: ReturnType<FlowSpawnIndex['facts']>
@@ -136,25 +143,21 @@ export type FlowFieldRendererFacts = Readonly<{
 export type FlowFieldRenderer = Readonly<{
     render(
         frameNumber: number,
-        capture: GeoViewSourceCapture<MapLibrePlanarCameraState>
+        capture: GeoViewSourceCapture<MapLibrePlanarCameraState>,
+        timeline: FlowTimelineSnapshot
     ): Promise<GeoFrameResult<FlowFieldRendererFrame>>
+    suspendTemporal(): Promise<void>
     flushResidency(): Promise<void>
     facts(): FlowFieldRendererFacts
     dispose(): Promise<void>
 }>
 
-type FlowFramePublications = Readonly<{
-    current: VirtualRasterRuntimePublication
-    next: VirtualRasterRuntimePublication
-    prefetchRuntime: FlowVelocityTimeRuntime
-    prefetch: VirtualRasterRuntimePublication
+type FlowFramePublication = Readonly<{
+    runtime: FlowVelocitySampleRuntime
+    publication: VirtualRasterRuntimePublication
 }>
 
-type FlowDemandReconciliations = Readonly<{
-    current: VirtualRasterFeedbackReconciliation
-    next: VirtualRasterFeedbackReconciliation
-    prefetch: VirtualRasterFeedbackReconciliation
-}>
+type FlowFramePublications = readonly FlowFramePublication[]
 
 type Disposable = Readonly<{ dispose(): void | Promise<void> }>
 
@@ -169,12 +172,12 @@ export async function createFlowFieldRenderer(
     options: FlowFieldRendererOptions
 ): Promise<FlowFieldRenderer> {
 
-    const { runtime, surface, temporal } = options ?? {}
+    const { runtime, surface, temporalWindow } = options ?? {}
     if (runtime === undefined || surface?.runtime !== runtime ||
-        temporal?.current?.gpu?.runtime !== runtime ||
-        temporal.next?.gpu?.runtime !== runtime || temporal.prefetch?.gpu?.runtime !== runtime ||
+        typeof temporalWindow?.capture !== 'function' ||
+        typeof temporalWindow.snapshot !== 'function' ||
         !Number.isFinite(options.maximumSpeed) || options.maximumSpeed <= 0) {
-        throw new TypeError('Flow Field renderer requires one runtime, Surface, and temporal raster')
+        throw new TypeError('Flow Field renderer requires one runtime, Surface, and temporal window')
     }
     let size = flowSurfaceSize(options.size)
     const cellsPerPageEdge = boundedCellEdge(
@@ -183,17 +186,6 @@ export async function createFlowFieldRenderer(
     const particleCount = boundedParticleCount(
         options.particleCount ?? DEFAULT_PARTICLE_COUNT
     )
-    const model = temporal.current.model
-    const maximumCandidatePages = Math.min(
-        model.addressSpace.pageTableEntryCount,
-        temporal.current.viewDemandProducer.maxDemands,
-        temporal.next.viewDemandProducer.maxDemands,
-        temporal.prefetch.viewDemandProducer.maxDemands
-    )
-    const maximumCandidateCount = maximumCandidatePages * cellsPerPageEdge ** 2
-    if (!Number.isSafeInteger(maximumCandidateCount) || maximumCandidateCount <= 0) {
-        throw new RangeError('Flow Field candidate capacity exceeds the safe integer range')
-    }
     const thresholds = flowActivityThresholds({ maximumSpeed: options.maximumSpeed })
     const owned: Disposable[] = []
     const own = <Value extends Disposable>(value: Value): Value => {
@@ -206,16 +198,29 @@ export async function createFlowFieldRenderer(
     let frameCount = 0
     let constructionInFlight: Promise<void> | undefined
     let frameInFlight: Promise<unknown> | undefined
+    let constructionCapture: ReturnType<typeof temporalWindow.capture> | undefined
+    let constructionCaptureReleased = false
 
     try {
-        const initialPublications = await Promise.all([
-            temporal.current.initialize(),
-            temporal.next.initialize(),
-            temporal.prefetch.initialize(),
-        ])
+        constructionCapture = temporalWindow.capture()
+        if (constructionCapture.state !== 'ready') {
+            throw new TypeError('Flow Field renderer requires an initially ready temporal pair')
+        }
+        const initialRuntimes = uniqueCaptureRuntimes(constructionCapture)
+        if (initialRuntimes.some(candidate => candidate.gpu.runtime !== runtime)) {
+            throw new TypeError('Flow Field temporal runtimes must share the renderer GPURuntime')
+        }
+        const model = constructionCapture.lower.runtime.model
+        const maximumCandidatePages = Math.min(
+            model.addressSpace.pageTableEntryCount,
+            ...initialRuntimes.map(candidate => candidate.viewDemandProducer.maxDemands)
+        )
+        const maximumCandidateCount = maximumCandidatePages * cellsPerPageEdge ** 2
+        if (!Number.isSafeInteger(maximumCandidateCount) || maximumCandidateCount <= 0) {
+            throw new RangeError('Flow Field candidate capacity exceeds the safe integer range')
+        }
         const temporalBindings = own(await createFlowTemporalBindings({
-            temporal,
-            requestedLevel: 0,
+            window: temporalWindow,
         }))
         const renderView = own(await createFlowRenderView({
             runtime,
@@ -236,7 +241,6 @@ export async function createFlowFieldRenderer(
             maximumDemands: Math.min(COVER_MAXIMUM_PATCHES, maximumCandidatePages),
         }))
         const demand = own(createFlowDemandCoordinator({
-            temporal,
             cover: viewDemand.cover,
             projection: viewDemand.projection,
             maximumDisplacementMeters:
@@ -286,142 +290,210 @@ export async function createFlowFieldRenderer(
             size,
             mode: 'reproject',
         }))
-
-        const initialPair = temporal.setPendingPublications(
-            initialPublications[0],
-            initialPublications[1]
-        )
-        const initialBuilder = runtime.createSubmission({ validation: 'throw' })
-        temporal.encodePending(initialBuilder)
-        temporal.prefetch.gpu.encode(initialBuilder, initialPublications[2].update)
-        const initialSubmitted = initialBuilder.submit()
-        await Promise.all([
-            observeFlowSubmittedWork(initialSubmitted),
-            temporal.acknowledgePending(initialSubmitted),
-            temporal.prefetch.acknowledge(initialPublications[2], initialSubmitted),
-        ])
-        temporal.recordPrefetchPublication(
-            temporal.prefetch.source.timeIndex,
-            initialPublications[2].snapshotEpoch,
-            initialPair.generation
-        )
-        if (initialPair.generation !== temporal.snapshot().generation) {
-            throw new Error('Flow Field temporal generation changed during initialization')
-        }
+        constructionCapture.release()
+        constructionCaptureReleased = true
         initialized = true
+
+        let temporalResidencyEpoch = 0
+        let lastTemporalSignature = ''
+        let requestedLevel = 0
 
         async function render(
             frameNumber: number,
-            capture: GeoViewSourceCapture<MapLibrePlanarCameraState>
+            capture: GeoViewSourceCapture<MapLibrePlanarCameraState>,
+            timeline: FlowTimelineSnapshot
         ): Promise<GeoFrameResult<FlowFieldRendererFrame>> {
 
             assertActive()
             if (!Number.isSafeInteger(frameNumber) || frameNumber <= frameCount ||
-                capture?.view === undefined) {
-                throw new TypeError('Flow Field render requires one monotonic captured frame')
+                capture?.view === undefined || timeline?.readiness !== 'ready') {
+                throw new TypeError(
+                    'Flow Field render requires one monotonic view and admitted timeline'
+                )
             }
             if (constructionInFlight !== undefined || frameInFlight !== undefined) {
                 throw new Error('Flow Field renderer permits exactly one frame in flight')
             }
             let finishConstruction!: () => void
             constructionInFlight = new Promise(resolve => { finishConstruction = resolve })
+            let temporalFrame: FlowTemporalReadyBindingFrame | undefined
+            let frameOwnershipTransferred = false
             try {
-            const nextSize = flowSurfaceSize(capture.presentationSize)
-            if (!sameSize(size, nextSize)) {
-                surface.resize(nextSize)
-                await history.resize(nextSize)
-                size = nextSize
-            }
-            const acknowledgedTemporal = temporal.snapshot()
-            const publications = takeFramePublications()
-            const frameTemporal = flowEncodedTemporalSnapshot(
-                acknowledgedTemporal,
-                publications.current.snapshotEpoch,
-                publications.next.snapshotEpoch
-            )
-            const view = flowFieldViewAdapter.read(capture.view, {
-                frameEpoch: frameNumber,
-                residencySnapshotEpoch: frameTemporal.temporalResidencyEpoch,
-            })
-            const builder = runtime.createSubmission({ validation: 'throw' })
-            temporal.setPendingPublications(publications.current, publications.next)
-            temporal.encodePending(builder)
-            publications.prefetchRuntime.gpu.encode(builder, publications.prefetch.update)
+                const nextSize = flowSurfaceSize(capture.presentationSize)
+                if (!sameSize(size, nextSize)) {
+                    surface.resize(nextSize)
+                    await history.resize(nextSize)
+                    size = nextSize
+                }
+                let prepared
+                try {
+                    prepared = await temporalBindings.prepareFrame(requestedLevel)
+                } catch (error) {
+                    if (error instanceof FlowTemporalBindingSupersededError) {
+                        throw new FlowTemporalFrameUnavailableError(
+                            'superseded',
+                            { cause: error }
+                        )
+                    }
+                    throw error
+                }
+                if (prepared.state !== 'ready') {
+                    if (prepared.state === 'failed') throw prepared.error
+                    throw new FlowTemporalFrameUnavailableError(prepared.state)
+                }
+                temporalFrame = prepared
+                try {
+                    assertFlowTemporalCapture(timeline, prepared.temporal)
+                } catch (error) {
+                    throw new FlowTemporalFrameUnavailableError('superseded', { cause: error })
+                }
+                const publications = takeFramePublications(prepared)
+                const lowerSnapshotEpoch = publicationEpoch(
+                    publications,
+                    prepared.temporal.lower.runtime
+                )
+                const upperSnapshotEpoch = publicationEpoch(
+                    publications,
+                    prepared.temporal.upper.runtime
+                )
+                const signature = `${prepared.pairGeneration}:` +
+                    `${lowerSnapshotEpoch}:${upperSnapshotEpoch}`
+                if (signature !== lastTemporalSignature) {
+                    temporalResidencyEpoch++
+                    lastTemporalSignature = signature
+                }
+                const frameTemporal = flowTemporalFrameSnapshot(
+                    timeline,
+                    prepared.temporal,
+                    {
+                        temporalResidencyEpoch,
+                        lowerSnapshotEpoch,
+                        upperSnapshotEpoch,
+                    }
+                )
+                const view = flowFieldViewAdapter.read(capture.view, {
+                    frameEpoch: frameNumber,
+                    residencySnapshotEpoch: frameTemporal.temporalResidencyEpoch,
+                })
+                const builder = runtime.createSubmission({ validation: 'throw' })
+                encodePublications(builder, publications)
 
-            const demandFrame = demand.encode(builder, view)
-            temporalBindings.setRequestedLevel(demandFrame.requestedLevel)
-            renderView.encode(builder, view)
-            const candidates = packFlowCandidateCells(
-                demandFrame.candidateCells,
-                model.addressCodec,
-                cellsPerPageEdge
-            )
-            const supportSnapshot = Object.freeze({
-                generation: frameTemporal.generation,
-                currentSnapshotEpoch: frameTemporal.currentSnapshotEpoch,
-                nextSnapshotEpoch: frameTemporal.nextSnapshotEpoch,
-                progress: frameTemporal.progress,
-                activitySpawn: thresholds.spawn,
-                activityKill: thresholds.kill,
-            })
-            spawn.encode(builder, candidates, demandFrame.candidateCells.length, supportSnapshot)
-            particles.encode(builder, particleSpawn.bindings)
-            contour.encode(builder, candidates, demandFrame.candidateCells.length, {
-                generation: supportSnapshot.generation,
-                currentSnapshotEpoch: supportSnapshot.currentSnapshotEpoch,
-                nextSnapshotEpoch: supportSnapshot.nextSnapshotEpoch,
-                progress: supportSnapshot.progress,
-                activityKill: supportSnapshot.activityKill,
-            })
-            const historyFrame = history.encode(builder, view, [
-                particleRender.draw,
-                contour.draw,
-            ])
-            const submitted = builder.submit()
-            const reconciliations = demand.reconcile(demandFrame).then(
-                requireFlowDemandReconciliations
-            )
-            const observing = observeFrame(
-                submitted,
-                publications,
-                frameTemporal,
-                reconciliations,
-                viewDemand,
-                contour,
-                temporalBindings
-            )
-            let observation: Promise<unknown>
-            observation = observing.finally(() => {
-                if (frameInFlight === observation) frameInFlight = undefined
-            })
-            frameInFlight = observation
-            const settlement = reconciliations.then(flowDemandSettlement)
-            frameCount = frameNumber
-            return Object.freeze({
-                observation,
-                settlement,
-                needsFollowUp: false,
-                value: Object.freeze({
+                const demandFrame = demand.encode(builder, view, prepared.temporal)
+                requestedLevel = demandFrame.requestedLevel
+                renderView.encode(builder, view)
+                const candidates = packFlowCandidateCells(
+                    demandFrame.candidateCells,
+                    model.addressCodec,
+                    cellsPerPageEdge
+                )
+                const supportSnapshot = Object.freeze({
+                    generation: frameTemporal.pairGeneration,
+                    currentSnapshotEpoch: frameTemporal.lowerSnapshotEpoch,
+                    nextSnapshotEpoch: frameTemporal.upperSnapshotEpoch,
+                    progress: frameTemporal.alpha,
+                    activitySpawn: thresholds.spawn,
+                    activityKill: thresholds.kill,
+                })
+                spawn.encode(
+                    builder,
+                    candidates,
+                    demandFrame.candidateCells.length,
+                    supportSnapshot,
+                    prepared
+                )
+                particles.encode(builder, particleSpawn.bindings, prepared)
+                contour.encode(builder, candidates, demandFrame.candidateCells.length, {
+                    generation: supportSnapshot.generation,
+                    currentSnapshotEpoch: supportSnapshot.currentSnapshotEpoch,
+                    nextSnapshotEpoch: supportSnapshot.nextSnapshotEpoch,
+                    progress: supportSnapshot.progress,
+                    activityKill: supportSnapshot.activityKill,
+                }, prepared)
+                const historyFrame = history.encode(builder, view, [
+                    particleRender.draw,
+                    contour.draw,
+                ])
+                const submitted = builder.submit()
+                const reconciliations = demand.reconcile(demandFrame).then(
+                    requireFlowDemandReconciliations
+                )
+                const observing = settleFrameObservations(
                     submitted,
-                    view,
-                    temporal: frameTemporal,
-                    demand: demandFrame,
-                    history: historyFrame,
-                }),
-            })
+                    publications,
+                    reconciliations,
+                    viewDemand,
+                    contour
+                )
+                let observation: Promise<unknown>
+                observation = observing.finally(() => {
+                    prepared.release()
+                    if (frameInFlight === observation) frameInFlight = undefined
+                })
+                frameOwnershipTransferred = true
+                frameInFlight = observation
+                const settlement = reconciliations.then(flowDemandSettlement)
+                frameCount = frameNumber
+                return Object.freeze({
+                    observation,
+                    settlement,
+                    needsFollowUp: false,
+                    value: Object.freeze({
+                        state: 'rendered' as const,
+                        submitted,
+                        view,
+                        temporal: frameTemporal,
+                        demand: demandFrame,
+                        history: historyFrame,
+                    }),
+                })
             } finally {
+                if (temporalFrame !== undefined && !frameOwnershipTransferred) {
+                    temporalFrame.release()
+                }
                 finishConstruction()
                 constructionInFlight = undefined
             }
         }
 
-        function takeFramePublications(): FlowFramePublications {
+        function takeFramePublications(
+            temporal: FlowTemporalReadyBindingFrame
+        ): FlowFramePublications {
 
-            const current = temporal.current.publish()
-            const next = temporal.next.publish()
-            const prefetchRuntime = temporal.prefetch
-            const prefetch = prefetchRuntime.publish()
-            return Object.freeze({ current, next, prefetchRuntime, prefetch })
+            return Object.freeze(uniqueCaptureRuntimes(temporal.temporal).map(runtime =>
+                Object.freeze({ runtime, publication: runtime.publish() })
+            ))
+        }
+
+        function encodePublications(
+            builder: ReturnType<GPURuntime['createSubmission']>,
+            publications: FlowFramePublications
+        ): void {
+
+            for (const { runtime: active, publication } of publications) {
+                active.gpu.encode(builder, publication.update)
+            }
+        }
+
+        async function suspendTemporal(): Promise<void> {
+
+            assertActive()
+            if (constructionInFlight !== undefined) await constructionInFlight
+            if (frameInFlight !== undefined) {
+                const settlement = await Promise.allSettled([ frameInFlight ])
+                if (settlement[0]?.status === 'rejected') throw settlement[0].reason
+            }
+            assertActive()
+            if (constructionInFlight !== undefined || frameInFlight !== undefined) {
+                throw new Error('Flow Field temporal suspension could not acquire the renderer')
+            }
+            let finishConstruction!: () => void
+            constructionInFlight = new Promise(resolve => { finishConstruction = resolve })
+            try {
+                await temporalBindings.suspend()
+            } finally {
+                finishConstruction()
+                constructionInFlight = undefined
+            }
         }
 
         async function flushResidency(): Promise<void> {
@@ -430,94 +502,35 @@ export async function createFlowFieldRenderer(
             if (constructionInFlight !== undefined || frameInFlight !== undefined) {
                 throw new Error('Flow Field residency flush requires an idle renderer')
             }
-            const publications = takeFramePublications()
-            const builder = runtime.createSubmission({ validation: 'throw' })
-            const pair = temporal.setPendingPublications(
-                publications.current,
-                publications.next
-            )
-            temporal.encodePending(builder)
-            publications.prefetchRuntime.gpu.encode(builder, publications.prefetch.update)
-            const submitted = builder.submit()
-            const flushing = Promise.all([
-                observeFlowSubmittedWork(submitted),
-                temporal.acknowledgePending(submitted),
-                publications.prefetchRuntime.acknowledge(publications.prefetch, submitted),
-            ]).then(() => {
-                temporal.recordPrefetchPublication(
-                    publications.prefetchRuntime.source.timeIndex,
-                    publications.prefetch.snapshotEpoch,
-                    pair.generation
-                )
-            })
-            let tracked: Promise<void>
-            tracked = flushing.finally(() => {
-                if (frameInFlight === tracked) frameInFlight = undefined
-            })
-            frameInFlight = tracked
-            return await tracked
-        }
-
-        async function observeFrame(
-            submitted: SubmittedWork,
-            publications: FlowFramePublications,
-            encodedTemporal: TemporalVelocitySnapshot,
-            reconciliations: Promise<FlowDemandReconciliations>,
-            activeViewDemand: FlowViewDemandAdapter,
-            activeContour: FlowContour,
-            activeBindings: FlowTemporalBindings
-        ) {
-
-            const beforeGeneration = temporal.snapshot().generation
-            const results = await Promise.all([
-                observeFlowSubmittedWork(submitted),
-                temporal.acknowledgePending(submitted),
-                publications.prefetchRuntime.acknowledge(publications.prefetch, submitted),
-                activeViewDemand.observe(submitted),
-                activeContour.observeOverflow(submitted),
-            ])
-            temporal.recordPrefetchPublication(
-                publications.prefetchRuntime.source.timeIndex,
-                publications.prefetch.snapshotEpoch,
-                encodedTemporal.generation
-            )
-            const acknowledged = temporal.snapshot()
-            if (acknowledged.currentSnapshotEpoch !== encodedTemporal.currentSnapshotEpoch ||
-                acknowledged.nextSnapshotEpoch !== encodedTemporal.nextSnapshotEpoch ||
-                acknowledged.temporalResidencyEpoch !== encodedTemporal.temporalResidencyEpoch) {
-                throw new Error('Flow Field acknowledged temporal provenance differs from sampling')
-            }
-            if (encodedTemporal.frameInTime === encodedTemporal.framesPerTime - 1) {
-                const latest = await reconciliations
-                await Promise.all([
-                    latest.current.settlement,
-                    latest.next.settlement,
-                    latest.prefetch.settlement,
-                ])
-            }
-            const advanced = await temporal.advanceFrame()
-            if (advanced.generation !== beforeGeneration) {
-                if (publications.prefetchRuntime !== temporal.next ||
-                    advanced.nextSnapshotEpoch !== publications.prefetch.snapshotEpoch) {
-                    throw new Error('Flow Field prefetch epoch was not preserved through rotation')
+            let finishConstruction!: () => void
+            constructionInFlight = new Promise(resolve => { finishConstruction = resolve })
+            let prepared: FlowTemporalReadyBindingFrame | undefined
+            let transferred = false
+            try {
+                const captured = await temporalBindings.prepareFrame(requestedLevel)
+                if (captured.state !== 'ready') {
+                    if (captured.state === 'failed') throw captured.error
+                    throw new FlowTemporalFrameUnavailableError(captured.state)
                 }
-                const prefetchRuntime = temporal.prefetch
-                const publication = await prefetchRuntime.initialize()
+                prepared = captured
+                const publications = takeFramePublications(captured)
                 const builder = runtime.createSubmission({ validation: 'throw' })
-                prefetchRuntime.gpu.encode(builder, publication.update)
-                const initializedPrefetch = builder.submit()
-                await Promise.all([
-                    observeFlowSubmittedWork(initializedPrefetch),
-                    prefetchRuntime.acknowledge(publication, initializedPrefetch),
-                ])
-                temporal.recordPrefetchPublication(
-                    prefetchRuntime.source.timeIndex,
-                    publication.snapshotEpoch,
-                    advanced.generation
-                )
-                await activeBindings.refresh()
+                encodePublications(builder, publications)
+                const submitted = builder.submit()
+                const flushing = settlePublicationObservations(submitted, publications, true)
+                let tracked: Promise<void>
+                tracked = flushing.finally(() => {
+                    captured.release()
+                    if (frameInFlight === tracked) frameInFlight = undefined
+                })
+                transferred = true
+                frameInFlight = tracked
+                return await tracked
+            } finally {
+                if (!transferred) prepared?.release()
+                finishConstruction()
+                constructionInFlight = undefined
             }
-            return results[0]
         }
 
         function facts(): FlowFieldRendererFacts {
@@ -530,12 +543,7 @@ export async function createFlowFieldRenderer(
                 maximumCandidatePages,
                 maximumCandidateCount,
                 maximumSpeed: options.maximumSpeed,
-                temporalWindow: temporal.snapshot(),
-                runtimes: Object.freeze({
-                    current: temporal.current.inspect(),
-                    next: temporal.next.inspect(),
-                    prefetch: temporal.prefetch.inspect(),
-                }),
+                temporalWindow: temporalWindow.snapshot(),
                 temporal: temporalBindings.facts(),
                 viewDemand: viewDemand.facts(),
                 spawn: spawn.facts(),
@@ -576,8 +584,11 @@ export async function createFlowFieldRenderer(
             if (!initialized || disposed) throw new Error('Flow Field renderer is not active')
         }
 
-        return Object.freeze({ render, flushResidency, facts, dispose })
+        return Object.freeze({ render, suspendTemporal, flushResidency, facts, dispose })
     } catch (error) {
+        if (constructionCapture?.state === 'ready' && !constructionCaptureReleased) {
+            constructionCapture.release()
+        }
         await disposeOwned(owned)
         throw error
     }
@@ -586,10 +597,20 @@ export async function createFlowFieldRenderer(
 function requireFlowDemandReconciliations(value: unknown): FlowDemandReconciliations {
 
     const candidate = value as Partial<FlowDemandReconciliations> | null
-    for (const reconciliation of [ candidate?.current, candidate?.next, candidate?.prefetch ]) {
-        if (!Number.isSafeInteger(reconciliation?.requestedCount) ||
-            reconciliation!.requestedCount < 0 ||
-            typeof reconciliation?.settlement?.then !== 'function') {
+    if (candidate?.kind !== 'flow-demand-reconciliations' ||
+        !Number.isSafeInteger(candidate.generation) || candidate.generation! <= 0 ||
+        !Number.isSafeInteger(candidate.requestedRevision) || candidate.requestedRevision! <= 0 ||
+        !Number.isSafeInteger(candidate.pairGeneration) || candidate.pairGeneration! <= 0 ||
+        !Array.isArray(candidate.members) || candidate.members.length < 1 ||
+        candidate.members.length > 2) {
+        throw new TypeError('Flow Field demand reconciliation facts are invalid')
+    }
+    for (const member of candidate.members) {
+        if (typeof member?.sampleKey !== 'string' || member.sampleKey.length === 0 ||
+            !Array.isArray(member.roles) || member.roles.length < 1 ||
+            !Number.isSafeInteger(member.reconciliation?.requestedCount) ||
+            member.reconciliation.requestedCount < 0 ||
+            typeof member.reconciliation.settlement?.then !== 'function') {
             throw new TypeError('Flow Field demand reconciliation facts are invalid')
         }
     }
@@ -600,26 +621,108 @@ function flowDemandSettlement(
     reconciliations: FlowDemandReconciliations
 ): GeoFrameSettlement {
 
-    const members = [
-        reconciliations.current,
-        reconciliations.next,
-        reconciliations.prefetch,
-    ]
-    const residencyWorkCount = members.reduce(
-        (sum, reconciliation) => sum + reconciliation.requestedCount,
+    const residencyWorkCount = reconciliations.members.reduce(
+        (sum, member) => sum + member.reconciliation.requestedCount,
         0
     )
     return Object.freeze({
-        residencySettlement: Promise.all(members.map(member => member.settlement)),
+        residencySettlement: Promise.all(reconciliations.members.map(
+            member => member.reconciliation.settlement
+        )),
         residencyWorkCount,
         needsFollowUp: false,
     })
 }
 
-async function observeFlowSubmittedWork(submitted: SubmittedWork) {
+function uniqueCaptureRuntimes(
+    capture: FlowTemporalReadyCapture<FlowVelocitySampleRuntime>
+): readonly FlowVelocitySampleRuntime[] {
+
+    return Object.freeze([ ...new Set([
+        capture.lower.runtime,
+        capture.upper.runtime,
+    ]) ])
+}
+
+function publicationEpoch(
+    publications: FlowFramePublications,
+    runtime: FlowVelocitySampleRuntime
+): number {
+
+    const member = publications.find(candidate => candidate.runtime === runtime)
+    if (member === undefined || !Number.isSafeInteger(member.publication.snapshotEpoch) ||
+        member.publication.snapshotEpoch <= 0) {
+        throw new Error('Flow Field publication is missing from its temporal capture')
+    }
+    return member.publication.snapshotEpoch
+}
+
+async function settlePublicationObservations(
+    submitted: SubmittedWork,
+    publications: FlowFramePublications,
+    allowNoNativeWork = false
+): Promise<void> {
+
+    const settlements = await Promise.allSettled([
+        observeFlowSubmittedWork(submitted, allowNoNativeWork),
+        ...publications.map(({ runtime, publication }) =>
+            runtime.acknowledge(publication, submitted)
+        ),
+    ])
+    throwSettledFailures(settlements, 'Flow Field publication observation failed')
+}
+
+async function settleFrameObservations(
+    submitted: SubmittedWork,
+    publications: FlowFramePublications,
+    reconciliations: Promise<FlowDemandReconciliations>,
+    viewDemand: FlowViewDemandAdapter,
+    contour: FlowContour
+): Promise<unknown> {
+
+    const settlements = await Promise.allSettled([
+        settlePublicationObservations(submitted, publications),
+        viewDemand.observe(submitted),
+        contour.observeOverflow(submitted),
+        reconciliations,
+    ])
+    throwSettledFailures(settlements, 'Flow Field frame observation failed')
+    return settlements[1]!.status === 'fulfilled' ? settlements[1]!.value : undefined
+}
+
+function throwSettledFailures(
+    settlements: readonly PromiseSettledResult<unknown>[],
+    message: string
+): void {
+
+    const failures = settlements.flatMap(result =>
+        result.status === 'rejected' ? [ result.reason ] : []
+    )
+    if (failures.length === 1) throw failures[0]
+    if (failures.length > 1) throw new AggregateError(failures, message)
+}
+
+export class FlowTemporalFrameUnavailableError extends Error {
+    readonly state: 'loading' | 'gap' | 'superseded'
+
+    constructor(
+        state: 'loading' | 'gap' | 'superseded',
+        options?: ErrorOptions
+    ) {
+        super(`Flow Field temporal frame is ${state}`, options)
+        this.name = 'FlowTemporalFrameUnavailableError'
+        this.state = state
+    }
+}
+
+async function observeFlowSubmittedWork(
+    submitted: SubmittedWork,
+    allowNoNativeWork = false
+) {
 
     const [ nativeOutcome ] = await Promise.all([ submitted.nativeOutcome, submitted.done ])
-    if (nativeOutcome.status !== 'observed-succeeded') {
+    if (nativeOutcome.status !== 'observed-succeeded' &&
+        !(allowNoNativeWork && nativeOutcome.status === 'no-native-work')) {
         throw new Error(`Flow Field submission native outcome was ${nativeOutcome.status}`)
     }
     return Object.freeze({ submissionId: submitted.id, nativeStatus: nativeOutcome.status })

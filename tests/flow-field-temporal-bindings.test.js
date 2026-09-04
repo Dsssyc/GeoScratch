@@ -7,9 +7,11 @@ import {
     webMercatorVirtualRasterField,
 } from 'geoscratch/geo'
 import {
+    FlowTemporalBindingSupersededError,
     createFlowTemporalBindings,
 } from '../examples/flowField/flow-temporal-bindings.ts'
 
+const HASH = '0123456789abcdef'.repeat(4)
 const wrapper = fs.readFileSync(path.join(
     process.cwd(),
     'examples',
@@ -20,111 +22,320 @@ const wrapper = fs.readFileSync(path.join(
 
 describe('Flow Field temporal bindings', () => {
 
-    it('creates one stable group-1 layout and current-generation frame', async() => {
+    it('holds one pair lease and snapshots alpha in independent frame captures', async() => {
 
-        const fixture = temporalFixture()
-        const provider = await createFlowTemporalBindings({
-            temporal: fixture.temporal,
-            requestedLevel: 0,
-            wrapper,
-        })
-        const frame = provider.frame()
+        const fixture = windowFixture()
+        const provider = await createFlowTemporalBindings({ window: fixture.window, wrapper })
+        const first = await provider.prepareFrame(1)
 
-        expect(provider.layout.group).to.equal(1)
-        expect(provider.layout.entries).to.deep.equal([
-            {
-                binding: 0,
-                name: 'currentPageTable',
-                type: 'read-storage',
-                visibility: [ 'compute' ],
-            },
-            {
-                binding: 1,
-                name: 'currentAtlas',
-                type: 'texture',
-                sampleType: 'unfilterable-float',
-                viewDimension: '2d',
-                visibility: [ 'compute' ],
-            },
-            {
-                binding: 2,
-                name: 'nextPageTable',
-                type: 'read-storage',
-                visibility: [ 'compute' ],
-            },
-            {
-                binding: 3,
-                name: 'nextAtlas',
-                type: 'texture',
-                sampleType: 'unfilterable-float',
-                viewDimension: '2d',
-                visibility: [ 'compute' ],
-            },
-        ])
-        expect(provider.module.bindings.group).to.equal(1)
-        expect(provider.module.sampleRegistration).to.equal('global-texel-lattice')
-        expect(provider.wgsl).to.equal(provider.module.code)
-        expect(frame).to.deep.include({
+        expect(first).to.deep.include({
+            state: 'ready',
+            requestedRevision: 1,
+            pairGeneration: 1,
             progress: 0.25,
-            requestedLevel: 0,
+            requestedLevel: 1,
+            sampleRegistration: 'pixel-center',
         })
-        expect(frame.resources).to.deep.equal([
-            fixture.currentResources.pageTable.buffer,
-            fixture.currentResources.atlas.texture,
-            fixture.nextResources.pageTable.buffer,
-            fixture.nextResources.atlas.texture,
-        ])
+        expect(first.resources).to.deep.equal(fixture.resources())
+        expect(provider.layout.group).to.equal(1)
+        expect(provider.module.sampleRegistration).to.equal('pixel-center')
+        expect(provider.wgsl).to.equal(provider.module.code)
+        expect(fixture.captureCount).to.equal(2)
         expect(provider.facts()).to.deep.include({
-            generation: 1,
-            requestedLevel: 0,
+            pairGeneration: 1,
+            windowPairGeneration: 1,
             refreshCount: 0,
-            ownsTemporal: false,
+            activeFrameCount: 1,
+            retiredBindingCount: 0,
+            ownsWindow: false,
             disposed: false,
         })
 
-        provider.setRequestedLevel(1)
-        expect(provider.frame().requestedLevel).to.equal(1)
-        expect(() => provider.setRequestedLevel(2)).to.throw(RangeError)
-        provider.dispose()
-        expect(fixture.temporalDisposeCount).to.equal(0)
+        fixture.setAlpha(0.75)
+        first.release()
+        const second = await provider.prepareFrame(0)
+        expect(second.progress).to.equal(0.75)
+        expect(second.bindSet).to.equal(first.bindSet)
+        expect(provider.facts().refreshCount).to.equal(0)
+        expect(() => provider.prepareFrame(2)).to.throw(RangeError)
+
+        second.release()
+        await provider.dispose()
+        expect(fixture.events.slice(-3)).to.deep.equal([
+            'dispose-set:g1',
+            'release-capture:g1:c1',
+            'dispose-layout',
+        ])
     })
 
-    it('creates the rotated set before releasing the old set and hard-fails stale frames', async() => {
+    it('creates a replacement before retiring the captured old pair', async() => {
 
-        const fixture = temporalFixture()
-        const provider = await createFlowTemporalBindings({
-            temporal: fixture.temporal,
-            requestedLevel: 0,
-            wrapper,
-        })
-        const oldSet = provider.frame().bindSet
-        fixture.rotate()
+        const fixture = windowFixture()
+        const provider = await createFlowTemporalBindings({ window: fixture.window, wrapper })
+        const oldFrame = await provider.prepareFrame(0)
+        const oldSet = oldFrame.bindSet
 
-        expect(() => provider.frame()).to.throw(/refresh/i)
-        expect(provider.facts().generation).to.equal(1)
-        expect(await provider.refresh()).to.equal(true)
-
-        const nextFrame = provider.frame()
-        expect(nextFrame.bindSet).to.not.equal(oldSet)
-        expect(oldSet.isDisposed).to.equal(true)
-        expect(fixture.events.slice(-2)).to.deep.equal([
-            'create-set:g2',
-            'dispose-set:g1',
-        ])
+        fixture.rotate('B', 'C', 0.4)
+        const current = await provider.prepareFrame(0)
+        expect(current).to.deep.include({ state: 'ready', pairGeneration: 2, progress: 0.4 })
+        expect(current.bindSet).to.not.equal(oldSet)
+        expect(oldSet.isDisposed).to.equal(false)
+        expect(fixture.events.indexOf('create-set:g2')).to.be.greaterThan(
+            fixture.events.indexOf('create-set:g1')
+        )
         expect(provider.facts()).to.deep.include({
-            generation: 2,
-            temporalGeneration: 2,
+            pairGeneration: 2,
             refreshCount: 1,
+            activeFrameCount: 2,
+            retiredBindingCount: 1,
         })
 
-        fixture.replaceAllocations()
-        expect(await provider.refresh()).to.equal(false)
-        expect(provider.frame().bindSet).to.equal(nextFrame.bindSet)
-        expect(provider.facts().refreshCount).to.equal(1)
+        current.release()
+        expect(oldSet.isDisposed).to.equal(false)
+        oldFrame.release()
+        expect(oldSet.isDisposed).to.equal(true)
+        expect(fixture.events.indexOf('dispose-set:g1')).to.be.lessThan(
+            fixture.events.indexOf('release-capture:g1:c1')
+        )
 
-        provider.dispose()
-        provider.dispose()
-        expect(fixture.temporalDisposeCount).to.equal(0)
+        await provider.dispose()
+    })
+
+    it('binds one exact runtime into both temporal slots without double release', async() => {
+
+        const fixture = windowFixture()
+        const provider = await createFlowTemporalBindings({ window: fixture.window, wrapper })
+        fixture.rotateExact('B')
+
+        const frame = await provider.prepareFrame(0)
+        const bindings = frame.bindSet.bindings
+        expect(bindings.currentPageTable.buffer).to.equal(bindings.nextPageTable.buffer)
+        expect(bindings.currentAtlas).to.equal(bindings.nextAtlas)
+        expect(frame.resources[0]).to.equal(frame.resources[2])
+        expect(frame.resources[1]).to.equal(frame.resources[3])
+        expect(frame.progress).to.equal(0)
+
+        frame.release()
+        frame.release()
+        await provider.dispose()
+        expect(fixture.releaseEvents('g2')).to.have.length(2)
+    })
+
+    it('never exposes the retained pair for loading, gap, or failed window states', async() => {
+
+        const fixture = windowFixture()
+        const provider = await createFlowTemporalBindings({ window: fixture.window, wrapper })
+
+        fixture.setLoading()
+        expect(await provider.prepareFrame(0)).to.deep.include({ state: 'loading' })
+        fixture.setFailed()
+        expect(await provider.prepareFrame(0)).to.deep.include({ state: 'failed' })
+        fixture.setGap()
+        expect(await provider.prepareFrame(0)).to.deep.include({ state: 'gap' })
+        expect(provider.pairGeneration).to.equal(0)
+        expect(fixture.events).to.include.members([
+            'dispose-set:g1',
+            'release-capture:g1:c1',
+        ])
+
+        await provider.dispose()
+    })
+
+    it('rejects stale async replacements and keeps the old pair usable', async() => {
+
+        const fixture = windowFixture()
+        const provider = await createFlowTemporalBindings({ window: fixture.window, wrapper })
+        fixture.rotate('B', 'C', 0.25)
+        const gate = fixture.deferNextSet()
+        const preparing = provider.prepareFrame(0)
+        await fixture.event('create-set:g2')
+        fixture.rotate('C', 'D', 0.5)
+        gate.resolve()
+
+        let failure
+        try {
+            await preparing
+        } catch (error) {
+            failure = error
+        }
+        expect(failure).to.be.instanceOf(FlowTemporalBindingSupersededError)
+        expect(failure.message).to.include('changed during binding refresh')
+        expect(provider.pairGeneration).to.equal(1)
+        expect(fixture.events).to.include.members([
+            'dispose-set:g2',
+            'release-capture:g2:c2',
+        ])
+
+        const latest = await provider.prepareFrame(0)
+        expect(latest).to.deep.include({ state: 'ready', pairGeneration: 3, progress: 0.5 })
+        latest.release()
+        await provider.dispose()
+    })
+
+    it('propagates a BindSet rejection unchanged and preserves the old pair', async() => {
+
+        const fixture = windowFixture()
+        const provider = await createFlowTemporalBindings({ window: fixture.window, wrapper })
+        const oldFrame = await provider.prepareFrame(0)
+        const oldSet = oldFrame.bindSet
+        const bindFailure = Object.assign(new Error('synthetic BindSet rejection'), {
+            code: 'SYNTHETIC_BIND_SET_FAILURE',
+        })
+
+        fixture.rotate('B', 'C', 0.5)
+        fixture.failNextSet(bindFailure)
+        let failure
+        try {
+            await provider.prepareFrame(0)
+        } catch (error) {
+            failure = error
+        }
+
+        expect(failure).to.equal(bindFailure)
+        expect(failure).to.not.be.instanceOf(FlowTemporalBindingSupersededError)
+        expect(provider.pairGeneration).to.equal(1)
+        expect(oldSet.isDisposed).to.equal(false)
+        expect(oldFrame.bindSet).to.equal(oldSet)
+        expect(fixture.events).to.include('release-capture:g2:c3')
+
+        oldFrame.release()
+        const retried = await provider.prepareFrame(0)
+        expect(retried).to.deep.include({ state: 'ready', pairGeneration: 2 })
+        expect(retried.bindSet).to.not.equal(oldSet)
+        retried.release()
+        await provider.dispose()
+    })
+
+    it('suspends the long pair capture and rebuilds it on later demand', async() => {
+
+        const fixture = windowFixture()
+        const provider = await createFlowTemporalBindings({ window: fixture.window, wrapper })
+        const initialSet = fixture.createdSets()[0]
+
+        await provider.suspend()
+        expect(provider.pairGeneration).to.equal(0)
+        expect(initialSet.isDisposed).to.equal(true)
+        expect(fixture.events).to.include('release-capture:g1:c1')
+
+        const rebuilt = await provider.prepareFrame(0)
+        expect(rebuilt).to.deep.include({ state: 'ready', pairGeneration: 1 })
+        expect(rebuilt.bindSet).to.not.equal(initialSet)
+        expect(provider.facts()).to.deep.include({
+            pairGeneration: 1,
+            refreshCount: 1,
+            activeFrameCount: 1,
+        })
+
+        rebuilt.release()
+        await provider.dispose()
+        expect(fixture.releaseEvents('g1')).to.have.length(3)
+    })
+
+    it('defers suspended pair retirement until an outstanding frame releases', async() => {
+
+        const fixture = windowFixture()
+        const provider = await createFlowTemporalBindings({ window: fixture.window, wrapper })
+        const frame = await provider.prepareFrame(0)
+        const retainedSet = frame.bindSet
+
+        await provider.suspend()
+        expect(provider.facts()).to.deep.include({
+            pairGeneration: 0,
+            activeFrameCount: 1,
+            retiredBindingCount: 1,
+        })
+        expect(retainedSet.isDisposed).to.equal(false)
+        expect(fixture.events).to.not.include('release-capture:g1:c1')
+
+        frame.release()
+        expect(retainedSet.isDisposed).to.equal(true)
+        expect(fixture.events).to.include.members([
+            'release-capture:g1:c1',
+            'release-capture:g1:c2',
+        ])
+
+        const rebuilt = await provider.prepareFrame(0)
+        expect(rebuilt.bindSet).to.not.equal(retainedSet)
+        rebuilt.release()
+        await provider.dispose()
+    })
+
+    it('blocks a new preparation while an in-flight refresh is being suspended', async() => {
+
+        const fixture = windowFixture()
+        const provider = await createFlowTemporalBindings({ window: fixture.window, wrapper })
+        fixture.rotate('B', 'C', 0.5)
+        const gate = fixture.deferNextSet()
+        const preparing = provider.prepareFrame(0)
+        await fixture.event('create-set:g2')
+
+        const suspending = provider.suspend()
+        expect(provider.facts().suspending).to.equal(true)
+        expect(() => provider.prepareFrame(0)).to.throw(/being suspended/)
+        gate.resolve()
+        const refreshed = await preparing
+        await suspending
+
+        expect(provider.pairGeneration).to.equal(0)
+        expect(refreshed.bindSet.isDisposed).to.equal(false)
+        refreshed.release()
+        expect(refreshed.bindSet.isDisposed).to.equal(true)
+
+        const rebuilt = await provider.prepareFrame(0)
+        expect(rebuilt).to.deep.include({ state: 'ready', pairGeneration: 2 })
+        rebuilt.release()
+        await provider.dispose()
+    })
+
+    it('waits for an in-flight refresh and outstanding frame during async disposal', async() => {
+
+        const fixture = windowFixture()
+        const provider = await createFlowTemporalBindings({ window: fixture.window, wrapper })
+        const oldFrame = await provider.prepareFrame(0)
+        fixture.rotate('B', 'C', 0.5)
+        const gate = fixture.deferNextSet()
+        const preparing = provider.prepareFrame(0)
+        await fixture.event('create-set:g2')
+        const disposing = provider.dispose()
+        gate.resolve()
+
+        let prepareFailure
+        try {
+            await preparing
+        } catch (error) {
+            prepareFailure = error
+        }
+        expect(prepareFailure).to.be.instanceOf(Error)
+        expect(fixture.events).to.include('dispose-set:g2')
+        let disposed = false
+        void disposing.then(() => { disposed = true })
+        await Promise.resolve()
+        expect(disposed).to.equal(false)
+
+        oldFrame.release()
+        await disposing
+        expect(provider.facts().disposed).to.equal(true)
+        expect(fixture.events.at(-1)).to.equal('dispose-layout')
+    })
+
+    it('rejects mixed registration and releases the rejected pair capture', async() => {
+
+        const fixture = windowFixture()
+        const provider = await createFlowTemporalBindings({ window: fixture.window, wrapper })
+        fixture.rotate('B', 'C', 0.5, 'pixel-center', 'global-texel-lattice')
+
+        let failure
+        try {
+            await provider.prepareFrame(0)
+        } catch (error) {
+            failure = error
+        }
+        expect(failure).to.be.instanceOf(TypeError)
+        expect(failure.message).to.include('shared registration')
+        expect(fixture.events).to.include('release-capture:g2:c2')
+        expect(provider.pairGeneration).to.equal(1)
+
+        await provider.dispose()
     })
 
     it('loads the production wrapper through the colocated raw asset path', () => {
@@ -136,105 +347,171 @@ describe('Flow Field temporal bindings', () => {
         expect(source).to.not.match(/runtime\.(?:device|queue)/)
         expect(source).to.not.include('packages/geoscratch/src')
     })
-
-    it('selects registration from both active sources and rejects a mixed pair', async() => {
-
-        const pixel = temporalFixture({
-            currentRegistration: 'pixel-center',
-            nextRegistration: 'pixel-center',
-        })
-        const provider = await createFlowTemporalBindings({
-            temporal: pixel.temporal,
-            wrapper,
-        })
-        expect(provider.module.sampleRegistration).to.equal('pixel-center')
-        expect(provider.wgsl).to.include('FlowVelocityRegistration_half_texel')
-        provider.dispose()
-
-        const mixed = temporalFixture({
-            currentRegistration: 'pixel-center',
-            nextRegistration: 'global-texel-lattice',
-        })
-        let failure
-        try {
-            await createFlowTemporalBindings({
-                temporal: mixed.temporal,
-                wrapper,
-            })
-        } catch (error) {
-            failure = error
-        }
-        expect(failure).to.be.instanceOf(TypeError)
-        expect(failure.message).to.include('shared registration')
-    })
 })
 
-function temporalFixture({
-    currentRegistration = 'global-texel-lattice',
-    nextRegistration = currentRegistration,
-} = {}) {
+function windowFixture() {
 
     const events = []
     const runtime = fakeRuntime(events)
-    let generation = 1
-    let progress = 0.25
-    let current = fakeTimeRuntime(runtime, 'current-g1', currentRegistration)
-    let next = fakeTimeRuntime(runtime, 'next-g1', nextRegistration)
-    let prefetch = fakeTimeRuntime(runtime, 'prefetch-g1', nextRegistration)
-    let temporalDisposeCount = 0
-    const temporal = {
-        get current() { return current },
-        get next() { return next },
-        get prefetch() { return prefetch },
-        snapshot: () => Object.freeze({ generation, progress }),
-        activeBindResources: () => Object.freeze({
-            generation,
-            current: Object.freeze({
-                timeIndex: generation - 1,
-                pageTable: current.gpu.pageTable.region(),
-                atlas: current.gpu.atlasView,
-            }),
-            next: Object.freeze({
-                timeIndex: generation,
-                pageTable: next.gpu.pageTable.region(),
-                atlas: next.gpu.atlasView,
-            }),
-        }),
-        async dispose() { temporalDisposeCount++ },
+    const runtimes = new Map()
+    let pairGeneration = 1
+    let requestedRevision = 1
+    let alpha = 0.25
+    let state = 'ready'
+    let lower = sample('A', 0)
+    let upper = sample('B', 1)
+    let lowerRuntime = timeRuntime(runtime, 'A', 'pixel-center')
+    let upperRuntime = timeRuntime(runtime, 'B', 'pixel-center')
+    runtimes.set('A', lowerRuntime)
+    runtimes.set('B', upperRuntime)
+    let captureSequence = 0
+
+    const window = {
+        capture() {
+
+            if (state === 'loading') {
+                return Object.freeze({ state, requestedRevision, selection: undefined })
+            }
+            if (state === 'gap') {
+                return Object.freeze({
+                    state,
+                    requestedRevision,
+                    selection: Object.freeze({
+                        kind: 'gap',
+                        modelTime: 0.5,
+                        lower,
+                        upper,
+                        reason: 'omitted-source-samples',
+                    }),
+                })
+            }
+            if (state === 'failed') {
+                return Object.freeze({
+                    state,
+                    requestedRevision,
+                    selection: undefined,
+                    failureCode: 'runtime-failed',
+                    error: new Error('synthetic failure'),
+                })
+            }
+            const captureId = `g${pairGeneration}:c${++captureSequence}`
+            events.push(`capture:${captureId}`)
+            let released = false
+            const exact = lower.sampleKey === upper.sampleKey
+            return Object.freeze({
+                state: 'ready',
+                requestedRevision,
+                pairGeneration,
+                selection: exact
+                    ? Object.freeze({ kind: 'exact', modelTime: lower.modelTime, sample: lower })
+                    : Object.freeze({
+                        kind: 'interpolated',
+                        modelTime: lower.modelTime +
+                            (upper.modelTime - lower.modelTime) * alpha,
+                        lower,
+                        upper,
+                        alpha,
+                    }),
+                alpha: exact ? 0 : alpha,
+                lower: Object.freeze({ sample: lower, runtime: lowerRuntime }),
+                upper: Object.freeze({ sample: upper, runtime: upperRuntime }),
+                release() {
+
+                    if (released) return
+                    released = true
+                    events.push(`release-capture:${captureId}`)
+                },
+            })
+        },
+        snapshot() {
+
+            return Object.freeze({ state, pairGeneration })
+        },
     }
+
+    function runtimeFor(key, registration) {
+
+        const existing = runtimes.get(key)
+        if (existing !== undefined && existing.source.sampleRegistration === registration) {
+            return existing
+        }
+        const created = timeRuntime(runtime, key, registration)
+        runtimes.set(key, created)
+        return created
+    }
+
     return {
         events,
-        temporal,
-        get temporalDisposeCount() { return temporalDisposeCount },
-        get currentResources() {
-            return {
-                pageTable: current.gpu.pageTable.region(),
-                atlas: current.gpu.atlasView,
-            }
-        },
-        get nextResources() {
-            return {
-                pageTable: next.gpu.pageTable.region(),
-                atlas: next.gpu.atlasView,
-            }
-        },
-        rotate() {
+        window,
+        get captureCount() { return captureSequence },
+        resources() {
 
-            generation = 2
-            progress = 0
-            current = next
-            next = prefetch
-            prefetch = fakeTimeRuntime(runtime, 'prefetch-g2', nextRegistration)
+            return [
+                lowerRuntime.gpu.pageTable,
+                lowerRuntime.gpu.atlasView.texture,
+                upperRuntime.gpu.pageTable,
+                upperRuntime.gpu.atlasView.texture,
+            ]
         },
-        replaceAllocations() {
+        releaseEvents(generation) {
 
-            current.gpu.pageTable.allocationVersion++
-            next.gpu.pageTable.allocationVersion++
+            return events.filter(value => value.startsWith(`release-capture:${generation}:`))
         },
+        setAlpha(value) {
+
+            alpha = value
+            requestedRevision++
+        },
+        rotate(
+            lowerKey,
+            upperKey,
+            nextAlpha,
+            lowerRegistration = 'pixel-center',
+            upperRegistration = lowerRegistration
+        ) {
+
+            pairGeneration++
+            requestedRevision++
+            alpha = nextAlpha
+            state = 'ready'
+            lower = sample(lowerKey, pairGeneration)
+            upper = sample(upperKey, pairGeneration + 1)
+            lowerRuntime = runtimeFor(lowerKey, lowerRegistration)
+            upperRuntime = runtimeFor(upperKey, upperRegistration)
+        },
+        rotateExact(key) {
+
+            pairGeneration++
+            requestedRevision++
+            state = 'ready'
+            lower = sample(key, pairGeneration)
+            upper = lower
+            lowerRuntime = runtimeFor(key, 'pixel-center')
+            upperRuntime = lowerRuntime
+        },
+        setLoading() { state = 'loading'; requestedRevision++ },
+        setGap() { state = 'gap'; requestedRevision++; pairGeneration++ },
+        setFailed() { state = 'failed'; requestedRevision++ },
+        deferNextSet: runtime.deferNextSet,
+        failNextSet: runtime.failNextSet,
+        createdSets: runtime.createdSets,
+        event: name => waitFor(() => events.includes(name)),
     }
 }
 
-function fakeTimeRuntime(runtime, id, sampleRegistration) {
+function sample(key, index) {
+
+    return Object.freeze({
+        sampleKey: `t${String(index).padStart(2, '0')}-${key}`,
+        timeIndex: index,
+        modelTime: index,
+        unit: 'hour',
+        phase: 'test',
+        sourceHash: HASH,
+    })
+}
+
+function timeRuntime(runtime, id, sampleRegistration) {
 
     const model = velocityModel(id)
     const pageTable = fakeResource(runtime, `${id}-page-table`)
@@ -245,7 +522,6 @@ function fakeTimeRuntime(runtime, id, sampleRegistration) {
         gpu: {
             runtime,
             pageTable,
-            atlas,
             atlasView: Object.freeze({ texture: atlas, id: `${id}-atlas-view` }),
         },
     }
@@ -299,16 +575,30 @@ function fakeResource(runtime, id) {
 
 function fakeRuntime(events) {
 
+    let nextSetGate
+    let nextSetFailure
+    const createdSets = []
     return {
         async createBindLayout(descriptor) {
 
-            return { ...descriptor, runtime: this, dispose() {} }
+            return {
+                ...descriptor,
+                runtime: this,
+                dispose() { events.push('dispose-layout') },
+            }
         },
         async createBindSet(layout, bindings, options) {
 
-            const generation = Number(/generation (\d+)/.exec(options.label)?.[1])
+            const generation = Number(/pair (\d+)/.exec(options.label)?.[1])
             events.push(`create-set:g${generation}`)
-            return {
+            const gate = nextSetGate
+            nextSetGate = undefined
+            if (gate !== undefined) await gate.promise
+            const failure = nextSetFailure
+            nextSetFailure = undefined
+            if (failure !== undefined) throw failure
+            const bindSet = {
+                runtime: this,
                 layout,
                 bindings,
                 isDisposed: false,
@@ -319,6 +609,38 @@ function fakeRuntime(events) {
                     events.push(`dispose-set:g${generation}`)
                 },
             }
+            createdSets.push(bindSet)
+            return bindSet
         },
+        deferNextSet() {
+
+            const gate = deferred()
+            nextSetGate = gate
+            return gate
+        },
+        failNextSet(error) {
+
+            nextSetFailure = error
+        },
+        createdSets() {
+
+            return [ ...createdSets ]
+        },
+    }
+}
+
+function deferred() {
+
+    let resolve
+    const promise = new Promise(accepted => { resolve = accepted })
+    return { promise, resolve }
+}
+
+async function waitFor(predicate) {
+
+    const deadline = Date.now() + 1000
+    while (!predicate()) {
+        if (Date.now() >= deadline) throw new Error('Timed out waiting for event')
+        await new Promise(resolve => setTimeout(resolve, 0))
     }
 }

@@ -2,20 +2,37 @@ import type {
     BindLayout,
     BindSet,
     BufferResource,
+    GPURuntime,
     TextureResource,
 } from 'geoscratch/scratch'
 import type {
-    FlowVelocityTimeRuntime,
-} from './velocity-source.ts'
+    FlowTemporalReadyCapture,
+    FlowTemporalRuntimeCapture,
+    FlowTemporalRuntimeWindow,
+} from './flow-temporal-runtime-window.ts'
 import {
     temporalVelocityWgslModule,
 } from './temporal-velocity-raster.ts'
 import type {
-    TemporalVelocityRaster,
     TemporalVelocityWgslModule,
 } from './temporal-velocity-raster.ts'
+import type {
+    FlowVelocitySampleRuntime,
+} from './velocity-source.ts'
 
-export type FlowTemporalBindingFrame = Readonly<{
+export type FlowTemporalBindingRuntime = FlowVelocitySampleRuntime
+
+type ReadyPairCapture = FlowTemporalReadyCapture<FlowTemporalBindingRuntime>
+type NonReadyPairCapture = Exclude<
+    FlowTemporalRuntimeCapture<FlowTemporalBindingRuntime>,
+    ReadyPairCapture
+>
+
+export type FlowTemporalReadyBindingFrame = Readonly<{
+    state: 'ready'
+    temporal: ReadyPairCapture
+    requestedRevision: number
+    pairGeneration: number
     bindSet: BindSet
     resources: readonly [
         BufferResource,
@@ -25,16 +42,24 @@ export type FlowTemporalBindingFrame = Readonly<{
     ]
     progress: number
     requestedLevel: number
+    sampleRegistration: 'global-texel-lattice' | 'pixel-center'
+    release(): void
 }>
+
+export type FlowTemporalBindingFrame =
+    | FlowTemporalReadyBindingFrame
+    | NonReadyPairCapture
 
 export type FlowTemporalBindingFacts = Readonly<{
     kind: 'flow-temporal-bindings'
-    generation: number
-    temporalGeneration: number
-    requestedLevel: number
+    pairGeneration: number
+    windowPairGeneration: number
     levelCount: number
     refreshCount: number
-    ownsTemporal: false
+    activeFrameCount: number
+    retiredBindingCount: number
+    suspending: boolean
+    ownsWindow: false
     disposed: boolean
 }>
 
@@ -42,220 +67,421 @@ export type FlowTemporalBindings = Readonly<{
     module: TemporalVelocityWgslModule
     wgsl: string
     layout: BindLayout
-    readonly generation: number
-    setRequestedLevel(level: number): void
-    refresh(): Promise<boolean>
-    frame(): FlowTemporalBindingFrame
+    readonly pairGeneration: number
+    prepareFrame(requestedLevel: number): Promise<FlowTemporalBindingFrame>
+    suspend(): Promise<void>
     facts(): FlowTemporalBindingFacts
-    dispose(): void
+    dispose(): Promise<void>
 }>
 
 export type FlowTemporalBindingsOptions = Readonly<{
-    temporal: TemporalVelocityRaster<FlowVelocityTimeRuntime>
-    requestedLevel?: number
+    window: FlowTemporalRuntimeWindow<FlowTemporalBindingRuntime>
     wrapper?: string
 }>
 
-type ActiveBindingState = Readonly<{
-    generation: number
+type BindingState = {
+    pairGeneration: number
+    capture: ReadyPairCapture
     bindSet: BindSet
-    resources: FlowTemporalBindingFrame['resources']
-}>
+    resources: FlowTemporalReadyBindingFrame['resources']
+    frameCount: number
+    retiring: boolean
+    released: boolean
+}
 
-/** Owns one stable temporal layout and generation-specific current/next BindSet. */
+/** Reports only a window generation race while an asynchronous BindSet refresh was pending. */
+export class FlowTemporalBindingSupersededError extends Error {
+
+    constructor(message: string) {
+        super(message)
+        this.name = 'FlowTemporalBindingSupersededError'
+    }
+}
+
+/** Owns one stable temporal layout and pair-generation BindSet leases. */
 export async function createFlowTemporalBindings(
     options: FlowTemporalBindingsOptions
 ): Promise<FlowTemporalBindings> {
 
-    const temporal = options?.temporal
-    const snapshot = temporal?.snapshot?.()
-    const current = temporal?.current
-    const next = temporal?.next
-    const runtime = current?.gpu?.runtime
-    if (snapshot === undefined || runtime === undefined || next?.gpu?.runtime !== runtime) {
-        throw new TypeError('Flow temporal bindings require two same-runtime velocity slots')
+    const window = options?.window
+    if (typeof window?.capture !== 'function' || typeof window.snapshot !== 'function') {
+        throw new TypeError('Flow temporal bindings require one runtime window')
     }
     const wrapper = options.wrapper ??
         (await import('./shaders/temporal-velocity.wgsl?raw')).default
-    const module = createModule(current, next, wrapper)
-    const levelCount = current.model.addressSpace.levelCount
-    let requestedLevel = options.requestedLevel ?? 0
-    validateRequestedLevel(requestedLevel, levelCount)
-    const layout = await runtime.createBindLayout({
-        label: 'Flow Field temporal velocity layout',
-        group: 1,
-        entries: [
-            {
-                binding: 0,
-                name: 'currentPageTable',
-                type: 'read-storage',
-                visibility: [ 'compute' ],
-            },
-            {
-                binding: 1,
-                name: 'currentAtlas',
-                type: 'texture',
-                sampleType: 'unfilterable-float',
-                viewDimension: '2d',
-                visibility: [ 'compute' ],
-            },
-            {
-                binding: 2,
-                name: 'nextPageTable',
-                type: 'read-storage',
-                visibility: [ 'compute' ],
-            },
-            {
-                binding: 3,
-                name: 'nextAtlas',
-                type: 'texture',
-                sampleType: 'unfilterable-float',
-                viewDimension: '2d',
-                visibility: [ 'compute' ],
-            },
-        ],
-    })
-    let active: ActiveBindingState
+    const initialCapture = window.capture()
+    if (initialCapture.state !== 'ready') {
+        throw new TypeError('Flow temporal bindings require an initially ready runtime pair')
+    }
+    let module: TemporalVelocityWgslModule
+    let runtime: GPURuntime
     try {
-        active = await createActiveState(temporal, layout, snapshot.generation)
+        module = createModule(initialCapture, wrapper)
+        runtime = requireSharedRuntime(initialCapture)
+    } catch (error) {
+        initialCapture.release()
+        throw error
+    }
+    let layout: BindLayout
+    try {
+        layout = await runtime.createBindLayout({
+            label: 'Flow Field temporal velocity layout',
+            group: 1,
+            entries: [
+                {
+                    binding: 0,
+                    name: 'currentPageTable',
+                    type: 'read-storage',
+                    visibility: [ 'compute' ],
+                },
+                {
+                    binding: 1,
+                    name: 'currentAtlas',
+                    type: 'texture',
+                    sampleType: 'unfilterable-float',
+                    viewDimension: '2d',
+                    visibility: [ 'compute' ],
+                },
+                {
+                    binding: 2,
+                    name: 'nextPageTable',
+                    type: 'read-storage',
+                    visibility: [ 'compute' ],
+                },
+                {
+                    binding: 3,
+                    name: 'nextAtlas',
+                    type: 'texture',
+                    sampleType: 'unfilterable-float',
+                    viewDimension: '2d',
+                    visibility: [ 'compute' ],
+                },
+            ],
+        })
+    } catch (error) {
+        initialCapture.release()
+        throw error
+    }
+    let active: BindingState | undefined
+    try {
+        active = await createBindingState(
+            initialCapture,
+            layout,
+            module,
+            wrapper,
+            runtime
+        )
     } catch (error) {
         layout.dispose()
         throw error
     }
+    const levelCount = initialCapture.lower.runtime.model.addressSpace.levelCount
+    const retired = new Set<BindingState>()
+    const retirementWaiters = new Set<() => void>()
+    const cleanupFailures: unknown[] = []
     let refreshCount = 0
     let disposed = false
+    let preparing: Promise<FlowTemporalBindingFrame> | undefined
+    let suspendPromise: Promise<void> | undefined
+    let disposePromise: Promise<void> | undefined
 
-    function setRequestedLevel(level: number): void {
-
-        assertActive()
-        validateRequestedLevel(level, levelCount)
-        requestedLevel = level
-    }
-
-    async function refresh(): Promise<boolean> {
+    function prepareFrame(requestedLevel: number): Promise<FlowTemporalBindingFrame> {
 
         assertActive()
-        const nextSnapshot = temporal.snapshot()
-        if (nextSnapshot.generation === active.generation) return false
-        validateRequestedLevel(requestedLevel, temporal.current.model.addressSpace.levelCount)
-        const rotatedModule = createModule(temporal.current, temporal.next, wrapper)
-        if (rotatedModule.code !== module.code) {
-            throw new TypeError('Flow temporal rotation changed the stable WGSL contract')
+        validateRequestedLevel(requestedLevel, levelCount)
+        if (suspendPromise !== undefined) {
+            throw new Error('Flow temporal bindings are being suspended')
         }
-        const replacement = await createActiveState(
-            temporal,
-            layout,
-            nextSnapshot.generation
-        )
-        const retired = active
-        active = replacement
-        refreshCount++
-        retired.bindSet.dispose()
-        return true
-    }
-
-    function frame(): FlowTemporalBindingFrame {
-
-        assertActive()
-        const currentSnapshot = temporal.snapshot()
-        if (currentSnapshot.generation !== active.generation) {
-            throw new Error('Flow temporal bindings require refresh after runtime rotation')
+        if (preparing !== undefined) {
+            throw new Error('Flow temporal bindings permit one frame preparation at a time')
         }
-        if (!Number.isFinite(currentSnapshot.progress) || currentSnapshot.progress < 0 ||
-            currentSnapshot.progress > 1) {
-            throw new RangeError('Flow temporal progress must remain within [0, 1]')
-        }
-        return Object.freeze({
-            bindSet: active.bindSet,
-            resources: active.resources,
-            progress: currentSnapshot.progress,
-            requestedLevel,
+        let tracked: Promise<FlowTemporalBindingFrame>
+        tracked = prepareFrameOnce(requestedLevel).finally(() => {
+            if (preparing === tracked) preparing = undefined
         })
+        preparing = tracked
+        return tracked
+    }
+
+    async function prepareFrameOnce(requestedLevel: number): Promise<FlowTemporalBindingFrame> {
+
+        let frameCapture = window.capture()
+        if (frameCapture.state !== 'ready') {
+            if (frameCapture.state === 'gap' && active !== undefined) {
+                const prior = active
+                active = undefined
+                retire(prior)
+            }
+            return frameCapture
+        }
+        if (active?.pairGeneration !== frameCapture.pairGeneration) {
+            const replacement = await createBindingState(
+                frameCapture,
+                layout,
+                module,
+                wrapper,
+                runtime
+            )
+            const current = window.snapshot()
+            if (disposed || current.state !== 'ready' ||
+                current.pairGeneration !== replacement.pairGeneration) {
+                releaseBindingState(replacement)
+                if (disposed) throw new Error('Flow temporal bindings are disposed')
+                throw new FlowTemporalBindingSupersededError(
+                    'Flow temporal runtime pair changed during binding refresh'
+                )
+            }
+            const prior = active
+            active = replacement
+            refreshCount++
+            if (prior !== undefined) retire(prior)
+            frameCapture = window.capture()
+            if (frameCapture.state !== 'ready' ||
+                frameCapture.pairGeneration !== replacement.pairGeneration) {
+                if (frameCapture.state === 'ready') frameCapture.release()
+                throw new FlowTemporalBindingSupersededError(
+                    'Flow temporal runtime pair changed before frame capture'
+                )
+            }
+        }
+        const state = active
+        if (state === undefined || state.pairGeneration !== frameCapture.pairGeneration) {
+            frameCapture.release()
+            throw new Error('Flow temporal bindings require refresh for the current pair')
+        }
+        if (frameCapture.lower.runtime.source.sampleRegistration !== module.sampleRegistration ||
+            frameCapture.upper.runtime.source.sampleRegistration !== module.sampleRegistration) {
+            frameCapture.release()
+            throw new TypeError('Flow temporal frame registration changed after binding creation')
+        }
+        state.frameCount++
+        let released = false
+        return Object.freeze({
+            state: 'ready' as const,
+            temporal: frameCapture,
+            requestedRevision: frameCapture.requestedRevision,
+            pairGeneration: frameCapture.pairGeneration,
+            bindSet: state.bindSet,
+            resources: state.resources,
+            progress: frameCapture.alpha,
+            requestedLevel,
+            sampleRegistration: module.sampleRegistration,
+            release() {
+
+                if (released) return
+                released = true
+                try {
+                    frameCapture.release()
+                } catch (error) {
+                    recordCleanupFailure(error)
+                }
+                state.frameCount--
+                if (state.frameCount < 0) {
+                    recordCleanupFailure(
+                        new Error('Flow temporal binding frame count underflowed')
+                    )
+                    return
+                }
+                if (state.retiring && state.frameCount === 0) releaseBindingState(state)
+            },
+        })
+    }
+
+    function retire(state: BindingState): void {
+
+        if (state.retiring) return
+        state.retiring = true
+        retired.add(state)
+        if (state.frameCount === 0) releaseBindingState(state)
+    }
+
+    function releaseBindingState(state: BindingState): void {
+
+        if (state.released) return
+        state.released = true
+        retired.delete(state)
+        try {
+            state.bindSet.dispose()
+        } catch (error) {
+            recordCleanupFailure(error)
+        }
+        try {
+            state.capture.release()
+        } catch (error) {
+            recordCleanupFailure(error)
+        }
+        if (retired.size === 0) {
+            for (const resolve of retirementWaiters) resolve()
+            retirementWaiters.clear()
+        }
     }
 
     function facts(): FlowTemporalBindingFacts {
 
-        const temporalGeneration = disposed
-            ? active.generation
-            : temporal.snapshot().generation
+        const snapshot = window.snapshot()
         return Object.freeze({
-            kind: 'flow-temporal-bindings',
-            generation: active.generation,
-            temporalGeneration,
-            requestedLevel,
+            kind: 'flow-temporal-bindings' as const,
+            pairGeneration: active?.pairGeneration ?? 0,
+            windowPairGeneration: snapshot.pairGeneration,
             levelCount,
             refreshCount,
-            ownsTemporal: false,
+            activeFrameCount: (active?.frameCount ?? 0) + [ ...retired ]
+                .reduce((count, state) => count + state.frameCount, 0),
+            retiredBindingCount: retired.size,
+            suspending: suspendPromise !== undefined,
+            ownsWindow: false as const,
             disposed,
         })
     }
 
-    function dispose(): void {
+    function suspend(): Promise<void> {
 
-        if (disposed) return
+        assertActive()
+        if (suspendPromise !== undefined) return suspendPromise
+        let tracked: Promise<void>
+        tracked = suspendOnce().finally(() => {
+            if (suspendPromise === tracked) suspendPromise = undefined
+        })
+        suspendPromise = tracked
+        return tracked
+    }
+
+    async function suspendOnce(): Promise<void> {
+
+        if (preparing !== undefined) await Promise.allSettled([ preparing ])
+        if (active !== undefined) {
+            const prior = active
+            active = undefined
+            retire(prior)
+        }
+        if (cleanupFailures.length > 0) {
+            throw new AggregateError(
+                [ ...cleanupFailures ],
+                'Flow temporal bindings failed to suspend'
+            )
+        }
+    }
+
+    function dispose(): Promise<void> {
+
+        if (disposePromise !== undefined) return disposePromise
         disposed = true
-        active.bindSet.dispose()
-        layout.dispose()
+        disposePromise = disposeAll()
+        return disposePromise
+    }
+
+    async function disposeAll(): Promise<void> {
+
+        if (suspendPromise !== undefined) await Promise.allSettled([ suspendPromise ])
+        if (preparing !== undefined) await Promise.allSettled([ preparing ])
+        if (active !== undefined) {
+            const prior = active
+            active = undefined
+            retire(prior)
+        }
+        while (retired.size > 0) {
+            await new Promise<void>(resolve => { retirementWaiters.add(resolve) })
+        }
+        try {
+            layout.dispose()
+        } catch (error) {
+            recordCleanupFailure(error)
+        }
+        if (cleanupFailures.length > 0) {
+            throw new AggregateError(
+                [ ...cleanupFailures ],
+                'Flow temporal binding disposal failed'
+            )
+        }
+    }
+
+    function recordCleanupFailure(error: unknown): void {
+
+        if (!cleanupFailures.includes(error)) cleanupFailures.push(error)
     }
 
     function assertActive(): void {
 
         if (disposed) throw new Error('Flow temporal bindings are disposed')
+        if (cleanupFailures.length > 0) {
+            throw new AggregateError(
+                [ ...cleanupFailures ],
+                'Flow temporal bindings have a cleanup failure'
+            )
+        }
     }
 
     return Object.freeze({
         module,
         wgsl: module.code,
         layout,
-        get generation() { return active.generation },
-        setRequestedLevel,
-        refresh,
-        frame,
+        get pairGeneration() { return active?.pairGeneration ?? 0 },
+        prepareFrame,
+        suspend,
         facts,
         dispose,
     })
 }
 
-async function createActiveState(
-    temporal: TemporalVelocityRaster<FlowVelocityTimeRuntime>,
+async function createBindingState(
+    capture: ReadyPairCapture,
     layout: BindLayout,
-    expectedGeneration: number
-): Promise<ActiveBindingState> {
+    stableModule: TemporalVelocityWgslModule,
+    wrapper: string,
+    runtime: GPURuntime
+): Promise<BindingState> {
 
-    const bindings = temporal.activeBindResources()
-    if (bindings.generation !== expectedGeneration) {
-        throw new Error('Flow temporal binding resources changed during refresh')
+    try {
+        if (requireSharedRuntime(capture) !== runtime) {
+            throw new TypeError('Flow temporal runtime pair changed its GPURuntime')
+        }
+        const rotated = createModule(capture, wrapper)
+        if (rotated.code !== stableModule.code ||
+            rotated.sampleRegistration !== stableModule.sampleRegistration) {
+            throw new TypeError('Flow temporal rotation changed the stable WGSL contract')
+        }
+        const lower = capture.lower.runtime
+        const upper = capture.upper.runtime
+        const lowerPageTable = lower.gpu.pageTable.region()
+        const upperPageTable = upper.gpu.pageTable.region()
+        const bindSet = await runtime.createBindSet(layout, {
+            currentPageTable: lowerPageTable,
+            currentAtlas: lower.gpu.atlasView,
+            nextPageTable: upperPageTable,
+            nextAtlas: upper.gpu.atlasView,
+        }, { label: `Flow Field temporal velocity pair ${capture.pairGeneration}` })
+        return {
+            pairGeneration: capture.pairGeneration,
+            capture,
+            bindSet,
+            resources: Object.freeze([
+                lowerPageTable.buffer,
+                lower.gpu.atlasView.texture,
+                upperPageTable.buffer,
+                upper.gpu.atlasView.texture,
+            ] as [BufferResource, TextureResource, BufferResource, TextureResource]),
+            frameCount: 0,
+            retiring: false,
+            released: false,
+        }
+    } catch (error) {
+        capture.release()
+        throw error
     }
-    const runtime = temporal.current.gpu.runtime
-    const bindSet = await runtime.createBindSet(layout, {
-        currentPageTable: bindings.current.pageTable,
-        currentAtlas: bindings.current.atlas,
-        nextPageTable: bindings.next.pageTable,
-        nextAtlas: bindings.next.atlas,
-    }, { label: `Flow Field temporal velocity generation ${expectedGeneration}` })
-    return Object.freeze({
-        generation: expectedGeneration,
-        bindSet,
-        resources: Object.freeze([
-            bindings.current.pageTable.buffer,
-            bindings.current.atlas.texture,
-            bindings.next.pageTable.buffer,
-            bindings.next.atlas.texture,
-        ] as [BufferResource, TextureResource, BufferResource, TextureResource]),
-    })
 }
 
 function createModule(
-    current: FlowVelocityTimeRuntime,
-    next: FlowVelocityTimeRuntime,
+    capture: ReadyPairCapture,
     wrapper: string
 ): TemporalVelocityWgslModule {
 
-    const sampleRegistration = current.source.sampleRegistration
-    if (next.source.sampleRegistration !== sampleRegistration) {
+    const lower = capture.lower.runtime
+    const upper = capture.upper.runtime
+    const sampleRegistration = lower.source.sampleRegistration
+    if (upper.source.sampleRegistration !== sampleRegistration) {
         throw new TypeError('Flow temporal samples require one shared registration')
     }
-    return temporalVelocityWgslModule(current.model, next.model, {
+    return temporalVelocityWgslModule(lower.model, upper.model, {
         group: 1,
         currentPageTableBinding: 0,
         currentAtlasBinding: 1,
@@ -264,6 +490,16 @@ function createModule(
         wrapper,
         sampleRegistration,
     })
+}
+
+function requireSharedRuntime(capture: ReadyPairCapture): GPURuntime {
+
+    const lower = capture.lower.runtime.gpu.runtime
+    const upper = capture.upper.runtime.gpu.runtime
+    if (lower === undefined || upper !== lower) {
+        throw new TypeError('Flow temporal bindings require one shared GPURuntime')
+    }
+    return lower
 }
 
 function validateRequestedLevel(level: number, levelCount: number): void {

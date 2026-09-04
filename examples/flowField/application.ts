@@ -3,9 +3,7 @@ import {
     WorkerModuleCatalog,
     WorkerSystem,
 } from 'geoscratch/scratch'
-import type {
-    LifetimeScope,
-} from 'geoscratch/scratch'
+import type { LifetimeScope } from 'geoscratch/scratch'
 import {
     createGeoFrameController,
     mapLibreFrameDriver,
@@ -13,26 +11,39 @@ import {
 } from 'geoscratch/geo'
 import type {
     GeoFrameController,
+    GeoFrameResult,
+    GeoViewSourceCapture,
+    MapLibrePlanarCameraState,
 } from 'geoscratch/geo'
+import { FLOW_FIELD_CACHE_DISABLED } from './cache-policy.ts'
+import { loadFlowFieldDataset } from './flow-dataset.ts'
+import { createReadyVelocitySampleRuntime } from './flow-ready-velocity-runtime.ts'
+import { FLOW_FIELD_RUNTIME_BUDGETS } from './flow-runtime-budgets.ts'
+import type { FlowFieldRuntimeBudgetFacts } from './flow-runtime-budgets.ts'
 import {
-    FLOW_FIELD_CACHE_DISABLED,
-} from './cache-policy.ts'
-import {
-    loadFlowDatasetManifest,
-} from './flow-dataset.ts'
-import {
+    FlowTemporalFrameUnavailableError,
     createFlowFieldRenderer,
 } from './flow-renderer.ts'
 import type {
     FlowFieldRenderer,
+    FlowFieldRendererFrame,
 } from './flow-renderer.ts'
+import { createFlowTemporalRuntimeWindow } from './flow-temporal-runtime-window.ts'
+import type {
+    FlowTemporalRequestResult,
+    FlowTemporalRequestTicket,
+    FlowTemporalRuntimeWindowSnapshot,
+} from './flow-temporal-runtime-window.ts'
+import { createFlowTimeline } from './flow-timeline.ts'
+import type {
+    FlowTimelineLoop,
+    FlowTimelineReadiness,
+    FlowTimelineSnapshot,
+} from './flow-timeline.ts'
 import {
     createFlowFieldMap,
     flowFieldViewAdapter,
 } from './map.ts'
-import {
-    createTemporalVelocityRaster,
-} from './temporal-velocity-raster.ts'
 
 export type FlowFieldApplicationOptions = Readonly<{
     lifetime: LifetimeScope
@@ -40,13 +51,52 @@ export type FlowFieldApplicationOptions = Readonly<{
     proofMode: boolean
     tileServerUrl: string
     workerModuleManifestUrl: URL
-    framesPerTime: number
-    fail(error: unknown): void
+    readWallTime(): number
+    initialPlaying?: boolean
+    initialRate?: number
+    initialLoop?: FlowTimelineLoop
+    initialZoom?: number
+    fail(error: unknown): void | Promise<void>
     setStatus(status: string): void
 }>
 
+export type { FlowFieldRuntimeBudgetFacts } from './flow-runtime-budgets.ts'
+
+export type FlowFieldApplicationFrame =
+    | FlowFieldRendererFrame
+    | Readonly<{
+        state: 'loading'
+        timelineRevision: number
+        selectionRevision: number
+        windowRequestRevision: number
+    }>
+    | Readonly<{
+        state: 'gap'
+        timelineRevision: number
+        selectionRevision: number
+        windowRequestRevision: number
+        lowerSampleKey: string
+        upperSampleKey: string
+    }>
+    | Readonly<{
+        state: 'failed'
+        timelineRevision: number
+        selectionRevision: number
+        windowRequestRevision: number
+        failureCode: 'runtime-failed'
+    }>
+
 export type FlowFieldApplicationFacts = Readonly<{
-    paused: boolean
+    timeline: FlowTimelineSnapshot
+    temporalWindow: FlowTemporalRuntimeWindowSnapshot
+    handshake: Readonly<{
+        timelineRevision: number
+        selectionRevision: number
+        windowRequestRevision: number
+        status: 'pending' | FlowTemporalRequestResult['status']
+    }>
+    lastFrame: FlowFieldApplicationFrame
+    budgets: FlowFieldRuntimeBudgetFacts
     frames: ReturnType<GeoFrameController['snapshot']>
     renderer: ReturnType<FlowFieldRenderer['facts']>
     workers: ReturnType<WorkerSystem['inspect']>
@@ -54,12 +104,23 @@ export type FlowFieldApplicationFacts = Readonly<{
 }>
 
 export type FlowFieldApplication = Readonly<{
-    setPaused(paused: boolean): void
-    flush(): Promise<void>
+    play(input: Readonly<{ wallTime: number }>): FlowTimelineSnapshot
+    pause(input: Readonly<{ wallTime: number }>): FlowTimelineSnapshot
+    seek(input: Readonly<{ wallTime: number, modelTime: number }>): FlowTimelineSnapshot
+    setRate(input: Readonly<{ wallTime: number, rate: number }>): FlowTimelineSnapshot
+    setLoop(input: Readonly<{ wallTime: number, loop: FlowTimelineLoop }>): FlowTimelineSnapshot
+    flush(input: Readonly<{ wallTime: number }>): Promise<FlowFieldApplicationFacts>
     facts(): FlowFieldApplicationFacts
 }>
 
-/** Assembles the independent Flow Field map, workers, temporal rasters, renderer, and frame owner. */
+type WindowHandshake = {
+    timelineRevision: number
+    selectionRevision: number
+    ticket: FlowTemporalRequestTicket
+    status: 'pending' | FlowTemporalRequestResult['status']
+}
+
+/** Assembles the schema-two Flow Field dataset, model clock, runtime window, and renderer. */
 export async function startFlowFieldApplication(
     options: FlowFieldApplicationOptions
 ): Promise<FlowFieldApplication> {
@@ -70,17 +131,19 @@ export async function startFlowFieldApplication(
         proofMode,
         tileServerUrl,
         workerModuleManifestUrl,
-        framesPerTime,
         setStatus,
     } = options
-    if (!Number.isSafeInteger(framesPerTime) || framesPerTime <= 0) {
-        throw new RangeError('Flow Field framesPerTime must be a positive integer')
+    if (typeof options?.readWallTime !== 'function') {
+        throw new TypeError('Flow Field application requires one monotonic wall-time source')
     }
-    const map = lifetime.own(createFlowFieldMap(canvas, { proof: proofMode }), {
+    const map = lifetime.own(createFlowFieldMap(canvas, {
+        proof: proofMode,
+        ...(options.initialZoom === undefined ? {} : { zoom: options.initialZoom }),
+    }), {
         label: 'flow-field-maplibre-map',
         release: value => value.remove(),
     })
-    const [ runtime, manifest, workerModules ] = await Promise.all([
+    const [ runtime, dataset, workerModules ] = await Promise.all([
         lifetime.acquire(GPURuntime.create({
             label: 'Flow Field runtime',
             powerPreference: 'high-performance',
@@ -95,10 +158,9 @@ export async function startFlowFieldApplication(
             label: 'flow-field-runtime',
             release: value => value.dispose(),
         }),
-        lifetime.track(
-            loadFlowDatasetManifest(flowManifestUrl(tileServerUrl)),
-            'flow-field-manifest'
-        ),
+        lifetime.track(loadFlowFieldDataset(flowManifestUrl(tileServerUrl), {
+            signal: lifetime.signal,
+        }), 'flow-field-runtime-manifest'),
         lifetime.track(
             WorkerModuleCatalog.load(workerModuleManifestUrl, { signal: lifetime.signal }),
             'flow-field-worker-module-catalog'
@@ -120,38 +182,81 @@ export async function startFlowFieldApplication(
         alphaMode: 'premultiplied',
         size,
     })
-    const temporal = await lifetime.acquire(createTemporalVelocityRaster({
-        runtime,
-        manifest,
-        cachePolicy: FLOW_FIELD_CACHE_DISABLED,
-        workerSystem: workers,
-        workerModules,
-        framesPerTime,
-        workerCount: 1,
-        maxNetworkRequests: 1,
-        maxDecodeTasks: 1,
-        maxRequests: 64,
-        maxPhysicalPages: 64,
-        maxHistory: 64,
+    const timeline = createFlowTimeline({
+        timeAxis: dataset.timeAxis,
+        wallTime: readWallTime(options),
+        playing: options.initialPlaying ?? true,
+        rate: options.initialRate ?? (proofMode ? 8 : 0.2),
+        loop: options.initialLoop ?? 'loop',
+    })
+    const temporalWindow = lifetime.own(createFlowTemporalRuntimeWindow({
+        datasetIdentity: {
+            datasetId: dataset.datasetId,
+            sourceHash: dataset.sourceHash,
+            contentVersion: dataset.contentVersion,
+        },
+        timeAxis: dataset.timeAxis,
+        maxOwnedRuntimes: FLOW_FIELD_RUNTIME_BUDGETS.maxOwnedRuntimes,
+        maxCreationSettleMs: FLOW_FIELD_RUNTIME_BUDGETS.maxCreationSettleMs,
+        createReadyRuntime: (sample, context) => createReadyVelocitySampleRuntime({
+            runtime,
+            dataset,
+            sampleKey: sample.sampleKey,
+            cachePolicy: FLOW_FIELD_CACHE_DISABLED,
+            workerSystem: workers,
+            workerModules,
+            workerCount: 1,
+            maxNetworkRequests: FLOW_FIELD_RUNTIME_BUDGETS.perRuntime.maxNetworkRequests,
+            maxDecodeTasks: FLOW_FIELD_RUNTIME_BUDGETS.perRuntime.maxDecodeTasks,
+            maxRequests: FLOW_FIELD_RUNTIME_BUDGETS.perRuntime.maxRequests,
+            maxPhysicalPages: FLOW_FIELD_RUNTIME_BUDGETS.perRuntime.maxPhysicalPages,
+            maxStagingBytes: FLOW_FIELD_RUNTIME_BUDGETS.perRuntime.maxStagingBytes,
+            maxHistory: 64,
+            signal: AbortSignal.any([ context.signal, lifetime.signal ]),
+        }),
+        stopRuntimeRequests: value => value.stopDemand(),
+        disposeRuntime: value => value.dispose(),
     }), {
-        label: 'flow-field-temporal-velocity',
+        label: 'flow-field-temporal-runtime-window',
         release: value => value.dispose(),
     })
-    const maximumSpeed = manifest.pages.reduce(
-        (maximum, page) => Math.max(maximum, page.maximumSpeed),
-        0
-    )
+    lifetime.deferStop({
+        label: 'flow-field-temporal-runtime-window-requests',
+        run: () => temporalWindow.stopRequests(),
+    })
+    void temporalWindow.termination.then(outcome => {
+        if (outcome.status === 'fatal') return options.fail(outcome.error)
+    }).catch(() => undefined)
+    let frameController: GeoFrameController | undefined
+    let latestHandshake: WindowHandshake
+    let lastFrame: FlowFieldApplicationFrame = Object.freeze({
+        state: 'loading',
+        timelineRevision: timeline.snapshot().revision,
+        selectionRevision: timeline.snapshot().selectionRevision,
+        windowRequestRevision: 0,
+    })
+
+    const initialRequest = requestWindow(timeline.snapshot(), false)
+    const initialOutcome = await initialRequest.ticket.settled
+    initialRequest.status = initialOutcome.status
+    if (initialOutcome.status !== 'ready') {
+        throw new Error(`Flow Field initial temporal selection was ${initialOutcome.status}`)
+    }
     const renderer = await lifetime.acquire(createFlowFieldRenderer({
         runtime,
         surface,
         size,
-        temporal,
-        maximumSpeed,
+        temporalWindow,
+        maximumSpeed: dataset.maximumSpeed,
     }), {
         label: 'flow-field-renderer',
         release: value => value.dispose(),
     })
     lifetime.assertActive()
+    timeline.tick({
+        wallTime: readWallTime(options),
+        readiness: readyReadiness(timeline.snapshot().selectionRevision),
+    })
 
     const viewSource = mapLibrePlanarViewSource({
         id: 'flow-field-maplibre-view-source',
@@ -160,8 +265,10 @@ export async function startFlowFieldApplication(
         presentationSize: () => canvasPixelSize(canvas),
         minimumElevationMeters: 0,
     })
-    let paused = false
-    const frameController = createGeoFrameController({
+    frameController = createGeoFrameController<
+        FlowFieldApplicationFrame,
+        GeoViewSourceCapture<MapLibrePlanarCameraState>
+    >({
         track: (work, label) => lifetime.track(work, label),
         maximumInFlightFrames: 1,
         driver: mapLibreFrameDriver({
@@ -169,16 +276,68 @@ export async function startFlowFieldApplication(
             map,
             capture: viewSource.capture,
         }),
-        render(frameNumber, captured) {
+        async render(frameNumber, captured) {
 
             lifetime.assertActive()
-            return renderer.render(frameNumber, captured)
+            const wallTime = readWallTime(options)
+            const before = timeline.snapshot()
+            let current = timeline.tick({
+                wallTime,
+                readiness: readinessFor(before),
+            })
+            const handshake = requestWindow(current, true)
+            const windowState = temporalWindow.snapshot()
+            if (windowState.state === 'loading') {
+                await renderer.suspendTemporal()
+                return idleFrameResult(setLoadingFrame(current, handshake))
+            }
+            if (windowState.state === 'gap' && current.selection.kind === 'gap') {
+                await renderer.suspendTemporal()
+                return idleFrameResult(setGapFrame(current, handshake))
+            }
+            if (windowState.state === 'failed') {
+                if (windowState.failureCode !== 'runtime-failed') {
+                    throw new Error(
+                        `Flow Field temporal window failed: ${windowState.failureCode}`
+                    )
+                }
+                await renderer.suspendTemporal()
+                return idleFrameResult(setFailedFrame(current, handshake))
+            }
+            if (current.readiness !== 'ready') {
+                current = timeline.tick({
+                    wallTime,
+                    readiness: readyReadiness(current.selectionRevision),
+                })
+            }
+            try {
+                const rendered = await renderer.render(frameNumber, captured, current)
+                lastFrame = rendered.value
+                return rendered
+            } catch (error) {
+                if (!(error instanceof FlowTemporalFrameUnavailableError)) throw error
+                await renderer.suspendTemporal()
+                const latest = timeline.snapshot()
+                const latestWindow = temporalWindow.snapshot()
+                if (latestWindow.state === 'failed') {
+                    if (latestWindow.failureCode !== 'runtime-failed') {
+                        throw new Error(
+                            `Flow Field temporal window failed: ${latestWindow.failureCode}`
+                        )
+                    }
+                    return idleFrameResult(setFailedFrame(latest, latestHandshake))
+                }
+                if (latestWindow.state === 'gap' && latest.selection.kind === 'gap') {
+                    return idleFrameResult(setGapFrame(latest, latestHandshake))
+                }
+                return idleFrameResult(setLoadingFrame(latest, latestHandshake))
+            }
         },
         onObserved() {
 
-            if (frameController.snapshot().state !== 'running') return
-            setStatus('ready')
-            if (!paused) frameController.invalidate()
+            if (frameController?.snapshot().state !== 'running') return
+            setStatus(lastFrame.state === 'rendered' ? 'ready' : lastFrame.state)
+            if (timeline.snapshot().needsTick) frameController.invalidate()
         },
         onError(error) {
 
@@ -188,38 +347,314 @@ export async function startFlowFieldApplication(
     })
     lifetime.deferStop({
         label: 'flow-field-frame-controller',
-        run: frameController.stop,
+        run: () => { frameController?.stop() },
     })
 
-    function setPaused(nextPaused: boolean): void {
+    function requestWindow(
+        snapshot: FlowTimelineSnapshot,
+        wake: boolean,
+        retryFailure = false
+    ): WindowHandshake {
 
-        paused = nextPaused
-        if (!paused && frameController.snapshot().state === 'running') {
-            frameController.invalidate()
+        if (!retryFailure && latestHandshake !== undefined &&
+            latestHandshake.selectionRevision === snapshot.selectionRevision) {
+            const currentWindow = temporalWindow.snapshot()
+            if (latestHandshake.status === 'failed' ||
+                (currentWindow.requestedRevision === latestHandshake.ticket.revision &&
+                    currentWindow.state === 'failed' &&
+                    currentWindow.failureCode === 'runtime-failed')) {
+                latestHandshake.status = 'failed'
+                return latestHandshake
+            }
+        }
+        const ticket = temporalWindow.request(snapshot.selection, snapshot.rate < 0 ? -1 : 1)
+        const windowState = temporalWindow.snapshot()
+        const handshake: WindowHandshake = {
+            timelineRevision: snapshot.revision,
+            selectionRevision: snapshot.selectionRevision,
+            ticket,
+            status: windowState.requestedRevision === ticket.revision &&
+                (windowState.state === 'ready' || windowState.state === 'gap')
+                ? windowState.state
+                : 'pending',
+        }
+        latestHandshake = handshake
+        if (wake && handshake.status === 'pending') {
+            const waking = ticket.settled.then(outcome => {
+                if (latestHandshake !== handshake) return
+                handshake.status = outcome.status
+                if (outcome.status === 'failed') {
+                    if (temporalWindow.snapshot().failureCode === 'runtime-failed' &&
+                        frameController?.snapshot().state === 'running') {
+                        frameController.invalidate()
+                    }
+                    return
+                }
+                if ((outcome.status === 'ready' || outcome.status === 'gap') &&
+                    frameController?.snapshot().state === 'running') {
+                    frameController.invalidate()
+                }
+            })
+            void lifetime.track(waking, `flow-field-window-request-${ticket.revision}`)
+        }
+        return handshake
+    }
+
+    function readinessFor(snapshot: FlowTimelineSnapshot): FlowTimelineReadiness {
+
+        const windowState = temporalWindow.snapshot()
+        if (snapshot.selection.kind === 'gap') {
+            return readyReadiness(snapshot.selectionRevision)
+        }
+        if (latestHandshake.selectionRevision !== snapshot.selectionRevision) {
+            return blockedReadiness(snapshot.selectionRevision, 'runtime-selection-unrequested')
+        }
+        if (windowState.requestedRevision !== latestHandshake.ticket.revision) {
+            return blockedReadiness(snapshot.selectionRevision, 'runtime-selection-superseded')
+        }
+        if (windowState.state === 'ready' && latestHandshake.status === 'ready') {
+            return readyReadiness(snapshot.selectionRevision)
+        }
+        if (windowState.state === 'failed') {
+            if (windowState.failureCode !== 'runtime-failed') {
+                throw new Error(`Flow Field temporal window failed: ${windowState.failureCode}`)
+            }
+            return blockedReadiness(snapshot.selectionRevision, 'runtime-selection-failed')
+        }
+        return blockedReadiness(snapshot.selectionRevision, 'runtime-selection-loading')
+    }
+
+    function applyControl(snapshot: FlowTimelineSnapshot): FlowTimelineSnapshot {
+
+        requestWindow(snapshot, true, true)
+        frameController!.invalidate()
+        return snapshot
+    }
+
+    function play(input: Readonly<{ wallTime: number }>): FlowTimelineSnapshot {
+
+        assertControllable()
+        return applyControl(timeline.play(input))
+    }
+
+    function pause(input: Readonly<{ wallTime: number }>): FlowTimelineSnapshot {
+
+        assertControllable()
+        return applyControl(timeline.pause(input))
+    }
+
+    function seek(
+        input: Readonly<{ wallTime: number, modelTime: number }>
+    ): FlowTimelineSnapshot {
+
+        assertControllable()
+        return applyControl(timeline.seek(input))
+    }
+
+    function setRate(
+        input: Readonly<{ wallTime: number, rate: number }>
+    ): FlowTimelineSnapshot {
+
+        assertControllable()
+        return applyControl(timeline.setRate(input))
+    }
+
+    function setLoop(
+        input: Readonly<{ wallTime: number, loop: FlowTimelineLoop }>
+    ): FlowTimelineSnapshot {
+
+        assertControllable()
+        return applyControl(timeline.setLoop(input))
+    }
+
+    async function flush(
+        input: Readonly<{ wallTime: number }>
+    ): Promise<FlowFieldApplicationFacts> {
+
+        try {
+            assertControllable()
+            pause(input)
+            frameController!.stop()
+            await renderer.suspendTemporal()
+            lifetime.assertActive()
+            await lifetime.drain()
+            lifetime.assertActive()
+            const outcome = await latestHandshake.ticket.settled
+            lifetime.assertActive()
+            latestHandshake.status = outcome.status
+            if (outcome.status === 'ready') {
+                const admitted = timeline.tick({
+                    wallTime: readWallTime(options),
+                    readiness: readyReadiness(timeline.snapshot().selectionRevision),
+                })
+                const terminalCapture = viewSource.capture()
+                await renderTerminalPass(admitted, terminalCapture, 'feedback')
+                await renderTerminalPass(admitted, terminalCapture, 'demand')
+                await lifetime.track(
+                    renderer.flushResidency(),
+                    'flow-field-terminal-residency-publication'
+                )
+                lifetime.assertActive()
+                await renderTerminalPass(admitted, terminalCapture, 'presentation')
+                setStatus('ready')
+            } else if (outcome.status !== 'gap') {
+                throw new Error(`Flow Field flush temporal selection was ${outcome.status}`)
+            } else {
+                await renderer.suspendTemporal()
+                setGapFrame(timeline.snapshot(), latestHandshake)
+                setStatus('gap')
+            }
+            await lifetime.drain()
+            lifetime.assertActive()
+            return facts()
+        } catch (error) {
+            void Promise.resolve(options.fail(error)).catch(() => undefined)
+            throw error
         }
     }
 
-    function flush(): Promise<void> {
+    async function renderTerminalPass(
+        admitted: FlowTimelineSnapshot,
+        capture: GeoViewSourceCapture<MapLibrePlanarCameraState>,
+        phase: 'feedback' | 'demand' | 'presentation'
+    ): Promise<void> {
 
-        if (frameController.snapshot().state !== 'running') {
-            return Promise.reject(new Error('Flow Field frame controller is stopped'))
+        const rendered = await renderer.render(
+            renderer.facts().frameCount + 1,
+            capture,
+            admitted
+        )
+        lifetime.assertActive()
+        lastFrame = rendered.value
+        await lifetime.track(rendered.observation, `flow-field-terminal-${phase}-observation`)
+        lifetime.assertActive()
+        const settlement = await lifetime.track(
+            rendered.settlement,
+            `flow-field-terminal-${phase}-settlement`
+        )
+        if (settlement !== undefined) {
+            await lifetime.track(
+                settlement.residencySettlement,
+                `flow-field-terminal-${phase}-residency`
+            )
+            lifetime.assertActive()
         }
-        frameController.stop()
-        return lifetime.track(renderer.flushResidency(), 'flow-field-residency-flush')
+    }
+
+    function setLoadingFrame(
+        snapshot: FlowTimelineSnapshot,
+        handshake: WindowHandshake
+    ): Extract<FlowFieldApplicationFrame, Readonly<{ state: 'loading' }>> {
+
+        const value = Object.freeze({
+            state: 'loading' as const,
+            timelineRevision: snapshot.revision,
+            selectionRevision: snapshot.selectionRevision,
+            windowRequestRevision: handshake.ticket.revision,
+        })
+        lastFrame = value
+        return value
+    }
+
+    function setGapFrame(
+        snapshot: FlowTimelineSnapshot,
+        handshake: WindowHandshake
+    ): Extract<FlowFieldApplicationFrame, Readonly<{ state: 'gap' }>> {
+
+        if (snapshot.selection.kind !== 'gap') {
+            throw new TypeError('Flow Field gap frame requires a gap selection')
+        }
+        const value = Object.freeze({
+            state: 'gap' as const,
+            timelineRevision: snapshot.revision,
+            selectionRevision: snapshot.selectionRevision,
+            windowRequestRevision: handshake.ticket.revision,
+            lowerSampleKey: snapshot.selection.lower.sampleKey,
+            upperSampleKey: snapshot.selection.upper.sampleKey,
+        })
+        lastFrame = value
+        return value
+    }
+
+    function setFailedFrame(
+        snapshot: FlowTimelineSnapshot,
+        handshake: WindowHandshake
+    ): Extract<FlowFieldApplicationFrame, Readonly<{ state: 'failed' }>> {
+
+        const value = Object.freeze({
+            state: 'failed' as const,
+            timelineRevision: snapshot.revision,
+            selectionRevision: snapshot.selectionRevision,
+            windowRequestRevision: handshake.ticket.revision,
+            failureCode: 'runtime-failed' as const,
+        })
+        lastFrame = value
+        return value
     }
 
     function facts(): FlowFieldApplicationFacts {
 
         return Object.freeze({
-            paused,
-            frames: frameController.snapshot(),
+            timeline: timeline.snapshot(),
+            temporalWindow: temporalWindow.snapshot(),
+            handshake: Object.freeze({
+                timelineRevision: latestHandshake.timelineRevision,
+                selectionRevision: latestHandshake.selectionRevision,
+                windowRequestRevision: latestHandshake.ticket.revision,
+                status: latestHandshake.status,
+            }),
+            lastFrame,
+            budgets: FLOW_FIELD_RUNTIME_BUDGETS,
+            frames: frameController!.snapshot(),
             renderer: renderer.facts(),
             workers: workers.inspect(),
             diagnostics: runtime.diagnostics.snapshot(),
         })
     }
 
-    return Object.freeze({ setPaused, flush, facts })
+    function assertControllable(): void {
+
+        if (frameController?.snapshot().state !== 'running') {
+            throw new Error('Flow Field frame controller is stopped')
+        }
+    }
+
+    return Object.freeze({ play, pause, seek, setRate, setLoop, flush, facts })
+}
+
+function idleFrameResult(
+    value: Exclude<FlowFieldApplicationFrame, FlowFieldRendererFrame>
+): GeoFrameResult<FlowFieldApplicationFrame> {
+
+    return Object.freeze({
+        observation: Promise.resolve(Object.freeze({ state: value.state })),
+        settlement: Promise.resolve(Object.freeze({
+            residencyWorkCount: 0,
+            needsFollowUp: false,
+        })),
+        needsFollowUp: false,
+        value,
+    })
+}
+
+function readyReadiness(selectionRevision: number): FlowTimelineReadiness {
+
+    return Object.freeze({ state: 'ready', selectionRevision })
+}
+
+function blockedReadiness(
+    selectionRevision: number,
+    reason: string
+): FlowTimelineReadiness {
+
+    return Object.freeze({ state: 'blocked', reason, selectionRevision })
+}
+
+function readWallTime(options: FlowFieldApplicationOptions): number {
+
+    const value = options.readWallTime()
+    if (!Number.isFinite(value)) throw new TypeError('Flow Field wall time must be finite')
+    return value
 }
 
 function flowManifestUrl(tileServerUrl: string): URL {

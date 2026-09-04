@@ -50,7 +50,7 @@ describe('Flow temporal runtime window', () => {
 
         oldCapture.release()
         current.release()
-        await settleMicrotasks()
+        await waitFor(() => harness.disposed.includes('runtime-t00-1'))
         expect(harness.disposed).to.include('runtime-t00-1')
         await harness.window.dispose()
         expect(new Set(harness.disposed).size).to.equal(3)
@@ -123,7 +123,7 @@ describe('Flow temporal runtime window', () => {
         expect(harness.disposed).to.deep.equal([])
 
         held.release()
-        await settleMicrotasks()
+        await waitFor(() => harness.disposed.length === 1)
         expect(harness.disposed).to.deep.equal([ 'runtime-t01-1' ])
         await harness.window.dispose()
     })
@@ -215,6 +215,7 @@ describe('Flow temporal runtime window', () => {
             async createReadyRuntime(sample) {
                 return { id: `runtime-${sample.sampleKey}-${++sequence}`, sampleKey: sample.sampleKey }
             },
+            async stopRuntimeRequests() {},
             async disposeRuntime(runtime) {
                 disposed.push(runtime.id)
                 if (runtime.id === 'runtime-t00-1') throw new Error('cleanup failed')
@@ -262,7 +263,13 @@ describe('Flow temporal runtime window', () => {
         factory.resolve('t00')
         await settleMicrotasks(6)
         expect(harness.disposed).to.deep.equal([ 'runtime-t00-1' ])
-        await harness.window.dispose()
+        let disposalFailure
+        try {
+            await harness.window.dispose()
+        } catch (error) {
+            disposalFailure = error
+        }
+        expect(disposalFailure).to.be.instanceOf(AggregateError)
         expect(harness.disposed).to.deep.equal([ 'runtime-t00-1' ])
     })
 
@@ -281,6 +288,7 @@ describe('Flow temporal runtime window', () => {
                 if (sample.sampleKey === 't00') return Promise.resolve(shared)
                 return new Promise(resolve => { resolveLate = resolve })
             },
+            async stopRuntimeRequests() {},
             async disposeRuntime(runtime) { disposed.push(runtime.id) },
         })
         await window.request(exact(axis.samples[0]), 1).settled
@@ -318,6 +326,7 @@ describe('Flow temporal runtime window', () => {
             async createReadyRuntime(sample) {
                 return { id: `runtime-${sample.sampleKey}-${++sequence}`, sampleKey: sample.sampleKey }
             },
+            async stopRuntimeRequests() {},
             async disposeRuntime(runtime) {
                 disposed.push(runtime.id)
                 if (runtime.id === 'runtime-t00-1') await firstDisposal
@@ -357,6 +366,320 @@ describe('Flow temporal runtime window', () => {
         await disposing
         expect(harness.disposed).to.deep.equal([ 'runtime-t00-1' ])
         expect(harness.window.snapshot()).to.deep.include({ state: 'disposed', disposed: true })
+    })
+
+    it('stops a pending factory, aborts it, and settles its ticket as disposed', async() => {
+
+        const axis = timeAxis([ 0 ], [ 0 ])
+        let factorySignal
+        const window = createFlowTemporalRuntimeWindow({
+            datasetIdentity: DATASET_IDENTITY,
+            timeAxis: axis,
+            maxOwnedRuntimes: 4,
+            maxCreationSettleMs: 1000,
+            createReadyRuntime(_sample, context) {
+                factorySignal = context.signal
+                return new Promise((_resolve, reject) => {
+                    const abort = () => reject(context.signal.reason)
+                    if (context.signal.aborted) abort()
+                    else context.signal.addEventListener('abort', abort, { once: true })
+                })
+            },
+            async stopRuntimeRequests() {},
+            async disposeRuntime() {},
+        })
+        const ticket = window.request(exact(axis.samples[0]), 0)
+        await waitFor(() => factorySignal !== undefined)
+
+        const stopping = window.stopRequests()
+
+        expect(await ticket.settled).to.deep.equal({
+            status: 'disposed',
+            revision: ticket.revision,
+        })
+        expect(factorySignal.aborted).to.equal(true)
+        await stopping
+        await window.dispose()
+        expect(await window.termination).to.deep.equal({ status: 'stopped' })
+        expect(window.snapshot()).to.deep.include({
+            state: 'disposed',
+            requestsStopped: true,
+            disposed: true,
+        })
+    })
+
+    it('wakes a capacity waiter when runtime requests stop', async() => {
+
+        const axis = timeAxis([ 0, 1, 2, 3, 4 ], [ 0, 10, 20, 30, 40 ])
+        const harness = immediateHarness(axis)
+        await harness.window.request(interpolated(axis, 0, 1, 5), 1).settled
+        const held = harness.window.capture()
+        await harness.window.request(interpolated(axis, 1, 2, 15), 1).settled
+        const waiting = harness.window.request(interpolated(axis, 3, 4, 35), 1)
+        await waitFor(() => harness.window.snapshot().candidateSampleKeys.length === 2)
+
+        await harness.window.stopRequests()
+
+        expect(await waiting.settled).to.deep.equal({
+            status: 'disposed',
+            revision: waiting.revision,
+        })
+        await waitFor(() => harness.window.snapshot().candidateSampleKeys.length === 0)
+        expect(harness.created).to.deep.equal([ 't00', 't01', 't02' ])
+        expect(harness.window.snapshot()).to.deep.include({
+            requestsStopped: true,
+            pendingCreationCount: 0,
+        })
+        expect(() => harness.window.request(exact(axis.samples[0]), -1))
+            .to.throw(/requests are stopped/)
+
+        held.release()
+        await harness.window.dispose()
+        expect(new Set(harness.disposed).size).to.equal(3)
+    })
+
+    it('publishes a persistent fatal termination for asynchronous retirement failure', async() => {
+
+        const axis = timeAxis([ 0, 1 ], [ 0, 10 ])
+        const cleanupFailure = new Error('retirement cleanup failed')
+        let finishRetirement
+        let retirementStarted = false
+        const retirementGate = new Promise(resolve => { finishRetirement = resolve })
+        let sequence = 0
+        const window = createFlowTemporalRuntimeWindow({
+            datasetIdentity: DATASET_IDENTITY,
+            timeAxis: axis,
+            maxOwnedRuntimes: 4,
+            maxCreationSettleMs: 1000,
+            async createReadyRuntime(sample) {
+                return { id: `runtime-${sample.sampleKey}-${++sequence}`, sampleKey: sample.sampleKey }
+            },
+            async stopRuntimeRequests() {},
+            async disposeRuntime(runtime) {
+                if (runtime.id !== 'runtime-t00-1') return
+                retirementStarted = true
+                await retirementGate
+                throw cleanupFailure
+            },
+        })
+        await window.request(exact(axis.samples[0]), 1).settled
+        expect(await window.request(exact(axis.samples[1]), 1).settled)
+            .to.deep.include({ status: 'ready', pairGeneration: 2 })
+        await waitFor(() => retirementStarted)
+        let terminationSettled = false
+        void window.termination.then(() => { terminationSettled = true })
+        await settleMicrotasks()
+        expect(terminationSettled).to.equal(false)
+
+        finishRetirement()
+        const termination = await window.termination
+
+        expect(termination).to.deep.include({
+            status: 'fatal',
+            failureCode: 'runtime-cleanup-failed',
+        })
+        expect(termination.error).to.be.instanceOf(AggregateError)
+        expect(termination.error.errors).to.deep.equal([ cleanupFailure ])
+        expect(window.snapshot()).to.deep.include({
+            state: 'failed',
+            failureCode: 'runtime-cleanup-failed',
+            ownedRuntimeCount: 2,
+        })
+        expect(() => window.request(exact(axis.samples[0]), -1))
+            .to.throw(/runtime-cleanup-failed/)
+        expect(await window.termination).to.equal(termination)
+
+        let disposalFailure
+        try {
+            await window.dispose()
+        } catch (error) {
+            disposalFailure = error
+        }
+        expect(disposalFailure).to.be.instanceOf(AggregateError)
+    })
+
+    it('stops then disposes a factory runtime that arrives after stop exactly once', async() => {
+
+        const axis = timeAxis([ 0 ], [ 0 ])
+        const events = []
+        let factoryCall
+        const runtime = { id: 'late-runtime-t00', sampleKey: 't00' }
+        const window = createFlowTemporalRuntimeWindow({
+            datasetIdentity: DATASET_IDENTITY,
+            timeAxis: axis,
+            maxOwnedRuntimes: 4,
+            maxCreationSettleMs: 1000,
+            createReadyRuntime(_sample, context) {
+                return new Promise(resolve => {
+                    factoryCall = { resolve, signal: context.signal }
+                })
+            },
+            async stopRuntimeRequests(value) { events.push(`stop:${value.id}`) },
+            async disposeRuntime(value) { events.push(`dispose:${value.id}`) },
+        })
+        const ticket = window.request(exact(axis.samples[0]), 0)
+        await waitFor(() => factoryCall !== undefined)
+
+        await window.stopRequests()
+        expect(await ticket.settled).to.deep.equal({
+            status: 'disposed',
+            revision: ticket.revision,
+        })
+        expect(factoryCall.signal.aborted).to.equal(true)
+        factoryCall.resolve(runtime)
+        await waitFor(() => events.length === 2)
+
+        expect(events).to.deep.equal([
+            'stop:late-runtime-t00',
+            'dispose:late-runtime-t00',
+        ])
+        await window.dispose()
+        expect(events).to.deep.equal([
+            'stop:late-runtime-t00',
+            'dispose:late-runtime-t00',
+        ])
+        expect(window.snapshot().ownedRuntimeCount).to.equal(0)
+    })
+
+    it('memoizes stopRequests and still disposes after an aggregated stop failure', async() => {
+
+        const axis = timeAxis([ 0 ], [ 0 ])
+        const stopFailure = new Error('runtime stop failed')
+        let stopCount = 0
+        let disposeCount = 0
+        const window = createFlowTemporalRuntimeWindow({
+            datasetIdentity: DATASET_IDENTITY,
+            timeAxis: axis,
+            maxOwnedRuntimes: 4,
+            maxCreationSettleMs: 1000,
+            async createReadyRuntime(sample) {
+                return { id: `runtime-${sample.sampleKey}`, sampleKey: sample.sampleKey }
+            },
+            async stopRuntimeRequests() {
+                stopCount++
+                throw stopFailure
+            },
+            async disposeRuntime() { disposeCount++ },
+        })
+        await window.request(exact(axis.samples[0]), 0).settled
+
+        const firstStop = window.stopRequests()
+        const secondStop = window.stopRequests()
+        expect(secondStop).to.equal(firstStop)
+        let stoppingFailure
+        try {
+            await firstStop
+        } catch (error) {
+            stoppingFailure = error
+        }
+
+        expect(stoppingFailure).to.be.instanceOf(AggregateError)
+        expect(stoppingFailure.errors).to.deep.equal([ stopFailure ])
+        expect(stopCount).to.equal(1)
+        expect(disposeCount).to.equal(0)
+        expect(await window.termination).to.deep.include({
+            status: 'fatal',
+            failureCode: 'runtime-cleanup-failed',
+        })
+
+        let disposalFailure
+        try {
+            await window.dispose()
+        } catch (error) {
+            disposalFailure = error
+        }
+        expect(disposalFailure).to.be.instanceOf(AggregateError)
+        expect(stopCount).to.equal(1)
+        expect(disposeCount).to.equal(1)
+        expect(window.snapshot()).to.deep.include({
+            state: 'disposed',
+            requestsStopped: true,
+            disposed: true,
+        })
+    })
+
+    it('reports an ignored-abort factory timeout during disposal as fatal', async() => {
+
+        const axis = timeAxis([ 0 ], [ 0 ])
+        const factory = controlledFactory()
+        const stopped = []
+        const disposed = []
+        const window = createFlowTemporalRuntimeWindow({
+            datasetIdentity: DATASET_IDENTITY,
+            timeAxis: axis,
+            maxOwnedRuntimes: 4,
+            maxCreationSettleMs: 15,
+            createReadyRuntime: factory.create,
+            async stopRuntimeRequests(runtime) { stopped.push(runtime.id) },
+            async disposeRuntime(runtime) { disposed.push(runtime.id) },
+        })
+        const ticket = window.request(exact(axis.samples[0]), 0)
+        await waitFor(() => factory.calls.length === 1)
+        const disposing = window.dispose()
+
+        expect(await ticket.settled).to.deep.equal({
+            status: 'disposed',
+            revision: ticket.revision,
+        })
+        await new Promise(resolve => setTimeout(resolve, 25))
+        factory.resolve('t00')
+
+        let disposalFailure
+        try {
+            await disposing
+        } catch (error) {
+            disposalFailure = error
+        }
+        expect(disposalFailure).to.be.instanceOf(AggregateError)
+        expect(await window.termination).to.deep.include({
+            status: 'fatal',
+            failureCode: 'factory-unresponsive',
+        })
+        expect(stopped).to.deep.equal([ 'runtime-t00-1' ])
+        expect(disposed).to.deep.equal([ 'runtime-t00-1' ])
+    })
+
+    it('preserves primary factory and partial-runtime cleanup failures together', async() => {
+
+        const axis = timeAxis([ 0, 1 ], [ 0, 10 ])
+        const primaryFailure = new Error('primary factory failure')
+        const cleanupFailure = new Error('partial runtime cleanup failure')
+        const partial = { id: 'runtime-t00-partial', sampleKey: 't00' }
+        const window = createFlowTemporalRuntimeWindow({
+            datasetIdentity: DATASET_IDENTITY,
+            timeAxis: axis,
+            maxOwnedRuntimes: 4,
+            maxCreationSettleMs: 1000,
+            async createReadyRuntime(sample) {
+                if (sample.sampleKey === 't00') return partial
+                await Promise.resolve()
+                throw primaryFailure
+            },
+            async stopRuntimeRequests() {},
+            async disposeRuntime(runtime) {
+                if (runtime === partial) throw cleanupFailure
+            },
+        })
+
+        const result = await window.request(interpolated(axis, 0, 1, 5), 1).settled
+
+        expect(result.status).to.equal('failed')
+        expect(result.error).to.be.instanceOf(AggregateError)
+        expect(result.error.errors).to.deep.equal([ primaryFailure, cleanupFailure ])
+        const termination = await window.termination
+        expect(termination).to.deep.include({
+            status: 'fatal',
+            failureCode: 'runtime-cleanup-failed',
+        })
+        expect(termination.error).to.equal(result.error)
+
+        let disposalFailure
+        try {
+            await window.dispose()
+        } catch (error) {
+            disposalFailure = error
+        }
+        expect(disposalFailure).to.be.instanceOf(AggregateError)
     })
 
     it('validates the complete normalized time-axis and fixed selection shape', async() => {
@@ -405,6 +728,7 @@ function windowHarness(axis, createReadyRuntime, maxCreationSettleMs = 1000) {
         maxOwnedRuntimes: 4,
         maxCreationSettleMs,
         createReadyRuntime,
+        async stopRuntimeRequests() {},
         async disposeRuntime(runtime) { disposed.push(runtime.id) },
     })
     return { axis, window, disposed }

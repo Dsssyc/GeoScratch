@@ -32,6 +32,7 @@ export type FlowTemporalRuntimeWindowSnapshot = Readonly<{
     ownedRuntimeCount: number
     pendingCreationCount: number
     activeCaptureCount: number
+    requestsStopped: boolean
     failureCode:
         | 'factory-unresponsive'
         | 'runtime-cleanup-failed'
@@ -39,6 +40,14 @@ export type FlowTemporalRuntimeWindowSnapshot = Readonly<{
         | undefined
     disposed: boolean
 }>
+
+export type FlowTemporalRuntimeWindowTermination =
+    | Readonly<{
+        status: 'fatal'
+        failureCode: 'factory-unresponsive' | 'runtime-cleanup-failed'
+        error: unknown
+    }>
+    | Readonly<{ status: 'stopped' }>
 
 export type FlowTemporalReadyCapture<Runtime extends object> = Readonly<{
     state: 'ready'
@@ -89,6 +98,7 @@ export type FlowTemporalRuntimeWindowOptions<Runtime extends object> = Readonly<
         sample: FlowFieldRuntimeSample,
         context: FlowReadyRuntimeFactoryContext
     ): Promise<Runtime>
+    stopRuntimeRequests(runtime: Runtime): Promise<void>
     disposeRuntime(runtime: Runtime): Promise<void>
 }>
 
@@ -97,8 +107,10 @@ export type FlowTemporalRuntimeWindow<Runtime extends object> = Readonly<{
         selection: FlowTimeSelection,
         direction: FlowTemporalDirection
     ): FlowTemporalRequestTicket
+    termination: Promise<FlowTemporalRuntimeWindowTermination>
     snapshot(): FlowTemporalRuntimeWindowSnapshot
     capture(): FlowTemporalRuntimeCapture<Runtime>
+    stopRequests(): Promise<void>
     dispose(): Promise<void>
 }>
 
@@ -167,6 +179,7 @@ export function createFlowTemporalRuntimeWindow<Runtime extends object>(
         throw new TypeError('Flow temporal runtime creation timeout must be positive')
     }
     if (typeof options.createReadyRuntime !== 'function' ||
+        typeof options.stopRuntimeRequests !== 'function' ||
         typeof options.disposeRuntime !== 'function') {
         throw new TypeError('Flow temporal runtime window requires ownership callbacks')
     }
@@ -175,6 +188,7 @@ export function createFlowTemporalRuntimeWindow<Runtime extends object>(
     const leases = new Map<string, RuntimeLease<Runtime>>()
     const ownedRuntimes = new Set<Runtime>()
     const runtimeOwners = new WeakMap<Runtime, string>()
+    const stopRuntimePromises = new WeakMap<Runtime, Promise<void>>()
     const disposalPromises = new WeakMap<Runtime, Promise<void>>()
     const retirements = new Set<Promise<void>>()
     const retiringPairs = new Set<RuntimePair<Runtime>>()
@@ -182,6 +196,7 @@ export function createFlowTemporalRuntimeWindow<Runtime extends object>(
     const capacityWaiters = new Set<Deferred<void>>()
     const lateSettlements = new Set<Promise<void>>()
     const backgroundFailures = new Set<unknown>()
+    const termination = createDeferred<FlowTemporalRuntimeWindowTermination>()
     let requestedRevision = 0
     let pairGeneration = 0
     let workSequence = 0
@@ -198,6 +213,8 @@ export function createFlowTemporalRuntimeWindow<Runtime extends object>(
     let latestTicket: TicketState | undefined
     let pumpPromise: Promise<void> | undefined
     let disposed = false
+    let requestsStopped = false
+    let stopRequestsPromise: Promise<void> | undefined
     let disposePromise: Promise<void> | undefined
     let pendingCreationCount = 0
 
@@ -269,6 +286,7 @@ export function createFlowTemporalRuntimeWindow<Runtime extends object>(
             pendingCreationCount,
             activeCaptureCount: (active?.captures ?? 0) + [ ...retiringPairs ]
                 .reduce((count, pair) => count + pair.captures, 0),
+            requestsStopped,
             failureCode: failure?.code,
             disposed,
         })
@@ -339,7 +357,8 @@ export function createFlowTemporalRuntimeWindow<Runtime extends object>(
         let tracked: Promise<void>
         tracked = pump().finally(() => {
             if (pumpPromise === tracked) pumpPromise = undefined
-            if (!disposed && state === 'loading' && candidate === undefined &&
+            if (!disposed && !requestsStopped && state === 'loading' &&
+                candidate === undefined &&
                 selection !== undefined && selection.kind !== 'gap') {
                 schedulePump()
             }
@@ -358,7 +377,7 @@ export function createFlowTemporalRuntimeWindow<Runtime extends object>(
             await previous.promise
             if (candidate === previous) candidate = undefined
         }
-        if (disposed || failure?.code === 'factory-unresponsive' ||
+        if (disposed || requestsStopped || failure?.code === 'factory-unresponsive' ||
             selection === undefined || selection.kind === 'gap' || state !== 'loading') {
             return
         }
@@ -385,7 +404,9 @@ export function createFlowTemporalRuntimeWindow<Runtime extends object>(
         try {
             await waitForCapacity(selectedSamples, work)
         } catch (error) {
-            if (!work.controller.signal.aborted && !disposed) enterFailure(error)
+            if (!work.controller.signal.aborted && !disposed && !requestsStopped) {
+                enterFailure(error)
+            }
             return
         }
         const settlements = await Promise.allSettled(
@@ -398,7 +419,8 @@ export function createFlowTemporalRuntimeWindow<Runtime extends object>(
         const failures = settlements.flatMap(settlement =>
             settlement.status === 'rejected' ? [ settlement.reason ] : []
         )
-        if (failures.length > 0 || work.controller.signal.aborted || disposed) {
+        if (failures.length > 0 || work.controller.signal.aborted || disposed ||
+            requestsStopped) {
             const cleanupFailures = await releaseLeases(acquired)
             const error = failures[0] ?? work.controller.signal.reason ??
                 new Error('Flow temporal runtime candidate was disposed')
@@ -413,20 +435,31 @@ export function createFlowTemporalRuntimeWindow<Runtime extends object>(
                 candidateFailure => candidateFailure instanceof FactoryUnresponsiveError
             )) {
                 enterFailure(combined, 'factory-unresponsive')
-            } else if (!disposed && work.revision === requestedRevision &&
+            } else if (!disposed && !requestsStopped &&
+                work.revision === requestedRevision &&
                 (work.failure !== undefined || !work.controller.signal.aborted)) {
                 enterFailure(combined)
             }
             return
         }
         if (candidate !== work || work.controller.signal.aborted || disposed ||
+            requestsStopped ||
             failure !== undefined || state !== 'loading' ||
             latestTicket === undefined || latestTicket.deferred.settled ||
             latestTicket.public.revision !== requestedRevision ||
             work.key !== selectionPairKey(work.selection) ||
             selection === undefined || selection.kind === 'gap' ||
             work.key !== selectionPairKey(selection)) {
-            await releaseLeases(acquired)
+            const cleanupFailures = await releaseLeases(acquired)
+            if (cleanupFailures.length > 0) {
+                enterFailure(
+                    new AggregateError(
+                        cleanupFailures,
+                        'Flow temporal stale candidate cleanup failed'
+                    ),
+                    'runtime-cleanup-failed'
+                )
+            }
             return
         }
         const byKey = new Map(acquired.map(lease => [ lease.sample.sampleKey, lease ]))
@@ -440,11 +473,17 @@ export function createFlowTemporalRuntimeWindow<Runtime extends object>(
         const upper = byKey.get(upperSample.sampleKey)
         if (lower === undefined || upper === undefined) {
             const cleanupFailures = await releaseLeases(acquired)
-            enterFailure(aggregate(
+            const incompleteFailure = aggregate(
                 new Error('Flow temporal runtime candidate is incomplete'),
                 cleanupFailures,
                 'Flow temporal runtime candidate failed'
-            ))
+            )
+            enterFailure(
+                incompleteFailure,
+                cleanupFailures.length > 0
+                    ? 'runtime-cleanup-failed'
+                    : 'runtime-failed'
+            )
             return
         }
         const pair: RuntimePair<Runtime> = {
@@ -501,7 +540,7 @@ export function createFlowTemporalRuntimeWindow<Runtime extends object>(
                 }),
             ])
             claimRuntime(runtime, attemptId)
-            if (work.controller.signal.aborted || disposed || timedOut) {
+            if (work.controller.signal.aborted || disposed || requestsStopped || timedOut) {
                 try {
                     await disposeOwnedRuntime(runtime)
                 } catch (error) {
@@ -608,7 +647,6 @@ export function createFlowTemporalRuntimeWindow<Runtime extends object>(
                 failures.push(error)
             }
         }
-        for (const error of failures) recordCleanupFailure(error)
         return failures
     }
 
@@ -619,6 +657,15 @@ export function createFlowTemporalRuntimeWindow<Runtime extends object>(
         const disposing = Promise.resolve().then(() => options.disposeRuntime(runtime))
         disposalPromises.set(runtime, disposing)
         return disposing
+    }
+
+    function stopRuntimeRequestsOnce(runtime: Runtime): Promise<void> {
+
+        const existing = stopRuntimePromises.get(runtime)
+        if (existing !== undefined) return existing
+        const stopping = Promise.resolve().then(() => options.stopRuntimeRequests(runtime))
+        stopRuntimePromises.set(runtime, stopping)
+        return stopping
     }
 
     function claimRuntime(runtime: Runtime, owner: string): void {
@@ -635,9 +682,23 @@ export function createFlowTemporalRuntimeWindow<Runtime extends object>(
 
     async function disposeOwnedRuntime(runtime: Runtime): Promise<void> {
 
-        await disposeRuntimeOnce(runtime)
-        ownedRuntimes.delete(runtime)
+        const failures: unknown[] = []
+        try {
+            await stopRuntimeRequestsOnce(runtime)
+        } catch (error) {
+            failures.push(error)
+        }
+        try {
+            await disposeRuntimeOnce(runtime)
+            ownedRuntimes.delete(runtime)
+        } catch (error) {
+            failures.push(error)
+        }
         signalCapacityChange()
+        if (failures.length === 1) throw failures[0]
+        if (failures.length > 1) {
+            throw new AggregateError(failures, 'Flow temporal runtime cleanup failed')
+        }
     }
 
     function recordCleanupFailure(error: unknown): void {
@@ -652,6 +713,10 @@ export function createFlowTemporalRuntimeWindow<Runtime extends object>(
             'runtime-failed'
     ): void {
 
+        if (code !== 'runtime-failed') {
+            backgroundFailures.add(error)
+            resolveFatalTermination(code, error)
+        }
         if (disposed) return
         if (failure?.code === 'factory-unresponsive' ||
             failure?.code === 'runtime-cleanup-failed') return
@@ -662,26 +727,68 @@ export function createFlowTemporalRuntimeWindow<Runtime extends object>(
         signalCapacityChange()
     }
 
+    function resolveFatalTermination(
+        code: 'factory-unresponsive' | 'runtime-cleanup-failed',
+        error: unknown
+    ): void {
+
+        if (termination.settled) return
+        termination.settled = true
+        termination.resolve(Object.freeze({
+            status: 'fatal' as const,
+            failureCode: code,
+            error,
+        }))
+    }
+
+    function stopRequests(): Promise<void> {
+
+        if (stopRequestsPromise !== undefined) return stopRequestsPromise
+        requestsStopped = true
+        settleTicket(latestTicket, 'disposed')
+        cancelCandidate('Flow temporal runtime requests were stopped')
+        signalCapacityChange()
+        const stopping = Promise.allSettled(
+            [ ...ownedRuntimes ].map(stopRuntimeRequestsOnce)
+        ).then(settlements => {
+            const failures = settlements.flatMap(result =>
+                result.status === 'rejected' ? [ result.reason ] : []
+            )
+            if (failures.length > 0) {
+                const failure = new AggregateError(
+                    failures,
+                    'Flow temporal runtime request shutdown failed'
+                )
+                enterFailure(failure, 'runtime-cleanup-failed')
+                throw failure
+            }
+        })
+        stopRequestsPromise = stopping
+        return stopping
+    }
+
     function dispose(): Promise<void> {
 
         if (disposePromise !== undefined) return disposePromise
+        const stopping = stopRequests()
         disposed = true
         state = 'disposed'
-        settleTicket(latestTicket, 'disposed')
-        cancelCandidate('Flow temporal runtime window disposal requested')
-        signalCapacityChange()
         if (active !== undefined) {
             const retired = active
             active = undefined
             retirePair(retired)
         }
-        disposePromise = disposeAll()
+        disposePromise = disposeAll(stopping)
         return disposePromise
     }
 
-    async function disposeAll(): Promise<void> {
+    async function disposeAll(stopping: Promise<void>): Promise<void> {
 
         const failures = new Set<unknown>(backgroundFailures)
+        const stopSettlement = await Promise.allSettled([ stopping ])
+        if (stopSettlement[0]?.status === 'rejected') {
+            failures.add(stopSettlement[0].reason)
+        }
         if (pumpPromise !== undefined) {
             const settlement = await Promise.allSettled([ pumpPromise ])
             if (settlement[0]?.status === 'rejected') failures.add(settlement[0].reason)
@@ -705,16 +812,32 @@ export function createFlowTemporalRuntimeWindow<Runtime extends object>(
         }
         for (const error of backgroundFailures) failures.add(error)
         if (failures.size > 0) {
+            resolveFatalTermination(
+                failure?.code === 'factory-unresponsive'
+                    ? 'factory-unresponsive'
+                    : 'runtime-cleanup-failed',
+                failures.size === 1
+                    ? [ ...failures ][0]
+                    : new AggregateError(
+                        [ ...failures ],
+                        'Flow temporal runtime window disposal failed'
+                    )
+            )
             throw new AggregateError(
                 [ ...failures ],
                 'Flow temporal runtime window disposal failed'
             )
+        }
+        if (!termination.settled) {
+            termination.settled = true
+            termination.resolve(Object.freeze({ status: 'stopped' as const }))
         }
     }
 
     function assertRequestable(): void {
 
         if (disposed) throw new Error('Flow temporal runtime window is disposed')
+        if (requestsStopped) throw new Error('Flow temporal runtime requests are stopped')
         if (failure?.code === 'factory-unresponsive' ||
             failure?.code === 'runtime-cleanup-failed') {
             throw new Error(`Flow temporal runtime window is fatal: ${failure.code}`)
@@ -765,7 +888,14 @@ export function createFlowTemporalRuntimeWindow<Runtime extends object>(
         }
     }
 
-    return Object.freeze({ request, snapshot, capture, dispose })
+    return Object.freeze({
+        request,
+        termination: termination.promise,
+        snapshot,
+        capture,
+        stopRequests,
+        dispose,
+    })
 
     async function waitForCapacity(
         selectedSamples: readonly FlowFieldRuntimeSample[],
@@ -775,6 +905,7 @@ export function createFlowTemporalRuntimeWindow<Runtime extends object>(
         while (true) {
             if (work.controller.signal.aborted) throw work.controller.signal.reason
             if (disposed) throw new Error('Flow temporal runtime window is disposed')
+            if (requestsStopped) throw new Error('Flow temporal runtime requests are stopped')
             const missingCount = new Set(
                 selectedSamples
                     .map(sample => sample.sampleKey)

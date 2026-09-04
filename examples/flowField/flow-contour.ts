@@ -26,6 +26,7 @@ import type {
     UploadCommand,
 } from 'geoscratch/scratch'
 import type { TemporalVelocityWgslModule } from './temporal-velocity-raster.ts'
+import type { FlowTemporalReadyBindingFrame } from './flow-temporal-bindings.ts'
 
 export type FlowContourPoint = readonly [number, number]
 export type FlowContourSegment = readonly [FlowContourPoint, FlowContourPoint]
@@ -146,11 +147,6 @@ const BUFFER_INDIRECT = 0x100
 export type FlowContourTemporalBinding = Readonly<{
     module: TemporalVelocityWgslModule
     layout: BindLayout
-    frame(): Readonly<{
-        bindSet: BindSet
-        resources: readonly (BufferResource | TextureResource)[]
-        progress: number
-    }>
 }>
 
 export type FlowContourViewBinding = Readonly<{
@@ -209,7 +205,8 @@ export type FlowContour = Readonly<{
         builder: SubmissionBuilder,
         candidateBytes: ArrayBufferView,
         candidateCount: number,
-        snapshot: FlowContourSnapshotParameters
+        snapshot: FlowContourSnapshotParameters,
+        temporal: FlowTemporalReadyBindingFrame
     ): FlowContourFrame
     observeOverflow(submitted: SubmittedWork): Promise<void>
     facts(): FlowContourFacts
@@ -499,7 +496,8 @@ export async function createFlowContour(options: FlowContourOptions): Promise<Fl
         builder: SubmissionBuilder,
         packedCandidates: ArrayBufferView,
         nextCandidateCount: number,
-        snapshot: FlowContourSnapshotParameters
+        snapshot: FlowContourSnapshotParameters,
+        temporalFrame: FlowTemporalReadyBindingFrame
     ): FlowContourFrame {
 
         assertActive()
@@ -514,9 +512,9 @@ export async function createFlowContour(options: FlowContourOptions): Promise<Fl
             throw new RangeError('Flow contour candidate bytes must match a bounded record count')
         }
         validateSnapshot(snapshot)
-        const temporalFrame = temporal.frame()
         validateTemporalFrame(runtime, temporal, temporalFrame)
-        if (temporalFrame.progress !== snapshot.progress) {
+        if (temporalFrame.pairGeneration !== snapshot.generation ||
+            temporalFrame.progress !== snapshot.progress) {
             throw new Error('Flow contour temporal frame progress is stale')
         }
         if (generate === undefined || temporalSet !== temporalFrame.bindSet) {
@@ -682,8 +680,7 @@ function validateTemporalBinding(runtime: GPURuntime, temporal: FlowContourTempo
         typeof temporal.module.code !== 'string' ||
         !temporal.module.code.includes('fn FlowVelocity_sample(') ||
         temporal.module.bindings.group !== 1 ||
-        temporal.layout?.runtime !== runtime || temporal.layout.group !== 1 ||
-        typeof temporal.frame !== 'function') {
+        temporal.layout?.runtime !== runtime || temporal.layout.group !== 1) {
         throw new TypeError(
             'Flow contour requires one group-1 temporal sampler and four declared resources'
         )
@@ -693,12 +690,16 @@ function validateTemporalBinding(runtime: GPURuntime, temporal: FlowContourTempo
 function validateTemporalFrame(
     runtime: GPURuntime,
     temporal: FlowContourTemporalBinding,
-    frame: ReturnType<FlowContourTemporalBinding['frame']>
+    frame: FlowTemporalReadyBindingFrame
 ): void {
 
-    if (frame?.bindSet?.runtime !== runtime || frame.bindSet.layout !== temporal.layout ||
+    if (frame?.state !== 'ready' || frame.bindSet?.runtime !== runtime ||
+        frame.bindSet.layout !== temporal.layout ||
         !Array.isArray(frame.resources) || frame.resources.length !== 4 ||
         frame.resources.some(resource => resource?.runtime !== runtime) ||
+        !Number.isSafeInteger(frame.requestedRevision) || frame.requestedRevision <= 0 ||
+        !Number.isSafeInteger(frame.pairGeneration) || frame.pairGeneration <= 0 ||
+        !Number.isSafeInteger(frame.requestedLevel) || frame.requestedLevel < 0 ||
         !Number.isFinite(frame.progress) || frame.progress < 0 || frame.progress > 1) {
         throw new TypeError(
             'Flow contour requires one current temporal set and four declared resources'

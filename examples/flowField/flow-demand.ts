@@ -3,11 +3,13 @@ import type {
     GeoViewSnapshot,
     GpuWebMercatorQuadProjectedDemand,
     VirtualRasterAddressSpace,
+    VirtualRasterFeedbackReconciliation,
     VirtualRasterPageIdentity,
     ViewDemandProducer,
     ViewTileDemandSet,
 } from 'geoscratch/geo'
 import type { SubmissionBuilder } from 'geoscratch/scratch'
+import type { FlowTemporalReadyCapture } from './flow-temporal-runtime-window.ts'
 
 export type FlowCandidateCell = Readonly<{
     page: VirtualRasterPageIdentity
@@ -27,14 +29,12 @@ export type FlowProjectedDemandBatch = Readonly<{
 export type FlowDemandRuntime = Readonly<{
     addressSpace: VirtualRasterAddressSpace
     viewDemandProducer: Pick<ViewDemandProducer, 'kind' | 'id' | 'maxDemands' | 'produce'>
-    reconcileViewDemands(demands: ViewTileDemandSet): unknown
+    reconcileViewDemands(demands: ViewTileDemandSet): VirtualRasterFeedbackReconciliation
 }>
 
-export type FlowDemandTemporalRuntimes = Readonly<{
-    current: FlowDemandRuntime
-    next: FlowDemandRuntime
-    prefetch: FlowDemandRuntime
-}>
+export type FlowDemandTemporalCapture = FlowTemporalReadyCapture<FlowDemandRuntime>
+
+export type FlowDemandTemporalRole = 'lower' | 'upper'
 
 export type FlowDemandCoverHook<CoverFrame> = Readonly<{
     encode(builder: SubmissionBuilder, view: GeoViewSnapshot): CoverFrame
@@ -69,19 +69,39 @@ export type FlowDemandCandidates = Readonly<{
 export type FlowDemandFrame = Readonly<{
     view: GeoViewSnapshot
     generation: number
+    requestedRevision: number
+    pairGeneration: number
+    sampleKeys: readonly [string] | readonly [string, string]
     requestedLevel: number
     candidatePages: readonly VirtualRasterPageIdentity[]
     candidateCells: readonly FlowCandidateCell[]
 }>
 
+export type FlowDemandReconciliationMember = Readonly<{
+    sampleKey: string
+    roles: readonly FlowDemandTemporalRole[]
+    reconciliation: VirtualRasterFeedbackReconciliation
+}>
+
+export type FlowDemandReconciliations = Readonly<{
+    kind: 'flow-demand-reconciliations'
+    generation: number
+    requestedRevision: number
+    pairGeneration: number
+    members: readonly FlowDemandReconciliationMember[]
+}>
+
 export type FlowDemandCoordinator = Readonly<{
-    encode(builder: SubmissionBuilder, view: GeoViewSnapshot): FlowDemandFrame
-    reconcile(frame: FlowDemandFrame): Promise<unknown>
+    encode(
+        builder: SubmissionBuilder,
+        view: GeoViewSnapshot,
+        temporal: FlowDemandTemporalCapture
+    ): FlowDemandFrame
+    reconcile(frame: FlowDemandFrame): Promise<FlowDemandReconciliations>
     dispose(): Promise<void>
 }>
 
 export type FlowDemandCoordinatorOptions<CoverFrame> = Readonly<{
-    temporal: FlowDemandTemporalRuntimes
     cover: FlowDemandCoverHook<CoverFrame>
     projection: FlowDemandProjectionHook<CoverFrame>
     maximumDisplacementMeters: number
@@ -106,10 +126,16 @@ type CandidateBuild = Readonly<{
 
 type FrameRecord = {
     owner: object
-    runtimes: readonly [FlowDemandRuntime, FlowDemandRuntime, FlowDemandRuntime]
+    members: readonly DemandRuntimeMember[]
     spatial: readonly SpatialCandidate[]
     reconciled: boolean
 }
+
+type DemandRuntimeMember = Readonly<{
+    sampleKey: string
+    roles: readonly FlowDemandTemporalRole[]
+    runtime: FlowDemandRuntime
+}>
 
 const frameRecords = new WeakMap<FlowDemandFrame, FrameRecord>()
 
@@ -121,7 +147,7 @@ export function createFlowDemandCandidates(
     return buildCandidates(options).public
 }
 
-/** Coordinates one bounded view-derived spatial demand set across three temporal runtimes. */
+/** Coordinates one bounded view-derived spatial demand set across an immutable temporal pair. */
 export function createFlowDemandCoordinator<CoverFrame>(
     options: FlowDemandCoordinatorOptions<CoverFrame>
 ): FlowDemandCoordinator {
@@ -133,24 +159,27 @@ export function createFlowDemandCoordinator<CoverFrame>(
     let disposed = false
     let disposePromise: Promise<void> | undefined
 
-    function encode(builder: SubmissionBuilder, view: GeoViewSnapshot): FlowDemandFrame {
+    function encode(
+        builder: SubmissionBuilder,
+        view: GeoViewSnapshot,
+        temporal: FlowDemandTemporalCapture
+    ): FlowDemandFrame {
 
         assertActive()
-        const runtimes = snapshotRuntimes(options.temporal)
-        assertDistinctProducerIds(runtimes)
+        const members = captureMembers(temporal)
         const coverFrame = options.cover.encode(builder, view)
         const projected = options.projection.encode(builder, coverFrame, view)
         const candidates = buildCandidates({
             view,
             batch: projected,
-            addressSpace: runtimes[0].addressSpace,
+            addressSpace: members[0]!.runtime.addressSpace,
             maximumDisplacementMeters: options.maximumDisplacementMeters,
             maximumCandidatePages: options.maximumCandidatePages,
             cellsPerPageEdge: options.cellsPerPageEdge,
             maximumCandidateCells: options.maximumCandidateCells,
         })
-        for (const runtime of runtimes) {
-            if (candidates.spatial.length > runtime.viewDemandProducer.maxDemands) {
+        for (const member of members) {
+            if (candidates.spatial.length > member.runtime.viewDemandProducer.maxDemands) {
                 throw new RangeError(
                     'Flow demand candidate count exceeds a temporal runtime producer capacity'
                 )
@@ -159,13 +188,17 @@ export function createFlowDemandCoordinator<CoverFrame>(
         const frame = Object.freeze({
             view,
             generation: ++generation,
+            requestedRevision: temporal.requestedRevision,
+            pairGeneration: temporal.pairGeneration,
+            sampleKeys: Object.freeze(members.map(member => member.sampleKey)) as
+                readonly [string] | readonly [string, string],
             requestedLevel: candidates.public.requestedLevel,
             candidatePages: candidates.public.candidatePages,
             candidateCells: candidates.public.candidateCells,
         })
         frameRecords.set(frame, {
             owner,
-            runtimes,
+            members,
             spatial: candidates.spatial,
             reconciled: false,
         })
@@ -173,7 +206,7 @@ export function createFlowDemandCoordinator<CoverFrame>(
         return frame
     }
 
-    async function reconcile(frame: FlowDemandFrame): Promise<unknown> {
+    async function reconcile(frame: FlowDemandFrame): Promise<FlowDemandReconciliations> {
 
         assertActive()
         const record = frameRecords.get(frame)
@@ -186,22 +219,21 @@ export function createFlowDemandCoordinator<CoverFrame>(
         if (record.reconciled) {
             throw new Error('Flow demand frame can be reconciled exactly once')
         }
-        const currentRuntimes = snapshotRuntimes(options.temporal)
-        if (currentRuntimes.some((runtime, index) => runtime !== record.runtimes[index])) {
-            throw new Error('Flow demand temporal provenance is stale after runtime rotation')
-        }
-        assertDistinctProducerIds(currentRuntimes)
-
-        const [ currentSet, nextSet, prefetchSet ] = [
-            produceDemandSet(record.runtimes[0], record.spatial, frame, 'required'),
-            produceDemandSet(record.runtimes[1], record.spatial, frame, 'required'),
-            produceDemandSet(record.runtimes[2], record.spatial, frame, 'prefetch'),
-        ]
         record.reconciled = true
+        const members = record.members.map(member => {
+            const demands = produceDemandSet(member.runtime, record.spatial, frame)
+            return Object.freeze({
+                sampleKey: member.sampleKey,
+                roles: member.roles,
+                reconciliation: member.runtime.reconcileViewDemands(demands),
+            })
+        })
         return Object.freeze({
-            current: record.runtimes[0].reconcileViewDemands(currentSet),
-            next: record.runtimes[1].reconcileViewDemands(nextSet),
-            prefetch: record.runtimes[2].reconcileViewDemands(prefetchSet),
+            kind: 'flow-demand-reconciliations' as const,
+            generation: frame.generation,
+            requestedRevision: frame.requestedRevision,
+            pairGeneration: frame.pairGeneration,
+            members: Object.freeze(members),
         })
     }
 
@@ -347,15 +379,12 @@ function candidateSampleLevel(
 function produceDemandSet(
     runtime: FlowDemandRuntime,
     spatial: readonly SpatialCandidate[],
-    frame: FlowDemandFrame,
-    usage: 'required' | 'prefetch'
+    frame: FlowDemandFrame
 ): ViewTileDemandSet {
 
     if (spatial.length > runtime.viewDemandProducer.maxDemands) {
         throw new RangeError('Flow demand fan-out exceeds its runtime producer capacity')
     }
-    const intent = usage === 'prefetch' ? 'prefetch' as const : 'refinement' as const
-    const priorityClass = usage === 'prefetch' ? 'background' as const : 'user-visible' as const
     const produced = runtime.viewDemandProducer.produce({
         view: frame.view,
         generation: frame.generation,
@@ -368,13 +397,11 @@ function produceDemandSet(
             desiredSampleLevel: candidate.requestedLevel,
             sourceLevelCeiling: candidate.sourceLevelCeiling,
             priority: Object.freeze({
-                class: priorityClass,
+                class: 'user-visible' as const,
                 score: candidate.priorityScore,
             }),
-            intent,
-            reason: usage === 'prefetch'
-                ? `flow-velocity-prefetch:z${candidate.requestedLevel}`
-                : `flow-velocity-required:z${candidate.requestedLevel}`,
+            intent: 'refinement' as const,
+            reason: `flow-velocity-required:z${candidate.requestedLevel}`,
         })),
     })
     if (produced.demands.length !== spatial.length) {
@@ -437,7 +464,6 @@ function validateCoordinatorOptions<CoverFrame>(
         typeof options.projection.dispose !== 'function') {
         throw new TypeError('Flow demand coordinator requires cover and projection encode hooks')
     }
-    snapshotRuntimes(options.temporal)
     if (!nonNegativeFinite(options.maximumDisplacementMeters) ||
         !positiveInteger(options.maximumCandidatePages) ||
         !positiveInteger(options.cellsPerPageEdge) ||
@@ -446,34 +472,84 @@ function validateCoordinatorOptions<CoverFrame>(
     }
 }
 
-function snapshotRuntimes(
-    temporal: FlowDemandTemporalRuntimes
-): readonly [FlowDemandRuntime, FlowDemandRuntime, FlowDemandRuntime] {
+function captureMembers(temporal: FlowDemandTemporalCapture): readonly DemandRuntimeMember[] {
 
-    const runtimes = [ temporal?.current, temporal?.next, temporal?.prefetch ] as const
-    for (const runtime of runtimes) {
+    if (temporal?.state !== 'ready' || !positiveInteger(temporal.requestedRevision) ||
+        !positiveInteger(temporal.pairGeneration) || typeof temporal.release !== 'function') {
+        throw new TypeError('Flow demand requires one ready temporal runtime capture')
+    }
+    const lower = temporal.lower
+    const upper = temporal.upper
+    if (typeof lower?.sample?.sampleKey !== 'string' || !lower.sample.sampleKey ||
+        typeof upper?.sample?.sampleKey !== 'string' || !upper.sample.sampleKey) {
+        throw new TypeError('Flow demand temporal capture contains invalid sample identities')
+    }
+    const selectionMatches = temporal.selection?.kind === 'exact'
+        ? temporal.alpha === 0 && lower.runtime === upper.runtime &&
+            lower.sample.sampleKey === temporal.selection.sample.sampleKey &&
+            upper.sample.sampleKey === temporal.selection.sample.sampleKey
+        : temporal.selection?.kind === 'interpolated' &&
+            Number.isFinite(temporal.alpha) && temporal.alpha > 0 && temporal.alpha < 1 &&
+            temporal.alpha === temporal.selection.alpha && lower.runtime !== upper.runtime &&
+            lower.sample.sampleKey !== upper.sample.sampleKey &&
+            lower.sample.sampleKey === temporal.selection.lower.sampleKey &&
+            upper.sample.sampleKey === temporal.selection.upper.sampleKey
+    if (!selectionMatches) {
+        throw new TypeError('Flow demand temporal capture does not match its time selection')
+    }
+    let members: readonly DemandRuntimeMember[]
+    if (lower.runtime === upper.runtime) {
+        if (lower.sample.sampleKey !== upper.sample.sampleKey) {
+            throw new TypeError('Flow demand cannot alias one runtime across different samples')
+        }
+        members = Object.freeze([ Object.freeze({
+            sampleKey: lower.sample.sampleKey,
+            roles: Object.freeze([ 'lower', 'upper' ] as const),
+            runtime: lower.runtime,
+        }) ])
+    } else {
+        members = Object.freeze([
+            Object.freeze({
+                sampleKey: lower.sample.sampleKey,
+                roles: Object.freeze([ 'lower' ] as const),
+                runtime: lower.runtime,
+            }),
+            Object.freeze({
+                sampleKey: upper.sample.sampleKey,
+                roles: Object.freeze([ 'upper' ] as const),
+                runtime: upper.runtime,
+            }),
+        ])
+    }
+    const coverage = members[0]!.runtime.addressSpace?.tileCoverage
+    const addressSpace = members[0]!.runtime.addressSpace
+    for (const { runtime } of members) {
         if (runtime?.addressSpace?.kind !== 'virtual-raster-address-space' ||
             runtime.addressSpace.tileCoverage?.tileMatrixSet !== WebMercatorQuad ||
+            runtime.addressSpace.tileCoverage !== coverage ||
+            runtime.addressSpace.levelCount !== addressSpace.levelCount ||
+            runtime.addressSpace.pageSize[0] !== addressSpace.pageSize[0] ||
+            runtime.addressSpace.pageSize[1] !== addressSpace.pageSize[1] ||
+            runtime.addressSpace.pageSize[0] !== 256 || runtime.addressSpace.pageSize[1] !== 256 ||
+            Array.from({ length: addressSpace.levelCount }, (_value, level) => level)
+                .some(level => runtime.addressSpace.matrixId(level) !==
+                    addressSpace.matrixId(level)) ||
             runtime.viewDemandProducer?.kind !== 'view-demand-producer' ||
             typeof runtime.viewDemandProducer.id !== 'string' ||
             !Number.isSafeInteger(runtime.viewDemandProducer.maxDemands) ||
             runtime.viewDemandProducer.maxDemands < 0 ||
             typeof runtime.viewDemandProducer.produce !== 'function' ||
             typeof runtime.reconcileViewDemands !== 'function') {
-            throw new TypeError('Flow demand requires three public Virtual Raster runtime surfaces')
+            throw new TypeError(
+                'Flow demand requires compatible public Virtual Raster runtime surfaces'
+            )
         }
     }
-    return runtimes
-}
-
-function assertDistinctProducerIds(
-    runtimes: readonly [FlowDemandRuntime, FlowDemandRuntime, FlowDemandRuntime]
-): void {
-
-    const ids = runtimes.map(runtime => runtime.viewDemandProducer.id)
+    const ids = members.map(member => member.runtime.viewDemandProducer.id)
     if (new Set(ids).size !== ids.length) {
         throw new TypeError('Flow temporal runtimes require unique view-demand producer identities')
     }
+    return members
 }
 
 async function disposeHooks<CoverFrame>(

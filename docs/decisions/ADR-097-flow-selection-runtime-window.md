@@ -2,8 +2,8 @@
 
 ## Status
 
-Accepted and implemented as an additive `Flow Field` resource owner. GPU publication and renderer
-integration remain on the existing temporal path until the next clean-cut phase. This decision
+Accepted and implemented by the `Flow Field` application, demand coordinator, temporal bindings,
+and renderer. The fixed three-slot temporal owner is no longer on the active path. This decision
 does not change the frozen `Flow Layer` example or public Geo/Scratch APIs.
 
 ## Date
@@ -102,6 +102,75 @@ retirement, and calls the supplied runtime disposer at most once per runtime ide
 failures are aggregated after all reachable owners have been settled. A factory that permanently
 violates the settling contract therefore also prevents disposal settlement, as described above.
 
+The window also has an idempotent request-stop phase distinct from resource disposal. Request stop
+rejects new selections, settles the pending ticket, aborts candidate and capacity work, and calls
+the supplied demand stopper exactly once for every runtime known at that point. A runtime returned
+late is stopped before it is disposed. This phase does not release a pair, capture, BindSet, or GPU
+resource, so the application can run it before draining observations without racing renderer
+ownership. A one-shot termination promise independently reports persistent cleanup/unresponsive
+failure, or settles as stopped only after complete normal disposal; fatal state therefore remains
+observable even after the latest request ticket already reported ready or request production has
+already stopped.
+
+### Application, demand, and renderer integration
+
+The application is the sole coordinator of the timeline and window. Timeline
+`selectionRevision` and window ticket revision remain distinct and are recorded together in a
+latest-only handshake. A late ticket cannot report readiness for another timeline selection.
+Loading returns an effect-free frame and waits for exactly one ticket wake-up; it does not spin.
+A gap also submits no simulation or raster publication, but display-paced invalidation continues
+while the timeline says it needs another tick, allowing the clock to cross the gap.
+Before either non-ready frame is returned, the renderer suspends its retained temporal binding.
+That retires a stale long-lived pair capture after any in-flight frame releases and prevents an old
+A/B BindSet plus an unpresented C/D pair from occupying all four runtime slots while E/F waits for
+capacity.
+
+An ordinary runtime factory failure is exposed as an effect-free failed frame and freezes the
+clock. It is not upgraded to page failure and is not retried by display invalidation; the next
+explicit play, pause, seek, rate, or loop control requests a retry. Persistent cleanup failure and
+factory unresponsiveness use the independent termination signal and fail the page even when no
+frame or request ticket remains pending.
+
+The renderer accepts only an admitted ready timeline and obtains one pair-generation binding
+frame before creating a submission. The binding provider keeps a long-lived capture for the
+active BindSet, while each rendered frame owns another capture until native observation,
+publication acknowledgement, demand registration, view feedback, and contour observation have
+all settled. A replacement BindSet is created before the old set and long capture retire.
+Consequently the window cannot dispose a runtime still referenced by a binding or in-flight frame.
+Only a dedicated binding-superseded error may be converted into an effect-free retry. BindSet,
+shader, resource, and cleanup errors keep their original identity and enter the application fatal
+path instead of being mislabeled as a generation race.
+
+Demand receives the same immutable ready capture as the renderer. It fans out one spatial set to
+one or two unique runtimes, never reads the window again during reconciliation, and collapses an
+exact sample's lower/upper roles into one request. Camera-driven fine-LoD settlements remain Geo
+frame settlement facts only; they never become timeline readiness.
+
+The application declares an aggregate four-runtime budget rather than multiplying a per-runtime
+number silently: 192 request slots, 192 physical pages, 96 MiB of staging, four network tasks, and
+four decode tasks are divided into four equal runtime partitions. The common steady pair therefore
+uses two partitions, while an old captured pair and a new candidate can coexist within the same
+explicit ceiling.
+
+The application request-stop action runs after the frame controller stops but before Lifetime
+observations drain. Full releases remain ordered renderer, temporal window, WorkerSystem,
+GPURuntime, then map. A terminal gap records a gap last-frame fact instead of retaining an
+unrelated rendered frame. Direct terminal rendering is guarded by the renderer in-flight lock and
+any error explicitly enters page teardown. Terminal ready flush uses three render passes because
+GPU view-demand feedback is one frame delayed: the first seeds
+current-view feedback, the second requests and awaits that view's fine pages, and the third draws
+after those pages have been published. All three passes reuse one immutable terminal view capture,
+so MapLibre camera changes cannot rebind delayed feedback to a different view. Page disposal aborts
+a concurrent terminal flush through
+the common Lifetime stop signal, and active-state checks prevent another terminal phase from
+starting after release begins.
+
+The managed headless Chrome proof uses the complete schema-two COG collection, seeks from the
+initial pair to model time 10.5, requests z10 pages for `t10` and `t11`, renders non-empty pixels,
+drains Worker and native-submission activity to zero, and disposes renderer, window, WorkerSystem,
+runtime, and map without cleanup failure. The proof also asserts the critical stop and release
+subsequences rather than inferring safe ownership order from a zero-failure count.
+
 ## Consequences
 
 - Runtime allocation follows timeline selections instead of render-frame counts.
@@ -112,8 +181,8 @@ violates the settling contract therefore also prevents disposal settlement, as d
   capture, or lease identity.
 - Camera-driven fine-LoD settlement is not part of `createReadyRuntime` admission and must not
   become model-clock readiness.
-- The renderer still needs a later adapter that creates safety-ready velocity runtimes, consumes
-  captures, and owns per-frame Virtual Raster publication acknowledgement.
+- Safety-ready construction, pair captures, and per-frame Virtual Raster acknowledgement now
+  compose without moving Flow policy into Geo or Scratch.
 
 ## Alternatives Rejected
 

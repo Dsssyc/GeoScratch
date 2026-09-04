@@ -165,12 +165,6 @@ describe('Flow Field particle lifecycle policy', () => {
             temporal: {
                 wgsl: '// temporal sampler',
                 layout: temporalLayout,
-                frame: () => ({
-                    bindSet: temporalSet,
-                    resources: [ temporalResource ],
-                    progress: 0.25,
-                    requestedLevel: 2,
-                }),
             },
             spawn: {
                 wgsl: '// spawn index',
@@ -189,8 +183,19 @@ describe('Flow Field particle lifecycle policy', () => {
             resources: [ spawnResource ],
         }
         const builder = fakeBuilder(events)
+        const temporalFrame = Object.freeze({
+            state: 'ready',
+            requestedRevision: 7,
+            pairGeneration: 3,
+            bindSet: temporalSet,
+            resources: Object.freeze([ temporalResource ]),
+            progress: 0.25,
+            requestedLevel: 2,
+            sampleRegistration: 'pixel-center',
+            release() {},
+        })
 
-        particles.encode(builder, spawn)
+        particles.encode(builder, spawn, temporalFrame)
 
         expect(particles.maximumCount).to.equal(1024)
         expect(particles.resources.particles.size).to.equal(1024 * 56)
@@ -216,6 +221,8 @@ describe('Flow Field particle lifecycle policy', () => {
             spawnSet,
         ])
         expect(runtime.readbackCount).to.equal(0)
+        expect(read('examples', 'flowField', 'flow-particles.ts'))
+            .to.not.include('options.temporal.frame()')
 
         particles.dispose()
         particles.dispose()
