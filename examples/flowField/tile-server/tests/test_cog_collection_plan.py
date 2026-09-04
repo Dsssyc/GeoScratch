@@ -10,6 +10,7 @@ from geoscratch_flow_field_tiles.cog import CogBuildBudget
 from geoscratch_flow_field_tiles.cog_batch import CogSnapshotBatchExecutionBudget
 from geoscratch_flow_field_tiles.collection import (
     COG_COLLECTION_MARKER,
+    COG_COLLECTION_SCHEMA_VERSION,
     CogCollectionBudget,
     _capture_collection_output_state,
     _install_collection_directory,
@@ -183,6 +184,16 @@ def test_collection_plan_accepts_explicit_z10_and_binds_distinct_identity(
     assert fixed.budget.approved
     assert fixed.snapshot_plan.grid.matrix_id == 10
     assert fixed.snapshot_plan.selection.matrix_relation == "explicitly-requested"
+    assert fixed.request_facts["runtimeMatrices"] == {
+        "sourceCeilingMatrixId": "10",
+        "tileMatrixIds": [str(matrix) for matrix in range(4, 11)],
+        "publicationPolicy": {
+            "kind": "bounded-source-ceiling",
+            "minimumMatrixId": "4",
+            "maximumMatrixCap": "10",
+            "resolvedMaximumMatrixId": "10",
+        },
+    }
     assert statistical.snapshot_plan.grid.matrix_id == 10
     assert fixed.request_sha256 != statistical.request_sha256
 
@@ -403,7 +414,7 @@ def _write_minimal_owned_collection(path, version="flow-test-v1"):
     snapshot.joinpath("manifest.json").write_text("{}\n", encoding="utf-8")
     snapshot.joinpath("flow-t00.cog.tif").write_bytes(b"test")
     manifest = {
-        "schemaVersion": 1,
+        "schemaVersion": COG_COLLECTION_SCHEMA_VERSION,
         "artifactType": "flow-field-cog-collection",
         "contentVersion": version,
         "snapshots": [{

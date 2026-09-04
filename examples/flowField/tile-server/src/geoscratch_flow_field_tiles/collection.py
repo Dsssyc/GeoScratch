@@ -45,9 +45,13 @@ from .resolution import (
     validate_resolution_selection_manifest,
 )
 from .runtime_manifest import (
+    RUNTIME_ADAPTER_VERSION,
+    RUNTIME_MAXIMUM_MATRIX_CAP,
+    RUNTIME_MINIMUM_MATRIX,
     CogRuntimePageIndex,
     build_cog_runtime_page_index,
     build_cog_runtime_manifest,
+    runtime_matrices_for_source_ceiling,
     validate_cog_runtime_manifest,
 )
 from .job_control import (
@@ -64,6 +68,9 @@ from .source import (
     load_source_snapshot,
     read_source_descriptor,
     source_descriptor_hash,
+    source_descriptor_identity_manifest,
+    source_descriptor_identity_manifest_hash,
+    source_snapshot_identity_manifest_hash,
     source_snapshot_hash,
 )
 
@@ -73,10 +80,36 @@ DEFAULT_COG_COLLECTION_DIRECTORY = TILE_SERVER_ROOT / "cog-collection"
 COG_COLLECTION_MARKER = ".flow-field-cog-collection.json"
 COG_COLLECTION_WORK_MARKER = ".flow-field-cog-collection-work.json"
 COG_SNAPSHOT_WORK_MARKER = ".flow-field-cog-snapshot-work.json"
-COG_COLLECTION_SCHEMA_VERSION = 1
-COG_COLLECTION_ADAPTER_VERSION = "flow-cog-wmq-rg32f-v1"
-RUNTIME_MINIMUM_MATRIX = 4
-RUNTIME_MAXIMUM_MATRIX = 9
+COG_COLLECTION_SCHEMA_VERSION = 2
+COG_COLLECTION_ADAPTER_VERSION = RUNTIME_ADAPTER_VERSION
+MINIMUM_COLLECTION_SOURCE_CEILING = 9
+
+
+def _runtime_matrix_contract(source_ceiling_matrix: int) -> dict[str, Any]:
+    matrices = runtime_matrices_for_source_ceiling(source_ceiling_matrix)
+    resolved_maximum = matrices[-1]
+    return {
+        "sourceCeilingMatrixId": str(source_ceiling_matrix),
+        "tileMatrixIds": [str(matrix) for matrix in matrices],
+        "publicationPolicy": {
+            "kind": "bounded-source-ceiling",
+            "minimumMatrixId": str(RUNTIME_MINIMUM_MATRIX),
+            "maximumMatrixCap": str(RUNTIME_MAXIMUM_MATRIX_CAP),
+            "resolvedMaximumMatrixId": str(resolved_maximum),
+        },
+    }
+
+
+def _runtime_adapter_contract(source_ceiling_matrix: int) -> dict[str, Any]:
+    matrix_contract = _runtime_matrix_contract(source_ceiling_matrix)
+    return {
+        "version": COG_COLLECTION_ADAPTER_VERSION,
+        **matrix_contract,
+        "advertisedMinimumMatrixId": matrix_contract["tileMatrixIds"][0],
+        "advertisedMaximumMatrixId": matrix_contract["tileMatrixIds"][-1],
+        "sampleRegistration": "pixel-center",
+        "unsupportedVelocity": [0.0, 0.0],
+    }
 
 
 @dataclass(frozen=True, slots=True)
@@ -607,12 +640,14 @@ def _source_collection_contract(
         "crs": "EPSG:4326",
         "geographicBounds": list(geographic_bounds),
         "stationCount": descriptor.station_count,
+        "fieldCount": descriptor.field_count,
         "stationHash": descriptor.station_sha256,
         "unit": descriptor.unit,
         "basis": descriptor.basis,
         "timeUnit": descriptor.time_unit or "ordinal",
         "phase": descriptor.phase,
         "authority": descriptor.authority.manifest(),
+        "descriptorIdentity": source_descriptor_identity_manifest(descriptor),
     }
 
 
@@ -626,6 +661,8 @@ def _build_collection_manifests(
     snapshot_artifact_bytes: int,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     source_contract = _source_collection_contract(descriptor, geographic_bounds)
+    source_ceiling_matrix = int(shared_contract["plan"]["grid"]["matrixId"])
+    selection_relation = shared_contract["plan"]["matrixDecision"]["relation"]
     facts = {
         "requestSha256": plan.request_sha256,
         "request": plan.request_facts,
@@ -639,19 +676,13 @@ def _build_collection_manifests(
         "sharedSnapshotContract": shared_contract,
         "snapshots": list(records),
         "runtimePageIndex": page_index.manifest(),
-        "adapter": {
-            "version": COG_COLLECTION_ADAPTER_VERSION,
-            "advertisedMinimumMatrixId": str(RUNTIME_MINIMUM_MATRIX),
-            "advertisedMaximumMatrixId": str(RUNTIME_MAXIMUM_MATRIX),
-            "sampleRegistration": "pixel-center",
-            "unsupportedVelocity": [0.0, 0.0],
-        },
+        "adapter": _runtime_adapter_contract(source_ceiling_matrix),
     }
     construction_sha256 = _canonical_sha256(facts)
     base_matrix = shared_contract["plan"]["grid"]["matrixId"]
     content_version = (
         f"flow-cog-collection-{construction_sha256[:16]}-"
-        f"t{len(records)}-z{base_matrix}-v1"
+        f"t{len(records)}-z{base_matrix}-v2"
     )
     quality = shared_contract["quality"]
     runtime_manifest = build_cog_runtime_manifest(
@@ -659,6 +690,7 @@ def _build_collection_manifests(
         content_version,
         page_index,
         quality,
+        source_ceiling_selection_relation=selection_relation,
     )
     runtime_bytes = _encoded_json(runtime_manifest)
     manifest = {
@@ -767,6 +799,11 @@ def _validate_collection_manifest_identity(
         )
     except ValueError as error:
         raise ValueError("Flow Field COG collection resolution identity is invalid") from error
+    if selected_matrix < MINIMUM_COLLECTION_SOURCE_CEILING:
+        raise ValueError(
+            "Flow Field COG collection source ceiling must be at least "
+            f"z{MINIMUM_COLLECTION_SOURCE_CEILING}"
+        )
     if (
         base_matrix != str(selected_matrix)
         or shared_plan.get("matrixDecision")
@@ -777,6 +814,18 @@ def _validate_collection_manifest_identity(
         }
     ):
         raise ValueError("Flow Field COG collection matrix decision is invalid")
+    runtime_matrix_contract = _runtime_matrix_contract(selected_matrix)
+    expected_adapter = _runtime_adapter_contract(selected_matrix)
+    descriptor_identity = source.get("descriptorIdentity")
+    try:
+        embedded_descriptor_hash = source_descriptor_identity_manifest_hash(
+            descriptor_identity
+        )
+    except ValueError as error:
+        raise ValueError("Flow Field COG collection source identity is invalid") from error
+    if not isinstance(descriptor_identity, dict):
+        raise ValueError("Flow Field COG collection source identity is invalid")
+    descriptor_fields = descriptor_identity["fields"]
     source_field_count = selection.get("sourceFieldCount")
     expected_full_selection = (
         list(range(source_field_count))
@@ -808,7 +857,24 @@ def _validate_collection_manifest_identity(
         )
     )
     source_is_valid = (
-        source.get("descriptorSchemaVersion") in {2, 3}
+        set(source) == {
+            "descriptorSchemaVersion",
+            "datasetId",
+            "sourceRevision",
+            "sourceHash",
+            "crs",
+            "geographicBounds",
+            "stationCount",
+            "fieldCount",
+            "stationHash",
+            "unit",
+            "basis",
+            "timeUnit",
+            "phase",
+            "authority",
+            "descriptorIdentity",
+        }
+        and source.get("descriptorSchemaVersion") in {2, 3}
         and isinstance(source.get("datasetId"), str)
         and bool(source["datasetId"])
         and isinstance(source.get("sourceRevision"), str)
@@ -820,6 +886,22 @@ def _validate_collection_manifest_identity(
         and isinstance(source.get("stationCount"), int)
         and not isinstance(source.get("stationCount"), bool)
         and source["stationCount"] >= 3
+        and isinstance(source.get("fieldCount"), int)
+        and not isinstance(source.get("fieldCount"), bool)
+        and source["fieldCount"] > 0
+        and source.get("sourceHash") == embedded_descriptor_hash
+        and source.get("descriptorSchemaVersion")
+        == descriptor_identity.get("schemaVersion")
+        and source.get("datasetId") == descriptor_identity.get("datasetId")
+        and source.get("sourceRevision") == descriptor_identity.get("sourceRevision")
+        and source.get("stationCount") == descriptor_identity.get("stationCount")
+        and source.get("fieldCount") == descriptor_identity.get("fieldCount")
+        and source.get("stationHash") == descriptor_identity.get("stationSha256")
+        and source.get("unit") == descriptor_identity.get("unit")
+        and source.get("basis") == descriptor_identity.get("basis")
+        and source.get("timeUnit") == descriptor_identity.get("timeUnit")
+        and source.get("phase") == descriptor_identity.get("phase")
+        and source.get("authority") == descriptor_identity.get("authority")
         and _is_sha256_value(source.get("stationHash"))
         and all(
             isinstance(source.get(key), str) and bool(source[key])
@@ -865,10 +947,30 @@ def _validate_collection_manifest_identity(
         and shared_topology.get("resolved") == "delaunay"
         and shared_topology.get("inferred") is True
     )
+    selected_times_match_descriptor = (
+        len(snapshots) == len(time_indices)
+        and all(
+            isinstance(record, dict)
+            and 0 <= time_index < len(descriptor_fields)
+            and descriptor_fields[time_index]["timeIndex"] == time_index
+            and descriptor_fields[time_index]["modelTime"]
+            == record.get("modelTime")
+            and descriptor_fields[time_index]["sha256"]
+            == record.get("velocityHash")
+            and source_snapshot_identity_manifest_hash(
+                descriptor_identity,
+                time_index,
+            )
+            == record.get("sourceHash")
+            for time_index, record in zip(time_indices, snapshots)
+        )
+    )
     if (
         not selection_is_valid
+        or source_field_count != source.get("fieldCount")
         or not source_is_valid
         or not source_matches_children
+        or not selected_times_match_descriptor
         or facts.get("requestSha256") != _canonical_sha256(request)
         or request.get("source")
         != {
@@ -876,6 +978,7 @@ def _validate_collection_manifest_identity(
             "sourceRevision": source.get("sourceRevision"),
             "sourceHash": source.get("sourceHash"),
             "stationCount": source.get("stationCount"),
+            "fieldCount": source.get("fieldCount"),
             "stationHash": source.get("stationHash"),
         }
         or request.get("selection")
@@ -911,29 +1014,46 @@ def _validate_collection_manifest_identity(
         }
         != shared.get("topology", {}).get("supportHeuristic")
         or request.get("adapterVersion") != COG_COLLECTION_ADAPTER_VERSION
-        or request.get("runtimeMatrices")
-        != {
-            "minimum": str(RUNTIME_MINIMUM_MATRIX),
-            "maximum": str(RUNTIME_MAXIMUM_MATRIX),
-        }
-        or adapter
-        != {
-            "version": COG_COLLECTION_ADAPTER_VERSION,
-            "advertisedMinimumMatrixId": str(RUNTIME_MINIMUM_MATRIX),
-            "advertisedMaximumMatrixId": str(RUNTIME_MAXIMUM_MATRIX),
-            "sampleRegistration": "pixel-center",
-            "unsupportedVelocity": [0.0, 0.0],
-        }
+        or request.get("runtimeMatrices") != runtime_matrix_contract
+        or adapter != expected_adapter
         or page_index.get("descriptorSha256") != source.get("sourceHash")
         or page_index.get("sourceBounds") != source.get("geographicBounds")
+        or page_index.get("sourceCeilingMatrixId") != str(selected_matrix)
         or page_index.get("timeIndices") != time_indices
-        or page_index.get("matrices")
-        != [str(matrix) for matrix in range(RUNTIME_MINIMUM_MATRIX, RUNTIME_MAXIMUM_MATRIX + 1)]
+        or page_index.get("matrices") != runtime_matrix_contract["tileMatrixIds"]
+        or set(page_index) != {
+            "descriptorSha256",
+            "sourceBounds",
+            "sourceCeilingMatrixId",
+            "timeIndices",
+            "matrices",
+            "limits",
+            "pages",
+            "pageSetSha256",
+            "timeMaximumSpeeds",
+            "maximumSpeed",
+        }
     ):
         raise ValueError("Flow Field COG collection semantic contract is invalid")
+    try:
+        runtime_manifest = json.loads(runtime_manifest_bytes)
+    except json.JSONDecodeError as error:
+        raise ValueError("Flow Field COG runtime manifest is unreadable") from error
+    validate_cog_runtime_manifest(runtime_manifest)
+    if (
+        runtime_manifest.get("tileMatrixSet", {}).get("limits")
+        != page_index.get("limits")
+        or runtime_manifest.get("pages") != page_index.get("pages")
+        or runtime_manifest.get("timeMaximumSpeeds")
+        != page_index.get("timeMaximumSpeeds")
+        or runtime_manifest.get("maximumSpeed") != page_index.get("maximumSpeed")
+        or runtime_manifest.get("construction", {}).get("pageSetSha256")
+        != page_index.get("pageSetSha256")
+    ):
+        raise ValueError("Flow Field COG collection runtime page index is inconsistent")
     expected_version = (
         f"flow-cog-collection-{expected_construction[:16]}-"
-        f"t{len(snapshots)}-z{base_matrix}-v1"
+        f"t{len(snapshots)}-z{base_matrix}-v2"
     )
     storage = manifest.get("storage")
     marker_byte_length = len(_encoded_json({
@@ -987,21 +1107,17 @@ def _validate_collection_manifest_identity(
         "pageSetSha256": page_index.get("pageSetSha256"),
     }:
         raise ValueError("Flow Field COG collection runtime identity is invalid")
-    try:
-        runtime_manifest = json.loads(runtime_manifest_bytes)
-    except json.JSONDecodeError as error:
-        raise ValueError("Flow Field COG runtime manifest is unreadable") from error
-    validate_cog_runtime_manifest(runtime_manifest)
     runtime_times = runtime_manifest.get("times")
     expected_runtime_times = [
         {
+            "sampleKey": f"t{time_index:02d}",
             "timeIndex": record.get("timeIndex"),
             "modelTime": record.get("modelTime"),
             "unit": source.get("timeUnit"),
             "phase": source.get("phase"),
             "sourceHash": record.get("velocityHash"),
         }
-        for record in snapshots
+        for time_index, record in zip(time_indices, snapshots)
     ]
     if (
         runtime_manifest.get("contentVersion") != expected_version
@@ -1016,13 +1132,22 @@ def _validate_collection_manifest_identity(
         }
         or runtime_manifest.get("unit") != source.get("unit")
         or runtime_manifest.get("basis") != source.get("basis")
+        or runtime_manifest.get("authority") != source.get("authority")
         or runtime_times != expected_runtime_times
-        or runtime_manifest.get("pages") != page_index.get("pages")
-        or runtime_manifest.get("construction", {}).get("pageSetSha256")
-        != page_index.get("pageSetSha256")
+        or runtime_manifest.get("temporal", {}).get("coverage")
+        != selection.get("coverage")
+        or runtime_manifest.get("temporal", {}).get("sourceSampleCount")
+        != source.get("fieldCount")
+        or runtime_manifest.get("sourceCeiling")
+        != {
+            "tileMatrixSetId": "WebMercatorQuad",
+            "matrixId": str(selected_matrix),
+            "selectionRelation": matrix_relation,
+        }
+        or runtime_manifest.get("tileMatrixSet", {}).get("tileMatrixIds")
+        != runtime_matrix_contract["tileMatrixIds"]
         or manifest.get("quality") != shared.get("quality")
-        or runtime_manifest.get("construction", {}).get("quality")
-        != shared.get("quality")
+        or runtime_manifest.get("quality") != shared.get("quality")
     ):
         raise ValueError("Flow Field COG collection runtime contract is inconsistent")
     return {
@@ -1611,6 +1736,7 @@ def _build_velocity_cog_collection(
             descriptor,
             readers,
             first_snapshot.geographic_bounds,
+            source_ceiling_matrix=plan.snapshot_plan.grid.matrix_id,
         )
         emitter.emit(
             "stage.completed",
@@ -1920,12 +2046,16 @@ def plan_velocity_cog_collection(
     resolved_interpolation = resolve_interpolation(
         descriptor.interpolation if interpolation is None else interpolation
     )
+    runtime_matrix_contract = _runtime_matrix_contract(
+        snapshot_plan.grid.matrix_id
+    )
     request_facts = {
         "source": {
             "datasetId": descriptor.dataset_id,
             "sourceRevision": descriptor.source_revision,
             "sourceHash": source_descriptor_hash(descriptor),
             "stationCount": descriptor.station_count,
+            "fieldCount": descriptor.field_count,
             "stationHash": descriptor.station_sha256,
         },
         "selection": {
@@ -1947,10 +2077,7 @@ def plan_velocity_cog_collection(
             "gdal": rasterio.__gdal_version__,
             "rioCogeo": rio_cogeo.__version__,
         },
-        "runtimeMatrices": {
-            "minimum": str(RUNTIME_MINIMUM_MATRIX),
-            "maximum": str(RUNTIME_MAXIMUM_MATRIX),
-        },
+        "runtimeMatrices": runtime_matrix_contract,
     }
     request_sha256 = hashlib.sha256(
         json.dumps(request_facts, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -1991,10 +2118,10 @@ def plan_velocity_cog_collection(
         )
     )
     violations: list[str] = []
-    if snapshot_plan.grid.matrix_id < RUNTIME_MAXIMUM_MATRIX:
+    if snapshot_plan.grid.matrix_id < MINIMUM_COLLECTION_SOURCE_CEILING:
         violations.append(
             "runtime adapter base matrix "
-            f"{snapshot_plan.grid.matrix_id} < {RUNTIME_MAXIMUM_MATRIX}"
+            f"{snapshot_plan.grid.matrix_id} < {MINIMUM_COLLECTION_SOURCE_CEILING}"
         )
     if remaining_count > 1 and estimated is None:
         violations.append("compressed snapshot estimate is required for multi-time output")

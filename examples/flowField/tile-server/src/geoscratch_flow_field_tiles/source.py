@@ -301,50 +301,192 @@ def _read_float32_pairs(
     return values
 
 
-def source_descriptor_hash(descriptor: SourceDescriptor) -> str:
-    """Return the descriptor-only source identity without reading field payloads."""
+def source_descriptor_identity_manifest(
+    descriptor: SourceDescriptor,
+) -> dict[str, Any]:
+    """Return the complete descriptor facts needed to reproduce source identity."""
     if not isinstance(descriptor, SourceDescriptor):
         raise TypeError("descriptor must be a SourceDescriptor")
-    if descriptor.schema_version == 2:
-        # Preserve the exact schema-v2 identity used by every existing artifact.
+    return {
+        "schemaVersion": descriptor.schema_version,
+        "datasetId": descriptor.dataset_id,
+        "sourceRevision": descriptor.source_revision,
+        "stationCount": descriptor.station_count,
+        "fieldCount": descriptor.field_count,
+        "stationSha256": descriptor.station_sha256,
+        "fields": [
+            {
+                "timeIndex": field.time_index,
+                "modelTime": field.model_time,
+                "file": field.filename,
+                "sha256": field.sha256,
+            }
+            for field in descriptor.fields
+        ],
+        "unit": descriptor.unit,
+        "basis": descriptor.basis,
+        "timeUnit": descriptor.time_unit or "ordinal",
+        "phase": descriptor.phase,
+        "authority": descriptor.authority.manifest(),
+    }
+
+
+def source_descriptor_identity_manifest_hash(value: object) -> str:
+    """Validate embedded descriptor facts and reproduce their canonical source hash."""
+    expected_keys = {
+        "schemaVersion",
+        "datasetId",
+        "sourceRevision",
+        "stationCount",
+        "fieldCount",
+        "stationSha256",
+        "fields",
+        "unit",
+        "basis",
+        "timeUnit",
+        "phase",
+        "authority",
+    }
+    if not isinstance(value, dict) or set(value) != expected_keys:
+        raise ValueError("Flow Field source descriptor identity is invalid")
+    schema_version = value["schemaVersion"]
+    station_count = _require_integer(value["stationCount"], "stationCount", 3)
+    field_count = _require_integer(value["fieldCount"], "fieldCount", 1)
+    dataset_id = _require_string(value["datasetId"], "datasetId")
+    source_revision = _require_string(value["sourceRevision"], "sourceRevision")
+    station_sha256 = _require_sha256(value["stationSha256"], "stationSha256")
+    unit = _require_string(value["unit"], "unit")
+    basis = _require_string(value["basis"], "basis")
+    time_unit = _require_string(value["timeUnit"], "timeUnit")
+    phase = _require_string(value["phase"], "phase")
+    authority = _read_authority(value["authority"])
+    fields = value["fields"]
+    if schema_version not in {2, 3} or not isinstance(fields, list) or (
+        len(fields) != field_count
+    ):
+        raise ValueError("Flow Field source descriptor identity is invalid")
+    normalized_fields: list[dict[str, Any]] = []
+    previous_model_time: int | float | None = None
+    for expected_index, field in enumerate(fields):
+        if not isinstance(field, dict) or set(field) != {
+            "timeIndex", "modelTime", "file", "sha256"
+        }:
+            raise ValueError("Flow Field source descriptor time inventory is invalid")
+        time_index = _require_integer(field["timeIndex"], "timeIndex")
+        if time_index != expected_index:
+            raise ValueError("Flow Field source descriptor time inventory is invalid")
+        model_time = _require_finite_number(field["modelTime"], "modelTime")
+        if schema_version == 2:
+            if not isinstance(model_time, int) or model_time != expected_index:
+                raise ValueError("Flow Field schema 2 model time identity is invalid")
+        elif previous_model_time is not None and model_time <= previous_model_time:
+            raise ValueError("Flow Field source model times must be strictly increasing")
+        previous_model_time = model_time
+        normalized_fields.append({
+            "timeIndex": time_index,
+            "modelTime": model_time,
+            "file": _require_filename(field["file"], "field.file"),
+            "sha256": _require_sha256(field["sha256"], "field.sha256"),
+        })
+    if schema_version == 2:
+        if (
+            unit != "legacy-flow-unit"
+            or basis != "source-u-v"
+            or time_unit != "ordinal"
+            or phase != "unspecified"
+            or authority != SourceAuthority()
+        ):
+            raise ValueError("Flow Field schema 2 descriptor identity is invalid")
         facts = [
-            descriptor.dataset_id,
-            descriptor.source_revision,
-            str(descriptor.station_count),
-            str(descriptor.field_count),
-            descriptor.station_sha256,
+            dataset_id,
+            source_revision,
+            str(station_count),
+            str(field_count),
+            station_sha256,
             *(
-                f"{field.time_index}:{field.model_time}:{field.filename}:{field.sha256}"
-                for field in descriptor.fields
+                f"{field['timeIndex']}:{field['modelTime']}:{field['file']}:{field['sha256']}"
+                for field in normalized_fields
             ),
-            descriptor.unit,
-            descriptor.basis,
-            descriptor.phase,
+            unit,
+            basis,
+            phase,
         ]
         payload = "\n".join(facts).encode("utf-8")
     else:
         payload = json.dumps(
             {
-                "schemaVersion": descriptor.schema_version,
-                "datasetId": descriptor.dataset_id,
-                "sourceRevision": descriptor.source_revision,
-                "stationCount": descriptor.station_count,
-                "fieldCount": descriptor.field_count,
-                "stationSha256": descriptor.station_sha256,
-                "fields": [
-                    {
-                        "timeIndex": field.time_index,
-                        "modelTime": field.model_time,
-                        "file": field.filename,
-                        "sha256": field.sha256,
-                    }
-                    for field in descriptor.fields
-                ],
-                "unit": descriptor.unit,
-                "basis": descriptor.basis,
-                "timeUnit": descriptor.time_unit,
-                "phase": descriptor.phase,
-                "authority": descriptor.authority.manifest(),
+                "schemaVersion": schema_version,
+                "datasetId": dataset_id,
+                "sourceRevision": source_revision,
+                "stationCount": station_count,
+                "fieldCount": field_count,
+                "stationSha256": station_sha256,
+                "fields": normalized_fields,
+                "unit": unit,
+                "basis": basis,
+                "timeUnit": time_unit,
+                "phase": phase,
+                "authority": authority.manifest(),
+            },
+            allow_nan=False,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def source_descriptor_hash(descriptor: SourceDescriptor) -> str:
+    """Return the descriptor-only source identity without reading field payloads."""
+    return source_descriptor_identity_manifest_hash(
+        source_descriptor_identity_manifest(descriptor)
+    )
+
+
+def source_snapshot_identity_manifest_hash(
+    descriptor_identity: object,
+    time_index: int,
+) -> str:
+    """Reproduce one snapshot identity from validated embedded descriptor facts."""
+    source_descriptor_identity_manifest_hash(descriptor_identity)
+    if not isinstance(descriptor_identity, dict):
+        raise ValueError("Flow Field source descriptor identity is invalid")
+    fields = descriptor_identity["fields"]
+    if (
+        isinstance(time_index, bool)
+        or not isinstance(time_index, int)
+        or time_index < 0
+        or time_index >= len(fields)
+    ):
+        raise ValueError("Flow Field source snapshot index is invalid")
+    field = fields[time_index]
+    schema_version = descriptor_identity["schemaVersion"]
+    if schema_version == 2:
+        facts = [
+            descriptor_identity["datasetId"],
+            descriptor_identity["sourceRevision"],
+            str(descriptor_identity["stationCount"]),
+            descriptor_identity["stationSha256"],
+            f"{field['timeIndex']}:{field['modelTime']}:{field['file']}:{field['sha256']}",
+            descriptor_identity["unit"],
+            descriptor_identity["basis"],
+            descriptor_identity["phase"],
+        ]
+        payload = "\n".join(facts).encode("utf-8")
+    else:
+        payload = json.dumps(
+            {
+                "schemaVersion": schema_version,
+                "datasetId": descriptor_identity["datasetId"],
+                "sourceRevision": descriptor_identity["sourceRevision"],
+                "stationCount": descriptor_identity["stationCount"],
+                "stationSha256": descriptor_identity["stationSha256"],
+                "field": field,
+                "unit": descriptor_identity["unit"],
+                "basis": descriptor_identity["basis"],
+                "timeUnit": descriptor_identity["timeUnit"],
+                "phase": descriptor_identity["phase"],
+                "authority": descriptor_identity["authority"],
             },
             allow_nan=False,
             ensure_ascii=False,
@@ -363,44 +505,10 @@ def source_snapshot_hash(
         raise TypeError("descriptor must be a SourceDescriptor")
     if not isinstance(field, FieldSourceDescriptor) or field not in descriptor.fields:
         raise ValueError("field must belong to the source descriptor")
-    if descriptor.schema_version == 2:
-        facts = [
-            descriptor.dataset_id,
-            descriptor.source_revision,
-            str(descriptor.station_count),
-            descriptor.station_sha256,
-            f"{field.time_index}:{field.model_time}:{field.filename}:{field.sha256}",
-            descriptor.unit,
-            descriptor.basis,
-            descriptor.phase,
-        ]
-        payload = "\n".join(facts).encode("utf-8")
-    else:
-        payload = json.dumps(
-            {
-                "schemaVersion": descriptor.schema_version,
-                "datasetId": descriptor.dataset_id,
-                "sourceRevision": descriptor.source_revision,
-                "stationCount": descriptor.station_count,
-                "stationSha256": descriptor.station_sha256,
-                "field": {
-                    "timeIndex": field.time_index,
-                    "modelTime": field.model_time,
-                    "file": field.filename,
-                    "sha256": field.sha256,
-                },
-                "unit": descriptor.unit,
-                "basis": descriptor.basis,
-                "timeUnit": descriptor.time_unit,
-                "phase": descriptor.phase,
-                "authority": descriptor.authority.manifest(),
-            },
-            allow_nan=False,
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode("utf-8")
-    return hashlib.sha256(payload).hexdigest()
+    return source_snapshot_identity_manifest_hash(
+        source_descriptor_identity_manifest(descriptor),
+        field.time_index,
+    )
 
 
 def _canonical_snapshot_time_indices(

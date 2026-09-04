@@ -120,6 +120,7 @@ class VelocityTileStore:
         self.manifest_bytes = self.manifest_path.read_bytes()
         self.manifest = json.loads(self.manifest_bytes)
         validate_artifact_manifest(self.manifest)
+        self.quality = self.manifest["construction"]["quality"]
         self.manifest_etag = f'"{hashlib.sha256(self.manifest_bytes).hexdigest()}"'
         self.matrix_ids = tuple(self.manifest["tileMatrixSet"]["tileMatrixIds"])
         self.time_ids = tuple(
@@ -292,10 +293,11 @@ class CogCollectionTileStore:
         self.manifest_path = runtime_manifest_path
         self.manifest_bytes = runtime_bytes
         self.manifest = json.loads(runtime_bytes)
+        self.quality = self.manifest["quality"]
         self.manifest_etag = f'"{hashlib.sha256(runtime_bytes).hexdigest()}"'
         self.matrix_ids = tuple(self.manifest["tileMatrixSet"]["tileMatrixIds"])
         self.time_ids = tuple(
-            f"t{time_record['timeIndex']:02d}"
+            time_record["sampleKey"]
             for time_record in self.manifest["times"]
         )
         self.pages = _page_records(self.manifest["pages"])
@@ -419,7 +421,7 @@ class CogCollectionTileStore:
         return f'"{page["sha256"]}"'
 
     def verify_tile(self, page: dict[str, Any]) -> bool:
-        time_id = f"t{page['timeIndex']:02d}"
+        time_id = page["sampleKey"]
         key = (
             time_id,
             page["matrixId"],
@@ -484,7 +486,7 @@ class CogCollectionTileStore:
         self,
         page: dict[str, Any],
     ) -> tuple[int, int, int, int, int]:
-        time_id = f"t{page['timeIndex']:02d}"
+        time_id = page["sampleKey"]
         path = self._cog_paths.get(time_id)
         expected = self._cog_fingerprints.get(time_id)
         if path is None or expected is None:
@@ -505,7 +507,7 @@ def _page_records(
 ) -> dict[tuple[str, str, int, int], dict[str, Any]]:
     pages: dict[tuple[str, str, int, int], dict[str, Any]] = {}
     for page in records:
-        time_id = f"t{page['timeIndex']:02d}"
+        time_id = page["sampleKey"]
         key = (time_id, page["matrixId"], page["tileRow"], page["tileCol"])
         if key in pages:
             raise ValueError(f"Flow Field runtime manifest contains a duplicate page: {key}")
@@ -601,9 +603,7 @@ def create_app(
             "status": "ok",
             "contentVersion": store.manifest["contentVersion"],
             "pageCount": len(store.pages),
-            "particleSimulation": store.manifest["construction"]["quality"][
-                "particleSimulation"
-            ],
+            "particleSimulation": store.quality["particleSimulation"],
         }
         if store.backend == "cog-collection":
             payload["backend"] = store.backend

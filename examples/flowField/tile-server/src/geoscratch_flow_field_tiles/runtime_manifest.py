@@ -13,8 +13,10 @@ from .cog_tiles import TILE_BYTE_LENGTH, CogVelocityTileReader
 from .source import SourceDescriptor, source_descriptor_hash
 
 
-RUNTIME_MATRICES = tuple(range(4, 10))
-RUNTIME_ADAPTER_VERSION = "flow-cog-wmq-rg32f-v1"
+RUNTIME_MINIMUM_MATRIX = 4
+RUNTIME_MAXIMUM_MATRIX_CAP = 10
+RUNTIME_ADAPTER_VERSION = "flow-cog-wmq-rg32f-v2"
+FLOW_RG32F_MEDIA_TYPE = "application/vnd.geoscratch.flow-rg32f"
 WEB_MERCATOR_QUAD_URI = (
     "http://www.opengis.net/def/tilematrixset/OGC/1.0/WebMercatorQuad"
 )
@@ -28,6 +30,7 @@ WEB_MERCATOR_QUAD = morecantile.tms.get("WebMercatorQuad")
 class CogRuntimePageIndex:
     descriptor_sha256: str
     source_bounds: tuple[float, float, float, float]
+    source_ceiling_matrix: int
     time_indices: tuple[int, ...]
     matrices: tuple[int, ...]
     limits: tuple[dict[str, int | str], ...]
@@ -40,6 +43,7 @@ class CogRuntimePageIndex:
         return {
             "descriptorSha256": self.descriptor_sha256,
             "sourceBounds": list(self.source_bounds),
+            "sourceCeilingMatrixId": str(self.source_ceiling_matrix),
             "timeIndices": list(self.time_indices),
             "matrices": [str(matrix) for matrix in self.matrices],
             "limits": [dict(limit) for limit in self.limits],
@@ -56,13 +60,14 @@ def build_cog_runtime_page_index(
     descriptor: SourceDescriptor,
     readers: Mapping[int, CogVelocityTileReader],
     source_bounds: Sequence[int | float],
-    matrices: Sequence[int] = RUNTIME_MATRICES,
+    *,
+    source_ceiling_matrix: int,
 ) -> CogRuntimePageIndex:
     """Materialize deterministic RG32F page identities without a runtime revision."""
     if not isinstance(descriptor, SourceDescriptor):
         raise TypeError("descriptor must be a SourceDescriptor")
     bounds = _source_bounds(source_bounds)
-    selected_matrices = _matrices(matrices)
+    selected_matrices = runtime_matrices_for_source_ceiling(source_ceiling_matrix)
     selected_times = _reader_time_indices(readers, descriptor.field_count)
 
     limits: tuple[dict[str, int | str], ...] | None = None
@@ -71,9 +76,11 @@ def build_cog_runtime_page_index(
     for time_index in selected_times:
         reader = readers[time_index]
         field = descriptor.fields[time_index]
+        sample_key = _sample_key(time_index)
         if (
             not isinstance(reader, CogVelocityTileReader)
             or reader.time_index != time_index
+            or reader.base_matrix != source_ceiling_matrix
             or field.time_index != time_index
             or tuple(reader.source_bounds) != bounds
             or any(matrix not in reader.supported_matrices for matrix in selected_matrices)
@@ -103,10 +110,11 @@ def build_cog_runtime_page_index(
                 ):
                     tile = reader.read_tile(matrix, tile_row, tile_col)
                     path = (
-                        f"tiles/WebMercatorQuad/t{time_index:02d}/{matrix}/"
+                        f"tiles/WebMercatorQuad/{sample_key}/{matrix}/"
                         f"{tile_row}/{tile_col}.rg32f"
                     )
                     record = {
+                        "sampleKey": sample_key,
                         "timeIndex": time_index,
                         "matrixId": str(matrix),
                         "tileRow": tile_row,
@@ -119,6 +127,7 @@ def build_cog_runtime_page_index(
                     pages.append(record)
                     time_maximum = max(time_maximum, tile.maximum_speed)
         time_maximum_speeds.append({
+            "sampleKey": sample_key,
             "timeIndex": time_index,
             "pageMaximumSpeed": time_maximum,
         })
@@ -129,6 +138,7 @@ def build_cog_runtime_page_index(
     return CogRuntimePageIndex(
         descriptor_sha256=source_descriptor_hash(descriptor),
         source_bounds=bounds,
+        source_ceiling_matrix=source_ceiling_matrix,
         time_indices=selected_times,
         matrices=selected_matrices,
         limits=limits,
@@ -147,6 +157,8 @@ def build_cog_runtime_manifest(
     collection_content_version: str,
     page_index: CogRuntimePageIndex,
     quality: Mapping[str, Any],
+    *,
+    source_ceiling_selection_relation: str,
 ) -> dict[str, Any]:
     """Bind one precomputed page index to a temporal collection revision."""
     if not isinstance(descriptor, SourceDescriptor):
@@ -158,14 +170,29 @@ def build_cog_runtime_manifest(
     if page_index.descriptor_sha256 != source_descriptor_hash(descriptor):
         raise ValueError("Flow Field runtime page index belongs to another descriptor")
     quality_snapshot = _quality(quality)
+    source_ceiling = _source_ceiling(
+        page_index.source_ceiling_matrix,
+        source_ceiling_selection_relation,
+    )
     matrices = page_index.matrices
+    if matrices != runtime_matrices_for_source_ceiling(page_index.source_ceiling_matrix):
+        raise ValueError("Flow Field runtime page index matrices do not match its source ceiling")
+    temporal = {
+        "coverage": (
+            "full"
+            if len(page_index.time_indices) == descriptor.field_count
+            else "subset"
+        ),
+        "sourceSampleCount": descriptor.field_count,
+        "sampleAdjacency": _sample_adjacency(page_index.time_indices),
+    }
     spatial_page_count = sum(
         (int(limit["maxTileRow"]) - int(limit["minTileRow"]) + 1)
         * (int(limit["maxTileCol"]) - int(limit["minTileCol"]) + 1)
         for limit in page_index.limits
     )
     manifest = {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "artifactType": "flow-field-cog-runtime",
         "datasetId": descriptor.dataset_id,
         "sourceRevision": descriptor.source_revision,
@@ -180,8 +207,10 @@ def build_cog_runtime_manifest(
             "crs": WEB_MERCATOR_CRS_URI,
             "bounds": list(_projected_bounds(page_index.source_bounds)),
         },
+        "authority": descriptor.authority.manifest(),
         "times": [
             {
+                "sampleKey": _sample_key(field.time_index),
                 "timeIndex": field.time_index,
                 "modelTime": field.model_time,
                 "unit": descriptor.time_unit or "ordinal",
@@ -193,6 +222,8 @@ def build_cog_runtime_manifest(
                 for time_index in page_index.time_indices
             )
         ],
+        "temporal": temporal,
+        "sourceCeiling": source_ceiling,
         "tileMatrixSet": {
             "id": "WebMercatorQuad",
             "uri": WEB_MERCATOR_QUAD_URI,
@@ -207,17 +238,22 @@ def build_cog_runtime_manifest(
             "tileMatrixIds": [str(matrix) for matrix in matrices],
             "limits": [dict(limit) for limit in page_index.limits],
         },
-        "encoding": {
+        "representation": {
+            "mediaType": FLOW_RG32F_MEDIA_TYPE,
+            "fieldKind": "vector",
             "channels": 2,
             "componentOrder": ["u", "v"],
             "sampleType": "float32-le",
             "layout": "rg-interleaved",
+            "sampleRegistration": "pixel-center",
+            "spatialInterpolation": "bilinear",
             "tileWidth": 256,
             "tileHeight": 256,
+            "unsupportedVelocity": [0.0, 0.0],
+            "missingPageSemantics": "unavailable",
         },
         "unit": descriptor.unit,
         "basis": descriptor.basis,
-        "temporalInterpolation": "component-wise-linear",
         "maximumSpeed": page_index.maximum_speed,
         "timeMaximumSpeeds": [
             dict(record) for record in page_index.time_maximum_speeds
@@ -229,16 +265,20 @@ def build_cog_runtime_manifest(
             "pageByteLength": TILE_BYTE_LENGTH,
             "totalRawPageBytes": len(page_index.pages) * TILE_BYTE_LENGTH,
         },
+        "quality": quality_snapshot,
         "construction": {
             "algorithmVersion": RUNTIME_ADAPTER_VERSION,
             "adapterVersion": RUNTIME_ADAPTER_VERSION,
             "collectionContentVersion": collection_content_version,
             "pageSetSha256": page_index.page_set_sha256,
-            "sampleRegistration": "pixel-center",
             "levelConstruction": "cog-physical-or-global-semantic-recursive",
             "supportFilter": "recursive-conservative-vector-box-v1",
-            "unsupportedVelocity": [0.0, 0.0],
-            "quality": quality_snapshot,
+            "publicationPolicy": {
+                "kind": "bounded-source-ceiling",
+                "minimumMatrixId": str(RUNTIME_MINIMUM_MATRIX),
+                "maximumMatrixCap": str(RUNTIME_MAXIMUM_MATRIX_CAP),
+                "resolvedMaximumMatrixId": str(matrices[-1]),
+            },
         },
     }
     validate_cog_runtime_manifest(manifest)
@@ -247,15 +287,48 @@ def build_cog_runtime_manifest(
 
 def validate_cog_runtime_manifest(manifest: object) -> None:
     """Validate runtime structure and page identity without reopening any COG."""
-    if not isinstance(manifest, dict) or manifest.get("schemaVersion") != 1:
+    expected_keys = {
+        "schemaVersion",
+        "artifactType",
+        "datasetId",
+        "sourceRevision",
+        "sourceHash",
+        "contentVersion",
+        "stationCount",
+        "source",
+        "projectedBounds",
+        "authority",
+        "times",
+        "temporal",
+        "sourceCeiling",
+        "tileMatrixSet",
+        "representation",
+        "unit",
+        "basis",
+        "maximumSpeed",
+        "timeMaximumSpeeds",
+        "pages",
+        "budgets",
+        "quality",
+        "construction",
+    }
+    if (
+        not isinstance(manifest, dict)
+        or set(manifest) != expected_keys
+        or manifest.get("schemaVersion") != 2
+    ):
         raise ValueError("Flow Field COG runtime manifest schema is invalid")
     source = manifest.get("source")
     projected = manifest.get("projectedBounds")
+    authority = manifest.get("authority")
     times = manifest.get("times")
+    temporal = manifest.get("temporal")
+    source_ceiling = manifest.get("sourceCeiling")
     matrix_set = manifest.get("tileMatrixSet")
-    encoding = manifest.get("encoding")
+    representation = manifest.get("representation")
     pages = manifest.get("pages")
     budgets = manifest.get("budgets")
+    quality = manifest.get("quality")
     construction = manifest.get("construction")
     time_maximum_speeds = manifest.get("timeMaximumSpeeds")
     if (
@@ -267,16 +340,19 @@ def validate_cog_runtime_manifest(manifest: object) -> None:
         or not _positive_integer(manifest.get("stationCount"))
         or not _nonempty_string(manifest.get("unit"))
         or not _nonempty_string(manifest.get("basis"))
-        or manifest.get("temporalInterpolation") != "component-wise-linear"
         or not isinstance(source, dict)
         or not isinstance(projected, dict)
+        or not isinstance(authority, dict)
         or not isinstance(times, list)
         or not times
+        or not isinstance(temporal, dict)
+        or not isinstance(source_ceiling, dict)
         or not isinstance(matrix_set, dict)
-        or not isinstance(encoding, dict)
+        or not isinstance(representation, dict)
         or not isinstance(pages, list)
         or not pages
         or not isinstance(budgets, dict)
+        or not isinstance(quality, dict)
         or not isinstance(construction, dict)
         or not isinstance(time_maximum_speeds, list)
     ):
@@ -287,12 +363,20 @@ def validate_cog_runtime_manifest(manifest: object) -> None:
         "bounds": list(_projected_bounds(bounds)),
     }:
         raise ValueError("Flow Field COG runtime source bounds are invalid")
+    if _authority(authority) != authority:
+        raise ValueError("Flow Field COG runtime authority is invalid")
+    if _quality(quality) != quality:
+        raise ValueError("Flow Field COG runtime quality is invalid")
     time_indices: list[int] = []
     if any(
         not isinstance(field, dict)
+        or set(field) != {
+            "sampleKey", "timeIndex", "modelTime", "unit", "phase", "sourceHash"
+        }
         or isinstance(field.get("timeIndex"), bool)
         or not isinstance(field.get("timeIndex"), int)
         or field["timeIndex"] < 0
+        or field.get("sampleKey") != _sample_key(field["timeIndex"])
         or not _finite_number(field.get("modelTime"))
         or not _nonempty_string(field.get("unit"))
         or not _nonempty_string(field.get("phase"))
@@ -320,7 +404,36 @@ def validate_cog_runtime_manifest(manifest: object) -> None:
         previous_model_time = model_time
         time_unit = field["unit"]
         phase = field["phase"]
-    if matrix_set.get("tileMatrixIds") != [str(matrix) for matrix in RUNTIME_MATRICES]:
+    source_sample_count = temporal.get("sourceSampleCount")
+    expected_coverage = (
+        "full"
+        if source_sample_count == len(time_indices)
+        else "subset"
+    )
+    if (
+        isinstance(source_sample_count, bool)
+        or not isinstance(source_sample_count, int)
+        or source_sample_count < len(time_indices)
+        or any(time_index >= source_sample_count for time_index in time_indices)
+        or temporal != {
+            "coverage": expected_coverage,
+            "sourceSampleCount": source_sample_count,
+            "sampleAdjacency": _sample_adjacency(tuple(time_indices)),
+        }
+    ):
+        raise ValueError("Flow Field COG runtime temporal contract is invalid")
+    try:
+        source_ceiling_matrix = int(source_ceiling.get("matrixId"))
+        expected_source_ceiling = _source_ceiling(
+            source_ceiling_matrix,
+            source_ceiling.get("selectionRelation"),
+        )
+        matrices = runtime_matrices_for_source_ceiling(source_ceiling_matrix)
+    except (TypeError, ValueError) as error:
+        raise ValueError("Flow Field COG runtime source ceiling is invalid") from error
+    if source_ceiling != expected_source_ceiling:
+        raise ValueError("Flow Field COG runtime source ceiling is invalid")
+    if matrix_set.get("tileMatrixIds") != [str(matrix) for matrix in matrices]:
         raise ValueError("Flow Field COG runtime matrices are invalid")
     expected_matrix_set = {
         "id": "WebMercatorQuad",
@@ -331,23 +444,29 @@ def validate_cog_runtime_manifest(manifest: object) -> None:
         "tileColDirection": "east",
         "tileWidth": 256,
         "tileHeight": 256,
-        "minTileMatrix": "4",
-        "maxTileMatrix": "9",
-        "tileMatrixIds": [str(matrix) for matrix in RUNTIME_MATRICES],
+        "minTileMatrix": str(RUNTIME_MINIMUM_MATRIX),
+        "maxTileMatrix": str(matrices[-1]),
+        "tileMatrixIds": [str(matrix) for matrix in matrices],
         "limits": matrix_set.get("limits"),
     }
     if matrix_set != expected_matrix_set:
         raise ValueError("Flow Field COG runtime tile matrix set is invalid")
-    limits = _limits(matrix_set.get("limits"), bounds)
-    if encoding != {
+    limits = _limits(matrix_set.get("limits"), bounds, matrices)
+    if representation != {
+        "mediaType": FLOW_RG32F_MEDIA_TYPE,
+        "fieldKind": "vector",
         "channels": 2,
         "componentOrder": ["u", "v"],
         "sampleType": "float32-le",
         "layout": "rg-interleaved",
+        "sampleRegistration": "pixel-center",
+        "spatialInterpolation": "bilinear",
         "tileWidth": 256,
         "tileHeight": 256,
+        "unsupportedVelocity": [0.0, 0.0],
+        "missingPageSemantics": "unavailable",
     }:
-        raise ValueError("Flow Field COG runtime encoding is invalid")
+        raise ValueError("Flow Field COG runtime representation is invalid")
 
     expected_page_count = len(times) * sum(
         (limit[1] - limit[0] + 1) * (limit[3] - limit[2] + 1)
@@ -356,19 +475,23 @@ def validate_cog_runtime_manifest(manifest: object) -> None:
     if len(pages) != expected_page_count:
         raise ValueError("Flow Field COG runtime page count is invalid")
     page_index = 0
-    observed_time_maximum = {time_index: 0.0 for time_index in time_indices}
+    observed_time_maximum = {
+        _sample_key(time_index): 0.0 for time_index in time_indices
+    }
     for time_index in time_indices:
-        for matrix in RUNTIME_MATRICES:
+        sample_key = _sample_key(time_index)
+        for matrix in matrices:
             min_row, max_row, min_col, max_col = limits[matrix]
             for tile_row in range(min_row, max_row + 1):
                 for tile_col in range(min_col, max_col + 1):
                     page = pages[page_index]
                     expected_path = (
-                        f"tiles/WebMercatorQuad/t{time_index:02d}/{matrix}/"
+                        f"tiles/WebMercatorQuad/{sample_key}/{matrix}/"
                         f"{tile_row}/{tile_col}.rg32f"
                     )
                     if (
                         not isinstance(page, dict)
+                        or page.get("sampleKey") != sample_key
                         or page.get("timeIndex") != time_index
                         or page.get("matrixId") != str(matrix)
                         or page.get("tileRow") != tile_row
@@ -379,8 +502,8 @@ def validate_cog_runtime_manifest(manifest: object) -> None:
                         or not _nonnegative_number(page.get("maximumSpeed"))
                     ):
                         raise ValueError("Flow Field COG runtime page structure is invalid")
-                    observed_time_maximum[time_index] = max(
-                        observed_time_maximum[time_index],
+                    observed_time_maximum[sample_key] = max(
+                        observed_time_maximum[sample_key],
                         float(page["maximumSpeed"]),
                     )
                     page_index += 1
@@ -388,8 +511,9 @@ def validate_cog_runtime_manifest(manifest: object) -> None:
         raise ValueError("Flow Field COG runtime page-set identity is invalid")
     expected_time_maximum = [
         {
+            "sampleKey": _sample_key(time_index),
             "timeIndex": time_index,
-            "pageMaximumSpeed": observed_time_maximum[time_index],
+            "pageMaximumSpeed": observed_time_maximum[_sample_key(time_index)],
         }
         for time_index in time_indices
     ]
@@ -406,18 +530,20 @@ def validate_cog_runtime_manifest(manifest: object) -> None:
         "totalRawPageBytes": expected_page_count * TILE_BYTE_LENGTH,
     }:
         raise ValueError("Flow Field COG runtime page budgets are invalid")
-    if (
-        construction.get("algorithmVersion") != RUNTIME_ADAPTER_VERSION
-        or construction.get("adapterVersion") != RUNTIME_ADAPTER_VERSION
-        or construction.get("collectionContentVersion") != manifest.get("contentVersion")
-        or construction.get("sampleRegistration") != "pixel-center"
-        or construction.get("levelConstruction")
-        != "cog-physical-or-global-semantic-recursive"
-        or construction.get("supportFilter")
-        != "recursive-conservative-vector-box-v1"
-        or construction.get("unsupportedVelocity") != [0.0, 0.0]
-        or _quality(construction.get("quality")) != construction.get("quality")
-    ):
+    if construction != {
+        "algorithmVersion": RUNTIME_ADAPTER_VERSION,
+        "adapterVersion": RUNTIME_ADAPTER_VERSION,
+        "collectionContentVersion": manifest.get("contentVersion"),
+        "pageSetSha256": construction.get("pageSetSha256"),
+        "levelConstruction": "cog-physical-or-global-semantic-recursive",
+        "supportFilter": "recursive-conservative-vector-box-v1",
+        "publicationPolicy": {
+            "kind": "bounded-source-ceiling",
+            "minimumMatrixId": str(RUNTIME_MINIMUM_MATRIX),
+            "maximumMatrixCap": str(RUNTIME_MAXIMUM_MATRIX_CAP),
+            "resolvedMaximumMatrixId": str(matrices[-1]),
+        },
+    }:
         raise ValueError("Flow Field COG runtime construction is invalid")
 
 
@@ -437,11 +563,12 @@ def _limit_record(
 def _limits(
     value: object,
     bounds: tuple[float, float, float, float],
+    matrices: tuple[int, ...],
 ) -> dict[int, tuple[int, int, int, int]]:
-    if not isinstance(value, list) or len(value) != len(RUNTIME_MATRICES):
+    if not isinstance(value, list) or len(value) != len(matrices):
         raise ValueError("Flow Field COG runtime limits are invalid")
     result: dict[int, tuple[int, int, int, int]] = {}
-    for matrix, record in zip(RUNTIME_MATRICES, value, strict=True):
+    for matrix, record in zip(matrices, value, strict=True):
         if not isinstance(record, dict) or record.get("matrixId") != str(matrix):
             raise ValueError("Flow Field COG runtime limits are invalid")
         entries = tuple(record.get(name) for name in (
@@ -475,6 +602,7 @@ def _page_set_sha256(pages: Sequence[Mapping[str, Any]]) -> str:
     digest = hashlib.sha256()
     for page in pages:
         record = (
+            page["sampleKey"],
             page["timeIndex"],
             page["matrixId"],
             page["tileRow"],
@@ -510,11 +638,58 @@ def _projected_bounds(
     )
 
 
-def _matrices(value: Sequence[int]) -> tuple[int, ...]:
-    result = tuple(value)
-    if result != RUNTIME_MATRICES:
-        raise ValueError("Flow Field browser runtime matrices must be exactly z4 through z9")
+def runtime_matrices_for_source_ceiling(source_ceiling: int) -> tuple[int, ...]:
+    """Return the bounded, contiguous WebMercator matrices published to browsers."""
+    if (
+        isinstance(source_ceiling, bool)
+        or not isinstance(source_ceiling, int)
+        or not RUNTIME_MINIMUM_MATRIX <= source_ceiling <= 24
+    ):
+        raise ValueError(
+            "Flow Field runtime source ceiling must be a WebMercator matrix from z4 to z24"
+        )
+    published_maximum = min(source_ceiling, RUNTIME_MAXIMUM_MATRIX_CAP)
+    return tuple(range(RUNTIME_MINIMUM_MATRIX, published_maximum + 1))
+
+
+def _sample_key(time_index: int) -> str:
+    return f"t{time_index:02d}"
+
+
+def _sample_adjacency(time_indices: tuple[int, ...]) -> list[dict[str, str]]:
+    result: list[dict[str, str]] = []
+    for lower, upper in zip(time_indices, time_indices[1:]):
+        record = {
+            "lowerSampleKey": _sample_key(lower),
+            "upperSampleKey": _sample_key(upper),
+        }
+        if upper == lower + 1:
+            record.update({
+                "kind": "interpolable",
+                "interpolation": "component-wise-linear",
+            })
+        else:
+            record.update({
+                "kind": "gap",
+                "interpolation": "none",
+                "reason": "omitted-source-samples",
+            })
+        result.append(record)
     return result
+
+
+def _source_ceiling(matrix: int, relation: object) -> dict[str, str]:
+    runtime_matrices_for_source_ceiling(matrix)
+    if (
+        not isinstance(relation, str)
+        or relation not in {"statistically-selected", "explicitly-requested"}
+    ):
+        raise ValueError("Flow Field runtime source ceiling relation is invalid")
+    return {
+        "tileMatrixSetId": "WebMercatorQuad",
+        "matrixId": str(matrix),
+        "selectionRelation": relation,
+    }
 
 
 def _reader_time_indices(
@@ -567,6 +742,20 @@ def _quality(value: object) -> dict[str, Any]:
         raise ValueError(
             "Flow Field runtime quality requires particleSimulation and approvalReason"
         )
+    return snapshot
+
+
+def _authority(value: object) -> dict[str, str]:
+    if not isinstance(value, Mapping) or set(value) != {
+        "unit", "basis", "time", "phase", "topology"
+    }:
+        raise ValueError("Flow Field runtime authority is invalid")
+    snapshot = dict(value)
+    if any(
+        snapshot.get(name) not in {"authoritative", "unconfirmed"}
+        for name in ("unit", "basis", "time", "phase")
+    ) or snapshot.get("topology") not in {"authoritative", "inferred"}:
+        raise ValueError("Flow Field runtime authority is invalid")
     return snapshot
 
 

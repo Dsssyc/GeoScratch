@@ -4,8 +4,9 @@
 
 Accepted and implemented for the example-owned `Flow Field` resource tool. This partially
 supersedes ADR-092's single statistical-resolution-authority clause and extends ADR-093's
-snapshot and temporal collection entrypoints. It does not change semantic overview pixels,
-the frozen `Flow Layer` example, or the public Geo/Scratch packages.
+snapshot and temporal collection entrypoints. ADR-095 later supersedes only the runtime
+publication-ceiling clause. It does not change semantic overview pixels, the frozen
+`Flow Layer` example, or the public Geo/Scratch packages.
 
 ## Date
 
@@ -114,3 +115,4 @@ plan was approved with `50,831,773,696` available bytes.
 
 - [ADR-092: Statistical-Ceiling Flow COG with Semantic Overviews](./ADR-092-statistical-ceiling-flow-cog-overviews.md)
 - [ADR-093: Temporal Flow COG Collection and Window Adapter](./ADR-093-temporal-flow-cog-collection.md)
+- [ADR-095: Bounded Flow Runtime Dataset Manifest](./ADR-095-bounded-flow-runtime-manifest.md)

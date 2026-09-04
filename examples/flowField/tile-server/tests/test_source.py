@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 
@@ -18,6 +19,9 @@ from geoscratch_flow_field_tiles.source import (
     load_source_snapshots,
     read_source_descriptor,
     source_descriptor_hash,
+    source_descriptor_identity_manifest,
+    source_descriptor_identity_manifest_hash,
+    source_snapshot_identity_manifest_hash,
     source_snapshot_hash,
 )
 
@@ -105,6 +109,7 @@ def test_source_loads_little_endian_pairs_and_typed_build_strategies(
 
 def test_schema_2_descriptor_and_existing_source_identities_remain_unchanged():
     descriptor = read_source_descriptor()
+    identity = source_descriptor_identity_manifest(descriptor)
 
     assert descriptor.schema_version == 2
     assert descriptor.time_unit is None
@@ -112,8 +117,14 @@ def test_schema_2_descriptor_and_existing_source_identities_remain_unchanged():
     assert source_descriptor_hash(descriptor) == (
         "377405f75a361a5ac165530884db7e6885938510f41d857f72e555dc1eb095c0"
     )
+    assert source_descriptor_identity_manifest_hash(identity) == (
+        source_descriptor_hash(descriptor)
+    )
     assert load_source_snapshot(time_index=0).source_hash == (
         "284eec65ca4d6e0d0cef7ddff06527bf5a89657e3c5427b893a76af63285550b"
+    )
+    assert source_snapshot_identity_manifest_hash(identity, 0) == (
+        source_snapshot_hash(descriptor, descriptor.fields[0])
     )
 
 
@@ -154,6 +165,18 @@ def test_schema_3_accepts_strictly_increasing_finite_model_times(
     )
     assert [field.time_index for field in descriptor.fields] == [0, 1]
     assert [field.model_time for field in descriptor.fields] == [0.25, 1.75]
+    identity = source_descriptor_identity_manifest(descriptor)
+    assert source_descriptor_identity_manifest_hash(identity) == (
+        source_descriptor_hash(descriptor)
+    )
+    assert source_snapshot_identity_manifest_hash(identity, 1) == (
+        source_snapshot_hash(descriptor, descriptor.fields[1])
+    )
+
+    changed = copy.deepcopy(identity)
+    changed["fieldCount"] += 1
+    with pytest.raises(ValueError, match="descriptor identity"):
+        source_descriptor_identity_manifest_hash(changed)
 
 
 @pytest.mark.parametrize(

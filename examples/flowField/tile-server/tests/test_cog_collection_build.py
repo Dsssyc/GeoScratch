@@ -24,10 +24,14 @@ from geoscratch_flow_field_tiles.collection import (
 from geoscratch_flow_field_tiles.resolution import (
     FixedWebMercatorResolution,
     StationSpacingResolution,
+    web_mercator_matrix_pixel_size,
 )
 from geoscratch_flow_field_tiles.job_control import (
     OutputLock,
     OutputLockConflictError,
+)
+from geoscratch_flow_field_tiles.source import (
+    source_descriptor_identity_manifest_hash,
 )
 
 
@@ -110,6 +114,7 @@ def test_collection_publishes_immutable_snapshots_runtime_pages_and_identity(
     assert verified["contentVersion"] == built_collection.content_version
     assert verified["timeIndices"] == (0, 1)
     assert manifest["coverage"] == "full"
+    assert manifest["source"]["fieldCount"] == 2
     assert manifest["selection"]["timeIndices"] == [0, 1]
     assert [record["directory"] for record in manifest["snapshots"]] == [
         "snapshots/t00",
@@ -117,7 +122,11 @@ def test_collection_publishes_immutable_snapshots_runtime_pages_and_identity(
     ]
     assert runtime["contentVersion"] == manifest["contentVersion"]
     assert len(runtime["pages"]) == 18
-    assert runtime["construction"]["sampleRegistration"] == "pixel-center"
+    assert runtime["schemaVersion"] == 2
+    assert runtime["representation"]["sampleRegistration"] == "pixel-center"
+    assert runtime["representation"]["missingPageSemantics"] == "unavailable"
+    assert runtime["quality"] == manifest["quality"]
+    assert runtime["authority"] == manifest["source"]["authority"]
     assert manifest["storage"]["totalArtifactBytes"] == sum(
         path.stat().st_size
         for path in built_collection.output_directory.rglob("*")
@@ -508,7 +517,10 @@ def test_collection_verifier_rejects_runtime_manifest_drift(
     runtime["pages"][0]["sha256"] = "0" * 64
     runtime_path.write_text(json.dumps(runtime), encoding="utf-8")
 
-    with pytest.raises(ValueError, match="runtime identity|storage identity"):
+    with pytest.raises(
+        ValueError,
+        match="runtime identity|storage identity|page-set identity",
+    ):
         verify_velocity_cog_collection(output, deep=False)
 
 
@@ -531,7 +543,19 @@ def test_fixed_collection_identity_only_verification_cross_checks_resolution(
         fixed_collection.output_directory,
         deep=False,
     )
+    runtime = json.loads(
+        fixed_collection.runtime_manifest_path.read_text(encoding="utf-8")
+    )
     assert verified["contentVersion"] == fixed_collection.content_version
+    assert runtime["sourceCeiling"] == {
+        "tileMatrixSetId": "WebMercatorQuad",
+        "matrixId": "10",
+        "selectionRelation": "explicitly-requested",
+    }
+    assert runtime["tileMatrixSet"]["tileMatrixIds"] == [
+        str(matrix) for matrix in range(4, 11)
+    ]
+    assert any(page["matrixId"] == "10" for page in runtime["pages"])
 
     output = tmp_path / "cog-collection"
     shutil.copytree(fixed_collection.output_directory, output)
@@ -550,6 +574,33 @@ def test_fixed_collection_identity_only_verification_cross_checks_resolution(
 
     with pytest.raises(ValueError, match="resolution identity"):
         verify_velocity_cog_collection(output, deep=False)
+
+
+def test_collection_identity_rejects_a_source_ceiling_below_z9(
+    fixed_collection,
+):
+    manifest = json.loads(fixed_collection.manifest_path.read_text(encoding="utf-8"))
+    runtime_bytes = fixed_collection.runtime_manifest_path.read_bytes()
+    plan = manifest["construction"]["facts"]["sharedSnapshotContract"]["plan"]
+    plan["resolution"]["requested"]["matrixId"] = "8"
+    plan["resolution"]["resolved"] = {
+        "matrixSet": "WebMercatorQuad",
+        "matrixId": "8",
+        "matrixPixelSizeMeters": web_mercator_matrix_pixel_size(8),
+    }
+    plan["matrixDecision"] = {
+        "selectedMatrixId": "8",
+        "outputMatrixId": "8",
+        "relation": "explicitly-requested",
+    }
+    plan["grid"]["matrixId"] = "8"
+    facts = manifest["construction"]["facts"]
+    manifest["construction"]["sha256"] = hashlib.sha256(
+        json.dumps(facts, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+    with pytest.raises(ValueError, match="at least z9"):
+        _validate_collection_manifest_identity(manifest, runtime_bytes)
 
 
 def test_collection_validator_rejects_self_consistent_adapter_drift(
@@ -587,6 +638,97 @@ def test_collection_validator_cross_binds_source_authority_to_children(
     ).hexdigest()
 
     with pytest.raises(ValueError, match="semantic contract"):
+        _validate_collection_manifest_identity(manifest, runtime_bytes)
+
+
+def test_collection_validator_cross_binds_source_field_count(
+    built_collection,
+):
+    manifest = json.loads(built_collection.manifest_path.read_text(encoding="utf-8"))
+    runtime_bytes = built_collection.runtime_manifest_path.read_bytes()
+    facts = manifest["construction"]["facts"]
+    facts["source"]["fieldCount"] = 3
+    facts["selection"]["sourceFieldCount"] = 3
+    facts["selection"]["coverage"] = "subset"
+    facts["request"]["source"]["fieldCount"] = 3
+    facts["request"]["selection"]["coverage"] = "subset"
+    facts["requestSha256"] = hashlib.sha256(
+        json.dumps(
+            facts["request"],
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    manifest["construction"]["sha256"] = hashlib.sha256(
+        json.dumps(
+            facts,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+
+    with pytest.raises(ValueError, match="semantic contract"):
+        _validate_collection_manifest_identity(manifest, runtime_bytes)
+
+
+def test_collection_validator_binds_selected_filename_to_snapshot_identity(
+    built_collection,
+):
+    manifest = json.loads(built_collection.manifest_path.read_text(encoding="utf-8"))
+    runtime_bytes = built_collection.runtime_manifest_path.read_bytes()
+    facts = manifest["construction"]["facts"]
+    descriptor_identity = facts["source"]["descriptorIdentity"]
+    descriptor_identity["fields"][0]["file"] = "renamed-uv-0.bin"
+    changed_source_hash = source_descriptor_identity_manifest_hash(
+        descriptor_identity
+    )
+    facts["source"]["sourceHash"] = changed_source_hash
+    facts["request"]["source"]["sourceHash"] = changed_source_hash
+    facts["runtimePageIndex"]["descriptorSha256"] = changed_source_hash
+    facts["requestSha256"] = hashlib.sha256(
+        json.dumps(
+            facts["request"],
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    manifest["construction"]["sha256"] = hashlib.sha256(
+        json.dumps(facts, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+    with pytest.raises(ValueError, match="semantic contract"):
+        _validate_collection_manifest_identity(manifest, runtime_bytes)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        lambda page_index: page_index.update({"invented": True}),
+        lambda page_index: page_index.update({"limits": []}),
+        lambda page_index: page_index.update({"timeMaximumSpeeds": []}),
+        lambda page_index: page_index.update({"maximumSpeed": 999.0}),
+    ),
+)
+def test_collection_validator_cross_binds_complete_runtime_page_index(
+    built_collection,
+    mutation,
+):
+    manifest = json.loads(built_collection.manifest_path.read_text(encoding="utf-8"))
+    runtime_bytes = built_collection.runtime_manifest_path.read_bytes()
+    page_index = manifest["construction"]["facts"]["runtimePageIndex"]
+    mutation(page_index)
+    manifest["construction"]["sha256"] = hashlib.sha256(
+        json.dumps(
+            manifest["construction"]["facts"],
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+
+    with pytest.raises(
+        ValueError,
+        match="semantic contract|runtime contract|runtime page index",
+    ):
         _validate_collection_manifest_identity(manifest, runtime_bytes)
 
 
@@ -737,12 +879,18 @@ def test_schema_three_subset_preserves_authority_and_original_model_time(
     assert manifest["source"]["timeUnit"] == "hour"
     assert manifest["source"]["authority"]["time"] == "authoritative"
     assert runtime["times"] == [{
+        "sampleKey": "t01",
         "timeIndex": 1,
         "modelTime": 1.75,
         "unit": "hour",
         "phase": "unspecified",
         "sourceHash": descriptor["fields"][1]["sha256"],
     }]
+    assert runtime["temporal"] == {
+        "coverage": "subset",
+        "sourceSampleCount": 2,
+        "sampleAdjacency": [],
+    }
     assert verify_velocity_cog_collection(output, deep=True)["timeIndices"] == (1,)
 
 

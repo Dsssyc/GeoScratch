@@ -191,10 +191,18 @@ The explicit-z10 t00 proof built with tool package 0.6.0 in 4.94 seconds:
   and
 - strict deep verification with no COG warnings.
 
-The same t00 COG was published as a one-time z10 collection with all 59 z4-z9 runtime pages.
+The same t00 COG was previously published under the v1 adapter as a one-time z10 collection
+with all 59 z4-z9 runtime pages.
 Its total artifact size is `12,012,275` bytes, page-set SHA-256 is
 `7ab9c53e4321cc12b9bd2046f363c625a540cc5636cf7ce869121faa844a822e`, and the collection deep
 verifier passed.
+
+The schema-v2 / adapter-v2 proof publishes the complete bounded z4-z10 product: 169 pages,
+including 110 z10 pages. Its 46,215-byte runtime manifest records source ceiling z10,
+`sampleKey: t00`, subset coverage against 27 source samples, no invented adjacency, complete
+unconfirmed authority, pixel-centre representation, and `particleSimulation: not-approved`.
+Deep collection verification passed with page-set SHA-256
+`92c5e3a632288c5181ab5c06f18b88b17fdef71bcd62861a52a629cdf67e3d26`.
 
 The COG quality record remains `particleSimulation: not-approved` with reason
 `inferred-topology-and-source-semantics-unapproved`. The statistical raster ceiling and
@@ -226,8 +234,9 @@ COG internal tiling and compression do not avoid interpolating every selected ba
 Preflight bounds total blocks and raw pyramid work; construction separately monitors actual
 compressed staging and a free-space reserve. The verified local build completed in roughly
 28 minutes without exceeding 0.8 GiB RSS during generation. See
-[ADR-092](../../../docs/decisions/ADR-092-statistical-ceiling-flow-cog-overviews.md) and
-[ADR-094](../../../docs/decisions/ADR-094-explicit-flow-cog-resolution.md).
+[ADR-092](../../../docs/decisions/ADR-092-statistical-ceiling-flow-cog-overviews.md),
+[ADR-094](../../../docs/decisions/ADR-094-explicit-flow-cog-resolution.md), and
+[ADR-095](../../../docs/decisions/ADR-095-bounded-flow-runtime-manifest.md).
 
 ## Temporal COG collection
 
@@ -242,6 +251,20 @@ cog-collection/
   snapshots/tNN/{.flow-field-cog-artifact.json,manifest.json,flow-tNN.cog.tif}
 ```
 
+The backend generates `runtime-manifest.json` during collection publication and the service
+returns those exact bytes from `GET /manifest.json`. Schema 2 makes `sampleKey` the runtime
+time identity, declares whether consecutive published samples are interpolable or separated by
+an omitted-source gap, and promotes source authority, quality, source ceiling, and the
+pixel-centre RG32F representation to frontend-visible facts. `timeIndex` remains source
+provenance and is not an array offset.
+The backend collection separately embeds and re-hashes the complete descriptor time inventory,
+so `full` versus `subset` is not inferred from repeated count fields alone.
+
+Browser publication is bounded independently from COG construction resolution. A z9 COG
+publishes z4-z9; a z10 or finer COG publishes z4-z10. The real source ceiling remains visible
+in `sourceCeiling`, while `tileMatrixSet.maxTileMatrix` is the requestable ceiling. This avoids
+turning a default z15 build into a multi-million-page runtime index.
+
 Time selection is explicit and canonical. Choose exactly one of all descriptor fields, a
 half-open range, or a comma-separated list:
 
@@ -249,21 +272,23 @@ half-open range, or a comma-separated list:
 # Read-only full-product plan. The estimate must come from a measured or justified snapshot.
 examples/flowField/tile-server/.venv/bin/flow-field-cog-collection-build \
   --all-times \
+  --matrix 10 \
   --plan-only \
-  --estimated-snapshot-bytes 1584930583
+  --estimated-snapshot-bytes 11953369
 
 # Build every time only after the plan is capacity-approved.
 examples/flowField/tile-server/.venv/bin/flow-field-cog-collection-build \
   --all-times \
-  --estimated-snapshot-bytes 1584930583 \
+  --matrix 10 \
+  --estimated-snapshot-bytes 11953369 \
   --batch-size 2 \
   --events-stderr
 
 # Other legal selections create explicit subset collections.
 examples/flowField/tile-server/.venv/bin/flow-field-cog-collection-build \
-  --time-range 0:4 --estimated-snapshot-bytes 1584930583
+  --time-range 0:4 --matrix 10 --estimated-snapshot-bytes 11953369
 examples/flowField/tile-server/.venv/bin/flow-field-cog-collection-build \
-  --time-indices 0,4,9 --estimated-snapshot-bytes 1584930583
+  --time-indices 0,4,9 --matrix 10 --estimated-snapshot-bytes 11953369
 ```
 
 The compressed estimate is planning input, not permission to exceed storage. Before publish,
@@ -304,13 +329,15 @@ The default is fail-closed and preserve; rebuilding it requires explicit authori
 ```bash
 examples/flowField/tile-server/.venv/bin/flow-field-cog-collection-build \
   --all-times \
-  --estimated-snapshot-bytes 1584930583 \
+  --matrix 10 \
+  --estimated-snapshot-bytes 11953369 \
   --resume
 
 # Only use after inspecting the matching request-owned incomplete work.
 examples/flowField/tile-server/.venv/bin/flow-field-cog-collection-build \
   --all-times \
-  --estimated-snapshot-bytes 1584930583 \
+  --matrix 10 \
+  --estimated-snapshot-bytes 11953369 \
   --resume --discard-incomplete-work
 ```
 
@@ -485,7 +512,7 @@ Both backends expose:
 
 - `GET /health`
 - `GET /manifest.json`
-- `GET /tiles/WebMercatorQuad/tNN/{matrix}/{row}/{col}.rg32f`
+- `GET /tiles/WebMercatorQuad/{sampleKey}/{matrix}/{row}/{col}.rg32f`
 - `GET /stats`
 
 Manifest and page responses use SHA-256 ETags with `Cache-Control: public, no-cache`, because
@@ -494,14 +521,16 @@ the stable URLs can be replaced and must revalidate before reuse. An address out
 `FLOW_FIELD_TILE_ARTIFACT_UNAVAILABLE`. `/stats` retains bounded aggregate counters only and
 reports `cogWindowReads` for the collection backend.
 
-The collection service returns the exact page bytes and SHA declared at publication. z7-z15
-physical values use exact integer IFD windows. z6-z4 are recursively derived from the globally
-aligned z7 values with the same conservative vector reducer; the terminal z6 COG IFD is validated
-as container content but never treated as WebMercator address authority.
+The collection service returns the exact page bytes and SHA declared at publication. Published
+z7 through `min(sourceCeiling, z10)` physical values use exact integer IFD windows. z6-z4 are
+recursively derived from globally aligned z7 values with the same conservative vector reducer;
+the terminal COG IFD is validated as container content but never treated as WebMercator address
+authority.
 It never invokes generic image resampling, exposes the `.tif`, or returns partial Range data.
-`runtime-manifest.json` declares `sampleRegistration: pixel-center`; the current browser still
-uses the historical integer-lattice sampler, so frontend half-texel migration remains required
-before switching the active Flow Field example to this backend.
+`runtime-manifest.json` schema 2 declares
+`representation.sampleRegistration: pixel-center`; the current browser still uses the
+historical integer-lattice sampler, so frontend half-texel migration remains required before
+switching the active Flow Field example to this backend.
 
 The server snapshots collection identity and COG fingerprints at startup; it does not hot reload.
 Replacing a collection while its old process is running makes that process fail requests with 503

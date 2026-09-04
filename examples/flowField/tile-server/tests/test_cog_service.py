@@ -16,7 +16,10 @@ from geoscratch_flow_field_tiles.collection import (
     build_velocity_cog_collection,
     verify_velocity_cog_collection,
 )
-from geoscratch_flow_field_tiles.resolution import StationSpacingResolution
+from geoscratch_flow_field_tiles.resolution import (
+    FixedWebMercatorResolution,
+    StationSpacingResolution,
+)
 from geoscratch_flow_field_tiles.service import create_app
 
 
@@ -47,6 +50,23 @@ def served_collection(synthetic_source, tmp_path_factory):
         time_indices=(0, 1),
         descriptor_path=synthetic_source.descriptor_path,
         resolution=_resolution(),
+        snapshot_budget=_snapshot_budget(),
+        collection_budget=CogCollectionBudget(
+            max_collection_bytes=1024**3,
+            estimated_snapshot_bytes=4 * 1024 * 1024,
+        ),
+    )
+
+
+@pytest.fixture(scope="module")
+def served_z10_collection(synthetic_source, tmp_path_factory):
+    output = tmp_path_factory.mktemp("flow-z10-cog-service") / "cog-collection"
+    return build_velocity_cog_collection(
+        synthetic_source.directory,
+        output,
+        time_indices=(0,),
+        descriptor_path=synthetic_source.descriptor_path,
+        resolution=FixedWebMercatorResolution(10),
         snapshot_budget=_snapshot_budget(),
         collection_budget=CogCollectionBudget(
             max_collection_bytes=1024**3,
@@ -141,6 +161,34 @@ def test_collection_tile_is_read_from_cog_and_matches_runtime_page_identity(
     assert conditional.status_code == 304
     assert conditional.content == b""
     assert direct_cog.status_code == 404
+
+
+def test_z10_collection_publishes_and_serves_its_bounded_ceiling(
+    served_z10_collection,
+):
+    collection, runtime = _manifests(served_z10_collection)
+    page = next(page for page in runtime["pages"] if page["matrixId"] == "10")
+    snapshot = collection["snapshots"][0]
+    reader = CogVelocityTileReader(
+        served_z10_collection.output_directory / snapshot["manifestPath"],
+        served_z10_collection.output_directory / snapshot["cogPath"],
+    )
+    expected = reader.read_tile(
+        page["matrixId"],
+        page["tileRow"],
+        page["tileCol"],
+    )
+
+    with TestClient(create_app(served_z10_collection.output_directory)) as client:
+        manifest_response = client.get("/manifest.json")
+        tile_response = client.get(_route(page))
+
+    assert manifest_response.status_code == 200
+    assert manifest_response.json()["tileMatrixSet"]["maxTileMatrix"] == "10"
+    assert page["sampleKey"] == "t00"
+    assert tile_response.status_code == 200
+    assert tile_response.content == expected.content
+    assert tile_response.headers["etag"] == f'"{page["sha256"]}"'
 
 
 def test_collection_service_keeps_structured_404_and_bounded_cog_stats(
