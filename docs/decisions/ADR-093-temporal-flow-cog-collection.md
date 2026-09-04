@@ -5,9 +5,9 @@
 Accepted for the example-owned `Flow Field` backend. This extends ADR-092; ADR-094 later adds
 an explicit fixed-matrix resolution strategy without changing this collection layout. ADR-095
 later supersedes this decision's schema-one runtime manifest and fixed z4-z9 publication
-clauses. None changes the frozen `Flow Layer` example or the public Geo/Scratch packages. The
-browser continues to use the existing pre-cut RG32F artifact until its pixel-centre sampling
-contract is migrated explicitly.
+clauses, and ADR-097 later replaces the browser's pre-cut three-slot path with the schema-two
+selection-driven runtime window. None changes the frozen `Flow Layer` example or the public
+Geo/Scratch packages.
 
 ## Date
 

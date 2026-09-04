@@ -171,6 +171,11 @@ drains Worker and native-submission activity to zero, and disposes renderer, win
 runtime, and map without cleanup failure. The proof also asserts the critical stop and release
 subsequences rather than inferring safe ownership order from a zero-failure count.
 
+The superseded schema-one frontend loader, numeric-time runtime source, fixed
+current/next/prefetch owner, and its publication bookkeeping are removed rather than retained as
+a second inactive API. The backend may still validate or explicitly serve historical pre-cut
+artifacts, but the active browser has exactly one dataset and temporal ownership path.
+
 ## Consequences
 
 - Runtime allocation follows timeline selections instead of render-frame counts.
