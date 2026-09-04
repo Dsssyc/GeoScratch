@@ -499,13 +499,12 @@ verify_velocity_cog_collection(result.output_directory)
 ## RG32F service
 
 ```bash
-# Historical pre-cut page artifact.
-examples/flowField/tile-server/.venv/bin/flow-field-tile-serve \
-  --output examples/flowField/tile-server/cache --port 8788
+# Current temporal COG collection. This is also the command's default output.
+examples/flowField/tile-server/.venv/bin/flow-field-tile-serve --port 8788
 
-# Temporal COG collection through the same network paths.
+# Historical pre-cut page artifacts remain readable only when explicitly selected.
 examples/flowField/tile-server/.venv/bin/flow-field-tile-serve \
-  --output examples/flowField/tile-server/cog-collection --port 8788
+  --output /path/to/historical/cache --port 8788
 ```
 
 Both backends expose:
@@ -528,9 +527,9 @@ the terminal COG IFD is validated as container content but never treated as WebM
 authority.
 It never invokes generic image resampling, exposes the `.tif`, or returns partial Range data.
 `runtime-manifest.json` schema 2 declares
-`representation.sampleRegistration: pixel-center`; the current browser still uses the
-historical integer-lattice sampler, so frontend half-texel migration remains required before
-switching the active Flow Field example to this backend.
+`representation.sampleRegistration: pixel-center`; the active Flow Field browser loads that
+manifest, requests pages by `sampleKey`, and applies the example-local wide-fixed half-texel
+registration adapter before sampling both temporal endpoints.
 
 The server snapshots collection identity and COG fingerprints at startup; it does not hot reload.
 Replacing a collection while its old process is running makes that process fail requests with 503

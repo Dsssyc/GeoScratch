@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 import os
 import shutil
@@ -13,6 +14,7 @@ from geoscratch_flow_field_tiles.cog import CogBuildBudget
 from geoscratch_flow_field_tiles.cog_tiles import CogVelocityTileReader
 from geoscratch_flow_field_tiles.collection import (
     CogCollectionBudget,
+    DEFAULT_COG_COLLECTION_DIRECTORY,
     build_velocity_cog_collection,
     verify_velocity_cog_collection,
 )
@@ -21,6 +23,11 @@ from geoscratch_flow_field_tiles.resolution import (
     StationSpacingResolution,
 )
 from geoscratch_flow_field_tiles.service import create_app
+
+
+def test_service_defaults_to_the_current_cog_collection() -> None:
+    parameter = inspect.signature(create_app).parameters["output_directory"]
+    assert parameter.default == DEFAULT_COG_COLLECTION_DIRECTORY
 
 
 def _resolution() -> StationSpacingResolution:

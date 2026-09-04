@@ -14,7 +14,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 
 from .build import (
-    DEFAULT_OUTPUT_DIRECTORY,
     PAGE_BYTE_LENGTH,
     validate_artifact_manifest,
 )
@@ -22,6 +21,7 @@ from .cog import COG_ARTIFACT_MARKER
 from .cog_tiles import CogVelocityTile, CogVelocityTileReader
 from .collection import (
     COG_COLLECTION_MARKER,
+    DEFAULT_COG_COLLECTION_DIRECTORY,
     _shared_snapshot_contract,
     _validate_collection_manifest_identity,
 )
@@ -580,7 +580,7 @@ def _create_store(
 
 
 def create_app(
-    output_directory: str | Path = DEFAULT_OUTPUT_DIRECTORY,
+    output_directory: str | Path = DEFAULT_COG_COLLECTION_DIRECTORY,
     *,
     max_cog_window_reads: int = 4,
 ) -> FastAPI:
@@ -700,7 +700,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Serve immutable GeoScratch Flow Field RG32F pages"
     )
-    parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT_DIRECTORY)
+    parser.add_argument("--output", type=Path, default=DEFAULT_COG_COLLECTION_DIRECTORY)
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8788)
     parser.add_argument("--max-cog-window-reads", type=int, default=4)
