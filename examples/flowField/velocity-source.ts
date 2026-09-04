@@ -66,10 +66,31 @@ export type FlowVelocityTimeRuntime = VirtualRasterRuntime<FlowVelocityTimeModel
     workerFacts(): ReturnType<FlowVelocityWorkerRequestExecutor['inspect']>
 }>
 
+export type FlowVelocitySampleRuntime = VirtualRasterRuntime<FlowVelocityTimeModel> & Readonly<{
+    source: FlowVelocitySampleSource
+    workerFacts(): ReturnType<FlowVelocityWorkerRequestExecutor['inspect']>
+}>
+
 export type FlowVelocityTimeRuntimeOptions = Readonly<{
     runtime: GPURuntime
     manifest: FlowDatasetManifest
     timeIndex: number
+    cachePolicy: FlowFieldCachePolicy
+    workerSystem: WorkerSystem
+    workerModules: WorkerModuleResolver
+    workerCount?: number
+    maxNetworkRequests?: number
+    maxDecodeTasks?: number
+    maxRequests?: number
+    maxPhysicalPages?: number
+    maxStagingBytes?: number
+    maxHistory?: number
+}>
+
+export type FlowVelocitySampleRuntimeOptions = Readonly<{
+    runtime: GPURuntime
+    dataset: FlowFieldDataset
+    sampleKey: string
     cachePolicy: FlowFieldCachePolicy
     workerSystem: WorkerSystem
     workerModules: WorkerModuleResolver
@@ -260,6 +281,57 @@ export async function createVelocityTimeRuntime({
         sourceId: `flow-velocity.${manifest.sourceHash}`,
         sampleKey: source.sampleKey,
         contentVersion: manifest.contentVersion,
+        cachePolicy,
+        workerSystem,
+        workerModules,
+        ...(workerCount === undefined ? {} : { workerCount }),
+        ...(maxNetworkRequests === undefined ? {} : { maxNetworkRequests }),
+        ...(maxDecodeTasks === undefined ? {} : { maxDecodeTasks }),
+        maxRequests,
+        resolvePage: source.resolvePage,
+    })
+    const virtualRaster = await createVirtualRasterRuntime({
+        runtime,
+        model: source.model,
+        executor: {
+            ownership: 'owned',
+            executor: requestExecutor,
+        },
+        maxRequests,
+        maxPhysicalPages,
+        maxStagingBytes,
+        maxHistory,
+        viewDemandProducerId: `flow-velocity-view-demand.${source.model.id}`,
+    })
+    return Object.freeze({
+        ...virtualRaster,
+        source,
+        workerFacts: requestExecutor.inspect,
+    })
+}
+
+/** Composes one sample-key velocity runtime with an owned executor and borrowed WorkerSystem. */
+export async function createVelocitySampleRuntime({
+    runtime,
+    dataset,
+    sampleKey,
+    cachePolicy,
+    workerSystem,
+    workerModules,
+    workerCount,
+    maxNetworkRequests,
+    maxDecodeTasks,
+    maxRequests = DEFAULT_MAX_REQUESTS,
+    maxPhysicalPages = DEFAULT_MAX_PHYSICAL_PAGES,
+    maxStagingBytes = maxPhysicalPages * PAGE_BYTE_LENGTH,
+    maxHistory = DEFAULT_MAX_HISTORY,
+}: FlowVelocitySampleRuntimeOptions): Promise<FlowVelocitySampleRuntime> {
+
+    const source = createVelocitySampleSource(dataset, sampleKey)
+    const requestExecutor = await createVelocityWorkerRequestExecutor({
+        sourceId: `flow-velocity.${dataset.sourceHash}`,
+        sampleKey: source.sampleKey,
+        contentVersion: dataset.contentVersion,
         cachePolicy,
         workerSystem,
         workerModules,

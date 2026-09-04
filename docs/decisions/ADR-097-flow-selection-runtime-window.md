@@ -72,6 +72,22 @@ Two factories for one candidate run concurrently. The first real failure aborts 
 factory may never return a runtime object previously seen by the window, even after disposal. A
 late duplicate of an active runtime is rejected without disposing the active owner's lease.
 
+### Velocity ready-runtime adapter
+
+The `Flow Field` velocity adapter fulfils `createReadyRuntime` without adding readiness policy to
+Geo. It creates one sample-key Virtual Raster runtime with an owned request executor and borrowed
+application `WorkerSystem`, waits for its minimum-level safety demand, encodes the resulting GPU
+publication into a Surface-free submission, and returns only after native outcome, queue
+completion, and Virtual Raster acknowledgement have all settled successfully.
+
+An abort during safety-demand initialization starts idempotent runtime disposal so request work
+can converge. Once a publication is submitted, abort does not race disposal against GPU
+acknowledgement: every native/done/ack observer settles first, then the runtime is disposed.
+Synchronous encode or submit failure leaves the publication owned by the runtime and disposal
+uses the existing Virtual Raster abandon path. Primary, observer, acknowledgement, and cleanup
+failures are retained in one aggregate, and a successful result is returned only for native status
+`observed-succeeded`.
+
 ### Failure and disposal
 
 An ordinary factory failure settles the latest ticket as failed after every partial success is
