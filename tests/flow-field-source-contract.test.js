@@ -4,9 +4,11 @@ import fs from 'node:fs'
 import path from 'node:path'
 import {
     WebMercatorQuad,
+    tileMatrixCoverage,
     virtualRasterCacheAddress,
 } from 'geoscratch/geo'
 import {
+    createVelocitySampleSource,
     createVelocityTimeSource,
 } from '../examples/flowField/velocity-source.ts'
 import {
@@ -95,7 +97,9 @@ describe('Flow Field velocity source contract', () => {
         const page = finestPage(source)
         const tile = page.tile
 
+        expect(source.sampleKey).to.equal('t00')
         expect(source.timeIndex).to.equal(0)
+        expect(source.sampleRegistration).to.equal('global-texel-lattice')
         expect(source.model.field).to.deep.include({
             fieldKind: 'vector',
             channels: 2,
@@ -120,8 +124,48 @@ describe('Flow Field velocity source contract', () => {
             tileCol: tile.tileCol,
             byteLength: 524288,
         })
+        expect(source.resolvePage(page).url).to.equal(source.tileUrl(page))
         expect(Object.isFrozen(source)).to.equal(true)
         expect(() => createVelocityTimeSource(manifest, 27)).to.throw(TypeError)
+    })
+
+    it('creates a pixel-center sampleKey source from published runtime coverage and page URLs', () => {
+
+        const dataset = normalizedRuntimeDataset()
+        const source = createVelocitySampleSource(dataset, 't04')
+        const limit = dataset.tileMatrixSet.coverage.limit('10')
+        const page = source.model.addressSpace.pageFromTile({
+            matrixId: '10',
+            tileRow: limit.minTileRow,
+            tileCol: limit.minTileCol,
+        })
+
+        expect(source.sampleKey).to.equal('t04')
+        expect(source.timeIndex).to.equal(4)
+        expect(source.sample.modelTime).to.equal(12.5)
+        expect(source.sampleRegistration).to.equal('pixel-center')
+        expect(source.representation).to.equal(dataset.representation)
+        expect(source.model.coverage).to.equal(dataset.tileMatrixSet.coverage)
+        expect(source.model.addressSpace.levelForMatrix('10')).to.equal(0)
+        expect(source.model.addressSpace.levelForMatrix('4')).to.equal(6)
+        expect(source.model.addressSpace.id).to.include(dataset.sourceHash.slice(0, 16))
+        expect(source.model.addressSpace.id).to.include(dataset.contentVersion)
+        expect(source.model.field.unit).to.equal(dataset.unit)
+        expect(source.model.plane.auxiliaryAxes).to.deep.include({
+            name: 'vector-basis',
+            value: dataset.basis,
+        })
+        expect(source.resolvePage(page)).to.deep.include({
+            sampleKey: 't04',
+            timeIndex: 4,
+            url: `https://tiles.example.test/runtime/t04/10/${limit.minTileRow}/` +
+                `${limit.minTileCol}.rg32f`,
+        })
+        expect(() => source.model.addressSpace.levelForMatrix('15')).to.throw()
+        expect(() => createVelocitySampleSource(dataset, 't09')).to.throw(RangeError)
+        expect(() => source.resolvePage({ ...page, addressSpaceId: 'another-field' }))
+            .to.throw(TypeError)
+        expect(Object.isFrozen(source)).to.equal(true)
     })
 
     it('keeps Flow Field source assembly on public GeoScratch capabilities', () => {
@@ -314,7 +358,9 @@ describe('Flow Field velocity source contract', () => {
         expect(executor).to.include('system: descriptor.workerSystem')
         expect(executor).to.include('descriptor.workerModules.resolve(')
         expect(executor).to.include("payloadRepresentation: 'raw/float32-rg-interleaved-le'")
-        expect(executor).to.include('plane: `velocity.${timeLabel}`')
+        expect(executor).to.include('plane: `velocity.${descriptor.sampleKey}`')
+        expect(executor).to.include('url: expected.url')
+        expect(executor).to.not.include('descriptor.timeIndex')
         expect(source).to.include('createVirtualRasterRuntime')
         expect(source).to.include("ownership: 'owned'")
         expect(source).to.include('executor: requestExecutor')
@@ -328,7 +374,7 @@ describe('Flow Field velocity source contract', () => {
         try {
             await createVelocityWorkerRequestExecutor({
                 sourceId: 'flow-field-test',
-                timeIndex: 0,
+                sampleKey: 't00',
                 contentVersion: 'flow-field-test-v1',
                 cachePolicy: {
                     mode: 'persistent',
@@ -347,8 +393,11 @@ describe('Flow Field velocity source contract', () => {
                     },
                 },
                 maxRequests: 1,
-                tileUrl: () => 'https://example.test/tile.rg32f',
-                expectedPage: () => ({ byteLength: 524288, sha256: HASH }),
+                resolvePage: () => ({
+                    url: 'https://example.test/tile.rg32f',
+                    byteLength: 524288,
+                    sha256: HASH,
+                }),
             })
         } catch (error) {
             failure = error
@@ -449,6 +498,96 @@ function validManifest() {
             ).flat()
         )).flat(),
     }
+}
+
+function normalizedRuntimeDataset() {
+
+    const bounds = [ 121.001, 31.001, 121.002, 31.002 ]
+    const limits = Array.from({ length: 7 }, (_value, index) => {
+        const matrixId = String(index + 4)
+        const northWest = WebMercatorQuad.tileFromLonLat(
+            [ bounds[0], bounds[3] ],
+            matrixId
+        )
+        const southEast = WebMercatorQuad.tileFromLonLat(
+            [ bounds[2], bounds[1] ],
+            matrixId
+        )
+        return {
+            matrixId,
+            minTileRow: northWest.tileRow,
+            maxTileRow: southEast.tileRow,
+            minTileCol: northWest.tileCol,
+            maxTileCol: southEast.tileCol,
+        }
+    })
+    const coverage = tileMatrixCoverage({ tileMatrixSet: WebMercatorQuad, limits })
+    const sample = Object.freeze({
+        sampleKey: 't04',
+        timeIndex: 4,
+        modelTime: 12.5,
+        unit: 'hour',
+        phase: 'cold-start',
+        sourceHash: HASH,
+    })
+    const representation = Object.freeze({
+        mediaType: 'application/vnd.geoscratch.flow-rg32f',
+        fieldKind: 'vector',
+        channels: 2,
+        componentOrder: Object.freeze([ 'u', 'v' ]),
+        sampleType: 'float32-le',
+        layout: 'rg-interleaved',
+        sampleRegistration: 'pixel-center',
+        spatialInterpolation: 'bilinear',
+        tileWidth: 256,
+        tileHeight: 256,
+        unsupportedVelocity: Object.freeze([ 0, 0 ]),
+        missingPageSemantics: 'unavailable',
+    })
+    return Object.freeze({
+        kind: 'flow-field-dataset',
+        schemaVersion: 2,
+        artifactType: 'flow-field-cog-runtime',
+        datasetId: 'flow-field-test',
+        sourceHash: HASH,
+        contentVersion: 'flow-cog-collection-test-t1-z15-v2',
+        unit: 'meter-per-second',
+        basis: 'east-north',
+        source: Object.freeze({ geographicBounds: Object.freeze(bounds) }),
+        sourceCeiling: Object.freeze({ matrixId: '15' }),
+        tileMatrixSet: Object.freeze({
+            id: 'WebMercatorQuad',
+            coverage,
+        }),
+        representation,
+        sample(sampleKey) {
+
+            if (sampleKey !== sample.sampleKey) {
+                throw new RangeError(`unknown sample ${sampleKey}`)
+            }
+            return sample
+        },
+        page(sampleKey, tile) {
+
+            if (sampleKey !== sample.sampleKey || !coverage.contains(tile)) {
+                throw new RangeError('unknown page')
+            }
+            return Object.freeze({
+                sampleKey,
+                timeIndex: sample.timeIndex,
+                matrixId: tile.matrixId,
+                tileRow: tile.tileRow,
+                tileCol: tile.tileCol,
+                path: `declared/${sampleKey}/${tile.matrixId}/${tile.tileRow}/` +
+                    `${tile.tileCol}.rg32f`,
+                url: `https://tiles.example.test/runtime/${sampleKey}/${tile.matrixId}/` +
+                    `${tile.tileRow}/${tile.tileCol}.rg32f`,
+                byteLength: 524288,
+                sha256: HASH,
+                maximumSpeed: 2.5,
+            })
+        },
+    })
 }
 
 function finestPage(source) {

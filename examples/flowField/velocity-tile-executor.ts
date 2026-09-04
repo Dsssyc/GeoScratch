@@ -25,7 +25,7 @@ import { FLOW_FIELD_VELOCITY_TILE_WORKER } from './velocity-tile-protocol.ts'
 
 type FlowVelocityWorkerTileSourceDescriptor = Readonly<{
     sourceId: string
-    timeIndex: number
+    sampleKey: string
     contentVersion: string
     cachePolicy: FlowFieldCachePolicy
     workerSystem: WorkerSystem
@@ -34,8 +34,8 @@ type FlowVelocityWorkerTileSourceDescriptor = Readonly<{
     maxNetworkRequests?: number
     maxDecodeTasks?: number
     maxRequests: number
-    tileUrl(page: VirtualRasterPageIdentity): string
-    expectedPage(page: VirtualRasterPageIdentity): Readonly<{
+    resolvePage(page: VirtualRasterPageIdentity): Readonly<{
+        url: string
         byteLength: 524288
         sha256: string
     }>
@@ -59,14 +59,19 @@ export async function createVelocityWorkerRequestExecutor(
     if (!positiveInteger(workerCount) || workerCount > descriptor.workerSystem.maxWorkers ||
         !positiveInteger(descriptor.maxRequests) ||
         !positiveInteger(maxNetworkRequests) || !positiveInteger(maxDecodeTasks) ||
+        typeof descriptor.sourceId !== 'string' || descriptor.sourceId.length === 0 ||
+        !validSampleKey(descriptor.sampleKey) ||
+        typeof descriptor.contentVersion !== 'string' || descriptor.contentVersion.length === 0 ||
+        typeof descriptor.resolvePage !== 'function' ||
         !validCachePolicy(descriptor.cachePolicy)) {
-        throw new TypeError('Flow Field Worker executor requires finite worker and request budgets')
+        throw new TypeError(
+            'Flow Field Worker executor requires source identity, page resolution, and finite budgets'
+        )
     }
     const module = descriptor.workerModules.resolve(FLOW_FIELD_VELOCITY_TILE_WORKER)
     const sequence = ++executorSequence
-    const timeLabel = `t${String(descriptor.timeIndex).padStart(2, '0')}`
     return await createVirtualRasterWorkerExecutor({
-        id: `flow-field-velocity-workers-${timeLabel}-${sequence}`,
+        id: `flow-field-velocity-workers-${descriptor.sampleKey}-${sequence}`,
         system: {
             ownership: 'borrowed',
             system: descriptor.workerSystem,
@@ -79,11 +84,11 @@ export async function createVelocityWorkerRequestExecutor(
             decode: maxDecodeTasks,
         },
         context: index => ({
-            key: `flow-field-velocity-${timeLabel}-cache-shard-${index}`,
+            key: `flow-field-velocity-${descriptor.sampleKey}-cache-shard-${index}`,
             init: {
                 cache: flowCacheConfigurationForShard(
                     descriptor.cachePolicy,
-                    timeLabel,
+                    descriptor.sampleKey,
                     index,
                     workerCount
                 ),
@@ -93,7 +98,6 @@ export async function createVelocityWorkerRequestExecutor(
             descriptor,
             sequence,
             requestSequence,
-            timeLabel,
             demand
         ),
         staleKey: candidate =>
@@ -116,7 +120,6 @@ function createCandidate(
     descriptor: FlowVelocityWorkerTileSourceDescriptor,
     executorId: number,
     requestSequence: number,
-    timeLabel: string,
     demand: VirtualRasterPageDemand
 ): FlowVelocityTileCandidateDescriptor {
 
@@ -124,7 +127,7 @@ function createCandidate(
     if (tile === undefined || tile.tileMatrixSetId !== 'WebMercatorQuad') {
         throw new TypeError('Flow Field Worker requests require WebMercatorQuad pages')
     }
-    const expected = descriptor.expectedPage(demand.page)
+    const expected = descriptor.resolvePage(demand.page)
     return Object.freeze({
         candidateId:
             `${executorId}:${requestSequence}:${demand.generation}:${demand.page.key}`,
@@ -136,7 +139,7 @@ function createCandidate(
             matrixId: tile.matrixId,
             tileRow: tile.tileRow,
             tileColumn: tile.tileCol,
-            plane: `velocity.${timeLabel}`,
+            plane: `velocity.${descriptor.sampleKey}`,
             coherence: {
                 mode: 'immutable',
                 contentVersion: descriptor.contentVersion,
@@ -147,7 +150,7 @@ function createCandidate(
             sampleType: 'float32',
             schemaVersion: CACHE_SCHEMA_VERSION,
         }),
-        url: descriptor.tileUrl(demand.page),
+        url: expected.url,
         contentVersion: descriptor.contentVersion,
         expectedByteLength: expected.byteLength,
         expectedSha256: expected.sha256,
@@ -156,7 +159,7 @@ function createCandidate(
 
 function flowCacheConfigurationForShard(
     policy: FlowFieldCachePolicy,
-    timeLabel: string,
+    sampleKey: string,
     shard: number,
     count: number
 ): FlowVelocityTileWorkerInit['cache'] {
@@ -171,7 +174,7 @@ function flowCacheConfigurationForShard(
     return Object.freeze({
         mode: 'persistent',
         descriptor: persistentCacheDescriptor({
-            namespace: `${policy.namespace}.${timeLabel}.shard-${shard}`,
+            namespace: `${policy.namespace}.${sampleKey}.shard-${shard}`,
             maxPayloadBytes: partitionBudget(
                 policy.maxPayloadBytes,
                 activeShardCount,
@@ -194,6 +197,11 @@ function partitionBudget(value: number, count: number, index: number): number {
 function positiveInteger(value: unknown): value is number {
 
     return Number.isSafeInteger(value) && Number(value) > 0
+}
+
+function validSampleKey(value: unknown): value is string {
+
+    return typeof value === 'string' && /^t(?:[0-9]{2}|[1-9][0-9]{2,})$/.test(value)
 }
 
 function validCachePolicy(policy: FlowFieldCachePolicy): boolean {

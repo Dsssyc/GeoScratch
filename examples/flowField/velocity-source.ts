@@ -24,15 +24,39 @@ import type {
     FlowVelocityWorkerRequestExecutor,
 } from './velocity-tile-executor.ts'
 import type {
+    FlowFieldDataset,
+    FlowFieldRuntimePage,
+    FlowFieldRuntimeRepresentation,
+    FlowFieldRuntimeSample,
     FlowDatasetManifest,
     FlowVelocityPageManifest,
 } from './flow-dataset.ts'
 
+export type FlowVelocityResolvedPage = Readonly<{
+    url: string
+    byteLength: 524288
+    sha256: string
+}>
+
 export type FlowVelocityTimeSource = Readonly<{
+    sampleKey: string
     timeIndex: number
+    sampleRegistration: 'global-texel-lattice'
     model: ReturnType<typeof webMercatorVirtualRasterField>
     tileUrl(page: VirtualRasterPageIdentity): string
     expectedPage(page: VirtualRasterPageIdentity): FlowVelocityPageManifest
+    resolvePage(page: VirtualRasterPageIdentity):
+        FlowVelocityPageManifest & FlowVelocityResolvedPage
+}>
+
+export type FlowVelocitySampleSource = Readonly<{
+    sampleKey: string
+    timeIndex: number
+    sample: FlowFieldRuntimeSample
+    sampleRegistration: 'pixel-center'
+    representation: FlowFieldRuntimeRepresentation
+    model: ReturnType<typeof webMercatorVirtualRasterField>
+    resolvePage(page: VirtualRasterPageIdentity): FlowFieldRuntimePage
 }>
 
 type FlowVelocityTimeModel = ReturnType<typeof webMercatorVirtualRasterField>
@@ -120,19 +144,97 @@ export function createVelocityTimeSource(
         return expected
     }
 
-    return Object.freeze({
-        timeIndex,
-        model,
-        tileUrl(page) {
+    function resolvePage(
+        page: VirtualRasterPageIdentity
+    ): FlowVelocityPageManifest & FlowVelocityResolvedPage {
 
-            const expected = requirePage(page)
-            return new URL(
+        const expected = requirePage(page)
+        return Object.freeze({
+            ...expected,
+            url: new URL(
                 `${timeLabel}/${encodeURIComponent(expected.matrixId)}/` +
                 `${expected.tileRow}/${expected.tileCol}.rg32f`,
                 tileBaseUrl
-            ).href
+            ).href,
+        })
+    }
+
+    return Object.freeze({
+        sampleKey: timeLabel,
+        timeIndex,
+        sampleRegistration: 'global-texel-lattice' as const,
+        model,
+        tileUrl(page) {
+
+            return resolvePage(page).url
         },
         expectedPage: requirePage,
+        resolvePage,
+    })
+}
+
+/** Creates one immutable velocity source from a normalized runtime sample identity. */
+export function createVelocitySampleSource(
+    dataset: FlowFieldDataset,
+    sampleKey: string
+): FlowVelocitySampleSource {
+
+    if (dataset?.kind !== 'flow-field-dataset' || dataset.schemaVersion !== 2 ||
+        dataset.artifactType !== 'flow-field-cog-runtime' ||
+        !/^[0-9a-f]{64}$/.test(dataset.sourceHash) ||
+        typeof dataset.contentVersion !== 'string' || dataset.contentVersion.length === 0 ||
+        dataset.representation?.sampleRegistration !== 'pixel-center' ||
+        dataset.tileMatrixSet?.coverage?.tileMatrixSet !== WebMercatorQuad ||
+        typeof dataset.sample !== 'function' || typeof dataset.page !== 'function') {
+        throw new TypeError('Flow Field velocity samples require a normalized runtime dataset')
+    }
+    const sample = dataset.sample(sampleKey)
+    if (sample.sampleKey !== sampleKey) {
+        throw new TypeError('Flow Field runtime dataset returned another sample identity')
+    }
+    const model = webMercatorVirtualRasterField({
+        id: `flow-velocity.${dataset.datasetId}.${sample.sampleKey}`,
+        addressSpaceId:
+            `flow-velocity.wmq.${dataset.sourceHash.slice(0, 16)}.` +
+            `${dataset.contentVersion}.${sample.sampleKey}`,
+        sourceRevision: dataset.contentVersion,
+        coverage: dataset.tileMatrixSet.coverage,
+        geographicBounds: dataset.source.geographicBounds,
+        fieldKind: 'vector',
+        channels: 2,
+        sampleType: 'float32',
+        gpuFormat: 'rg32float',
+        unit: dataset.unit,
+        interpolation: 'linear',
+        auxiliaryAxes: [
+            { name: 'model-time', value: sample.modelTime },
+            { name: 'vector-basis', value: dataset.basis },
+        ],
+    })
+
+    function resolvePage(page: VirtualRasterPageIdentity): FlowFieldRuntimePage {
+
+        const tile = page?.tile
+        if (page?.addressSpaceId !== model.addressSpace.id || tile === undefined ||
+            tile.tileMatrixSetId !== dataset.tileMatrixSet.id) {
+            throw new TypeError('Flow Field velocity source requires its own WebMercatorQuad page')
+        }
+        const resolved = dataset.page(sample.sampleKey, tile)
+        if (resolved.sampleKey !== sample.sampleKey ||
+            resolved.timeIndex !== sample.timeIndex) {
+            throw new TypeError('Flow Field runtime page belongs to another sample')
+        }
+        return resolved
+    }
+
+    return Object.freeze({
+        sampleKey: sample.sampleKey,
+        timeIndex: sample.timeIndex,
+        sample,
+        sampleRegistration: dataset.representation.sampleRegistration,
+        representation: dataset.representation,
+        model,
+        resolvePage,
     })
 }
 
@@ -156,7 +258,7 @@ export async function createVelocityTimeRuntime({
     const source = createVelocityTimeSource(manifest, timeIndex)
     const requestExecutor = await createVelocityWorkerRequestExecutor({
         sourceId: `flow-velocity.${manifest.sourceHash}`,
-        timeIndex,
+        sampleKey: source.sampleKey,
         contentVersion: manifest.contentVersion,
         cachePolicy,
         workerSystem,
@@ -165,8 +267,7 @@ export async function createVelocityTimeRuntime({
         ...(maxNetworkRequests === undefined ? {} : { maxNetworkRequests }),
         ...(maxDecodeTasks === undefined ? {} : { maxDecodeTasks }),
         maxRequests,
-        tileUrl: source.tileUrl,
-        expectedPage: source.expectedPage,
+        resolvePage: source.resolvePage,
     })
     const virtualRaster = await createVirtualRasterRuntime({
         runtime,
