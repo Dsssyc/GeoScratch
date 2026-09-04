@@ -12,6 +12,9 @@ import type {
     TextureViewSpec,
 } from 'geoscratch/scratch'
 import {
+    flowPixelCenterRegistrationWgslModule,
+} from './flow-pixel-center-registration.ts'
+import {
     createVelocityTimeRuntime,
 } from './velocity-source.ts'
 import type {
@@ -106,10 +109,12 @@ export type TemporalVelocityWgslOptions = Readonly<{
     nextAtlasBinding: number
     wrapper: string
     transitionTexels?: number
+    sampleRegistration?: 'global-texel-lattice' | 'pixel-center'
 }>
 
 export type TemporalVelocityWgslModule = Readonly<{
     kind: 'temporal-velocity-wgsl-module'
+    sampleRegistration: 'global-texel-lattice' | 'pixel-center'
     code: string
     bindings: Readonly<{
         group: number
@@ -555,6 +560,13 @@ export function temporalVelocityWgslModule(
 ): TemporalVelocityWgslModule {
 
     assertCompatibleModels(current, next)
+    const sampleRegistration = options?.sampleRegistration ?? 'global-texel-lattice'
+    if (sampleRegistration !== 'global-texel-lattice' &&
+        sampleRegistration !== 'pixel-center') {
+        throw new TypeError(
+            'Temporal velocity WGSL sampleRegistration must be global-texel-lattice or pixel-center'
+        )
+    }
     const bindings = [
         options?.currentPageTableBinding,
         options?.currentAtlasBinding,
@@ -569,8 +581,24 @@ export function temporalVelocityWgslModule(
     }
     const addressNamespace = 'FlowVelocityAddress'
     const sharedAddress = current.addressCodec.wgslModule({ namespace: addressNamespace })
+    const registrationNamespace = 'FlowVelocityRegistration'
+    const currentSamplerNamespace = 'FlowVelocityCurrent'
+    const nextSamplerNamespace = 'FlowVelocityNext'
+    const registration = sampleRegistration === 'pixel-center'
+        ? flowPixelCenterRegistrationWgslModule(current, {
+            namespace: registrationNamespace,
+            addressNamespace,
+            currentSamplerNamespace,
+            nextSamplerNamespace,
+        }).code
+        : flowGlobalTexelRegistrationWgsl(
+            registrationNamespace,
+            `${addressNamespace}Fixed`,
+            currentSamplerNamespace,
+            nextSamplerNamespace,
+        )
     const currentModule = webMercatorVirtualRasterWgslModule(current, {
-        namespace: 'FlowVelocityCurrent',
+        namespace: currentSamplerNamespace,
         addressNamespace,
         group: options.group,
         pageTableBinding: options.currentPageTableBinding,
@@ -580,7 +608,7 @@ export function temporalVelocityWgslModule(
             : { transitionTexels: options.transitionTexels }),
     })
     const nextModule = webMercatorVirtualRasterWgslModule(next, {
-        namespace: 'FlowVelocityNext',
+        namespace: nextSamplerNamespace,
         addressNamespace,
         group: options.group,
         pageTableBinding: options.nextPageTableBinding,
@@ -595,10 +623,12 @@ export function temporalVelocityWgslModule(
     }
     return Object.freeze({
         kind: 'temporal-velocity-wgsl-module',
+        sampleRegistration,
         code: [
             sharedAddress,
             currentModule.code.slice(prefix.length),
             nextModule.code.slice(prefix.length),
+            registration,
             flowVelocitySourceBoundsWgsl(current),
             options.wrapper,
         ].join('\n\n'),
@@ -614,6 +644,35 @@ export function temporalVelocityWgslModule(
             }),
         }),
     })
+}
+
+function flowGlobalTexelRegistrationWgsl(
+    namespace: string,
+    fixedNamespace: string,
+    currentSamplerNamespace: string,
+    nextSamplerNamespace: string,
+): string {
+
+    return `fn ${namespace}_position(
+    position: ${fixedNamespace}Position,
+    _level: u32,
+) -> ${fixedNamespace}Position {
+    return position;
+}
+
+fn ${namespace}_sample_current(
+    position: ${fixedNamespace}Position,
+    level: u32,
+) -> ${currentSamplerNamespace}Sample {
+    return ${currentSamplerNamespace}_sample_compute(position, level);
+}
+
+fn ${namespace}_sample_next(
+    position: ${fixedNamespace}Position,
+    level: u32,
+) -> ${nextSamplerNamespace}Sample {
+    return ${nextSamplerNamespace}_sample_compute(position, level);
+}`
 }
 
 function flowVelocitySourceBoundsWgsl(model: WebMercatorVirtualRasterField): string {
@@ -675,6 +734,7 @@ function assertCompatibleModels(
         current.plane.channels !== 2 || next.plane.channels !== 2 ||
         current.plane.sampleType !== 'float32' || next.plane.sampleType !== 'float32' ||
         current.plane.gpuFormat !== 'rg32float' || next.plane.gpuFormat !== 'rg32float' ||
+        current.plane.noData !== undefined || next.plane.noData !== undefined ||
         current.addressCodec.coordinateBits !== next.addressCodec.coordinateBits ||
         JSON.stringify(current.geographicBounds) !== JSON.stringify(next.geographicBounds) ||
         JSON.stringify(currentLimits) !== JSON.stringify(nextLimits)) {

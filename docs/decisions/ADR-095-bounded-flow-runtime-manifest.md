@@ -109,6 +109,25 @@ For a COG collection, `/manifest.json` is the exact `runtime-manifest.json` byte
 page remains unavailable and is never converted to velocity `(0, 0)`. The server snapshots
 collection and COG fingerprints at startup; a replacement still requires restart.
 
+### Frontend sample registration
+
+Schema-two COG pages are pixel-centre samples, while the public Geo Virtual Raster sampler
+addresses a global texel lattice. `Flow Field` therefore adapts registration locally on top of
+the public sampler; neither Scratch nor Geo acquires COG-specific policy.
+
+For each attempted common Virtual Raster level, the adapter subtracts exactly half of that
+level's texel in wide-fixed WebMercator quanta from the original physical position before both
+time samples are evaluated. If either public sampler resolves to a coarser level, the tentative
+values are discarded and the half-texel offset is recomputed from the original position for the
+new common level. Reusing the fine-level offset at a parent would introduce a quarter of a
+parent-pixel phase error. Offsets use both fixed-point limbs and saturate at the global north/west
+origin; they are never narrowed to `i32` or converted through whole-world `f32` coordinates.
+
+Registration is a source representation fact, not a frame uniform. The compatibility source
+for the historical direct page cache remains `global-texel-lattice`; only a source backed by the
+schema-two COG runtime manifest selects `pixel-center`. Current and next temporal sources must
+declare the same registration before sharing a sampler module.
+
 ## Verified z10 Runtime Proof
 
 The current t00 source was published through the schema-two adapter in an isolated collection.
@@ -117,6 +136,12 @@ z10 pages for the source extent. Deep collection verification passed with page-s
 `92c5e3a632288c5181ab5c06f18b88b17fdef71bcd62861a52a629cdf67e3d26` and collection content
 version `flow-cog-collection-5f3f82631332c072-t1-z10-v2`. The one-sample subset declares zero
 adjacency records against the complete 27-sample source instead of inventing a loop or interval.
+
+The complete 27-sample source was subsequently published through z10. Its runtime manifest is
+1,172,702 bytes and declares 4,563 pages with 2,392,326,144 bytes of decoded RG32F page payload.
+Identity-only and deep verification passed with page-set SHA-256
+`461518f8ecfb4da65e5ac9e4b8a5deb23d0a06d9f9a2b0b291c9868b8bb6686d` and content version
+`flow-cog-collection-10e94fd373678507-t27-z10-v2`.
 
 ## Consequences
 
@@ -127,8 +152,9 @@ adjacency records against the complete 27-sample source instead of inventing a l
   texture or network data plane.
 - The runtime manifest is a frontend dataset contract, while collection and snapshot manifests
   remain backend construction contracts.
-- The current browser remains on the historical cache until its loader and pixel-centre
-  sampler migrate explicitly.
+- The schema-two loader, sample-key source, and registration adapter can coexist with the
+  historical cache; the application remains on that cache until the temporal window migrates
+  explicitly.
 
 ## Alternatives Rejected
 

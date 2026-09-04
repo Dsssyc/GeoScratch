@@ -62,6 +62,7 @@ describe('Flow Field temporal bindings', () => {
             },
         ])
         expect(provider.module.bindings.group).to.equal(1)
+        expect(provider.module.sampleRegistration).to.equal('global-texel-lattice')
         expect(provider.wgsl).to.equal(provider.module.code)
         expect(frame).to.deep.include({
             progress: 0.25,
@@ -135,17 +136,51 @@ describe('Flow Field temporal bindings', () => {
         expect(source).to.not.match(/runtime\.(?:device|queue)/)
         expect(source).to.not.include('packages/geoscratch/src')
     })
+
+    it('selects registration from both active sources and rejects a mixed pair', async() => {
+
+        const pixel = temporalFixture({
+            currentRegistration: 'pixel-center',
+            nextRegistration: 'pixel-center',
+        })
+        const provider = await createFlowTemporalBindings({
+            temporal: pixel.temporal,
+            wrapper,
+        })
+        expect(provider.module.sampleRegistration).to.equal('pixel-center')
+        expect(provider.wgsl).to.include('FlowVelocityRegistration_half_texel')
+        provider.dispose()
+
+        const mixed = temporalFixture({
+            currentRegistration: 'pixel-center',
+            nextRegistration: 'global-texel-lattice',
+        })
+        let failure
+        try {
+            await createFlowTemporalBindings({
+                temporal: mixed.temporal,
+                wrapper,
+            })
+        } catch (error) {
+            failure = error
+        }
+        expect(failure).to.be.instanceOf(TypeError)
+        expect(failure.message).to.include('shared registration')
+    })
 })
 
-function temporalFixture() {
+function temporalFixture({
+    currentRegistration = 'global-texel-lattice',
+    nextRegistration = currentRegistration,
+} = {}) {
 
     const events = []
     const runtime = fakeRuntime(events)
     let generation = 1
     let progress = 0.25
-    let current = fakeTimeRuntime(runtime, 'current-g1')
-    let next = fakeTimeRuntime(runtime, 'next-g1')
-    let prefetch = fakeTimeRuntime(runtime, 'prefetch-g1')
+    let current = fakeTimeRuntime(runtime, 'current-g1', currentRegistration)
+    let next = fakeTimeRuntime(runtime, 'next-g1', nextRegistration)
+    let prefetch = fakeTimeRuntime(runtime, 'prefetch-g1', nextRegistration)
     let temporalDisposeCount = 0
     const temporal = {
         get current() { return current },
@@ -189,7 +224,7 @@ function temporalFixture() {
             progress = 0
             current = next
             next = prefetch
-            prefetch = fakeTimeRuntime(runtime, 'prefetch-g2')
+            prefetch = fakeTimeRuntime(runtime, 'prefetch-g2', nextRegistration)
         },
         replaceAllocations() {
 
@@ -199,12 +234,13 @@ function temporalFixture() {
     }
 }
 
-function fakeTimeRuntime(runtime, id) {
+function fakeTimeRuntime(runtime, id, sampleRegistration) {
 
     const model = velocityModel(id)
     const pageTable = fakeResource(runtime, `${id}-page-table`)
     const atlas = fakeResource(runtime, `${id}-atlas`)
     return {
+        source: Object.freeze({ sampleRegistration }),
         model,
         gpu: {
             runtime,

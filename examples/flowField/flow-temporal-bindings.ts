@@ -251,6 +251,10 @@ function createModule(
     wrapper: string
 ): TemporalVelocityWgslModule {
 
+    const sampleRegistration = current.source.sampleRegistration
+    if (next.source.sampleRegistration !== sampleRegistration) {
+        throw new TypeError('Flow temporal samples require one shared registration')
+    }
     return temporalVelocityWgslModule(current.model, next.model, {
         group: 1,
         currentPageTableBinding: 0,
@@ -258,6 +262,7 @@ function createModule(
         nextPageTableBinding: 2,
         nextAtlasBinding: 3,
         wrapper,
+        sampleRegistration,
     })
 }
 

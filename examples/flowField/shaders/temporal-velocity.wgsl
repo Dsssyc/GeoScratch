@@ -22,13 +22,23 @@ fn FlowVelocity_sample(
     requested_level: u32,
     temporal: FlowVelocityTemporal,
 ) -> FlowVelocitySample {
+    if (requested_level >= FlowVelocityCurrent_level_count) {
+        return FlowVelocitySample(4u, vec2f(0.0), 0.0f, false, requested_level);
+    }
     if (!FlowVelocity_source_contains(position)) {
         return FlowVelocitySample(0u, vec2f(0.0), 0.0f, false, requested_level);
     }
     var common_level = requested_level;
-    var current = FlowVelocityCurrent_sample_compute(position, common_level);
-    var next = FlowVelocityNext_sample_compute(position, common_level);
     for (var iteration = 0u; iteration < FlowVelocityCurrent_level_count; iteration++) {
+        let registered_position = FlowVelocityRegistration_position(position, common_level);
+        let current = FlowVelocityRegistration_sample_current(
+            registered_position,
+            common_level,
+        );
+        let next = FlowVelocityRegistration_sample_next(
+            registered_position,
+            common_level,
+        );
         if (current.status == 0u || current.status == 3u || current.status == 4u ||
             next.status == 0u || next.status == 3u || next.status == 4u) {
             return FlowVelocitySample(
@@ -51,9 +61,12 @@ fn FlowVelocity_sample(
                 common_level,
             );
         }
-        common_level = max(current.resolved_level, next.resolved_level);
-        current = FlowVelocityCurrent_sample_compute(position, common_level);
-        next = FlowVelocityNext_sample_compute(position, common_level);
+        let resolved_level = max(current.resolved_level, next.resolved_level);
+        if (resolved_level <= common_level ||
+            resolved_level >= FlowVelocityCurrent_level_count) {
+            return FlowVelocitySample(4u, vec2f(0.0), 0.0f, false, common_level);
+        }
+        common_level = resolved_level;
     }
-    return FlowVelocitySample(0u, vec2f(0.0), 0.0f, false, common_level);
+    return FlowVelocitySample(4u, vec2f(0.0), 0.0f, false, common_level);
 }
