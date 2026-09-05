@@ -213,7 +213,10 @@ export async function createFlowFieldRenderer(
     let constructionCapture: ReturnType<typeof temporalWindow.capture> | undefined
     let constructionCaptureReleased = false
     let presentation = flowFieldPresentation(options.presentation ?? FLOW_FIELD_PRESENTATION)
-    let resetPending = false
+    let resetRevision = 0
+    let appliedResetRevision = 0
+    let presentationRevision = 0
+    let clearedPresentationRevision = 0
 
     try {
         constructionCapture = temporalWindow.capture()
@@ -311,7 +314,7 @@ export async function createFlowFieldRenderer(
             activityKill: thresholds.kill,
         }))
         const inspector = own(await createFlowScreenInspector({
-            runtime, surface, temporal: temporalBindings, model,
+            runtime, temporal: temporalBindings, model,
             maximumSpeed: options.maximumSpeed,
         }))
         const overlayPass = own(runtime.createRenderPass({
@@ -351,11 +354,8 @@ export async function createFlowFieldRenderer(
             let frameOwnershipTransferred = false
             try {
                 const framePresentation = presentation
-                if (resetPending) {
-                    history.reset()
-                    particles.reset()
-                    resetPending = false
-                }
+                const frameResetRevision = resetRevision
+                const framePresentationRevision = presentationRevision
                 const nextSize = flowSurfaceSize(capture.presentationSize)
                 if (!sameSize(size, nextSize)) {
                     surface.resize(nextSize)
@@ -419,12 +419,22 @@ export async function createFlowFieldRenderer(
                 const demandFrame = demand.encode(builder, view, prepared.temporal)
                 requestedLevel = demandFrame.requestedLevel
                 if (presentedPairGeneration !== prepared.pairGeneration &&
+                    !needsViewFollowUp &&
                     prepared.requestedLevel === requestedLevel &&
-                    flowPairViewReady(prepared.temporal, demandFrame.candidatePages)) {
+                    (demandFrame.candidatePages.length === 0 ||
+                        flowPairViewReady(prepared.temporal, demandFrame.candidatePages))) {
                     presentedPairGeneration = prepared.pairGeneration
                 }
-                const presentationReady = framePresentation.view !== 'particles' ||
-                    presentedPairGeneration === prepared.pairGeneration
+                const presentationReady = presentedPairGeneration === prepared.pairGeneration
+                if (clearedPresentationRevision !== framePresentationRevision) {
+                    history.reset()
+                    clearedPresentationRevision = framePresentationRevision
+                }
+                if (presentationReady && appliedResetRevision !== frameResetRevision) {
+                    history.reset()
+                    particles.reset()
+                    appliedResetRevision = frameResetRevision
+                }
                 renderView.encode(builder, view)
                 if (packedCells !== demandFrame.candidateCells) {
                     packedCandidates = packFlowCandidateCells(
@@ -458,14 +468,13 @@ export async function createFlowFieldRenderer(
                     progress: supportSnapshot.progress,
                     activityKill: supportSnapshot.activityKill,
                 }, prepared)
+                const content = framePresentation.view === 'particles' ? [particleRender.draw]
+                    : presentationReady ? [inspector.encode(builder, view, prepared, framePresentation)] : []
                 const historyFrame = presentationReady ? history.encode(builder, view,
-                    framePresentation.view === 'particles' ? [particleRender.draw] : [],
+                    content,
                     framePresentation.view === 'particles' && framePresentation.trails,
                     prepared
                 ) : history.presentRetained(builder, view)
-                if (framePresentation.view !== 'particles') {
-                    inspector.encode(builder, view, prepared, framePresentation)
-                }
                 if (presentationReady && framePresentation.contour) builder.render(overlayPass, [contour.draw])
                 const submitted = builder.submit()
                 const reconciliations = demand.reconcile(demandFrame).then(
@@ -573,6 +582,10 @@ export async function createFlowFieldRenderer(
                     residencySnapshotEpoch: temporalResidencyEpoch,
                 })
                 const builder = runtime.createSubmission({ validation: 'throw' })
+                if (clearedPresentationRevision !== presentationRevision) {
+                    history.reset()
+                    clearedPresentationRevision = presentationRevision
+                }
                 history.presentRetained(builder, view)
                 const submitted = builder.submit()
                 let observation: Promise<unknown>
@@ -681,14 +694,17 @@ export async function createFlowFieldRenderer(
 
         function resetVisuals(): void {
             assertActive()
-            resetPending = true
+            resetRevision++
         }
 
         function setPresentation(value: FlowFieldPresentation): void {
             assertActive()
             const next = flowFieldPresentation(value)
             if (next.view !== presentation.view || next.trails !== presentation.trails ||
-                next.sample !== presentation.sample) resetPending = true
+                next.sample !== presentation.sample) {
+                resetRevision++
+                presentationRevision++
+            }
             presentation = next
         }
 

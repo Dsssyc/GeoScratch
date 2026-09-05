@@ -19,6 +19,12 @@ sampler. Status colors are green for resident moving data, amber for fallback,
 gray for zero velocity, magenta for unavailable data, and red for invalid sampling.
 Activity contour is an optional velocity threshold overlay and does not enter trails.
 
+During a time-pair handoff the inspector retains the previous complete image until
+the requested pages are ready. Loading and the old presented time remain visible.
+Fallback is always reported relative to the original sampling request, including
+when a coarser page contains zero velocity. Changing the inspection mode explicitly
+invalidates the old image rather than relabeling it.
+
 Flow-specific controls, screen projection, particles, and history stay local to this
 example. The former `flowLayer` is a frozen rendering reference. See
 [ADR-098](../../docs/decisions/ADR-098-flow-field-reference-presentation.md) for the
@@ -31,6 +37,8 @@ node tests/browser/flow-screen-projection.mjs
 node tests/browser/flow-field-particle-reference.mjs
 node tests/browser/flow-field-history.mjs
 node tests/browser/flow-field-controls.mjs
+node tests/browser/flow-field-temporal-status.mjs
+node tests/browser/flow-field-inspector-handoff.mjs
 node tests/browser/scratch-flow-field.mjs
 ```
 

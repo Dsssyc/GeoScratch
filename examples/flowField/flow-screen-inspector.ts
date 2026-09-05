@@ -1,6 +1,6 @@
 import { layoutCodec } from 'geoscratch/scratch'
 import type {
-    BindLayout, BindSet, DrawCommand, GPURuntime, SubmissionBuilder, Surface,
+    BindLayout, BindSet, DrawCommand, GPURuntime, SubmissionBuilder,
 } from 'geoscratch/scratch'
 import type { GeoViewSnapshot, WebMercatorVirtualRasterField } from 'geoscratch/geo'
 import type { FlowTemporalReadyBindingFrame } from './flow-temporal-bindings.ts'
@@ -11,7 +11,6 @@ import inspectorShader from './shaders/screen-inspector.wgsl?raw'
 
 export type FlowScreenInspectorOptions = Readonly<{
     runtime: GPURuntime
-    surface: Surface
     temporal: Readonly<{ wgsl: string, layout: BindLayout }>
     model: WebMercatorVirtualRasterField
     maximumSpeed: number
@@ -23,17 +22,17 @@ export type FlowScreenInspector = Readonly<{
         view: GeoViewSnapshot,
         temporal: FlowTemporalReadyBindingFrame,
         presentation: FlowFieldPresentation
-    ): void
+    ): DrawCommand
     dispose(): void
 }>
 
-/** Owns a current-frame Surface overlay, borrowing the renderer's exact temporal frame lease. */
+/** Prepares a replacement history-image draw, borrowing the exact temporal frame lease. */
 export async function createFlowScreenInspector(options: FlowScreenInspectorOptions): Promise<FlowScreenInspector> {
-    const { runtime, surface, model, maximumSpeed } = options
-    if (surface?.runtime !== runtime || options.temporal?.layout.runtime !== runtime ||
+    const { runtime, model, maximumSpeed } = options
+    if (runtime === undefined || options.temporal?.layout.runtime !== runtime ||
         model?.kind !== 'web-mercator-virtual-raster-field' ||
         !Number.isFinite(maximumSpeed) || maximumSpeed <= 0) {
-        throw new TypeError('Flow screen inspector requires one runtime, Surface, temporal layout and finite speed range')
+        throw new TypeError('Flow screen inspector requires one runtime, temporal layout and finite speed range')
     }
     const owned: { dispose(): void }[] = []
     const own = <T extends { dispose(): void }>(resource: T): T => {
@@ -108,15 +107,10 @@ export async function createFlowScreenInspector(options: FlowScreenInspectorOpti
         const pipeline = own(await runtime.createRenderPipeline({
             label: 'Flow Field screen inspector pipeline', program,
             layout: { mode: 'explicit', bindLayouts: [ layout, options.temporal.layout ] },
-            targets: [ { format: surface.format, blend: {
-                color: { operation: 'add', srcFactor: 'src-alpha', dstFactor: 'one-minus-src-alpha' },
-                alpha: { operation: 'add', srcFactor: 'one', dstFactor: 'one-minus-src-alpha' },
-            } } ],
+            // Store straight RGBA; the history presenter applies alpha once at the Surface.
+            targets: [ { format: 'rgba8unorm' } ],
             primitive: { topology: 'triangle-list' },
-        }))
-        const pass = own(runtime.createRenderPass({
-            label: 'Flow Field current-frame screen inspector',
-            color: [ { target: surface, load: 'load', store: 'store' } ],
+            depthStencil: { format: 'depth32float', depthWriteEnabled: false, depthCompare: 'always' },
         }))
 
         function encode(
@@ -124,10 +118,12 @@ export async function createFlowScreenInspector(options: FlowScreenInspectorOpti
             view: GeoViewSnapshot,
             temporal: FlowTemporalReadyBindingFrame,
             presentation: FlowFieldPresentation
-        ): void {
+        ): DrawCommand {
             if (disposed) throw new Error('Flow screen inspector is disposed')
             const selected = flowFieldPresentation(presentation)
-            if (selected.view === 'particles') return
+            if (selected.view === 'particles') {
+                throw new TypeError('Flow screen inspector requires an inspection view')
+            }
             if (builder?.runtime !== runtime || temporal?.state !== 'ready' ||
                 temporal.bindSet.layout !== options.temporal.layout ||
                 temporal.bindSet.preparationState !== 'prepared' ||
@@ -164,7 +160,7 @@ export async function createFlowScreenInspector(options: FlowScreenInspectorOpti
                 previousSet = temporal.bindSet
             }
             builder.upload(upload)
-            builder.render(pass, [ draw ])
+            return draw
         }
         return Object.freeze({ encode, dispose })
     } catch (error) {

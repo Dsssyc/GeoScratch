@@ -4,6 +4,8 @@
 
 Accepted and implemented in `examples/flowField/`. The frozen `examples/flowLayer/`
 defines the visual reference. No Scratch or Geo public API changes.
+ADR-101 later unifies inspector handoff readiness with particle presentation and
+retains diagnostic images in the existing history color targets.
 
 ## Date
 

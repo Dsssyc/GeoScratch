@@ -428,8 +428,8 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
                 throw new TypeError('Flow Field history requires the current same-runtime temporal frame')
             }
             const screenView = flowScreenViewValues(view, options.addressCodec)
-            const compose = prepared === undefined ? retainedCommands[directionIndex]!
-                : prepareComposePair(prepared)[directionIndex]!
+            const compose = !accumulate ? undefined : prepared === undefined
+                ? retainedCommands[directionIndex]! : prepareComposePair(prepared)[directionIndex]!
             if (!accumulate) clearPending = true
             const currentView = historyViewFacts(view)
             const cameraChanged = previousView !== undefined && !sameView(previousView, currentView)
@@ -461,7 +461,7 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
                 builder.render(clearPass, [])
                 clearPending = false
             }
-            builder.render(direction.pass, [ compose, ...content ])
+            builder.render(direction.pass, compose === undefined ? [ ...content ] : [ compose, ...content ])
             builder.render(presentationPass, [ direction.presentation ])
             previousView = currentView
             directionIndex = (directionIndex + 1) % directions.length
