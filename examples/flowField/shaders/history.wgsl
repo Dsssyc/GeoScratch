@@ -125,7 +125,6 @@ fn vMain(@builtin(vertex_index) vertexIndex: u32) -> VertexOutput {
 
 @fragment
 fn fMain(input: VertexOutput) -> @location(0) vec4f {
-    if (!FlowHistory_supported(input.texcoords)) { return vec4f(0.0); }
     let dim = vec2f(textureDimensions(historyTexture, 0));
     let pixel = vec2i(correctedPixel(dim * input.texcoords, dim));
     var color = textureLoad(historyTexture, pixel, 0);
@@ -147,5 +146,9 @@ fn fMain(input: VertexOutput) -> @location(0) vec4f {
     if (residual <= cleanupUniform.trailCutoff) {
         return vec4f(0.0);
     }
+    // Only visible retained ink needs current-flow validation. Sampling the
+    // temporal raster for every empty physical pixel can halve visual ticks.
+    // Keep the check in current screen space, after any history reprojection.
+    if (!FlowHistory_supported(input.texcoords)) { return vec4f(0.0); }
     return faded;
 }

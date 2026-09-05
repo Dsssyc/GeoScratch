@@ -39,8 +39,15 @@ node tests/browser/flow-field-history.mjs
 node tests/browser/flow-field-controls.mjs
 node tests/browser/flow-field-temporal-status.mjs
 node tests/browser/flow-field-inspector-handoff.mjs
+node tests/browser/flow-field-motion-performance.mjs
 node tests/browser/scratch-flow-field.mjs
 ```
+
+Run the motion benchmark alone: it compares high-DPR visual step frequency against
+frozen Flow Layer and an isolated eager-support counterfactual. Empty or fully faded
+history skips temporal-raster support sampling (see
+[ADR-102](../../docs/decisions/ADR-102-flow-history-visible-support.md)); visible
+history still checks the current flow before presentation.
 
 With Vite and the tile service already running,
 `node tests/browser/flow-field-reference-appearance.mjs` saves both examples at
