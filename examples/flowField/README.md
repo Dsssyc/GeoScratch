@@ -42,3 +42,8 @@ the same camera for visual comparison without changing the reference.
 retained-history reprojection during delayed time loading, and steady animation
 throughput. Large view demands select a coarser complete cover within the existing
 page budget; they do not increase the budget or discard arbitrary visible tiles.
+
+`node tests/browser/flow-field-pitch.mjs` checks tilted particle and Speed views at
+model time 6.93, including screenshot colors against COG U/V samples.
+`node tests/browser/flow-field-pitch-projection.mjs` checks real MapLibre camera
+unprojection on GPU at 0/60/75/85 degrees and DPR 1/2.

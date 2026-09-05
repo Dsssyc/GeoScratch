@@ -325,20 +325,81 @@ describe('Flow Field demand', () => {
         await coordinator.dispose()
     })
 
-    it('keeps mixed-level candidate footprints prefix-free', () => {
+    it('retains nearby fine raster pages under a coarse horizon parent without duplicate spawn cells', () => {
+        const view = viewAt(4, 4)
+        const options = collectionOptions(view, {
+            cellsPerPageEdge: 64,
+            maximumCandidateCells: 47 * 64 ** 2,
+        })
+        const demands = [
+            projected(view, { requestMatrixLevel: 4, desiredSampleLevel: 4,
+                sourceLevelCeiling: 10, tileRow: 6, tileCol: 13 }),
+            projected(view, { requestMatrixLevel: 10, desiredSampleLevel: 10,
+                sourceLevelCeiling: 10, tileRow: 418, tileCol: 857 }),
+        ]
+        const result = createFlowDemandCandidates({ ...options, batch: batch(view, demands) })
+        const coarse = result.candidatePages.filter(page => page.tile.matrixId === '4')
+        const fine = result.candidatePages.filter(page => page.tile.matrixId === '10')
+        expect(coarse).to.have.length(1)
+        expect(fine).to.have.length(25)
+        expect(result.requestedLevel).to.equal(0)
+        const coarseCells = result.candidateCells.filter(cell => cell.page.tile.matrixId === '4')
+        expect(coarseCells).to.have.length(64 ** 2 - fine.length)
+        expect(result.candidateCells).to.have.length(26 * 64 ** 2 - fine.length)
+        for (const cell of coarseCells) {
+            expect(fine.some(page => page.tile.tileRow === 6 * 64 + cell.cellY &&
+                page.tile.tileCol === 13 * 64 + cell.cellX)).to.equal(false)
+        }
+        expect(createFlowDemandCandidates({ ...options,
+            batch: batch(view, demands.toReversed()) })).to.deep.equal(result)
+    })
+
+    it('coarsens over-budget mixed raster demand while retaining local detail and the full parent', () => {
         const view = viewAt(4, 4)
         const options = collectionOptions(view)
         const result = createFlowDemandCandidates({ ...options, batch: { ...options.batch,
-            demands: [...options.batch.demands, projected(view, { requestMatrixLevel: 8,
-                desiredSampleLevel: 8, sourceLevelCeiling: 10, tileRow: 104, tileCol: 214 })] } })
-        for (const page of result.candidatePages) {
-            expect(result.candidatePages.some(other => {
-                const delta = Number(page.tile.matrixId) - Number(other.tile.matrixId)
-                return delta > 0 && Math.floor(page.tile.tileRow / 2 ** delta) === other.tile.tileRow &&
-                    Math.floor(page.tile.tileCol / 2 ** delta) === other.tile.tileCol
-            })).to.equal(false)
-        }
+            demands: [...options.batch.demands, projected(view, { requestMatrixLevel: 4,
+                desiredSampleLevel: 4, sourceLevelCeiling: 10, tileRow: 6, tileCol: 13 })] } })
+        expect(result.candidatePages.filter(page => page.tile.matrixId === '4')).to.have.length(1)
+        expect(result.candidatePages.filter(page => page.tile.matrixId === '9')).to.have.length(30)
+        expect(result.requestedLevel).to.equal(options.addressSpace.levelForMatrix('9'))
         expect(result.candidatePages.length).to.be.at.most(47)
+    })
+
+    it('omits partially refined coarse spawn cells on smaller grids without dropping raster pages', () => {
+        const view = viewAt(4, 4)
+        const options = collectionOptions(view, { maximumDisplacementMeters: 0 })
+        const result = createFlowDemandCandidates({ ...options, batch: batch(view, [
+            projected(view, { requestMatrixLevel: 4, desiredSampleLevel: 4,
+                sourceLevelCeiling: 10, tileRow: 6, tileCol: 13 }),
+            projected(view, { requestMatrixLevel: 10, desiredSampleLevel: 10,
+                sourceLevelCeiling: 10, tileRow: 418, tileCol: 857 }),
+        ]) })
+        expect(result.candidatePages).to.have.length(10)
+        const coarseCells = result.candidateCells.filter(cell => cell.page.tile.matrixId === '4')
+        expect(coarseCells.map(cell => [cell.cellX, cell.cellY])).to.deep.equal([
+            [0, 0], [1, 0], [1, 1],
+        ])
+        expect(result.candidateCells.filter(cell => cell.page.tile.matrixId === '10'))
+            .to.have.length(9 * 4)
+    })
+
+    it('prefers a finer complete source cover over a more expensive coarse hierarchy', () => {
+        const view = viewAt(4, 4)
+        const options = collectionOptions(view)
+        const coarse = collectionCoverage.limits.slice(0, 5).map(limit => projected(view, {
+            requestMatrixLevel: Number(limit.matrixId),
+            desiredSampleLevel: Number(limit.matrixId), sourceLevelCeiling: 10,
+            tileRow: limit.minTileRow, tileCol: limit.minTileCol,
+        }))
+        const result = createFlowDemandCandidates({ ...options,
+            batch: batch(view, [...coarse, ...options.batch.demands]) })
+        // Keeping every coarse level would force the near-field cap down to z8.
+        // The complete z9 source is finer everywhere and still needs only 36 slots.
+        expect(result.candidatePages).to.have.length(36)
+        expect(result.candidatePages.every(page => page.tile.matrixId === '9')).to.equal(true)
+        expect(result.requestedLevel).to.equal(options.addressSpace.levelForMatrix('9'))
+        expect(result.candidateCells).to.have.length(36 * 4)
     })
 
     it('reuses static spatial cells across epochs but refreshes camera priority and validates provenance', async () => {

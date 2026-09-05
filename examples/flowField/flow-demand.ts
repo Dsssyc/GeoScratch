@@ -292,6 +292,14 @@ function buildCandidates(options: FlowDemandCandidateOptions): CandidateBuild {
     if (selected === undefined) {
         throw new RangeError('Flow demand capacity cannot contain its minimum published cover')
     }
+    // Overlapping coarse levels can consume more slots than a complete, finer
+    // source level. Prefer that strictly better cover after budget coarsening.
+    const finestSelected = Math.max(...selected.map(page => page.matrixLevel), -1)
+    if (finestSelected >= 0 && finestSelected < maximumRequestedMatrix) {
+        const complete = completeCoverageFallback(options, pageCapacity)
+        if (complete !== undefined && complete[0]!.matrixLevel > finestSelected &&
+            complete[0]!.matrixLevel <= maximumRequestedMatrix) selected = complete
+    }
     const spatial = Object.freeze([...selected].sort(compareSpatial))
     const candidatePages = Object.freeze(spatial.map(candidate =>
         options.addressSpace.pageFromTile({
@@ -306,8 +314,11 @@ function buildCandidates(options: FlowDemandCandidateOptions): CandidateBuild {
         const requestedLevel = options.addressSpace.levelForMatrix(
             String(spatial[pageIndex]!.matrixLevel)
         )
+        const refinedCells = refinedCellMask(spatial[pageIndex]!, spatial,
+            options.cellsPerPageEdge)
         for (let cellY = 0; cellY < options.cellsPerPageEdge; cellY++) {
             for (let cellX = 0; cellX < options.cellsPerPageEdge; cellX++) {
+                if (refinedCells?.[cellY * options.cellsPerPageEdge + cellX]) continue
                 candidateCells.push(Object.freeze({ page, requestedLevel, cellX, cellY }))
             }
         }
@@ -387,31 +398,8 @@ function expandCandidates(
                         tileCol
                     ),
                 })
-                // Coarse demands are inserted first. Retain their complete footprint
-                // and do not spend more slots on overlapping descendants.
-                let covered = false
-                for (const ancestor of coverage.limits) {
-                    const level = Number(ancestor.matrixId)
-                    if (level >= candidate.matrixLevel) break
-                    const divisor = 2 ** (candidate.matrixLevel - level)
-                    const parentKey = spatialKey({ matrixLevel: level,
-                        tileRow: Math.floor(tileRow / divisor),
-                        tileCol: Math.floor(tileCol / divisor) })
-                    const parent = spatialByKey.get(parentKey)
-                    if (parent === undefined) continue
-                    if (candidate.requestedLevel > parent.requestedLevel) {
-                        spatialByKey.set(parentKey, Object.freeze({ ...parent,
-                            requestedLevel: candidate.requestedLevel,
-                            sourceLevelCeiling: Math.max(parent.sourceLevelCeiling,
-                                candidate.sourceLevelCeiling),
-                            priorityScore: cameraPriority(options.view, candidate.requestedLevel,
-                                parent.matrixLevel, parent.tileRow, parent.tileCol),
-                        }))
-                    }
-                    covered = true
-                    break
-                }
-                if (covered) continue
+                // Raster parents provide fallback while descendants retain local detail.
+                // Geometry's prefix-free cut must not suppress overlapping raster pages.
                 const key = spatialKey(candidate)
                 const existing = spatialByKey.get(key)
                 if (existing === undefined || betterCandidate(candidate, existing)) {
@@ -423,6 +411,38 @@ function expandCandidates(
     }
 
     return [...spatialByKey.values()]
+}
+
+function refinedCellMask(
+    page: SpatialCandidate,
+    spatial: readonly SpatialCandidate[],
+    cellsPerPageEdge: number
+): Uint8Array | undefined {
+
+    let mask: Uint8Array | undefined
+    for (const finer of spatial) {
+        const delta = finer.matrixLevel - page.matrixLevel
+        if (delta <= 0) continue
+        const scale = 2 ** delta
+        if (Math.floor(finer.tileRow / scale) !== page.tileRow ||
+            Math.floor(finer.tileCol / scale) !== page.tileCol) continue
+        mask ??= new Uint8Array(cellsPerPageEdge ** 2)
+        const localRow = finer.tileRow - page.tileRow * scale
+        const localCol = finer.tileCol - page.tileCol * scale
+        const minimumX = Math.floor(localCol * cellsPerPageEdge / scale)
+        const maximumX = Math.ceil((localCol + 1) * cellsPerPageEdge / scale)
+        const minimumY = Math.floor(localRow * cellsPerPageEdge / scale)
+        const maximumY = Math.ceil((localRow + 1) * cellsPerPageEdge / scale)
+        // Spawn candidates must not count a refined footprint twice. The example's
+        // 64-cell grid exactly partitions every z4–z10 descendant. Other grids
+        // conservatively omit a partially intersecting coarse spawn cell; raster
+        // demand and sampling still retain its complete parent page.
+        for (let y = minimumY; y < maximumY; y++) {
+            mask.fill(1, y * cellsPerPageEdge + minimumX,
+                y * cellsPerPageEdge + maximumX)
+        }
+    }
+    return mask
 }
 
 function completeCoverageFallback(

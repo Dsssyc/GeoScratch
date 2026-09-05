@@ -4,6 +4,8 @@
 
 Accepted. Refines ADR-098's presentation waiting behavior. Changes are example-local;
 Flow Layer and the Geo/Scratch package APIs remain unchanged.
+ADR-100 supersedes this decision's removal of overlapping raster descendants, which
+incorrectly applied a geometry-cover constraint to multi-resolution residency.
 
 ## Date
 
