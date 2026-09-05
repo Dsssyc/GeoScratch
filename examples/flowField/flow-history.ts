@@ -22,6 +22,7 @@ import type {
     UploadCommand,
 } from 'geoscratch/scratch'
 import historyShader from './shaders/history.wgsl?raw'
+import historySupportShader from './shaders/history-support.wgsl?raw'
 import presentationShader from './shaders/presentation.wgsl?raw'
 import { flowScreenProjectionWgsl, flowScreenViewValues } from './flow-screen-projection.ts'
 import type { FlowScreenViewValues } from './flow-screen-projection.ts'
@@ -65,6 +66,7 @@ export type FlowHistoryFacts = Readonly<{
 export type FlowHistory = Readonly<{
     resize(size: SurfaceSize): Promise<void>
     reset(): void
+    presentRetained(builder: SubmissionBuilder, view: GeoViewSnapshot): FlowHistoryFrame
     encode(
         builder: SubmissionBuilder,
         view: GeoViewSnapshot,
@@ -252,7 +254,15 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
         }, { label: 'Flow Field history B presentation' }))
         const historyModule = own(await runtime.createShaderModule({
             label: 'Flow Field history shader',
-            sourceParts: [ { code: temporal.wgsl }, { code: screenProjection }, { code: historyShader } ],
+            sourceParts: [ { code: temporal.wgsl }, { code: screenProjection },
+                { code: historySupportShader }, { code: historyShader } ],
+        }))
+        const retainedModule = own(await runtime.createShaderModule({
+            label: 'Flow Field retained history shader',
+            sourceParts: [
+                { code: 'fn FlowHistory_supported(uv: vec2f) -> bool { return true; }' },
+                { code: historyShader },
+            ],
         }))
         const presentationModule = own(await runtime.createShaderModule({
             label: 'Flow Field history presentation shader',
@@ -271,6 +281,12 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
             fragment: { module: historyModule, entryPoint: 'fMain' },
             layoutRequirements: [ requirement ],
         }))
+        const retainedProgram = own(runtime.createProgram({
+            label: 'Flow Field retained history program',
+            vertex: { module: retainedModule, entryPoint: 'vMain' },
+            fragment: { module: retainedModule, entryPoint: 'fMain' },
+            layoutRequirements: [ requirement ],
+        }))
         const presentationProgram = own(runtime.createProgram({
             label: 'Flow Field history presentation program',
             vertex: { module: presentationModule, entryPoint: 'vMain' },
@@ -282,6 +298,12 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
             layout: { mode: 'explicit', bindLayouts: [ uniformLayout, temporal.layout, historyLayout ] },
             targets: [ { format: historyA.format } ],
             primitive: { topology: 'triangle-strip' },
+            depthStencil: { format: 'depth32float', depthWriteEnabled: false, depthCompare: 'less' },
+        }))
+        const retainedPipeline = own(await runtime.createRenderPipeline({
+            label: 'Flow Field retained history pipeline', program: retainedProgram,
+            layout: { mode: 'explicit', bindLayouts: [ uniformLayout, historyLayout ] },
+            targets: [{ format: historyA.format }], primitive: { topology: 'triangle-strip' },
             depthStencil: { format: 'depth32float', depthWriteEnabled: false, depthCompare: 'less' },
         }))
         const presentationPipeline = own(await runtime.createRenderPipeline({
@@ -338,6 +360,12 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
             target: 'B',
         })
         const directions = Object.freeze([ directionBToA, directionAToB ])
+        const retainedCommands = [
+            own(composeCommand(runtime, retainedPipeline, uniformSet, historyBToA,
+                uniformBuffer, historyB, undefined, 'Reproject retained Flow history B to A')),
+            own(composeCommand(runtime, retainedPipeline, uniformSet, historyAToB,
+                uniformBuffer, historyA, undefined, 'Reproject retained Flow history A to B')),
+        ]
         const historyBindSets = Object.freeze([
             uniformSet, historyBToA, historyAToB, presentationA, presentationB,
         ])
@@ -347,11 +375,11 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
             uniformUpload,
             bindLayouts: Object.freeze([ uniformLayout, historyLayout, presentationLayout ]),
             bindSets: historyBindSets,
-            shaderModules: Object.freeze([ historyModule, presentationModule ]),
-            programs: Object.freeze([ historyProgram, presentationProgram ]),
-            pipelines: Object.freeze([ historyPipeline, presentationPipeline ]),
+            shaderModules: Object.freeze([ historyModule, retainedModule, presentationModule ]),
+            programs: Object.freeze([ historyProgram, retainedProgram, presentationProgram ]),
+            pipelines: Object.freeze([ historyPipeline, retainedPipeline, presentationPipeline ]),
             passes: Object.freeze([ clearPass, passBToA, passAToB, presentationPass ]),
-            commands: Object.freeze([ presentA, presentB ]),
+            commands: Object.freeze([ presentA, presentB, ...retainedCommands ]),
         })
         let composePair: Readonly<{
             bindSet: BindSet
@@ -389,18 +417,19 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
             view: GeoViewSnapshot,
             content: readonly DrawCommand[] = [],
             accumulate = true,
-            prepared: FlowTemporalReadyBindingFrame
+            prepared?: FlowTemporalReadyBindingFrame
         ): FlowHistoryFrame {
             assertActive()
             if (resizePending) throw new Error('Flow Field history cannot encode during resize')
             if (builder?.runtime !== runtime) {
                 throw new TypeError('Flow Field history requires a same-runtime SubmissionBuilder')
             }
-            if (prepared?.state !== 'ready' || prepared.bindSet.runtime !== runtime) {
+            if (prepared !== undefined && (prepared.state !== 'ready' || prepared.bindSet.runtime !== runtime)) {
                 throw new TypeError('Flow Field history requires the current same-runtime temporal frame')
             }
             const screenView = flowScreenViewValues(view, options.addressCodec)
-            const compose = prepareComposePair(prepared)[directionIndex]!
+            const compose = prepared === undefined ? retainedCommands[directionIndex]!
+                : prepareComposePair(prepared)[directionIndex]!
             if (!accumulate) clearPending = true
             const currentView = historyViewFacts(view)
             const cameraChanged = previousView !== undefined && !sameView(previousView, currentView)
@@ -416,7 +445,7 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
             }
             codec.write(uniformBytes, uniformValues(previousView, currentView, {
                 mode,
-                trailDecay,
+                trailDecay: prepared === undefined ? 1 : trailDecay,
                 trailCutoff,
                 historyValid,
                 historyReprojecting,
@@ -513,7 +542,11 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
             clearPending = true
         }
 
-        return Object.freeze({ resize, reset, encode, facts, dispose })
+        function presentRetained(builder: SubmissionBuilder, view: GeoViewSnapshot): FlowHistoryFrame {
+            return encode(builder, view, [], true)
+        }
+
+        return Object.freeze({ resize, reset, encode, presentRetained, facts, dispose })
     } catch (error) {
         const failures: unknown[] = [ error ]
         for (const resource of construction.reverse()) {
@@ -574,19 +607,19 @@ function composeCommand(
     historySet: BindSet,
     uniformBuffer: BufferResource,
     source: TextureResource,
-    prepared: FlowTemporalReadyBindingFrame,
+    prepared: FlowTemporalReadyBindingFrame | undefined,
     label: string
 ): DrawCommand {
     return runtime.createDrawCommand({
         label,
         pipeline,
-        bindSets: [ { set: uniformSet }, { set: prepared.bindSet }, { set: historySet } ],
+        bindSets: [ { set: uniformSet }, ...(prepared ? [{set: prepared.bindSet}] : []), { set: historySet } ],
         count: { vertexCount: 4 },
         resources: {
             read: [
                 { resource: uniformBuffer, contentEpoch: 'current-at-step' },
                 { resource: source, contentEpoch: 'current-at-step' },
-                ...Array.from(new Set(prepared.resources), resource => ({
+                ...Array.from(new Set(prepared?.resources ?? []), resource => ({
                     resource, contentEpoch: 'current-at-step' as const,
                 })),
             ],

@@ -18,6 +18,7 @@ const model = webMercatorVirtualRasterField({
     fieldKind: 'vector', channels: 2, sampleType: 'float32', gpuFormat: 'rg32float', interpolation: 'linear',
 })
 const historyShader = await readFile(new URL('../../examples/flowField/shaders/history.wgsl', import.meta.url), 'utf8')
+const historySupportShader = await readFile(new URL('../../examples/flowField/shaders/history-support.wgsl', import.meta.url), 'utf8')
 const projectionShader = flowScreenProjectionWgsl(model.addressCodec)
 const temporal = temporalVelocityWgslModule(model, model, {
     group: 1, currentPageTableBinding: 0, currentAtlasBinding: 1, nextPageTableBinding: 2, nextAtlasBinding: 3,
@@ -33,8 +34,8 @@ fn FlowVelocity_sample(position: FlowVelocityAddressFixedPosition, level: u32, t
     return FlowVelocitySample(u32(testVelocity.z), testVelocity.xy, speed, speed >= temporal.activityKill);
 }`
 const testCode = model.addressCodec.wgslModule({ namespace: 'FlowVelocityAddress' }) + '\n' +
-    fixture + '\n' + projectionShader + '\n' + historyShader
-const realCode = temporal.code + '\n' + projectionShader + '\n' + historyShader
+    fixture + '\n' + projectionShader + '\n' + historySupportShader + '\n' + historyShader
+const realCode = temporal.code + '\n' + projectionShader + '\n' + historySupportShader + '\n' + historyShader
 const camera = model.addressCodec.fromProjected([ 13_360_000.125, 3_503_000.25 ]).fixed.limbs
 const server = createServer((_request, response) => {
     response.setHeader('content-type', 'text/html')

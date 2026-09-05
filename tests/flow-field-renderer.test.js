@@ -24,7 +24,7 @@ describe('Flow Field renderer composition', () => {
         const source = fs.readFileSync(sourcePath, 'utf8')
         const publish = source.indexOf('encodePublications(builder, publications)')
         const demand = source.indexOf('const demandFrame = demand.encode(builder, view, prepared.temporal)')
-        const pack = source.indexOf('const candidates = packFlowCandidateCells(')
+        const pack = source.indexOf('packedCandidates = packFlowCandidateCells(')
         const spawn = source.indexOf('spawn.encode(')
         const particles = source.indexOf('particles.encode(builder, particleSpawn.bindings, prepared, view)')
         const contour = source.indexOf('contour.encode(builder, candidates')

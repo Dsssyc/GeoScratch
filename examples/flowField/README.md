@@ -37,3 +37,8 @@ node tests/browser/scratch-flow-field.mjs
 With Vite and the tile service already running,
 `node tests/browser/flow-field-reference-appearance.mjs` saves both examples at
 the same camera for visual comparison without changing the reference.
+
+`node tests/browser/flow-field-camera.mjs` checks continuous zoom, paused zoom,
+retained-history reprojection during delayed time loading, and steady animation
+throughput. Large view demands select a coarser complete cover within the existing
+page budget; they do not increase the budget or discard arbitrary visible tiles.

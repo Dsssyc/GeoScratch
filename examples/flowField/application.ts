@@ -302,7 +302,8 @@ export async function startFlowFieldApplication(
             const windowState = temporalWindow.snapshot()
             if (windowState.state === 'loading') {
                 await renderer.suspendTemporal()
-                return idleFrameResult(setLoadingFrame(current, handshake))
+                const retained = await renderer.presentRetained(frameNumber, captured)
+                return { ...retained, value: setLoadingFrame(current, handshake) }
             }
             if (windowState.state === 'gap' && current.selection.kind === 'gap') {
                 await renderer.suspendTemporal()
@@ -343,7 +344,8 @@ export async function startFlowFieldApplication(
                 if (latestWindow.state === 'gap' && latest.selection.kind === 'gap') {
                     return idleFrameResult(setGapFrame(latest, latestHandshake))
                 }
-                return idleFrameResult(setLoadingFrame(latest, latestHandshake))
+                const retained = await renderer.presentRetained(frameNumber, captured)
+                return { ...retained, value: setLoadingFrame(latest, latestHandshake) }
             }
         },
         onObserved({ value }) {

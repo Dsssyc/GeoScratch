@@ -153,6 +153,10 @@ export type FlowFieldRenderer = Readonly<{
         timeline: FlowTimelineSnapshot
     ): Promise<GeoFrameResult<FlowFieldRendererFrame>>
     suspendTemporal(): Promise<void>
+    presentRetained(
+        frameNumber: number,
+        capture: GeoViewSourceCapture<MapLibrePlanarCameraState>
+    ): Promise<GeoFrameResult<undefined>>
     setPresentation(presentation: FlowFieldPresentation): void
     resetVisuals(): void
     flushResidency(): Promise<void>
@@ -322,6 +326,8 @@ export async function createFlowFieldRenderer(
         let lastTemporalSignature = ''
         let requestedLevel = 0
         let presentedPairGeneration = 0
+        let packedCells: FlowDemandFrame['candidateCells'] | undefined
+        let packedCandidates = new Uint8Array(new ArrayBuffer(0))
 
         async function render(
             frameNumber: number,
@@ -409,6 +415,7 @@ export async function createFlowFieldRenderer(
                 const builder = runtime.createSubmission({ validation: 'throw' })
                 encodePublications(builder, publications)
 
+                const needsViewFollowUp = !viewDemand.hasFeedbackFor(view)
                 const demandFrame = demand.encode(builder, view, prepared.temporal)
                 requestedLevel = demandFrame.requestedLevel
                 if (presentedPairGeneration !== prepared.pairGeneration &&
@@ -419,11 +426,13 @@ export async function createFlowFieldRenderer(
                 const presentationReady = framePresentation.view !== 'particles' ||
                     presentedPairGeneration === prepared.pairGeneration
                 renderView.encode(builder, view)
-                const candidates = packFlowCandidateCells(
-                    demandFrame.candidateCells,
-                    model.addressCodec,
-                    cellsPerPageEdge
-                )
+                if (packedCells !== demandFrame.candidateCells) {
+                    packedCandidates = packFlowCandidateCells(
+                        demandFrame.candidateCells, model.addressCodec, cellsPerPageEdge
+                    )
+                    packedCells = demandFrame.candidateCells
+                }
+                const candidates = packedCandidates
                 const supportSnapshot = Object.freeze({
                     generation: frameTemporal.pairGeneration,
                     currentSnapshotEpoch: frameTemporal.lowerSnapshotEpoch,
@@ -453,7 +462,7 @@ export async function createFlowFieldRenderer(
                     framePresentation.view === 'particles' ? [particleRender.draw] : [],
                     framePresentation.view === 'particles' && framePresentation.trails,
                     prepared
-                ) : undefined
+                ) : history.presentRetained(builder, view)
                 if (framePresentation.view !== 'particles') {
                     inspector.encode(builder, view, prepared, framePresentation)
                 }
@@ -481,7 +490,7 @@ export async function createFlowFieldRenderer(
                 return Object.freeze({
                     observation,
                     settlement,
-                    needsFollowUp: false,
+                    needsFollowUp: needsViewFollowUp || prepared.requestedLevel !== requestedLevel,
                     value: Object.freeze({
                         state: 'rendered' as const,
                         submitted,
@@ -536,6 +545,46 @@ export async function createFlowFieldRenderer(
             constructionInFlight = new Promise(resolve => { finishConstruction = resolve })
             try {
                 await temporalBindings.suspend()
+            } finally {
+                finishConstruction()
+                constructionInFlight = undefined
+            }
+        }
+
+        async function presentRetained(
+            frameNumber: number,
+            capture: GeoViewSourceCapture<MapLibrePlanarCameraState>
+        ): Promise<GeoFrameResult<undefined>> {
+            assertActive()
+            if (constructionInFlight !== undefined || frameInFlight !== undefined) {
+                throw new Error('Flow retained presentation requires an idle renderer')
+            }
+            let finishConstruction!: () => void
+            constructionInFlight = new Promise(resolve => { finishConstruction = resolve })
+            try {
+                const nextSize = flowSurfaceSize(capture.presentationSize)
+                if (!sameSize(size, nextSize)) {
+                    surface.resize(nextSize)
+                    await history.resize(nextSize)
+                    size = nextSize
+                }
+                const view = flowFieldViewAdapter.read(capture.view, {
+                    frameEpoch: frameNumber,
+                    residencySnapshotEpoch: temporalResidencyEpoch,
+                })
+                const builder = runtime.createSubmission({ validation: 'throw' })
+                history.presentRetained(builder, view)
+                const submitted = builder.submit()
+                let observation: Promise<unknown>
+                observation = observeFlowSubmittedWork(submitted).finally(() => {
+                    if (frameInFlight === observation) frameInFlight = undefined
+                })
+                frameInFlight = observation
+                frameCount = frameNumber
+                return Object.freeze({
+                    observation, needsFollowUp: false, value: undefined,
+                    settlement: Promise.resolve({ residencyWorkCount: 0, needsFollowUp: false }),
+                })
             } finally {
                 finishConstruction()
                 constructionInFlight = undefined
@@ -644,7 +693,7 @@ export async function createFlowFieldRenderer(
         }
 
         return Object.freeze({
-            render, suspendTemporal, setPresentation, resetVisuals,
+            render, suspendTemporal, presentRetained, setPresentation, resetVisuals,
             flushResidency, facts, dispose,
         })
     } catch (error) {

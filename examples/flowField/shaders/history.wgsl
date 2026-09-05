@@ -125,27 +125,7 @@ fn vMain(@builtin(vertex_index) vertexIndex: u32) -> VertexOutput {
 
 @fragment
 fn fMain(input: VertexOutput) -> @location(0) vec4f {
-    let ground = FlowScreen_ground_position(
-        input.texcoords,
-        cleanupUniform.currentInverseMatrix,
-        cleanupUniform.cameraX,
-        cleanupUniform.cameraY,
-        cleanupUniform.cameraZ,
-    );
-    if (ground.valid == 0u) {
-        return vec4f(0.0);
-    }
-    let currentFlow = FlowVelocity_sample(
-        ground.position,
-        cleanupUniform.requestedLevel,
-        FlowVelocityTemporal(cleanupUniform.progress, cleanupUniform.activityKill),
-    );
-    // History has the same current support as particle advection. Formerly
-    // moving pixels disappear immediately when the temporal field turns zero.
-    if ((currentFlow.status != 1u && currentFlow.status != 2u) ||
-        !currentFlow.advectable || !(currentFlow.speed > 0.0)) {
-        return vec4f(0.0);
-    }
+    if (!FlowHistory_supported(input.texcoords)) { return vec4f(0.0); }
     let dim = vec2f(textureDimensions(historyTexture, 0));
     let pixel = vec2i(correctedPixel(dim * input.texcoords, dim));
     var color = textureLoad(historyTexture, pixel, 0);

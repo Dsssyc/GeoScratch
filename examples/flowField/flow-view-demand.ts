@@ -62,6 +62,7 @@ export type FlowViewDemandAdapter = Readonly<{
     projection: FlowDemandProjectionHook<FlowViewDemandCoverFrame>
     observe(submitted: SubmittedWork): Promise<FlowViewDemandSettlement>
     settlement(): Promise<FlowViewDemandSettlement> | undefined
+    hasFeedbackFor(view: GeoViewSnapshot): boolean
     facts(): FlowViewDemandFacts
     dispose(): Promise<void>
 }>
@@ -132,6 +133,7 @@ export async function createFlowViewDemandAdapter(
     let latestDemandFeedback: GpuWebMercatorQuadDemandProjectionFeedback | undefined
     let latestSettlement: Promise<FlowViewDemandSettlement> | undefined
     let latestSettledFrameEpoch = 0
+    let latestSettledView: GeoViewSnapshot | undefined
     let disposed = false
     let disposePromise: Promise<void> | undefined
 
@@ -213,6 +215,7 @@ export async function createFlowViewDemandAdapter(
             }
             latestDemandFeedback = demandFeedback
             latestSettledFrameEpoch = active.view.frameEpoch
+            latestSettledView = active.view
             return Object.freeze({
                 sourceView: active.view,
                 coverFeedback,
@@ -229,6 +232,10 @@ export async function createFlowViewDemandAdapter(
 
     function settlement(): Promise<FlowViewDemandSettlement> | undefined {
         return latestSettlement
+    }
+
+    function hasFeedbackFor(view: GeoViewSnapshot): boolean {
+        return latestSettledView !== undefined && flowViewDecisionEquals(latestSettledView, view)
     }
 
     function facts(): FlowViewDemandFacts {
@@ -275,7 +282,19 @@ export async function createFlowViewDemandAdapter(
         projection: projectionHook,
         observe,
         settlement,
+        hasFeedbackFor,
         facts,
         dispose,
     })
+}
+
+/** Compares camera decisions independently of per-frame residency and submission epochs. */
+export function flowViewDecisionEquals(left: GeoViewSnapshot, right: GeoViewSnapshot): boolean {
+    const keys = [ 'clipFromRelativeWorld', 'cameraHigh', 'cameraLow', 'referenceViewport' ] as const
+    return left.zoomHint === right.zoomHint &&
+        keys.every(key => {
+            const a = left[key]
+            const b = right[key]
+            return a.length === b.length && a.every((value, index) => value === b[index])
+        })
 }
