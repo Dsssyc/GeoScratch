@@ -23,6 +23,35 @@ const coverage = tileMatrixCoverage({
     } ],
 })
 
+// Same published spatial limits as the z10 collection, independent of local data files.
+const collectionCoverage = tileMatrixCoverage({
+    tileMatrixSet: WebMercatorQuad,
+    limits: [
+        ['4', 6, 6, 13, 13], ['5', 12, 13, 26, 26], ['6', 25, 26, 53, 53],
+        ['7', 51, 53, 106, 107], ['8', 103, 106, 213, 215],
+        ['9', 207, 212, 426, 431], ['10', 414, 424, 853, 862],
+    ].map(([matrixId, minTileRow, maxTileRow, minTileCol, maxTileCol]) => ({
+        matrixId, minTileRow, maxTileRow, minTileCol, maxTileCol,
+    })),
+})
+
+function collectionOptions(view, overrides = {}) {
+    const demands = []
+    for (let tileRow = 417; tileRow <= 419; tileRow++) {
+        for (let tileCol = 856; tileCol <= 858; tileCol++) {
+            demands.push(projected(view, { desiredSampleLevel: 10, sourceLevelCeiling: 10,
+                requestMatrixLevel: 10, tileRow, tileCol }))
+        }
+    }
+    return candidateOptions(view, demands, {
+        addressSpace: addressSpace('flow-collection-candidates', collectionCoverage),
+        maximumDisplacementMeters: 3.6142587121574894 * 50 * 4,
+        maximumCandidatePages: 47,
+        maximumCandidateCells: 47 * 4,
+        ...overrides,
+    })
+}
+
 function addressSpace(id, selectedCoverage = coverage) {
 
     return virtualRasterTileAddressSpace({ id, coverage: selectedCoverage })
@@ -243,6 +272,100 @@ describe('Flow Field demand', () => {
 
         expect(candidates.candidatePages).to.have.length(49)
         expect(candidates.candidateCells).to.have.length(49)
+    })
+
+    it('coarsens complete demand including its halo instead of exceeding the 47-page budget', () => {
+        const view = viewAt(4, 4)
+        const options = collectionOptions(view)
+        const result = createFlowDemandCandidates(options)
+
+        // Nine z10 pages need a 7x7 halo (49 pages), which previously threw.
+        expect(result.candidatePages).to.have.length(30)
+        expect(result.candidatePages.every(page => page.tile.matrixId === '9')).to.equal(true)
+        expect(result.requestedLevel).to.equal(options.addressSpace.levelForMatrix('9'))
+        expect(result.candidateCells.every(cell => cell.requestedLevel === result.requestedLevel))
+            .to.equal(true)
+        for (const demand of options.batch.demands) {
+            expect(result.candidatePages.some(page => page.tile.tileRow === Math.floor(demand.tileRow / 2) &&
+                page.tile.tileCol === Math.floor(demand.tileCol / 2))).to.equal(true)
+        }
+        const reversed = createFlowDemandCandidates({ ...options,
+            batch: { ...options.batch, demands: [...options.batch.demands].reverse() } })
+        expect(reversed).to.deep.equal(result)
+    })
+
+    it('uses complete published coverage after truncated projection feedback', () => {
+        const view = viewAt(4, 4)
+        const options = collectionOptions(view)
+        const result = createFlowDemandCandidates({ ...options,
+            batch: { ...options.batch, demands: options.batch.demands.slice(0, 1), overflowCount: 12 } })
+
+        expect(result.candidatePages).to.have.length(36)
+        expect(result.candidatePages.every(page => page.tile.matrixId === '9')).to.equal(true)
+        expect(new Set(result.candidatePages.map(page => page.tile.tileRow)).size).to.equal(6)
+        expect(new Set(result.candidatePages.map(page => page.tile.tileCol)).size).to.equal(6)
+        const smaller = createFlowDemandCandidates({ ...options, maximumCandidateCells: 12 * 4,
+            batch: { ...options.batch, demands: [], overflowCount: 100 } })
+        expect(smaller.candidatePages).to.have.length(12)
+        expect(smaller.candidatePages.every(page => page.tile.matrixId === '8')).to.equal(true)
+    })
+
+    it('keeps source ceiling and desired precision while executing the coarsened pages', async () => {
+        const view = viewAt(4, 4)
+        const options = collectionOptions(view)
+        const runtime = fakeRuntime('budget', 'budget-demand', 47, collectionCoverage)
+        const graph = hooks(options.batch)
+        const coordinator = createFlowDemandCoordinator({ ...options,
+            cover: graph.cover, projection: graph.projection })
+        const frame = coordinator.encode({}, view, readyCapture(runtime, runtime))
+        await coordinator.reconcile(frame)
+        expect(runtime.reconciliations[0].demands.every(demand =>
+            demand.page.tile.matrixId === '9' && demand.desiredSampleLevel === 10 &&
+            demand.sourceLevelCeiling === 10)).to.equal(true)
+        await coordinator.dispose()
+    })
+
+    it('keeps mixed-level candidate footprints prefix-free', () => {
+        const view = viewAt(4, 4)
+        const options = collectionOptions(view)
+        const result = createFlowDemandCandidates({ ...options, batch: { ...options.batch,
+            demands: [...options.batch.demands, projected(view, { requestMatrixLevel: 8,
+                desiredSampleLevel: 8, sourceLevelCeiling: 10, tileRow: 104, tileCol: 214 })] } })
+        for (const page of result.candidatePages) {
+            expect(result.candidatePages.some(other => {
+                const delta = Number(page.tile.matrixId) - Number(other.tile.matrixId)
+                return delta > 0 && Math.floor(page.tile.tileRow / 2 ** delta) === other.tile.tileRow &&
+                    Math.floor(page.tile.tileCol / 2 ** delta) === other.tile.tileCol
+            })).to.equal(false)
+        }
+        expect(result.candidatePages.length).to.be.at.most(47)
+    })
+
+    it('reuses static spatial cells across epochs but refreshes camera priority and validates provenance', async () => {
+        const view = viewAt(4, 0)
+        const runtime = fakeRuntime('cached', 'cached-demand')
+        const graph = hooks(batch(view, [projected(view)]))
+        const coordinator = createFlowDemandCoordinator({ cover: graph.cover,
+            projection: graph.projection, maximumDisplacementMeters: 0,
+            maximumCandidatePages: 64, cellsPerPageEdge: 2, maximumCandidateCells: 256 })
+        const temporal = readyCapture(runtime, runtime)
+        const first = coordinator.encode({}, view, temporal)
+        const secondView = viewAt(4, 0, { frameEpoch: 13, residencySnapshotEpoch: 8 })
+        graph.setBatch(batch(secondView, [projected(secondView)]))
+        const second = coordinator.encode({}, secondView, temporal)
+        expect(second.candidateCells).to.equal(first.candidateCells)
+        await coordinator.reconcile(second)
+        expect(runtime.reconciliations[0].demands[0].source.frameEpoch).to.equal(13)
+        const movedView = viewAt(4, 1, { frameEpoch: 14, residencySnapshotEpoch: 8 })
+        graph.setBatch(batch(movedView, [projected(movedView)]))
+        const moved = coordinator.encode({}, movedView, temporal)
+        expect(moved.candidateCells).not.to.equal(first.candidateCells)
+        await coordinator.reconcile(moved)
+        expect(runtime.reconciliations[1].demands.map(demand => demand.priority.score))
+            .not.to.deep.equal(runtime.reconciliations[0].demands.map(demand => demand.priority.score))
+        graph.setBatch(batch(movedView, [projected(secondView)]))
+        expect(() => coordinator.encode({}, movedView, temporal)).to.throw(/frame provenance/i)
+        await coordinator.dispose()
     })
 
     it('fans one spatial set through two captured required runtimes with provenance', async () => {

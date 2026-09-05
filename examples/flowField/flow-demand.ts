@@ -156,6 +156,11 @@ export function createFlowDemandCoordinator<CoverFrame>(
     const owner = Object.freeze({ kind: 'flow-demand-coordinator-owner' })
     let generation = 0
     let latestFrame: FlowDemandFrame | undefined
+    let cachedCandidates: Readonly<{
+        addressSpace: VirtualRasterAddressSpace
+        key: string
+        build: CandidateBuild
+    }> | undefined
     let disposed = false
     let disposePromise: Promise<void> | undefined
 
@@ -169,22 +174,30 @@ export function createFlowDemandCoordinator<CoverFrame>(
         const members = captureMembers(temporal)
         const coverFrame = options.cover.encode(builder, view)
         const projected = options.projection.encode(builder, coverFrame, view)
-        const candidates = buildCandidates({
+        const candidateOptions = {
             view,
             batch: projected,
             addressSpace: members[0]!.runtime.addressSpace,
             maximumDisplacementMeters: options.maximumDisplacementMeters,
-            maximumCandidatePages: options.maximumCandidatePages,
+            maximumCandidatePages: Math.min(options.maximumCandidatePages,
+                ...members.map(member => member.runtime.viewDemandProducer.maxDemands)),
             cellsPerPageEdge: options.cellsPerPageEdge,
             maximumCandidateCells: options.maximumCandidateCells,
-        })
-        for (const member of members) {
-            if (candidates.spatial.length > member.runtime.viewDemandProducer.maxDemands) {
-                throw new RangeError(
-                    'Flow demand candidate count exceeds a temporal runtime producer capacity'
-                )
-            }
         }
+        // Epochs still validate on cache hits. Only immutable spatial work is reused;
+        // each frame and producer demand receives its current provenance below.
+        validateCandidateOptions(candidateOptions)
+        validateBatchDemands(candidateOptions)
+        const key = candidateCacheKey(candidateOptions)
+        if (cachedCandidates?.addressSpace !== candidateOptions.addressSpace ||
+            cachedCandidates.key !== key) {
+            cachedCandidates = Object.freeze({
+                addressSpace: candidateOptions.addressSpace,
+                key,
+                build: buildCandidates(candidateOptions),
+            })
+        }
+        const candidates = cachedCandidates.build
         const frame = Object.freeze({
             view,
             generation: ++generation,
@@ -241,6 +254,7 @@ export function createFlowDemandCoordinator<CoverFrame>(
 
         if (disposePromise !== undefined) return disposePromise
         disposed = true
+        cachedCandidates = undefined
         disposePromise = disposeHooks(options)
         return disposePromise
     }
@@ -256,10 +270,76 @@ export function createFlowDemandCoordinator<CoverFrame>(
 function buildCandidates(options: FlowDemandCandidateOptions): CandidateBuild {
 
     validateCandidateOptions(options)
+    validateBatchDemands(options)
+    const coverage = options.addressSpace.tileCoverage!
+    const pageCapacity = Math.min(options.maximumCandidatePages,
+        Math.floor(options.maximumCandidateCells / options.cellsPerPageEdge ** 2))
+    const maximumRequestedMatrix = Math.max(...options.batch.demands
+        .map(demand => demand.requestMatrixLevel), Number(coverage.limits[0]!.matrixId))
+    let selected: readonly SpatialCandidate[] | undefined
+    if (options.batch.overflowCount > 0) {
+        // Truncated feedback cannot describe the complete viewport. Cover the whole
+        // declared source at the finest level that fits instead of silently dropping it.
+        selected = completeCoverageFallback(options, pageCapacity)
+    } else {
+        for (const limit of [...coverage.limits].reverse()) {
+            const cap = Number(limit.matrixId)
+            if (cap > maximumRequestedMatrix) continue
+            selected = expandCandidates(options, cap, pageCapacity)
+            if (selected !== undefined) break
+        }
+    }
+    if (selected === undefined) {
+        throw new RangeError('Flow demand capacity cannot contain its minimum published cover')
+    }
+    const spatial = Object.freeze([...selected].sort(compareSpatial))
+    const candidatePages = Object.freeze(spatial.map(candidate =>
+        options.addressSpace.pageFromTile({
+            matrixId: String(candidate.matrixLevel),
+            tileRow: candidate.tileRow,
+            tileCol: candidate.tileCol,
+        })
+    ))
+    const candidateCells: FlowCandidateCell[] = []
+    for (let pageIndex = 0; pageIndex < candidatePages.length; pageIndex++) {
+        const page = candidatePages[pageIndex]!
+        const requestedLevel = options.addressSpace.levelForMatrix(
+            String(spatial[pageIndex]!.matrixLevel)
+        )
+        for (let cellY = 0; cellY < options.cellsPerPageEdge; cellY++) {
+            for (let cellX = 0; cellX < options.cellsPerPageEdge; cellX++) {
+                candidateCells.push(Object.freeze({ page, requestedLevel, cellX, cellY }))
+            }
+        }
+    }
+    const requestedLevel = candidateCells.length === 0 ? 0 : candidateCells.reduce(
+        (finest, candidate) => Math.min(finest, candidate.requestedLevel),
+        options.addressSpace.levelCount - 1
+    )
+    return Object.freeze({
+        public: Object.freeze({ requestedLevel, candidatePages,
+            candidateCells: Object.freeze(candidateCells) }),
+        spatial,
+    })
+}
+
+function expandCandidates(
+    options: FlowDemandCandidateOptions,
+    cap: number,
+    capacity: number
+): readonly SpatialCandidate[] | undefined {
+
     const coverage = options.addressSpace.tileCoverage!
     const spatialByKey = new Map<string, SpatialCandidate>()
-    for (const demand of options.batch.demands) {
-        validateProjectedDemand(demand, options.view)
+    const demands = options.batch.demands.map(demand => {
+        const requestMatrixLevel = Math.min(cap, demand.requestMatrixLevel)
+        const divisor = 2 ** (demand.requestMatrixLevel - requestMatrixLevel)
+        return { ...demand, requestMatrixLevel,
+            tileRow: Math.floor(demand.tileRow / divisor),
+            tileCol: Math.floor(demand.tileCol / divisor) }
+    }).sort((left, right) => left.requestMatrixLevel - right.requestMatrixLevel ||
+        left.tileRow - right.tileRow || left.tileCol - right.tileCol)
+    for (const demand of demands) {
         const matrix = WebMercatorQuad.matrix(String(demand.requestMatrixLevel))
         const pageWorldExtent = matrix.cellSize * matrix.tileWidth
         const displacementPages = Math.ceil(
@@ -288,8 +368,9 @@ function buildCandidates(options: FlowDemandCandidateOptions): CandidateBuild {
             matrix.matrixWidth,
             limit.minTileCol,
             limit.maxTileCol,
-            options.maximumCandidatePages
+            capacity
         )
+        if (tileColumns === undefined) return undefined
         for (let tileRow = minimumRow; tileRow <= maximumRow; tileRow++) {
             for (const tileCol of tileColumns) {
                 const candidate = Object.freeze({
@@ -306,74 +387,71 @@ function buildCandidates(options: FlowDemandCandidateOptions): CandidateBuild {
                         tileCol
                     ),
                 })
+                // Coarse demands are inserted first. Retain their complete footprint
+                // and do not spend more slots on overlapping descendants.
+                let covered = false
+                for (const ancestor of coverage.limits) {
+                    const level = Number(ancestor.matrixId)
+                    if (level >= candidate.matrixLevel) break
+                    const divisor = 2 ** (candidate.matrixLevel - level)
+                    const parentKey = spatialKey({ matrixLevel: level,
+                        tileRow: Math.floor(tileRow / divisor),
+                        tileCol: Math.floor(tileCol / divisor) })
+                    const parent = spatialByKey.get(parentKey)
+                    if (parent === undefined) continue
+                    if (candidate.requestedLevel > parent.requestedLevel) {
+                        spatialByKey.set(parentKey, Object.freeze({ ...parent,
+                            requestedLevel: candidate.requestedLevel,
+                            sourceLevelCeiling: Math.max(parent.sourceLevelCeiling,
+                                candidate.sourceLevelCeiling),
+                            priorityScore: cameraPriority(options.view, candidate.requestedLevel,
+                                parent.matrixLevel, parent.tileRow, parent.tileCol),
+                        }))
+                    }
+                    covered = true
+                    break
+                }
+                if (covered) continue
                 const key = spatialKey(candidate)
                 const existing = spatialByKey.get(key)
                 if (existing === undefined || betterCandidate(candidate, existing)) {
                     spatialByKey.set(key, candidate)
                 }
-                if (spatialByKey.size > options.maximumCandidatePages) {
-                    throw new RangeError('Flow demand candidate page capacity was exceeded')
-                }
+                if (spatialByKey.size > capacity) return undefined
             }
         }
     }
 
-    const spatial = Object.freeze([ ...spatialByKey.values() ].sort(compareSpatial))
-    const candidatePages = Object.freeze(spatial.map(candidate =>
-        options.addressSpace.pageFromTile({
-            matrixId: String(candidate.matrixLevel),
-            tileRow: candidate.tileRow,
-            tileCol: candidate.tileCol,
-        })
-    ))
-    const cellCount = candidatePages.length * options.cellsPerPageEdge ** 2
-    if (!Number.isSafeInteger(cellCount) || cellCount > options.maximumCandidateCells) {
-        throw new RangeError('Flow demand candidate cell capacity was exceeded')
-    }
-    const candidateCells: FlowCandidateCell[] = []
-    for (let pageIndex = 0; pageIndex < candidatePages.length; pageIndex++) {
-        const page = candidatePages[pageIndex]!
-        const requestedLevel = candidateSampleLevel(
-            options.addressSpace,
-            spatial[pageIndex]!
-        )
-        for (let cellY = 0; cellY < options.cellsPerPageEdge; cellY++) {
-            for (let cellX = 0; cellX < options.cellsPerPageEdge; cellX++) {
-                candidateCells.push(Object.freeze({
-                    page,
-                    requestedLevel,
-                    cellX,
-                    cellY,
+    return [...spatialByKey.values()]
+}
+
+function completeCoverageFallback(
+    options: FlowDemandCandidateOptions,
+    capacity: number
+): readonly SpatialCandidate[] | undefined {
+
+    const coverage = options.addressSpace.tileCoverage!
+    const sourceLevelCeiling = Number(coverage.limits.at(-1)!.matrixId)
+    const requestedLevel = Math.max(sourceLevelCeiling,
+        ...options.batch.demands.map(demand => demand.desiredSampleLevel))
+    for (const limit of [...coverage.limits].reverse()) {
+        const count = (limit.maxTileRow - limit.minTileRow + 1) *
+            (limit.maxTileCol - limit.minTileCol + 1)
+        if (count > capacity) continue
+        const matrixLevel = Number(limit.matrixId)
+        const spatial: SpatialCandidate[] = []
+        for (let tileRow = limit.minTileRow; tileRow <= limit.maxTileRow; tileRow++) {
+            for (let tileCol = limit.minTileCol; tileCol <= limit.maxTileCol; tileCol++) {
+                spatial.push(Object.freeze({ matrixLevel, tileRow, tileCol,
+                    requestedLevel, sourceLevelCeiling,
+                    priorityScore: cameraPriority(options.view, requestedLevel,
+                        matrixLevel, tileRow, tileCol),
                 }))
             }
         }
+        return spatial
     }
-    const requestedLevel = candidateCells.length === 0
-        ? 0
-        : candidateCells.reduce(
-            (finest, candidate) => Math.min(finest, candidate.requestedLevel),
-            options.addressSpace.levelCount - 1
-        )
-    return Object.freeze({
-        public: Object.freeze({
-            requestedLevel,
-            candidatePages,
-            candidateCells: Object.freeze(candidateCells),
-        }),
-        spatial,
-    })
-}
-
-function candidateSampleLevel(
-    addressSpace: VirtualRasterAddressSpace,
-    candidate: SpatialCandidate
-): number {
-
-    const sampleMatrixLevel = Math.min(
-        candidate.requestedLevel,
-        candidate.sourceLevelCeiling
-    )
-    return addressSpace.levelForMatrix(String(sampleMatrixLevel))
+    return undefined
 }
 
 function produceDemandSet(
@@ -420,7 +498,8 @@ function validateCandidateOptions(options: FlowDemandCandidateOptions): void {
         !positiveInteger(options.maximumCandidatePages) ||
         !positiveInteger(options.cellsPerPageEdge) ||
         !positiveInteger(options.maximumCandidateCells) ||
-        !Array.isArray(options.batch.demands) || options.batch.overflowCount !== 0) {
+        !Array.isArray(options.batch.demands) ||
+        !Number.isSafeInteger(options.batch.overflowCount) || options.batch.overflowCount < 0) {
         throw new TypeError('Flow demand candidates require bounded WebMercator projection facts')
     }
     if (options.batch.frameEpoch !== options.view.frameEpoch) {
@@ -429,6 +508,31 @@ function validateCandidateOptions(options: FlowDemandCandidateOptions): void {
     if (options.batch.residencySnapshotEpoch !== options.view.residencySnapshotEpoch) {
         throw new Error('Flow demand batch residency provenance is stale')
     }
+}
+
+function validateBatchDemands(options: FlowDemandCandidateOptions): void {
+
+    for (const demand of options.batch.demands) {
+        validateProjectedDemand(demand, options.view)
+        if (!options.addressSpace.tileCoverage!.contains({
+            matrixId: String(demand.requestMatrixLevel),
+            tileRow: demand.tileRow,
+            tileCol: demand.tileCol,
+        })) throw new RangeError('Flow projected demand is outside velocity source coverage')
+    }
+}
+
+function candidateCacheKey(options: FlowDemandCandidateOptions): string {
+
+    return JSON.stringify([
+        options.view.cameraHigh, options.view.cameraLow,
+        options.maximumCandidatePages, options.maximumCandidateCells,
+        options.cellsPerPageEdge, options.maximumDisplacementMeters,
+        options.batch.overflowCount,
+        options.batch.demands.map(demand => [demand.requestMatrixLevel,
+            demand.tileRow, demand.tileCol, demand.desiredSampleLevel,
+            demand.sourceLevelCeiling]),
+    ])
 }
 
 function validateProjectedDemand(
@@ -601,28 +705,26 @@ function haloColumns(
     minimum: number,
     maximum: number,
     capacity: number
-): readonly number[] {
+): readonly number[] | undefined {
 
     const columns = new Set<number>()
-    const add = (column: number) => {
-        if (column >= minimum && column <= maximum) columns.add(column)
-        if (columns.size > capacity) {
-            throw new RangeError('Flow demand candidate page capacity was exceeded')
-        }
-    }
     if (halo * 2 + 1 >= matrixWidth) {
-        for (let column = minimum; column <= maximum; column++) add(column)
+        if (maximum - minimum + 1 > capacity) return undefined
+        for (let column = minimum; column <= maximum; column++) columns.add(column)
     } else {
-        for (let offset = -halo; offset <= halo; offset++) {
-            add(positiveModulo(center + offset, matrixWidth))
+        const low = center - halo
+        const high = center + halo
+        const intervals = low < 0 ? [[0, high], [matrixWidth + low, matrixWidth - 1]] :
+            high >= matrixWidth ? [[low, matrixWidth - 1], [0, high - matrixWidth]] :
+                [[low, high]]
+        for (const [start, end] of intervals) {
+            const first = Math.max(minimum, start!)
+            const last = Math.min(maximum, end!)
+            if (columns.size + Math.max(0, last - first + 1) > capacity) return undefined
+            for (let column = first; column <= last; column++) columns.add(column)
         }
     }
     return Object.freeze([ ...columns ].sort((left, right) => left - right))
-}
-
-function positiveModulo(value: number, divisor: number): number {
-
-    return ((value % divisor) + divisor) % divisor
 }
 
 function betterCandidate(left: SpatialCandidate, right: SpatialCandidate): boolean {
