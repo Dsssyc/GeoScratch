@@ -132,7 +132,7 @@ export async function createFlowTemporalBindings(
                     binding: 0,
                     name: 'currentPageTable',
                     type: 'read-storage',
-                    visibility: [ 'compute' ],
+                    visibility: [ 'compute', 'fragment' ],
                 },
                 {
                     binding: 1,
@@ -140,13 +140,13 @@ export async function createFlowTemporalBindings(
                     type: 'texture',
                     sampleType: 'unfilterable-float',
                     viewDimension: '2d',
-                    visibility: [ 'compute' ],
+                    visibility: [ 'compute', 'fragment' ],
                 },
                 {
                     binding: 2,
                     name: 'nextPageTable',
                     type: 'read-storage',
-                    visibility: [ 'compute' ],
+                    visibility: [ 'compute', 'fragment' ],
                 },
                 {
                     binding: 3,
@@ -154,7 +154,7 @@ export async function createFlowTemporalBindings(
                     type: 'texture',
                     sampleType: 'unfilterable-float',
                     viewDimension: '2d',
-                    visibility: [ 'compute' ],
+                    visibility: [ 'compute', 'fragment' ],
                 },
             ],
         })

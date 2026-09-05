@@ -70,6 +70,25 @@ fn sameFixedPosition(
         vec2u(right.axes[1].low, right.axes[1].high));
 }
 
+fn FlowParticle_colorFromInt(color: u32) -> vec3f {
+    return vec3f(f32((color >> 16u) & 255u), f32((color >> 8u) & 255u), f32(color & 255u)) / 255.0;
+}
+
+fn FlowParticle_velocityColor(speed: f32) -> vec3f {
+    let colors = array<u32, 8>(
+        0x3288bdu, 0x66c2a5u, 0xabdda4u, 0xe6f598u,
+        0xfee08bu, 0xfdae61u, 0xf46d43u, 0xd53e4fu,
+    );
+    let position = clamp(speed / FLOW_PARTICLE_MAXIMUM_SPEED * 8.0, 0.0, 7.0);
+    let lower = u32(floor(position));
+    let upper = min(lower + 1u, 7u);
+    return mix(
+        FlowParticle_colorFromInt(colors[lower]),
+        FlowParticle_colorFromInt(colors[upper]),
+        position - f32(lower),
+    );
+}
+
 @vertex
 fn vParticle(@builtin(vertex_index) vertexIndex: u32) -> FlowParticleVertexOutput {
     let particle = flowParticleRenderRecords[vertexIndex / 2u];
@@ -100,6 +119,5 @@ fn vParticle(@builtin(vertex_index) vertexIndex: u32) -> FlowParticleVertexOutpu
 fn fParticle(input: FlowParticleVertexOutput) -> @location(0) vec4f {
     if (input.visible == FLOW_PARTICLE_DORMANT) { return vec4f(0.0); }
     let speed = length(input.velocity);
-    let color = mix(vec3f(0.18, 0.72, 0.96), vec3f(0.98, 0.56, 0.24), clamp(speed, 0.0, 1.0));
-    return vec4f(color, 0.72);
+    return vec4f(FlowParticle_velocityColor(speed), 0.5);
 }

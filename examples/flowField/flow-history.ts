@@ -2,7 +2,7 @@ import {
     GPURuntime,
     layoutCodec,
 } from 'geoscratch/scratch'
-import type { GeoViewSnapshot } from 'geoscratch/geo'
+import type { GeoViewSnapshot, WebMercatorQuadAddressCodec } from 'geoscratch/geo'
 import type {
     BindLayout,
     BindSet,
@@ -21,9 +21,11 @@ import type {
     TextureResource,
     UploadCommand,
 } from 'geoscratch/scratch'
-import { mat4 } from 'wgpu-matrix'
 import historyShader from './shaders/history.wgsl?raw'
 import presentationShader from './shaders/presentation.wgsl?raw'
+import { flowScreenProjectionWgsl, flowScreenViewValues } from './flow-screen-projection.ts'
+import type { FlowScreenViewValues } from './flow-screen-projection.ts'
+import type { FlowTemporalReadyBindingFrame } from './flow-temporal-bindings.ts'
 
 
 export type FlowHistoryMode = 'off' | 'clear' | 'reproject'
@@ -32,6 +34,9 @@ export type FlowHistoryOptions = Readonly<{
     runtime: GPURuntime
     surface: Surface
     size: SurfaceSize
+    temporal: Readonly<{ wgsl: string; layout: BindLayout }>
+    addressCodec: WebMercatorQuadAddressCodec
+    activityKill: number
     mode?: FlowHistoryMode
     trailDecay?: number
     trailCutoff?: number
@@ -59,10 +64,13 @@ export type FlowHistoryFacts = Readonly<{
 
 export type FlowHistory = Readonly<{
     resize(size: SurfaceSize): Promise<void>
+    reset(): void
     encode(
         builder: SubmissionBuilder,
         view: GeoViewSnapshot,
-        content?: readonly DrawCommand[]
+        content: readonly DrawCommand[] | undefined,
+        accumulate: boolean | undefined,
+        prepared: FlowTemporalReadyBindingFrame
     ): FlowHistoryFrame
     facts(): FlowHistoryFacts
     dispose(): void
@@ -83,6 +91,12 @@ type HistoryUniformValues = {
     currentCenterLow: readonly number[]
     previousViewport: readonly number[]
     currentViewport: readonly number[]
+    cameraX: readonly number[]
+    cameraY: readonly number[]
+    cameraZ: readonly number[]
+    requestedLevel: number
+    progress: number
+    activityKill: number
 }
 
 type HistoryViewFacts = Readonly<{
@@ -95,7 +109,6 @@ type HistoryViewFacts = Readonly<{
 type FlowHistoryDirection = Readonly<{
     label: string
     pass: RenderPassSpec
-    compose: DrawCommand
     presentation: DrawCommand
     target: 'A' | 'B'
 }>
@@ -139,6 +152,13 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
     if (!(runtime instanceof GPURuntime) || surface?.runtime !== runtime) {
         throw new TypeError('Flow Field history requires one runtime-owned borrowed Surface')
     }
+    const temporal = options.temporal
+    if (temporal?.layout?.runtime !== runtime || temporal.layout.group !== 1 ||
+        typeof temporal.wgsl !== 'string' || temporal.wgsl.length === 0) {
+        throw new TypeError('Flow Field history requires a same-runtime temporal sampler at group 1')
+    }
+    const screenProjection = flowScreenProjectionWgsl(options.addressCodec)
+    const activityKill = finiteNonNegative(options.activityKill, 'activityKill')
     let size = historySize(options.size)
     const mode = options.mode ?? 'reproject'
     if (mode !== 'off' && mode !== 'clear' && mode !== 'reproject') {
@@ -157,283 +177,353 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
         trailCutoff,
         historyValid: false,
         historyReprojecting: false,
+        activityKill,
     })
-    const uniformBytes = codec.pack(initialUniforms)
-    const uniformBuffer = await runtime.createBuffer({
-        label: 'Flow Field history uniform',
-        size: uniformBytes.byteLength,
-        usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.UNIFORM,
-    })
-    const uniformRegion = uniformBuffer.region({ layout: codec.artifact })
-    const uniformUpload = runtime.createUploadCommand({
-        label: 'Upload Flow Field history uniform',
-        target: uniformRegion,
-        data: uniformBytes,
-    })
-    const sampledTargetUsage = GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING
-    const historyA = await runtime.createTexture({
-        label: 'Flow Field history A',
-        size,
-        format: 'rgba8unorm',
-        usage: sampledTargetUsage,
-    })
-    const historyB = await runtime.createTexture({
-        label: 'Flow Field history B',
-        size,
-        format: 'rgba8unorm',
-        usage: sampledTargetUsage,
-    })
-    const historyAView = historyA.view({ label: 'Flow Field history A view' })
-    const historyBView = historyB.view({ label: 'Flow Field history B view' })
-    const uniformLayout = await runtime.createBindLayout({
-        label: 'Flow Field history uniform layout',
-        group: 0,
-        entries: [ {
-            binding: 0,
-            name: 'cleanupUniform',
-            type: 'uniform',
-            visibility: [ 'vertex', 'fragment' ],
-            minBindingSize: codec.byteLength(),
-        } ],
-    })
-    const historyLayout = await textureLayout(runtime, 1, 'Flow Field history source layout')
-    const presentationLayout = await textureLayout(runtime, 0, 'Flow Field history presentation layout')
-    const uniformSet = await runtime.createBindSet(uniformLayout, {
-        cleanupUniform: uniformRegion,
-    }, { label: 'Flow Field history uniforms' })
-    const historyBToA = await runtime.createBindSet(historyLayout, {
-        historyTexture: historyBView,
-    }, { label: 'Flow Field history B to A source' })
-    const historyAToB = await runtime.createBindSet(historyLayout, {
-        historyTexture: historyAView,
-    }, { label: 'Flow Field history A to B source' })
-    const presentationA = await runtime.createBindSet(presentationLayout, {
-        historyTexture: historyAView,
-    }, { label: 'Flow Field history A presentation' })
-    const presentationB = await runtime.createBindSet(presentationLayout, {
-        historyTexture: historyBView,
-    }, { label: 'Flow Field history B presentation' })
-    const historyModule = await runtime.createShaderModule({
-        label: 'Flow Field history shader',
-        sourceParts: [ { code: historyShader } ],
-    })
-    const presentationModule = await runtime.createShaderModule({
-        label: 'Flow Field history presentation shader',
-        sourceParts: [ { code: presentationShader } ],
-    })
-    const requirement: ProgramBufferLayoutRequirement = {
-        group: 0,
-        binding: 0,
-        type: 'uniform',
-        hasDynamicOffset: false,
-        layout: codec.artifact,
+    const construction: { dispose(): void }[] = []
+    function own<T extends { dispose(): void }>(resource: T): T {
+        construction.push(resource)
+        return resource
     }
-    const historyProgram = runtime.createProgram({
-        label: 'Flow Field history program',
-        vertex: { module: historyModule, entryPoint: 'vMain' },
-        fragment: { module: historyModule, entryPoint: 'fMain' },
-        layoutRequirements: [ requirement ],
-    })
-    const presentationProgram = runtime.createProgram({
-        label: 'Flow Field history presentation program',
-        vertex: { module: presentationModule, entryPoint: 'vMain' },
-        fragment: { module: presentationModule, entryPoint: 'fMain' },
-    })
-    const historyPipeline = await runtime.createRenderPipeline({
-        label: 'Flow Field history pipeline',
-        program: historyProgram,
-        layout: { mode: 'explicit', bindLayouts: [ uniformLayout, historyLayout ] },
-        targets: [ { format: historyA.format } ],
-        primitive: { topology: 'triangle-strip' },
-    })
-    const presentationPipeline = await runtime.createRenderPipeline({
-        label: 'Flow Field history presentation pipeline',
-        program: presentationProgram,
-        layout: { mode: 'explicit', bindLayouts: [ presentationLayout ] },
-        targets: [ { format: surface.format, blend: NORMAL_BLEND } ],
-        primitive: { topology: 'triangle-strip' },
-    })
-    const clearPass = runtime.createRenderPass({
-        label: 'Flow Field history clear',
-        color: [
-            { target: historyAView, load: 'clear', store: 'store', clear: [ 0, 0, 0, 0 ] },
-            { target: historyBView, load: 'clear', store: 'store', clear: [ 0, 0, 0, 0 ] },
-        ],
-    })
-    const passBToA = runtime.createRenderPass({
-        label: 'Flow Field history B to A',
-        color: [ { target: historyAView, load: 'clear', store: 'store', clear: [ 0, 0, 0, 0 ] } ],
-    })
-    const passAToB = runtime.createRenderPass({
-        label: 'Flow Field history A to B',
-        color: [ { target: historyBView, load: 'clear', store: 'store', clear: [ 0, 0, 0, 0 ] } ],
-    })
-    const presentationPass = runtime.createRenderPass({
-        label: 'Flow Field history presentation',
-        color: [ {
-            target: surface,
-            load: 'clear',
-            store: 'store',
-            clear: [ 0, 0, 0, 0 ],
-        } ],
-    })
-    const composeBToA = composeCommand(
-        runtime, historyPipeline, uniformSet, historyBToA, uniformBuffer, historyB,
-        'Compose Flow Field history B to A'
-    )
-    const composeAToB = composeCommand(
-        runtime, historyPipeline, uniformSet, historyAToB, uniformBuffer, historyA,
-        'Compose Flow Field history A to B'
-    )
-    const presentA = presentationCommand(
-        runtime, presentationPipeline, presentationA, historyA,
-        'Present Flow Field history A'
-    )
-    const presentB = presentationCommand(
-        runtime, presentationPipeline, presentationB, historyB,
-        'Present Flow Field history B'
-    )
-    const directionBToA: FlowHistoryDirection = Object.freeze({
-        label: 'Flow Field history B to A',
-        pass: passBToA,
-        compose: composeBToA,
-        presentation: presentA,
-        target: 'A',
-    })
-    const directionAToB: FlowHistoryDirection = Object.freeze({
-        label: 'Flow Field history A to B',
-        pass: passAToB,
-        compose: composeAToB,
-        presentation: presentB,
-        target: 'B',
-    })
-    const directions = Object.freeze([ directionBToA, directionAToB ])
-    const historyBindSets = Object.freeze([
-        uniformSet, historyBToA, historyAToB, presentationA, presentationB,
-    ])
-    const graph: OwnedGraph = Object.freeze({
-        textures: Object.freeze([ historyA, historyB ]),
-        uniformBuffer,
-        uniformUpload,
-        bindLayouts: Object.freeze([ uniformLayout, historyLayout, presentationLayout ]),
-        bindSets: historyBindSets,
-        shaderModules: Object.freeze([ historyModule, presentationModule ]),
-        programs: Object.freeze([ historyProgram, presentationProgram ]),
-        pipelines: Object.freeze([ historyPipeline, presentationPipeline ]),
-        passes: Object.freeze([ clearPass, passBToA, passAToB, presentationPass ]),
-        commands: Object.freeze([ composeBToA, composeAToB, presentA, presentB ]),
-    })
-    let directionIndex = 0
-    let resizeGeneration = 0
-    let previousView: HistoryViewFacts | undefined
-    let clearPending = true
-    let resizePending = false
-    let disposed = false
+    try {
+        const uniformBytes = codec.pack(initialUniforms)
+        const uniformBuffer = own(await runtime.createBuffer({
+            label: 'Flow Field history uniform',
+            size: uniformBytes.byteLength,
+            usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.UNIFORM,
+        }))
+        const uniformRegion = uniformBuffer.region({ layout: codec.artifact })
+        const uniformUpload = own(runtime.createUploadCommand({
+            label: 'Upload Flow Field history uniform',
+            target: uniformRegion,
+            data: uniformBytes,
+        }))
+        const sampledTargetUsage = GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING
+        const historyA = own(await runtime.createTexture({
+            label: 'Flow Field history A',
+            size,
+            format: 'rgba8unorm',
+            usage: sampledTargetUsage,
+        }))
+        const historyB = own(await runtime.createTexture({
+            label: 'Flow Field history B',
+            size,
+            format: 'rgba8unorm',
+            usage: sampledTargetUsage,
+        }))
+        const depth = own(await runtime.createTexture({
+            label: 'Flow Field particle overlap depth',
+            size,
+            format: 'depth32float',
+            usage: GPUTextureUsage.RENDER_ATTACHMENT,
+        }))
+        const depthAttachment = {
+            target: depth.view(), depthLoad: 'clear' as const,
+            depthStore: 'store' as const, depthClear: 1,
+        }
+        const historyAView = historyA.view({ label: 'Flow Field history A view' })
+        const historyBView = historyB.view({ label: 'Flow Field history B view' })
+        const uniformLayout = own(await runtime.createBindLayout({
+            label: 'Flow Field history uniform layout',
+            group: 0,
+            entries: [ {
+                binding: 0,
+                name: 'cleanupUniform',
+                type: 'uniform',
+                visibility: [ 'vertex', 'fragment' ],
+                minBindingSize: codec.byteLength(),
+            } ],
+        }))
+        const historyLayout = own(await textureLayout(runtime, 2, 'Flow Field history source layout'))
+        const presentationLayout = own(await textureLayout(runtime, 0, 'Flow Field history presentation layout'))
+        const uniformSet = own(await runtime.createBindSet(uniformLayout, {
+            cleanupUniform: uniformRegion,
+        }, { label: 'Flow Field history uniforms' }))
+        const historyBToA = own(await runtime.createBindSet(historyLayout, {
+            historyTexture: historyBView,
+        }, { label: 'Flow Field history B to A source' }))
+        const historyAToB = own(await runtime.createBindSet(historyLayout, {
+            historyTexture: historyAView,
+        }, { label: 'Flow Field history A to B source' }))
+        const presentationA = own(await runtime.createBindSet(presentationLayout, {
+            historyTexture: historyAView,
+        }, { label: 'Flow Field history A presentation' }))
+        const presentationB = own(await runtime.createBindSet(presentationLayout, {
+            historyTexture: historyBView,
+        }, { label: 'Flow Field history B presentation' }))
+        const historyModule = own(await runtime.createShaderModule({
+            label: 'Flow Field history shader',
+            sourceParts: [ { code: temporal.wgsl }, { code: screenProjection }, { code: historyShader } ],
+        }))
+        const presentationModule = own(await runtime.createShaderModule({
+            label: 'Flow Field history presentation shader',
+            sourceParts: [ { code: presentationShader } ],
+        }))
+        const requirement: ProgramBufferLayoutRequirement = {
+            group: 0,
+            binding: 0,
+            type: 'uniform',
+            hasDynamicOffset: false,
+            layout: codec.artifact,
+        }
+        const historyProgram = own(runtime.createProgram({
+            label: 'Flow Field history program',
+            vertex: { module: historyModule, entryPoint: 'vMain' },
+            fragment: { module: historyModule, entryPoint: 'fMain' },
+            layoutRequirements: [ requirement ],
+        }))
+        const presentationProgram = own(runtime.createProgram({
+            label: 'Flow Field history presentation program',
+            vertex: { module: presentationModule, entryPoint: 'vMain' },
+            fragment: { module: presentationModule, entryPoint: 'fMain' },
+        }))
+        const historyPipeline = own(await runtime.createRenderPipeline({
+            label: 'Flow Field history pipeline',
+            program: historyProgram,
+            layout: { mode: 'explicit', bindLayouts: [ uniformLayout, temporal.layout, historyLayout ] },
+            targets: [ { format: historyA.format } ],
+            primitive: { topology: 'triangle-strip' },
+            depthStencil: { format: 'depth32float', depthWriteEnabled: false, depthCompare: 'less' },
+        }))
+        const presentationPipeline = own(await runtime.createRenderPipeline({
+            label: 'Flow Field history presentation pipeline',
+            program: presentationProgram,
+            layout: { mode: 'explicit', bindLayouts: [ presentationLayout ] },
+            targets: [ { format: surface.format, blend: NORMAL_BLEND } ],
+            primitive: { topology: 'triangle-strip' },
+        }))
+        const clearPass = own(runtime.createRenderPass({
+            label: 'Flow Field history clear',
+            color: [
+                { target: historyAView, load: 'clear', store: 'store', clear: [ 0, 0, 0, 0 ] },
+                { target: historyBView, load: 'clear', store: 'store', clear: [ 0, 0, 0, 0 ] },
+            ],
+        }))
+        const passBToA = own(runtime.createRenderPass({
+            label: 'Flow Field history B to A',
+            color: [ { target: historyAView, load: 'clear', store: 'store', clear: [ 0, 0, 0, 0 ] } ],
+            depth: depthAttachment,
+        }))
+        const passAToB = own(runtime.createRenderPass({
+            label: 'Flow Field history A to B',
+            color: [ { target: historyBView, load: 'clear', store: 'store', clear: [ 0, 0, 0, 0 ] } ],
+            depth: depthAttachment,
+        }))
+        const presentationPass = own(runtime.createRenderPass({
+            label: 'Flow Field history presentation',
+            color: [ {
+                target: surface,
+                load: 'clear',
+                store: 'store',
+                clear: [ 0, 0, 0, 0 ],
+            } ],
+        }))
+        const presentA = own(presentationCommand(
+            runtime, presentationPipeline, presentationA, historyA,
+            'Present Flow Field history A'
+        ))
+        const presentB = own(presentationCommand(
+            runtime, presentationPipeline, presentationB, historyB,
+            'Present Flow Field history B'
+        ))
+        const directionBToA: FlowHistoryDirection = Object.freeze({
+            label: 'Flow Field history B to A',
+            pass: passBToA,
+            presentation: presentA,
+            target: 'A',
+        })
+        const directionAToB: FlowHistoryDirection = Object.freeze({
+            label: 'Flow Field history A to B',
+            pass: passAToB,
+            presentation: presentB,
+            target: 'B',
+        })
+        const directions = Object.freeze([ directionBToA, directionAToB ])
+        const historyBindSets = Object.freeze([
+            uniformSet, historyBToA, historyAToB, presentationA, presentationB,
+        ])
+        const graph: OwnedGraph = Object.freeze({
+            textures: Object.freeze([ historyA, historyB, depth ]),
+            uniformBuffer,
+            uniformUpload,
+            bindLayouts: Object.freeze([ uniformLayout, historyLayout, presentationLayout ]),
+            bindSets: historyBindSets,
+            shaderModules: Object.freeze([ historyModule, presentationModule ]),
+            programs: Object.freeze([ historyProgram, presentationProgram ]),
+            pipelines: Object.freeze([ historyPipeline, presentationPipeline ]),
+            passes: Object.freeze([ clearPass, passBToA, passAToB, presentationPass ]),
+            commands: Object.freeze([ presentA, presentB ]),
+        })
+        let composePair: Readonly<{
+            bindSet: BindSet
+            commands: readonly [DrawCommand, DrawCommand]
+        }> | undefined
+        let directionIndex = 0
+        let resizeGeneration = 0
+        let previousView: HistoryViewFacts | undefined
+        let clearPending = true
+        let resizePending = false
+        let disposed = false
 
-    async function resize(nextSize: SurfaceSize): Promise<void> {
-        assertActive()
-        if (resizePending) throw new Error('Flow Field history resize is already pending')
-        const normalized = historySize(nextSize)
-        if (normalized.width === size.width && normalized.height === size.height) return
-        resizePending = true
-        try {
-            await historyA.resize(normalized)
-            await historyB.resize(normalized)
-            await prepareStaleBindSets(historyBindSets)
-            size = normalized
-            resizeGeneration++
+        async function resize(nextSize: SurfaceSize): Promise<void> {
+            assertActive()
+            if (resizePending) throw new Error('Flow Field history resize is already pending')
+            const normalized = historySize(nextSize)
+            if (normalized.width === size.width && normalized.height === size.height) return
+            resizePending = true
+            try {
+                await historyA.resize(normalized)
+                await historyB.resize(normalized)
+                await depth.resize(normalized)
+                await prepareStaleBindSets(historyBindSets)
+                size = normalized
+                resizeGeneration++
+                previousView = undefined
+                clearPending = true
+            } finally {
+                resizePending = false
+            }
+        }
+
+        function encode(
+            builder: SubmissionBuilder,
+            view: GeoViewSnapshot,
+            content: readonly DrawCommand[] = [],
+            accumulate = true,
+            prepared: FlowTemporalReadyBindingFrame
+        ): FlowHistoryFrame {
+            assertActive()
+            if (resizePending) throw new Error('Flow Field history cannot encode during resize')
+            if (builder?.runtime !== runtime) {
+                throw new TypeError('Flow Field history requires a same-runtime SubmissionBuilder')
+            }
+            if (prepared?.state !== 'ready' || prepared.bindSet.runtime !== runtime) {
+                throw new TypeError('Flow Field history requires the current same-runtime temporal frame')
+            }
+            const screenView = flowScreenViewValues(view, options.addressCodec)
+            const compose = prepareComposePair(prepared)[directionIndex]!
+            if (!accumulate) clearPending = true
+            const currentView = historyViewFacts(view)
+            const cameraChanged = previousView !== undefined && !sameView(previousView, currentView)
+            if (mode === 'clear' && cameraChanged) clearPending = true
+            const centerDelta = previousView === undefined
+                ? Infinity
+                : viewCenterDelta(previousView, currentView)
+            let historyValid = false
+            const historyReprojecting = mode === 'reproject' && cameraChanged
+            if (historyReprojecting && previousView !== undefined) {
+                historyValid = sameArray(previousView.viewport, currentView.viewport) &&
+                    centerDelta <= maxReprojectCenterDeltaMeters
+            }
+            codec.write(uniformBytes, uniformValues(previousView, currentView, {
+                mode,
+                trailDecay,
+                trailCutoff,
+                historyValid,
+                historyReprojecting,
+                currentInverseMatrix: screenView.relativeWorldFromClip,
+                activityKill,
+                screenView,
+                prepared,
+            }))
+            const direction = directions[directionIndex]!
+            builder.upload(uniformUpload)
+            const cleared = clearPending
+            if (clearPending) {
+                builder.render(clearPass, [])
+                clearPending = false
+            }
+            builder.render(direction.pass, [ compose, ...content ])
+            builder.render(presentationPass, [ direction.presentation ])
+            previousView = currentView
+            directionIndex = (directionIndex + 1) % directions.length
+            return Object.freeze({
+                direction: direction.target === 'A' ? 'B-to-A' : 'A-to-B',
+                target: direction.target,
+                cameraChanged,
+                historyValid,
+                cleared,
+                resizeGeneration,
+            })
+        }
+
+        function prepareComposePair(prepared: FlowTemporalReadyBindingFrame): readonly [DrawCommand, DrawCommand] {
+            if (composePair?.bindSet === prepared.bindSet) return composePair.commands
+            const composeBToA = composeCommand(
+                runtime, historyPipeline, uniformSet, historyBToA, uniformBuffer, historyB,
+                prepared, 'Compose Flow Field history B to A'
+            )
+            let composeAToB: DrawCommand
+            try {
+                composeAToB = composeCommand(
+                    runtime, historyPipeline, uniformSet, historyAToB, uniformBuffer, historyA,
+                    prepared, 'Compose Flow Field history A to B'
+                )
+            } catch (error) {
+                composeBToA.dispose()
+                throw error
+            }
+            const previous = composePair
+            composePair = Object.freeze({
+                bindSet: prepared.bindSet,
+                commands: Object.freeze([ composeBToA, composeAToB ]) as readonly [DrawCommand, DrawCommand],
+            })
+            // The renderer admits one native frame at a time and holds the borrowed
+            // temporal frame until submission settles. Only our commands retire here.
+            for (const command of previous?.commands ?? []) command.dispose()
+            return composePair.commands
+        }
+
+        function facts(): FlowHistoryFacts {
+            return Object.freeze({
+                mode,
+                size: Object.freeze({ ...size }),
+                directionCount: 2,
+                nextDirection: directionIndex === 0 ? 'B-to-A' : 'A-to-B',
+                resizeGeneration,
+                hasPreviousView: previousView !== undefined,
+                disposed,
+            })
+        }
+
+        function dispose(): void {
+            if (disposed) return
+            disposed = true
+            for (const command of composePair?.commands ?? []) command.dispose()
+            composePair = undefined
+            for (const command of graph.commands) command.dispose()
+            graph.uniformUpload.dispose()
+            for (const pass of graph.passes) pass.dispose()
+            for (const pipeline of graph.pipelines) pipeline.dispose()
+            for (const program of graph.programs) program.dispose()
+            for (const shaderModule of graph.shaderModules) shaderModule.dispose()
+            for (const bindSet of graph.bindSets) bindSet.dispose()
+            for (const bindLayout of graph.bindLayouts) bindLayout.dispose()
+            graph.uniformBuffer.dispose()
+            for (const texture of graph.textures) texture.dispose()
+            previousView = undefined
+        }
+
+        function assertActive(): void {
+            if (disposed) throw new Error('Flow Field history is disposed')
+        }
+
+        function reset(): void {
+            assertActive()
             previousView = undefined
             clearPending = true
-        } finally {
-            resizePending = false
         }
-    }
 
-    function encode(
-        builder: SubmissionBuilder,
-        view: GeoViewSnapshot,
-        content: readonly DrawCommand[] = []
-    ): FlowHistoryFrame {
-        assertActive()
-        if (resizePending) throw new Error('Flow Field history cannot encode during resize')
-        if (builder?.runtime !== runtime) {
-            throw new TypeError('Flow Field history requires a same-runtime SubmissionBuilder')
+        return Object.freeze({ resize, reset, encode, facts, dispose })
+    } catch (error) {
+        const failures: unknown[] = [ error ]
+        for (const resource of construction.reverse()) {
+            try { resource.dispose() } catch (cleanupError) { failures.push(cleanupError) }
         }
-        const currentView = historyViewFacts(view)
-        const cameraChanged = previousView !== undefined && !sameView(previousView, currentView)
-        if (mode === 'clear' && cameraChanged) clearPending = true
-        const currentInverse = inverseOrIdentity(currentView.matrix)
-        const centerDelta = previousView === undefined
-            ? Infinity
-            : viewCenterDelta(previousView, currentView)
-        let historyValid = false
-        const historyReprojecting = mode === 'reproject' && cameraChanged
-        if (historyReprojecting && previousView !== undefined) {
-            historyValid = sameArray(previousView.viewport, currentView.viewport) &&
-                currentInverse.valid && centerDelta <= maxReprojectCenterDeltaMeters
+        if (failures.length > 1) {
+            throw new AggregateError(failures, 'Flow Field history construction and cleanup failed')
         }
-        codec.write(uniformBytes, uniformValues(previousView, currentView, {
-            mode,
-            trailDecay,
-            trailCutoff,
-            historyValid,
-            historyReprojecting,
-            currentInverseMatrix: currentInverse.matrix,
-        }))
-        const direction = directions[directionIndex]!
-        builder.upload(uniformUpload)
-        const cleared = clearPending
-        if (clearPending) {
-            builder.render(clearPass, [])
-            clearPending = false
-        }
-        builder.render(direction.pass, [ direction.compose, ...content ])
-        builder.render(presentationPass, [ direction.presentation ])
-        previousView = currentView
-        directionIndex = (directionIndex + 1) % directions.length
-        return Object.freeze({
-            direction: direction.target === 'A' ? 'B-to-A' : 'A-to-B',
-            target: direction.target,
-            cameraChanged,
-            historyValid,
-            cleared,
-            resizeGeneration,
-        })
+        throw error
     }
-
-    function facts(): FlowHistoryFacts {
-        return Object.freeze({
-            mode,
-            size: Object.freeze({ ...size }),
-            directionCount: 2,
-            nextDirection: directionIndex === 0 ? 'B-to-A' : 'A-to-B',
-            resizeGeneration,
-            hasPreviousView: previousView !== undefined,
-            disposed,
-        })
-    }
-
-    function dispose(): void {
-        if (disposed) return
-        disposed = true
-        for (const command of graph.commands) command.dispose()
-        graph.uniformUpload.dispose()
-        for (const pass of graph.passes) pass.dispose()
-        for (const pipeline of graph.pipelines) pipeline.dispose()
-        for (const program of graph.programs) program.dispose()
-        for (const shaderModule of graph.shaderModules) shaderModule.dispose()
-        for (const bindSet of graph.bindSets) bindSet.dispose()
-        for (const bindLayout of graph.bindLayouts) bindLayout.dispose()
-        graph.uniformBuffer.dispose()
-        for (const texture of graph.textures) texture.dispose()
-        previousView = undefined
-    }
-
-    function assertActive(): void {
-        if (disposed) throw new Error('Flow Field history is disposed')
-    }
-
-    return Object.freeze({ resize, encode, facts, dispose })
 }
 
 function historyUniformCodec(): LayoutCodec {
@@ -452,6 +542,12 @@ function historyUniformCodec(): LayoutCodec {
         { name: 'currentCenterLow', type: 'vec3f' },
         { name: 'previousViewport', type: 'vec2f' },
         { name: 'currentViewport', type: 'vec2f' },
+        { name: 'cameraX', type: 'vec2u' },
+        { name: 'cameraY', type: 'vec2u' },
+        { name: 'cameraZ', type: 'vec2f' },
+        { name: 'requestedLevel', type: 'u32' },
+        { name: 'progress', type: 'f32' },
+        { name: 'activityKill', type: 'f32' },
     ]
     return layoutCodec({ name: 'FlowFieldHistoryUniform', fields }, { usage: [ 'uniform' ] })
 }
@@ -478,17 +574,21 @@ function composeCommand(
     historySet: BindSet,
     uniformBuffer: BufferResource,
     source: TextureResource,
+    prepared: FlowTemporalReadyBindingFrame,
     label: string
 ): DrawCommand {
     return runtime.createDrawCommand({
         label,
         pipeline,
-        bindSets: [ { set: uniformSet }, { set: historySet } ],
+        bindSets: [ { set: uniformSet }, { set: prepared.bindSet }, { set: historySet } ],
         count: { vertexCount: 4 },
         resources: {
             read: [
                 { resource: uniformBuffer, contentEpoch: 'current-at-step' },
                 { resource: source, contentEpoch: 'current-at-step' },
+                ...Array.from(new Set(prepared.resources), resource => ({
+                    resource, contentEpoch: 'current-at-step' as const,
+                })),
             ],
             write: [],
         },
@@ -546,6 +646,9 @@ function uniformValues(
         historyValid: boolean
         historyReprojecting: boolean
         currentInverseMatrix?: readonly number[]
+        activityKill: number
+        screenView?: FlowScreenViewValues
+        prepared?: FlowTemporalReadyBindingFrame
     }>
 ): HistoryUniformValues {
     const currentView = current ?? {
@@ -570,6 +673,12 @@ function uniformValues(
         currentCenterLow: currentView.centerLow,
         previousViewport: previousView.viewport,
         currentViewport: currentView.viewport,
+        cameraX: options.screenView?.cameraX ?? [ 0, 0 ],
+        cameraY: options.screenView?.cameraY ?? [ 0, 0 ],
+        cameraZ: options.screenView?.cameraZ ?? [ 0, 0 ],
+        requestedLevel: options.prepared?.requestedLevel ?? 0,
+        progress: options.prepared?.progress ?? 0,
+        activityKill: options.activityKill,
     }
 }
 
@@ -579,15 +688,6 @@ function historyModeValue(mode: FlowHistoryMode): number {
         case 'clear': return 1
         case 'reproject': return 2
     }
-}
-
-function inverseOrIdentity(matrix: readonly number[]): Readonly<{
-    matrix: readonly number[]
-    valid: boolean
-}> {
-    const inverse = Array.from(mat4.inverse(Array.from(matrix)))
-    const valid = finiteArray(inverse, 16)
-    return Object.freeze({ matrix: valid ? inverse : IDENTITY_MATRIX, valid })
 }
 
 function sameView(first: HistoryViewFacts, second: HistoryViewFacts): boolean {

@@ -6,6 +6,9 @@ import type {
     FlowFieldApplication,
     FlowFieldApplicationFacts,
 } from './application.ts'
+import { mountFlowFieldControls } from './control-panel.ts'
+import { FLOW_FIELD_PRESENTATION, flowFieldPresentation } from './flow-presentation.ts'
+import type { FlowFieldPresentation } from './flow-presentation.ts'
 
 type FlowFieldProofApi = Readonly<{
     pauseAndDrain(): Promise<FlowFieldApplicationFacts | undefined>
@@ -15,6 +18,7 @@ type FlowFieldProofApi = Readonly<{
     seek(modelTime: number): void
     setRate(rate: number): void
     setLoop(loop: 'clamp' | 'loop'): void
+    setPresentation(presentation: FlowFieldPresentation): void
     dispose(): Promise<unknown>
     facts(): FlowFieldApplicationFacts | undefined
 }>
@@ -30,6 +34,16 @@ const parameters = new URLSearchParams(window.location.search)
 let application: FlowFieldApplication | undefined
 let terminalFlush: Promise<FlowFieldApplicationFacts | undefined> | undefined
 let pageSettlement: Promise<unknown> | undefined
+const controls = mountFlowFieldControls({
+    container: document.getElementById('FlowFieldControls')!,
+    onPlay: () => application?.play({ wallTime: performance.now() }),
+    onPause: () => application?.pause({ wallTime: performance.now() }),
+    onSeek: modelTime => application?.seek({ wallTime: performance.now(), modelTime }),
+    onRate: rate => application?.setRate({ wallTime: performance.now(), rate }),
+    onLoop: loop => application?.setLoop({ wallTime: performance.now(), loop }),
+    onPresentation: value => application?.setPresentation(value),
+})
+lifetime.deferStop({ label: 'flow-field-controls', run: controls.dispose })
 
 const handlePageHide = () => { void disposePage() }
 window.addEventListener('pagehide', handlePageHide, { once: true })
@@ -53,6 +67,7 @@ const proofApi: FlowFieldProofApi = Object.freeze({
     seek(modelTime) { application?.seek({ wallTime: performance.now(), modelTime }) },
     setRate(rate) { application?.setRate({ wallTime: performance.now(), rate }) },
     setLoop(loop) { application?.setLoop({ wallTime: performance.now(), loop }) },
+    setPresentation(value) { application?.setPresentation(value) },
     dispose: disposePage,
     facts: () => application?.facts(),
 })
@@ -81,6 +96,11 @@ async function initializePage(): Promise<void> {
         readWallTime: () => performance.now(),
         initialRate,
         initialLoop,
+        initialPresentation: flowFieldPresentation({
+            ...FLOW_FIELD_PRESENTATION,
+            view: (parameters.get('view') ?? 'particles') as FlowFieldPresentation['view'],
+        }),
+        onControlSnapshot: controls.update,
         ...(initialZoom === undefined ? {} : { initialZoom }),
         fail: failPage,
         setStatus,
@@ -145,12 +165,18 @@ function setStatus(status: string): void {
 
     canvas.dataset.status = status
     document.body.dataset.status = status
+    canvas.style.visibility = status === 'gap' || status === 'failed' ? 'hidden' : 'visible'
+    controls.setStatus(status === 'disposed' ? 'stopped'
+        : status === 'error' ? 'failed' : status as 'ready' | 'loading' | 'gap' | 'failed')
 }
 
 function reportFatalError(error: unknown): void {
 
     setStatus('error')
     canvas.dataset.error = error instanceof Error ? error.message : String(error)
+    const errorElement = document.getElementById('FlowFieldError')!
+    errorElement.textContent = canvas.dataset.error
+    errorElement.hidden = false
     if ((error as FailureDetails | null | undefined)?.diagnostic !== undefined) {
         const details = error as FailureDetails
         canvas.dataset.diagnostic = JSON.stringify(details.diagnostic)

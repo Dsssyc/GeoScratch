@@ -103,6 +103,10 @@ import {
 import type {
     FlowVelocitySampleRuntime,
 } from './velocity-source.ts'
+import { FLOW_FIELD_PRESENTATION, flowFieldPresentation } from './flow-presentation.ts'
+import type { FlowFieldPresentation } from './flow-presentation.ts'
+import { createFlowScreenInspector } from './flow-screen-inspector.ts'
+import { flowPairViewReady } from './flow-pair-presentation.ts'
 
 export type FlowFieldRendererOptions = Readonly<{
     runtime: GPURuntime
@@ -110,6 +114,7 @@ export type FlowFieldRendererOptions = Readonly<{
     size: SurfaceSize
     temporalWindow: FlowTemporalRuntimeWindow<FlowVelocitySampleRuntime>
     maximumSpeed: number
+    presentation?: FlowFieldPresentation
     cellsPerPageEdge?: number
     particleCount?: number
 }>
@@ -120,7 +125,8 @@ export type FlowFieldRendererFrame = Readonly<{
     view: GeoViewSnapshot
     temporal: FlowTemporalFrameSnapshot
     demand: FlowDemandFrame
-    history: FlowHistoryFrame
+    history: FlowHistoryFrame | undefined
+    presentationReady: boolean
 }>
 
 export type FlowFieldRendererFacts = Readonly<{
@@ -147,6 +153,8 @@ export type FlowFieldRenderer = Readonly<{
         timeline: FlowTimelineSnapshot
     ): Promise<GeoFrameResult<FlowFieldRendererFrame>>
     suspendTemporal(): Promise<void>
+    setPresentation(presentation: FlowFieldPresentation): void
+    resetVisuals(): void
     flushResidency(): Promise<void>
     facts(): FlowFieldRendererFacts
     dispose(): Promise<void>
@@ -200,6 +208,8 @@ export async function createFlowFieldRenderer(
     let frameInFlight: Promise<unknown> | undefined
     let constructionCapture: ReturnType<typeof temporalWindow.capture> | undefined
     let constructionCaptureReleased = false
+    let presentation = flowFieldPresentation(options.presentation ?? FLOW_FIELD_PRESENTATION)
+    let resetPending = false
 
     try {
         constructionCapture = temporalWindow.capture()
@@ -259,26 +269,29 @@ export async function createFlowFieldRenderer(
         const particles = own(await createFlowParticles({
             runtime,
             maximumCount: particleCount,
+            maximumSpeed: options.maximumSpeed,
+            addressCodec: model.addressCodec,
             simulationShader: particleSimulationShader,
             temporal: temporalBindings,
             spawn: particleSpawn.module,
             activitySpawn: thresholds.spawn,
             activityKill: thresholds.kill,
             timeStep: 1,
-            substeps: 2,
-            maximumAgeSteps: 180,
+            substeps: 1,
+            maximumAgeSteps: 3600,
             maximumStagnantSteps: 30,
             minimumDisplacementMeters: 0.25,
         }))
         const particleRender = own(await createFlowParticleRender({
             runtime,
             particles,
+            maximumSpeed: options.maximumSpeed,
             view: renderView,
             targetFormat: 'rgba8unorm',
         }))
         const contour = own(await createFlowContour({
             runtime,
-            targetFormat: 'rgba8unorm',
+            targetFormat: surface.format,
             maximumCandidateCount,
             segmentCapacity: maximumCandidateCount * 2,
             temporal: temporalBindings,
@@ -289,6 +302,17 @@ export async function createFlowFieldRenderer(
             surface,
             size,
             mode: 'reproject',
+            temporal: temporalBindings,
+            addressCodec: model.addressCodec,
+            activityKill: thresholds.kill,
+        }))
+        const inspector = own(await createFlowScreenInspector({
+            runtime, surface, temporal: temporalBindings, model,
+            maximumSpeed: options.maximumSpeed,
+        }))
+        const overlayPass = own(runtime.createRenderPass({
+            label: 'Flow Field current contour overlay',
+            color: [{ target: surface, load: 'load', store: 'store' }],
         }))
         constructionCapture.release()
         constructionCaptureReleased = true
@@ -297,6 +321,7 @@ export async function createFlowFieldRenderer(
         let temporalResidencyEpoch = 0
         let lastTemporalSignature = ''
         let requestedLevel = 0
+        let presentedPairGeneration = 0
 
         async function render(
             frameNumber: number,
@@ -319,6 +344,12 @@ export async function createFlowFieldRenderer(
             let temporalFrame: FlowTemporalReadyBindingFrame | undefined
             let frameOwnershipTransferred = false
             try {
+                const framePresentation = presentation
+                if (resetPending) {
+                    history.reset()
+                    particles.reset()
+                    resetPending = false
+                }
                 const nextSize = flowSurfaceSize(capture.presentationSize)
                 if (!sameSize(size, nextSize)) {
                     surface.resize(nextSize)
@@ -380,6 +411,13 @@ export async function createFlowFieldRenderer(
 
                 const demandFrame = demand.encode(builder, view, prepared.temporal)
                 requestedLevel = demandFrame.requestedLevel
+                if (presentedPairGeneration !== prepared.pairGeneration &&
+                    prepared.requestedLevel === requestedLevel &&
+                    flowPairViewReady(prepared.temporal, demandFrame.candidatePages)) {
+                    presentedPairGeneration = prepared.pairGeneration
+                }
+                const presentationReady = framePresentation.view !== 'particles' ||
+                    presentedPairGeneration === prepared.pairGeneration
                 renderView.encode(builder, view)
                 const candidates = packFlowCandidateCells(
                     demandFrame.candidateCells,
@@ -401,18 +439,25 @@ export async function createFlowFieldRenderer(
                     supportSnapshot,
                     prepared
                 )
-                particles.encode(builder, particleSpawn.bindings, prepared)
-                contour.encode(builder, candidates, demandFrame.candidateCells.length, {
+                if (presentationReady && framePresentation.view === 'particles') {
+                    particles.encode(builder, particleSpawn.bindings, prepared, view)
+                }
+                if (presentationReady && framePresentation.contour) contour.encode(builder, candidates, demandFrame.candidateCells.length, {
                     generation: supportSnapshot.generation,
                     currentSnapshotEpoch: supportSnapshot.currentSnapshotEpoch,
                     nextSnapshotEpoch: supportSnapshot.nextSnapshotEpoch,
                     progress: supportSnapshot.progress,
                     activityKill: supportSnapshot.activityKill,
                 }, prepared)
-                const historyFrame = history.encode(builder, view, [
-                    particleRender.draw,
-                    contour.draw,
-                ])
+                const historyFrame = presentationReady ? history.encode(builder, view,
+                    framePresentation.view === 'particles' ? [particleRender.draw] : [],
+                    framePresentation.view === 'particles' && framePresentation.trails,
+                    prepared
+                ) : undefined
+                if (framePresentation.view !== 'particles') {
+                    inspector.encode(builder, view, prepared, framePresentation)
+                }
+                if (presentationReady && framePresentation.contour) builder.render(overlayPass, [contour.draw])
                 const submitted = builder.submit()
                 const reconciliations = demand.reconcile(demandFrame).then(
                     requireFlowDemandReconciliations
@@ -422,7 +467,7 @@ export async function createFlowFieldRenderer(
                     publications,
                     reconciliations,
                     viewDemand,
-                    contour
+                    presentationReady && framePresentation.contour ? contour : undefined
                 )
                 let observation: Promise<unknown>
                 observation = observing.finally(() => {
@@ -444,6 +489,7 @@ export async function createFlowFieldRenderer(
                         temporal: frameTemporal,
                         demand: demandFrame,
                         history: historyFrame,
+                        presentationReady,
                     }),
                 })
             } finally {
@@ -584,7 +630,23 @@ export async function createFlowFieldRenderer(
             if (!initialized || disposed) throw new Error('Flow Field renderer is not active')
         }
 
-        return Object.freeze({ render, suspendTemporal, flushResidency, facts, dispose })
+        function resetVisuals(): void {
+            assertActive()
+            resetPending = true
+        }
+
+        function setPresentation(value: FlowFieldPresentation): void {
+            assertActive()
+            const next = flowFieldPresentation(value)
+            if (next.view !== presentation.view || next.trails !== presentation.trails ||
+                next.sample !== presentation.sample) resetPending = true
+            presentation = next
+        }
+
+        return Object.freeze({
+            render, suspendTemporal, setPresentation, resetVisuals,
+            flushResidency, facts, dispose,
+        })
     } catch (error) {
         if (constructionCapture?.state === 'ready' && !constructionCaptureReleased) {
             constructionCapture.release()
@@ -677,13 +739,13 @@ async function settleFrameObservations(
     publications: FlowFramePublications,
     reconciliations: Promise<FlowDemandReconciliations>,
     viewDemand: FlowViewDemandAdapter,
-    contour: FlowContour
+    contour: FlowContour | undefined
 ): Promise<unknown> {
 
     const settlements = await Promise.allSettled([
         settlePublicationObservations(submitted, publications),
         viewDemand.observe(submitted),
-        contour.observeOverflow(submitted),
+        contour?.observeOverflow(submitted),
         reconciliations,
     ])
     throwSettledFailures(settlements, 'Flow Field frame observation failed')

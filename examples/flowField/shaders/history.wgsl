@@ -18,6 +18,12 @@ struct FlowFieldHistoryUniform {
     currentCenterLow: vec3f,
     previousViewport: vec2f,
     currentViewport: vec2f,
+    cameraX: vec2u,
+    cameraY: vec2u,
+    cameraZ: vec2f,
+    requestedLevel: u32,
+    progress: f32,
+    activityKill: f32,
 };
 
 struct HistoryProjection {
@@ -26,7 +32,7 @@ struct HistoryProjection {
 };
 
 @group(0) @binding(0) var<uniform> cleanupUniform: FlowFieldHistoryUniform;
-@group(1) @binding(0) var historyTexture: texture_2d<f32>;
+@group(2) @binding(0) var historyTexture: texture_2d<f32>;
 
 fn correctedPixel(pixel: vec2f, dim: vec2f) -> vec2f {
     return clamp(pixel, vec2f(0.0), dim - vec2f(1.0));
@@ -62,21 +68,22 @@ fn reprojectHistoryUv(texcoords: vec2f) -> HistoryProjection {
     if (abs(nearRelativeH.w) < 0.000001 || abs(farRelativeH.w) < 0.000001) {
         return invalidHistoryProjection();
     }
-    let nearWorld = nearRelativeH.xyz / nearRelativeH.w +
-        cleanupUniform.currentCenterHigh + cleanupUniform.currentCenterLow;
-    let farWorld = farRelativeH.xyz / farRelativeH.w +
-        cleanupUniform.currentCenterHigh + cleanupUniform.currentCenterLow;
-    let ray = farWorld - nearWorld;
+    let nearRelative = nearRelativeH.xyz / nearRelativeH.w;
+    let farRelative = farRelativeH.xyz / farRelativeH.w;
+    let ray = farRelative - nearRelative;
     if (abs(ray.z) < 0.000001) {
         return invalidHistoryProjection();
     }
-    let planeT = -nearWorld.z / ray.z;
+    let groundRelativeZ = -(cleanupUniform.cameraZ.x + cleanupUniform.cameraZ.y);
+    let planeT = (groundRelativeZ - nearRelative.z) / ray.z;
     if (planeT < 0.0 || planeT > 1.0) {
         return invalidHistoryProjection();
     }
-    let world = nearWorld + ray * planeT;
+    let currentRelative = nearRelative + ray * planeT;
+    let centerDelta = (cleanupUniform.currentCenterHigh - cleanupUniform.previousCenterHigh) +
+        (cleanupUniform.currentCenterLow - cleanupUniform.previousCenterLow);
     let previousRelative = vec4f(
-        world - cleanupUniform.previousCenterHigh - cleanupUniform.previousCenterLow,
+        currentRelative + centerDelta,
         1.0
     );
     let previousClip = cleanupUniform.previousMatrix * previousRelative;
@@ -118,6 +125,27 @@ fn vMain(@builtin(vertex_index) vertexIndex: u32) -> VertexOutput {
 
 @fragment
 fn fMain(input: VertexOutput) -> @location(0) vec4f {
+    let ground = FlowScreen_ground_position(
+        input.texcoords,
+        cleanupUniform.currentInverseMatrix,
+        cleanupUniform.cameraX,
+        cleanupUniform.cameraY,
+        cleanupUniform.cameraZ,
+    );
+    if (ground.valid == 0u) {
+        return vec4f(0.0);
+    }
+    let currentFlow = FlowVelocity_sample(
+        ground.position,
+        cleanupUniform.requestedLevel,
+        FlowVelocityTemporal(cleanupUniform.progress, cleanupUniform.activityKill),
+    );
+    // History has the same current support as particle advection. Formerly
+    // moving pixels disappear immediately when the temporal field turns zero.
+    if ((currentFlow.status != 1u && currentFlow.status != 2u) ||
+        !currentFlow.advectable || !(currentFlow.speed > 0.0)) {
+        return vec4f(0.0);
+    }
     let dim = vec2f(textureDimensions(historyTexture, 0));
     let pixel = vec2i(correctedPixel(dim * input.texcoords, dim));
     var color = textureLoad(historyTexture, pixel, 0);
@@ -131,7 +159,7 @@ fn fMain(input: VertexOutput) -> @location(0) vec4f {
             return vec4f(0.0);
         }
         historyUv = projection.uv;
-        let historyPixel = clamp(historyUv * dim, vec2f(0.0), dim - vec2f(1.0));
+        let historyPixel = clamp(historyUv * dim - vec2f(0.5), vec2f(0.0), dim - vec2f(1.0));
         color = linearSampling(historyTexture, historyPixel, dim);
     }
     let faded = floor(255.0 * color * cleanupUniform.trailDecay) / 255.0;

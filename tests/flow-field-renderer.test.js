@@ -26,9 +26,9 @@ describe('Flow Field renderer composition', () => {
         const demand = source.indexOf('const demandFrame = demand.encode(builder, view, prepared.temporal)')
         const pack = source.indexOf('const candidates = packFlowCandidateCells(')
         const spawn = source.indexOf('spawn.encode(')
-        const particles = source.indexOf('particles.encode(builder, particleSpawn.bindings, prepared)')
+        const particles = source.indexOf('particles.encode(builder, particleSpawn.bindings, prepared, view)')
         const contour = source.indexOf('contour.encode(builder, candidates')
-        const history = source.indexOf('const historyFrame = history.encode(builder, view')
+        const history = source.indexOf('history.encode(builder, view')
         const submit = source.indexOf('const submitted = builder.submit()', publish)
 
         expect(publish).to.be.greaterThan(-1)

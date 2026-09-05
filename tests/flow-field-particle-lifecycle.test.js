@@ -2,6 +2,7 @@ import { expect } from 'chai'
 import fs from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { WebMercatorQuad, WebMercatorQuadAddressCodec, tileMatrixCoverage } from 'geoscratch/geo'
 
 const moduleUrl = pathToFileURL(path.join(
     process.cwd(),
@@ -124,7 +125,7 @@ describe('Flow Field particle lifecycle policy', () => {
         expect(simulation).to.include('stagnant_steps: u32')
         expect(simulation).to.include('random_state: u32')
         expect(simulation).to.include('lifecycle_state: u32')
-        expect(simulation).to.include('FlowVelocityAddress_advance_meters')
+        expect(simulation).to.include('FlowScreen_advance_meters')
         expect(simulation.match(/FlowVelocity_sample\(/g).length).to.be.greaterThan(2)
         expect(simulation).to.include('flowParticleConfig.legacy_displacement_scale')
         expect(simulation).to.include('f32(flowParticleConfig.substeps)')
@@ -156,6 +157,8 @@ describe('Flow Field particle lifecycle policy', () => {
         const particles = await createFlowParticles({
             runtime,
             maximumCount: 1024,
+            addressCodec: particleAddressCodec(),
+            maximumSpeed: 4,
             simulationShader: read(
                 'examples',
                 'flowField',
@@ -221,12 +224,29 @@ describe('Flow Field particle lifecycle policy', () => {
             spawnSet,
         ])
         expect(runtime.readbackCount).to.equal(0)
+        const config = new DataView(runtime.configUpload.data.buffer)
+        expect(config.byteLength).to.equal(176)
+        expect(config.getFloat32(48, true)).to.equal(4)
+        expect(config.getUint32(52, true)).to.equal(0)
         expect(read('examples', 'flowField', 'flow-particles.ts'))
             .to.not.include('options.temporal.frame()')
+
+        const initialClears = events.filter(event => event === 'builder:clear').length
+        particles.encode(builder, spawn, temporalFrame)
+        expect(events.filter(event => event === 'builder:clear')).to.have.length(initialClears + 1)
+        const beforeReset = events.length
+        particles.reset()
+        particles.reset()
+        expect(events).to.have.length(beforeReset)
+        expect(particles.facts()).to.include({ resetPending: true, resetCount: 2 })
+        particles.encode(builder, spawn, temporalFrame)
+        expect(events.filter(event => event === 'builder:clear')).to.have.length(initialClears + 3)
+        expect(particles.facts()).to.include({ resetPending: false, encodedSteps: 3 })
 
         particles.dispose()
         particles.dispose()
         expect(particles.facts().disposed).to.equal(true)
+        expect(() => particles.reset()).to.throw('disposed')
     })
 
     it('adapts public FlowSpawnIndex counter/output resources without CPU observation', async() => {
@@ -320,6 +340,7 @@ function fakeRuntime(events) {
         },
         createUploadCommand(descriptor) {
 
+            runtime.configUpload = descriptor
             return { descriptor, dispose() {} }
         },
         createClearBufferCommand(descriptor) {
@@ -338,6 +359,17 @@ function fakeRuntime(events) {
         },
     }
     return runtime
+}
+
+function particleAddressCodec() {
+
+    return new WebMercatorQuadAddressCodec({
+        coordinateBits: 52,
+        coverage: tileMatrixCoverage({
+            tileMatrixSet: WebMercatorQuad,
+            limits: [ { matrixId: '0', minTileCol: 0, maxTileCol: 0, minTileRow: 0, maxTileRow: 0 } ],
+        }),
+    })
 }
 
 function fakeBuilder(events) {

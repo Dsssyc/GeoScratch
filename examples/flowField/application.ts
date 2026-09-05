@@ -35,6 +35,9 @@ import type {
     FlowTemporalRuntimeWindowSnapshot,
 } from './flow-temporal-runtime-window.ts'
 import { createFlowTimeline } from './flow-timeline.ts'
+import { FLOW_FIELD_PRESENTATION, flowFieldPresentation } from './flow-presentation.ts'
+import type { FlowFieldControlSnapshot, FlowFieldPresentation } from './flow-presentation.ts'
+import type { FlowTemporalFrameSnapshot } from './flow-frame-provenance.ts'
 import type {
     FlowTimelineLoop,
     FlowTimelineReadiness,
@@ -56,6 +59,8 @@ export type FlowFieldApplicationOptions = Readonly<{
     initialRate?: number
     initialLoop?: FlowTimelineLoop
     initialZoom?: number
+    initialPresentation?: FlowFieldPresentation
+    onControlSnapshot?(snapshot: FlowFieldControlSnapshot): void
     fail(error: unknown): void | Promise<void>
     setStatus(status: string): void
 }>
@@ -109,6 +114,8 @@ export type FlowFieldApplication = Readonly<{
     seek(input: Readonly<{ wallTime: number, modelTime: number }>): FlowTimelineSnapshot
     setRate(input: Readonly<{ wallTime: number, rate: number }>): FlowTimelineSnapshot
     setLoop(input: Readonly<{ wallTime: number, loop: FlowTimelineLoop }>): FlowTimelineSnapshot
+    setPresentation(value: FlowFieldPresentation): void
+    controlSnapshot(): FlowFieldControlSnapshot
     flush(input: Readonly<{ wallTime: number }>): Promise<FlowFieldApplicationFacts>
     facts(): FlowFieldApplicationFacts
 }>
@@ -228,6 +235,8 @@ export async function startFlowFieldApplication(
         if (outcome.status === 'fatal') return options.fail(outcome.error)
     }).catch(() => undefined)
     let frameController: GeoFrameController | undefined
+    let presentation = flowFieldPresentation(options.initialPresentation ?? FLOW_FIELD_PRESENTATION)
+    let presented: FlowTemporalFrameSnapshot | undefined
     let latestHandshake: WindowHandshake
     let lastFrame: FlowFieldApplicationFrame = Object.freeze({
         state: 'loading',
@@ -248,6 +257,7 @@ export async function startFlowFieldApplication(
         size,
         temporalWindow,
         maximumSpeed: dataset.maximumSpeed,
+        presentation,
     }), {
         label: 'flow-field-renderer',
         release: value => value.dispose(),
@@ -285,6 +295,9 @@ export async function startFlowFieldApplication(
                 wallTime,
                 readiness: readinessFor(before),
             })
+            if ((current.rate >= 0 && current.modelTime < before.modelTime) ||
+                (current.rate < 0 && current.modelTime > before.modelTime) ||
+                current.selection.kind === 'gap') renderer.resetVisuals()
             const handshake = requestWindow(current, true)
             const windowState = temporalWindow.snapshot()
             if (windowState.state === 'loading') {
@@ -333,10 +346,14 @@ export async function startFlowFieldApplication(
                 return idleFrameResult(setLoadingFrame(latest, latestHandshake))
             }
         },
-        onObserved() {
+        onObserved({ value }) {
 
             if (frameController?.snapshot().state !== 'running') return
-            setStatus(lastFrame.state === 'rendered' ? 'ready' : lastFrame.state)
+            if (value.state === 'rendered' && value.presentationReady) presented = value.temporal
+            else if (value.state === 'gap') presented = undefined
+            setStatus(lastFrame.state === 'rendered'
+                ? lastFrame.presentationReady ? 'ready' : 'loading' : lastFrame.state)
+            emitControls()
             if (timeline.snapshot().needsTick) frameController.invalidate()
         },
         onError(error) {
@@ -428,6 +445,7 @@ export async function startFlowFieldApplication(
 
         requestWindow(snapshot, true, true)
         frameController!.invalidate()
+        emitControls()
         return snapshot
     }
 
@@ -448,6 +466,7 @@ export async function startFlowFieldApplication(
     ): FlowTimelineSnapshot {
 
         assertControllable()
+        renderer.resetVisuals()
         return applyControl(timeline.seek(input))
     }
 
@@ -456,6 +475,9 @@ export async function startFlowFieldApplication(
     ): FlowTimelineSnapshot {
 
         assertControllable()
+        if (Math.sign(input.rate) !== Math.sign(timeline.snapshot().rate)) {
+            renderer.resetVisuals()
+        }
         return applyControl(timeline.setRate(input))
     }
 
@@ -528,6 +550,8 @@ export async function startFlowFieldApplication(
         lastFrame = rendered.value
         await lifetime.track(rendered.observation, `flow-field-terminal-${phase}-observation`)
         lifetime.assertActive()
+        if (rendered.value.presentationReady) presented = rendered.value.temporal
+        emitControls()
         const settlement = await lifetime.track(
             rendered.settlement,
             `flow-field-terminal-${phase}-settlement`
@@ -612,6 +636,42 @@ export async function startFlowFieldApplication(
         })
     }
 
+    function controlSnapshot(): FlowFieldControlSnapshot {
+        const windowState = temporalWindow.snapshot()
+        return Object.freeze({
+            dataset: Object.freeze({
+                id: dataset.datasetId,
+                minimumTime: dataset.timeAxis.samples[0]!.modelTime,
+                maximumTime: dataset.timeAxis.samples.at(-1)!.modelTime,
+                timeUnit: dataset.timeAxis.unit,
+                velocityUnit: dataset.unit,
+                sampleCount: dataset.timeAxis.samples.length,
+                maximumMatrix: dataset.tileMatrixSet.maxTileMatrix,
+            }),
+            timeline: timeline.snapshot(),
+            presented,
+            state: frameController?.snapshot().state === 'stopped' ? 'stopped'
+                : windowState.state === 'disposed' ? 'stopped'
+                    : windowState.state === 'ready' && lastFrame.state === 'rendered' &&
+                        !lastFrame.presentationReady ? 'loading' : windowState.state,
+            runtimeCount: windowState.ownedRuntimeCount,
+            presentation,
+        })
+    }
+
+    function emitControls(): void {
+        options.onControlSnapshot?.(controlSnapshot())
+    }
+
+    function setPresentation(value: FlowFieldPresentation): void {
+        assertControllable()
+        const next = flowFieldPresentation(value)
+        renderer.setPresentation(next)
+        presentation = next
+        frameController!.invalidate()
+        emitControls()
+    }
+
     function assertControllable(): void {
 
         if (frameController?.snapshot().state !== 'running') {
@@ -619,7 +679,10 @@ export async function startFlowFieldApplication(
         }
     }
 
-    return Object.freeze({ play, pause, seek, setRate, setLoop, flush, facts })
+    emitControls()
+    return Object.freeze({
+        play, pause, seek, setRate, setLoop, setPresentation, controlSnapshot, flush, facts,
+    })
 }
 
 function idleFrameResult(

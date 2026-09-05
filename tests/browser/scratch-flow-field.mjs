@@ -16,7 +16,7 @@ const tileOutput = resolve(root, 'examples/flowField/tile-server/cog-collection'
 const tileManifest = resolve(tileOutput, 'runtime-manifest.json')
 const workerManifest = resolve(root, 'examples/public/scratch-workers/manifest.json')
 const timeout = positiveInteger(process.env.FLOW_FIELD_BROWSER_TIMEOUT_MS, 180_000)
-const requiredFrames = positiveInteger(process.env.FLOW_FIELD_PROOF_FRAMES, 6)
+const requiredFrames = positiveInteger(process.env.FLOW_FIELD_PROOF_FRAMES, 60)
 const headless = process.env.FLOW_FIELD_BROWSER_HEADLESS !== '0'
 const outputDirectory = resolve(
     process.env.FLOW_FIELD_BROWSER_OUTPUT ?? '/tmp/geoscratch-flow-field-browser'
@@ -145,10 +145,16 @@ async function verify(activeBrowser) {
         if (status === 'error') return true
         return (window.__FLOW_FIELD_PROOF__?.facts()?.frames?.observedFrameCount ?? 0) >= minimum
     }, requiredFrames, { timeout })
-    await page.evaluate(() => {
-        window.__FLOW_FIELD_PROOF__.pause()
-        window.__FLOW_FIELD_PROOF__.seek(10.5)
-    })
+    const layerScreenshotOptions = {
+        style: '#FlowFieldControls, .maplibregl-control-container { visibility: hidden !important; }',
+    }
+    await page.locator('[data-flow-control="play-pause"]').click()
+    const particlesScreenshot = await page.locator('#GPUFrame').screenshot(layerScreenshotOptions)
+    await writeFile(resolve(outputDirectory, 'particles.png'), particlesScreenshot)
+    const particlePixels = await inspectPixels(page, particlesScreenshot)
+    const timeline = page.locator('[data-flow-control="time"]')
+    await timeline.fill('10.5')
+    await timeline.dispatchEvent('change')
     await page.waitForFunction(() => {
         const facts = window.__FLOW_FIELD_PROOF__?.facts()
         return document.body.dataset.status === 'error' || (
@@ -158,16 +164,22 @@ async function verify(activeBrowser) {
             facts.timeline.selection.upper.sampleKey === 't11'
         )
     }, undefined, { timeout })
+    await page.locator('[data-flow-control="view"]').selectOption('speed')
+    await page.waitForFunction(() => document.body.dataset.status === 'ready' &&
+        document.querySelector('[data-flow-control="presented"]')?.textContent?.includes('10.5'),
+        undefined, { timeout })
     const drained = await page.evaluate(async() => {
         return await window.__FLOW_FIELD_PROOF__.pauseAndDrain()
     })
     const status = await page.locator('#GPUFrame').getAttribute('data-status')
     const error = await page.locator('#GPUFrame').getAttribute('data-error')
     const diagnostic = await page.locator('#GPUFrame').getAttribute('data-diagnostic')
-    const screenshot = await page.locator('#GPUFrame').screenshot()
+    const screenshot = await page.locator('#GPUFrame').screenshot(layerScreenshotOptions)
     const screenshotPath = resolve(outputDirectory, 'flow-field.png')
     await writeFile(screenshotPath, screenshot)
     const pixels = await inspectPixels(page, screenshot)
+    const controls = await page.locator('#FlowFieldControls').innerText()
+    await page.screenshot({ path: resolve(outputDirectory, 'flow-field-controls.png') })
     const cleanup = await page.evaluate(async() => {
         return await window.__FLOW_FIELD_PROOF__.dispose()
     })
@@ -183,6 +195,8 @@ async function verify(activeBrowser) {
         cleanup,
         terminalStatus,
         pixels,
+        particlePixels,
+        controls,
         screenshotPath,
         network: {
             requestCount: flowRequests.length,
@@ -246,7 +260,7 @@ function validate(observed, topLevelFailure, cleanupFailures) {
     if (renderer?.spawn?.cpuReadback !== false ||
         renderer?.particles?.cpuMirrorBytes !== 0 ||
         renderer?.particles?.readbackCount !== 0 ||
-        renderer?.contour?.candidateCount <= 0 ||
+        renderer?.contour?.candidateCount !== 0 ||
         renderer?.history?.hasPreviousView !== true) {
         failures.push('GPU-derived support, particle, contour, or history facts are incomplete')
     }
@@ -274,8 +288,14 @@ function validate(observed, topLevelFailure, cleanupFailures) {
         diagnostics?.readbackMemory?.activeMappings !== 0) {
         failures.push('GPU diagnostics did not remain clean and bounded')
     }
-    if (observed.pixels.nonDarkPixels < 1_000 || observed.pixels.channelRange < 32) {
+    if (observed.pixels.coloredPixels < 1_000 || observed.pixels.channelRange < 32) {
         failures.push(`rendered pixels are empty:${JSON.stringify(observed.pixels)}`)
+    }
+    if (observed.particlePixels.coloredPixels < 100) {
+        failures.push(`particle-only pixels are empty:${JSON.stringify(observed.particlePixels)}`)
+    }
+    if (!observed.controls.includes('10.5') || !observed.controls.includes('t10 → t11')) {
+        failures.push('visible timeline did not converge on its requested and presented time')
     }
     if (observed.network.requestCount === 0 ||
         ![ 't00', 't01', 't10', 't11' ].every(label =>
@@ -377,6 +397,8 @@ function summarizeResult(observed) {
         cleanup: observed.cleanup,
         terminalStatus: observed.terminalStatus,
         pixels: observed.pixels,
+        particlePixels: observed.particlePixels,
+        controls: observed.controls,
         screenshotPath: observed.screenshotPath,
         network: observed.network,
         stats: observed.stats,
@@ -425,14 +447,16 @@ async function inspectPixels(page, png) {
         let minimum = 255
         let maximum = 0
         let nonDarkPixels = 0
+        let coloredPixels = 0
         for (let index = 0; index < data.length; index += 4) {
             const localMaximum = Math.max(data[index], data[index + 1], data[index + 2])
             const localMinimum = Math.min(data[index], data[index + 1], data[index + 2])
             minimum = Math.min(minimum, localMinimum)
             maximum = Math.max(maximum, localMaximum)
             if (localMaximum > 8) nonDarkPixels++
+            if (localMaximum > 30 && localMaximum - localMinimum > 18) coloredPixels++
         }
-        return { width: canvas.width, height: canvas.height, nonDarkPixels,
+        return { width: canvas.width, height: canvas.height, nonDarkPixels, coloredPixels,
             channelRange: maximum - minimum }
     }, png.toString('base64'))
 }

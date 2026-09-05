@@ -15,6 +15,9 @@ import type {
     UploadCommand,
 } from 'geoscratch/scratch'
 import type { FlowTemporalReadyBindingFrame } from './flow-temporal-bindings.ts'
+import type { GeoViewSnapshot, WebMercatorQuadAddressCodec } from 'geoscratch/geo'
+import { flowRenderViewValues } from './flow-render-view.ts'
+import { flowScreenProjectionWgsl } from './flow-screen-projection.ts'
 
 export const FLOW_PARTICLE_RECORD_BYTES = 56
 export const FLOW_PARTICLE_MAXIMUM_COUNT = 262_144
@@ -74,6 +77,8 @@ export type FlowParticleFacts = Readonly<{
     lastSpawnCount: null
     lastSpawnDormant: null
     legacyDisplacementScale: 50
+    resetPending: boolean
+    resetCount: number
 }>
 
 export type FlowParticles = Readonly<{
@@ -91,8 +96,11 @@ export type FlowParticles = Readonly<{
     encode(
         builder: SubmissionBuilder,
         spawn: FlowParticleSpawnBindings,
-        temporal: FlowParticleTemporalFrame
+        temporal: FlowParticleTemporalFrame,
+        view?: GeoViewSnapshot
     ): void
+    /** Defers canonical state clearing to the next encoded simulation tick. */
+    reset(): void
     facts(): FlowParticleFacts
     dispose(): void
 }>
@@ -100,6 +108,8 @@ export type FlowParticles = Readonly<{
 export type FlowParticlesOptions = Readonly<{
     runtime: GPURuntime
     maximumCount?: number
+    maximumSpeed?: number
+    addressCodec: WebMercatorQuadAddressCodec
     simulationShader: string
     temporal: FlowParticleTemporalBindings
     spawn: FlowParticleSpawnModule
@@ -115,7 +125,7 @@ export type FlowParticlesOptions = Readonly<{
 const BUFFER_COPY_DST = 0x08
 const BUFFER_UNIFORM = 0x40
 const BUFFER_STORAGE = 0x80
-const CONFIG_BYTES = 64
+const CONFIG_BYTES = 176
 const COUNTER_BYTES = 16
 const WORKGROUP_SIZE = 256
 
@@ -258,6 +268,7 @@ export async function createFlowParticles(
             label: 'Flow Field particle simulation shader',
             sourceParts: [
                 { code: options.temporal.wgsl },
+                { code: flowScreenProjectionWgsl(options.addressCodec) },
                 { code: options.spawn.wgsl },
                 { code: options.simulationShader },
             ],
@@ -289,11 +300,14 @@ export async function createFlowParticles(
         let disposed = false
         let initialized = false
         let encodedSteps = 0
+        let resetPending = false
+        let resetCount = 0
 
         function encode(
             builder: SubmissionBuilder,
             spawn: FlowParticleSpawnBindings,
-            temporal: FlowParticleTemporalFrame
+            temporal: FlowParticleTemporalFrame,
+            view?: GeoViewSnapshot
         ): void {
 
             assertActive()
@@ -304,7 +318,8 @@ export async function createFlowParticles(
                 options,
                 maximumCount,
                 temporal,
-                encodedSteps + 1
+                encodedSteps + 1,
+                view
             )
             if (lastSimulation === undefined || lastTemporalSet !== temporal.bindSet ||
                 lastSpawnSet !== spawn.bindSet) {
@@ -338,14 +353,22 @@ export async function createFlowParticles(
                     whenMissing: 'throw',
                 })
             }
-            if (!initialized) {
+            if (!initialized || resetPending) {
                 builder.clear(initializeParticles)
                 initialized = true
+                resetPending = false
             }
             builder.upload(configUpload)
             builder.clear(clearCounters)
             builder.compute(pass, [ lastSimulation ])
             encodedSteps++
+        }
+
+        function reset(): void {
+
+            assertActive()
+            resetPending = true
+            resetCount++
         }
 
         function facts(): FlowParticleFacts {
@@ -367,6 +390,8 @@ export async function createFlowParticles(
                 lastSpawnCount: null,
                 lastSpawnDormant: null,
                 legacyDisplacementScale: FLOW_PARTICLE_LEGACY_DISPLACEMENT_SCALE,
+                resetPending,
+                resetCount,
             })
         }
 
@@ -394,6 +419,7 @@ export async function createFlowParticles(
             resources: Object.freeze({ particles, counters, config }),
             commands,
             encode,
+            reset,
             facts,
             dispose,
         })
@@ -409,7 +435,8 @@ function writeParticleConfig(
     options: FlowParticlesOptions,
     maximumCount: number,
     temporal: FlowParticleTemporalFrame,
-    frameSeed: number
+    frameSeed: number,
+    frameView?: GeoViewSnapshot
 ): void {
 
     bytes.fill(0)
@@ -426,12 +453,26 @@ function writeParticleConfig(
     view.setFloat32(36, options.timeStep, true)
     view.setFloat32(40, options.minimumDisplacementMeters, true)
     view.setFloat32(44, FLOW_PARTICLE_LEGACY_DISPLACEMENT_SCALE, true)
+    view.setFloat32(48, options.maximumSpeed ?? 1, true)
+    if (frameView !== undefined) {
+        const camera = flowRenderViewValues(frameView, options.addressCodec)
+        view.setUint32(52, 1, true)
+        camera.clipFromRelativeWorld.forEach((value, index) => {
+            view.setFloat32(64 + index * 4, value, true)
+        })
+        camera.cameraX.forEach((value, index) => view.setUint32(128 + index * 4, value, true))
+        camera.cameraY.forEach((value, index) => view.setUint32(136 + index * 4, value, true))
+        camera.cameraZ.forEach((value, index) => view.setFloat32(144 + index * 4, value, true))
+        view.setFloat32(152, camera.metersPerQuantum, true)
+    }
 }
 
 function validateOptions(options: FlowParticlesOptions): void {
 
     const maximumCount = options?.maximumCount ?? FLOW_PARTICLE_MAXIMUM_COUNT
     if (options?.runtime === undefined || !positiveInteger(maximumCount) ||
+        !positiveFinite(Math.fround(options.maximumSpeed ?? 1)) ||
+        options.addressCodec === undefined ||
         maximumCount > FLOW_PARTICLE_MAXIMUM_COUNT ||
         typeof options.simulationShader !== 'string' || options.simulationShader.length === 0 ||
         typeof options.temporal?.wgsl !== 'string' || options.temporal.wgsl.length === 0 ||

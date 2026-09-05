@@ -57,6 +57,11 @@ describe('Flow Field viewport history', () => {
         expect(shader).to.include('floor(255.0 * color * cleanupUniform.trailDecay) / 255.0')
         expect(shader).to.include('residual <= cleanupUniform.trailCutoff')
         expect(shader).not.to.match(/mask|boundary|depth|wet|sdf/i)
+        expect(shader).to.include('FlowScreen_ground_position(')
+        expect(shader).to.include('FlowVelocity_sample(')
+        expect(shader).to.include('!currentFlow.advectable || !(currentFlow.speed > 0.0)')
+        expect(shader).to.include('historyUv * dim - vec2f(0.5)')
+        expect(shader).not.to.include('let nearWorld')
     })
 
     it('resizes stable resources, reparses bindings, invalidates history, and clears both targets', () => {
@@ -80,15 +85,27 @@ describe('Flow Field viewport history', () => {
         expect(upload).to.be.greaterThan(-1)
         expect(compose).to.be.greaterThan(upload)
         expect(present).to.be.greaterThan(compose)
-        expect(source).to.include('[ direction.compose, ...content ]')
-        expect(source).to.include("target: surface,\n            load: 'clear'")
+        expect(source).to.include('[ compose, ...content ]')
+        expect(source).to.match(/target: surface,\s+load: 'clear'/)
         expect(source).to.include('clear: [ 0, 0, 0, 0 ]')
-        expect(source).to.include("import type { GeoViewSnapshot } from 'geoscratch/geo'")
+        expect(source).to.include("import type { GeoViewSnapshot, WebMercatorQuadAddressCodec } from 'geoscratch/geo'")
         expect(source).not.to.include('runtime.device')
         expect(source).not.to.include('runtime.queue')
 
         const presentation = read(presentationPath)
         expect(presentation).to.include('var historyTexture: texture_2d<f32>')
         expect(presentation).to.include('textureLoad(historyTexture')
+    })
+
+    it('borrows each current temporal frame and retires only its owned composition commands', () => {
+
+        const source = read(sourcePath)
+        expect(source).to.include('prepared: FlowTemporalReadyBindingFrame')
+        expect(source).to.include('uniformLayout, temporal.layout, historyLayout')
+        expect(source).to.include('new Set(prepared.resources)')
+        expect(source).to.include('composePair?.bindSet === prepared.bindSet')
+        expect(source).to.include('for (const command of previous?.commands ?? []) command.dispose()')
+        expect(source).not.to.match(/prepared\.(?:bindSet\.dispose|release)\(/)
+        expect(source).not.to.match(/temporal\.layout\.dispose\(/)
     })
 })

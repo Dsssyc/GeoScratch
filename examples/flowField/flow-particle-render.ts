@@ -18,6 +18,7 @@ export type FlowParticleRenderOptions = Readonly<{
     particles: Pick<FlowParticles, 'maximumCount' | 'resources'>
     view: FlowRenderViewBinding
     targetFormat?: GPUTextureFormat
+    maximumSpeed?: number
 }>
 
 export type FlowParticleRender = Readonly<{
@@ -58,6 +59,7 @@ export async function createFlowParticleRender(
     const view: FlowRenderViewBinding = options.view
     const viewEntry = view?.bindLayout?.entries[0]
     const targetFormat = options.targetFormat ?? 'rgba8unorm'
+    const maximumSpeed = options.maximumSpeed ?? 1
     if (runtime === undefined || !Number.isSafeInteger(particleCount) || particleCount <= 0 ||
         particleBuffer?.runtime !== runtime ||
         particleBuffer.size !== particleCount * FLOW_PARTICLE_RECORD_BYTES ||
@@ -66,7 +68,8 @@ export async function createFlowParticleRender(
         viewEntry.minBindingSize < FLOW_RENDER_VIEW_UNIFORM_BYTE_LENGTH ||
         view.bindSet?.runtime !== runtime || view.bindSet.layout !== view.bindLayout ||
         view.resources.length !== 1 || view.resources[0].runtime !== runtime ||
-        typeof targetFormat !== 'string' || targetFormat.length === 0) {
+        typeof targetFormat !== 'string' || targetFormat.length === 0 ||
+        !Number.isFinite(Math.fround(maximumSpeed)) || Math.fround(maximumSpeed) <= 0) {
         throw new TypeError('Flow particle render requires canonical particles and shared view binding')
     }
     const particleLayout = await runtime.createBindLayout({
@@ -88,7 +91,10 @@ export async function createFlowParticleRender(
     )
     const shader = await runtime.createShaderModule({
         label: 'Flow Field particle render shader',
-        sourceParts: [ { code: shaderSource } ],
+        sourceParts: [
+            { code: `const FLOW_PARTICLE_MAXIMUM_SPEED = ${Math.fround(maximumSpeed)}f;` },
+            { code: shaderSource },
+        ],
     })
     const program = runtime.createProgram({
         label: 'Flow Field particle render program',
@@ -101,6 +107,7 @@ export async function createFlowParticleRender(
         layout: { mode: 'explicit', bindLayouts: [ particleLayout, view.bindLayout ] },
         targets: [ { format: targetFormat, blend: NORMAL_BLEND } ],
         primitive: { topology: 'line-list' },
+        depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'less' },
     })
     const draw = runtime.createDrawCommand({
         label: 'Draw Flow Field particle lines',

@@ -52,7 +52,7 @@ fn FlowVelocity_sample(
         if (current.resolved_level == common_level && next.resolved_level == common_level) {
             let velocity = mix(current.value.xy, next.value.xy, temporal.progress);
             let speed = length(velocity);
-            let advectable = speed >= temporal.activityKill;
+            let advectable = speed > 0.0 && speed >= temporal.activityKill;
             return FlowVelocitySample(
                 max(current.status, next.status),
                 velocity,
