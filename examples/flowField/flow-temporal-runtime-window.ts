@@ -29,6 +29,9 @@ export type FlowTemporalRuntimeWindowSnapshot = Readonly<{
     selection: FlowTimeSelection | undefined
     activeSampleKeys: readonly string[]
     candidateSampleKeys: readonly string[]
+    prefetchSampleKey: string | undefined
+    prefetchState: 'idle' | 'loading' | 'ready' | 'failed'
+    prefetchFailure: unknown | undefined
     ownedRuntimeCount: number
     pendingCreationCount: number
     activeCaptureCount: number
@@ -57,6 +60,13 @@ export type FlowTemporalReadyCapture<Runtime extends object> = Readonly<{
     alpha: number
     lower: Readonly<{ sample: FlowFieldRuntimeSample, runtime: Runtime }>
     upper: Readonly<{ sample: FlowFieldRuntimeSample, runtime: Runtime }>
+    release(): void
+}>
+
+/** Borrows one safety-ready lookahead runtime until submitted work has settled. */
+export type FlowTemporalPrefetchCapture<Runtime extends object> = Readonly<{
+    sample: FlowFieldRuntimeSample
+    runtime: Runtime
     release(): void
 }>
 
@@ -108,6 +118,9 @@ export type FlowTemporalRuntimeWindow<Runtime extends object> = Readonly<{
         direction: FlowTemporalDirection
     ): FlowTemporalRequestTicket
     termination: Promise<FlowTemporalRuntimeWindowTermination>
+    prefetch(sample: FlowFieldRuntimeSample | undefined): void
+    capturePrefetch(): FlowTemporalPrefetchCapture<Runtime> | undefined
+    rejectPrefetch(runtime: Runtime, error: unknown): void
     snapshot(): FlowTemporalRuntimeWindowSnapshot
     capture(): FlowTemporalRuntimeCapture<Runtime>
     stopRequests(): Promise<void>
@@ -129,6 +142,7 @@ type RuntimeLease<Runtime extends object> = {
     sample: FlowFieldRuntimeSample
     runtime: Runtime
     references: number
+    reusable: boolean
     disposed: boolean
 }
 
@@ -164,7 +178,7 @@ class FactoryUnresponsiveError extends Error {
     readonly code = 'factory-unresponsive'
 }
 
-/** Owns a latest-selection pair of already safety-ready temporal runtimes. */
+/** Owns a latest-selection pair and optional lookahead within one four-runtime budget. */
 export function createFlowTemporalRuntimeWindow<Runtime extends object>(
     options: FlowTemporalRuntimeWindowOptions<Runtime>
 ): FlowTemporalRuntimeWindow<Runtime> {
@@ -191,6 +205,7 @@ export function createFlowTemporalRuntimeWindow<Runtime extends object>(
     const stopRuntimePromises = new WeakMap<Runtime, Promise<void>>()
     const disposalPromises = new WeakMap<Runtime, Promise<void>>()
     const retirements = new Set<Promise<void>>()
+    const prefetchRetirements = new Set<Promise<void>>()
     const retiringPairs = new Set<RuntimePair<Runtime>>()
     const captureWaiters = new Set<Deferred<void>>()
     const capacityWaiters = new Set<Deferred<void>>()
@@ -210,6 +225,12 @@ export function createFlowTemporalRuntimeWindow<Runtime extends object>(
     }> | undefined
     let active: RuntimePair<Runtime> | undefined
     let candidate: PairWork<Runtime> | undefined
+    let prefetchSample: FlowFieldRuntimeSample | undefined
+    let prefetchState: FlowTemporalRuntimeWindowSnapshot['prefetchState'] = 'idle'
+    let prefetchFailure: unknown | undefined
+    let prefetched: RuntimePair<Runtime> | undefined
+    let prefetchWork: PairWork<Runtime> | undefined
+    let prefetchPumpPromise: Promise<void> | undefined
     let latestTicket: TicketState | undefined
     let pumpPromise: Promise<void> | undefined
     let disposed = false
@@ -226,6 +247,9 @@ export function createFlowTemporalRuntimeWindow<Runtime extends object>(
         assertRequestable()
         const acceptedSelection = validateSelection(requestedSelection, timeAxis)
         const acceptedDirection = normalizeDirection(requestedDirection)
+        if (acceptedDirection !== direction) {
+            clearPrefetch('Flow temporal direction changed', true)
+        }
         settleTicket(latestTicket, 'superseded')
         const ticket = createTicket(++requestedRevision, acceptedSelection)
         latestTicket = ticket
@@ -235,6 +259,7 @@ export function createFlowTemporalRuntimeWindow<Runtime extends object>(
 
         if (acceptedSelection.kind === 'gap') {
             state = 'gap'
+            clearPrefetch('Flow temporal selection changed to a gap')
             cancelCandidate('Flow temporal selection changed to a gap')
             if (active !== undefined) {
                 const retired = active
@@ -250,7 +275,19 @@ export function createFlowTemporalRuntimeWindow<Runtime extends object>(
             active.selection = acceptedSelection
             state = 'ready'
             cancelCandidate('Flow temporal selection returned to the active pair')
+            if (prefetchSample === undefined) {
+                clearPrefetch('Flow foreground no longer needs joined lookahead')
+            } else {
+                const joined = prefetchWork?.selection
+                if (joined?.kind === 'exact' && joined.sample.sampleKey !== prefetchSample.sampleKey) {
+                    prefetchWork!.controller.abort(new Error('Flow foreground abandoned joined lookahead'))
+                }
+                if (prefetched !== undefined && prefetched.lower.sample.sampleKey !== prefetchSample.sampleKey) {
+                    retirePrefetched()
+                }
+            }
             settleTicket(ticket, 'ready')
+            schedulePrefetchPump()
             return ticket.public
         }
         if (candidate?.key === requestedPairKey) {
@@ -263,6 +300,19 @@ export function createFlowTemporalRuntimeWindow<Runtime extends object>(
 
         state = 'loading'
         cancelCandidate('Flow temporal selection was superseded')
+        const available = candidateSamples(acceptedSelection).map(sample =>
+            leases.get(sample.sampleKey)
+        )
+        if (available.every(lease => lease !== undefined && lease.reusable && !lease.disposed)) {
+            const acquired = available as RuntimeLease<Runtime>[]
+            for (const lease of acquired) lease.references++
+            activatePair(acceptedSelection, acquired)
+            return ticket.public
+        }
+        if (prefetchSample === undefined || !candidateSamples(acceptedSelection)
+            .some(sample => sample.sampleKey === prefetchSample?.sampleKey)) {
+            clearPrefetch('Flow foreground selection takes priority over lookahead')
+        }
         schedulePump()
         return ticket.public
     }
@@ -282,9 +332,12 @@ export function createFlowTemporalRuntimeWindow<Runtime extends object>(
             candidateSampleKeys: Object.freeze(candidate === undefined
                 ? []
                 : candidateSamples(candidate.selection).map(sample => sample.sampleKey)),
+            prefetchSampleKey: prefetchSample?.sampleKey,
+            prefetchState,
+            prefetchFailure,
             ownedRuntimeCount: ownedRuntimes.size,
             pendingCreationCount,
-            activeCaptureCount: (active?.captures ?? 0) + [ ...retiringPairs ]
+            activeCaptureCount: (active?.captures ?? 0) + (prefetched?.captures ?? 0) + [ ...retiringPairs ]
                 .reduce((count, pair) => count + pair.captures, 0),
             requestsStopped,
             failureCode: failure?.code,
@@ -344,6 +397,156 @@ export function createFlowTemporalRuntimeWindow<Runtime extends object>(
         })
     }
 
+    function prefetch(sample: FlowFieldRuntimeSample | undefined): void {
+
+        assertRequestable()
+        const accepted = sample === undefined ? undefined : requireSample(sample, timeAxis.samples)
+        if (accepted?.sampleKey === prefetchSample?.sampleKey) return
+        clearPrefetch('Flow temporal lookahead was superseded')
+        if (accepted === undefined) return
+        prefetchSample = accepted
+        prefetchState = 'loading'
+        schedulePrefetchPump()
+    }
+
+    function capturePrefetch(): FlowTemporalPrefetchCapture<Runtime> | undefined {
+
+        if (disposed) throw new Error('Flow temporal runtime window is disposed')
+        if (requestsStopped || prefetchState !== 'ready' || prefetched === undefined) return
+        const pair = prefetched
+        pair.captures++
+        let released = false
+        return Object.freeze({
+            sample: pair.lower.sample,
+            runtime: pair.lower.runtime,
+            release() {
+
+                if (released) return
+                released = true
+                pair.captures--
+                if (pair.retiring && pair.captures === 0) retirePair(pair)
+            },
+        })
+    }
+
+    function rejectPrefetch(runtime: Runtime, error: unknown): void {
+
+        if (disposed || requestsStopped || prefetched?.lower.runtime !== runtime ||
+            prefetched.lower.sample.sampleKey !== prefetchSample?.sampleKey ||
+            foregroundNeeds(prefetched.lower.sample.sampleKey) ||
+            active?.leases.some(lease => lease.runtime === runtime)) return
+        prefetched.lower.reusable = false
+        prefetchState = 'failed'
+        prefetchFailure = error
+        retirePrefetched()
+    }
+
+    function clearPrefetch(reason: string, force = false): void {
+
+        prefetchSample = undefined
+        prefetchState = 'idle'
+        prefetchFailure = undefined
+        const pendingSample = prefetchWork?.selection.kind === 'exact'
+            ? prefetchWork.selection.sample : undefined
+        if (force || pendingSample === undefined || !foregroundNeeds(pendingSample.sampleKey)) {
+            prefetchWork?.controller.abort(new Error(reason))
+        }
+        if (prefetched !== undefined &&
+            (force || !foregroundNeeds(prefetched.lower.sample.sampleKey))) {
+            retirePrefetched()
+        }
+        signalCapacityChange()
+    }
+
+    function foregroundNeeds(sampleKey: string): boolean {
+
+        return !disposed && !requestsStopped && state === 'loading' &&
+            selection !== undefined && selection.kind !== 'gap' &&
+            candidateSamples(selection).some(sample => sample.sampleKey === sampleKey)
+    }
+
+    function retirePrefetched(): void {
+
+        if (prefetched === undefined) return
+        const retired = prefetched
+        prefetched = undefined
+        const cleanup = retirePair(retired)
+        if (cleanup !== undefined) {
+            prefetchRetirements.add(cleanup)
+            void cleanup.then(
+                () => { prefetchRetirements.delete(cleanup) },
+                () => { prefetchRetirements.delete(cleanup) },
+            )
+        }
+    }
+
+    function schedulePrefetchPump(): void {
+
+        if (prefetchPumpPromise !== undefined || disposed || requestsStopped ||
+            state !== 'ready' || candidate !== undefined || prefetchState !== 'loading' ||
+            prefetchSample === undefined) return
+        let tracked: Promise<void>
+        tracked = preparePrefetch().finally(() => {
+            if (prefetchPumpPromise === tracked) prefetchPumpPromise = undefined
+            schedulePrefetchPump()
+        })
+        prefetchPumpPromise = tracked
+        void tracked.catch(recordCleanupFailure)
+    }
+
+    async function preparePrefetch(): Promise<void> {
+
+        const sample = prefetchSample!
+        const selected = Object.freeze({ kind: 'exact' as const, modelTime: sample.modelTime, sample })
+        const work: PairWork<Runtime> = {
+            id: ++workSequence,
+            key: selectionPairKey(selected),
+            revision: requestedRevision,
+            direction,
+            selection: selected,
+            controller: new AbortController(),
+            promise: Promise.resolve(),
+            leases: [],
+        }
+        prefetchWork = work
+        work.promise = (async() => {
+            let lease: RuntimeLease<Runtime> | undefined
+            try {
+                await waitForCapacity([ sample ], work)
+                lease = await acquireLease(sample, work)
+                if (work.controller.signal.aborted || disposed || requestsStopped ||
+                    (prefetchSample?.sampleKey !== sample.sampleKey &&
+                        !foregroundNeeds(sample.sampleKey))) {
+                    const cleanup = await releaseLeases([ lease ])
+                    if (cleanup.length > 0) {
+                        throw new AggregateError(cleanup, 'Flow lookahead cleanup failed')
+                    }
+                    return
+                }
+                // A joined old holder may have survived a change of speculative intent.
+                // It must retain its retirement path even if foreground returned elsewhere.
+                retirePrefetched()
+                prefetched = createPair(selected, [ lease ])
+                if (prefetchSample?.sampleKey === sample.sampleKey) prefetchState = 'ready'
+            } catch (error) {
+                if (error instanceof FactoryUnresponsiveError) {
+                    enterFailure(error, 'factory-unresponsive')
+                } else if (lease !== undefined) {
+                    recordCleanupFailure(error)
+                } else if (!disposed && !requestsStopped &&
+                    prefetchSample?.sampleKey === sample.sampleKey &&
+                    (work.failure !== undefined || !work.controller.signal.aborted)) {
+                    // Optional preparation never fails the current pair or retries each frame.
+                    prefetchState = 'failed'
+                    prefetchFailure = error
+                }
+            } finally {
+                if (prefetchWork === work) prefetchWork = undefined
+            }
+        })()
+        await work.promise
+    }
+
     function cancelCandidate(reason: string): void {
 
         if (candidate === undefined || candidate.controller.signal.aborted) return
@@ -362,6 +565,7 @@ export function createFlowTemporalRuntimeWindow<Runtime extends object>(
                 selection !== undefined && selection.kind !== 'gap') {
                 schedulePump()
             }
+            schedulePrefetchPump()
         })
         pumpPromise = tracked
         void pumpPromise.catch(error => {
@@ -402,6 +606,10 @@ export function createFlowTemporalRuntimeWindow<Runtime extends object>(
 
         const selectedSamples = candidateSamples(work.selection)
         try {
+            // A matching factory is joined before acquiring; an unrelated one has
+            // been cancelled by request and must release its budget first.
+            if (prefetchWork !== undefined) await prefetchWork.promise
+            if (prefetchRetirements.size > 0) await Promise.all([ ...prefetchRetirements ])
             await waitForCapacity(selectedSamples, work)
         } catch (error) {
             if (!work.controller.signal.aborted && !disposed && !requestsStopped) {
@@ -462,33 +670,25 @@ export function createFlowTemporalRuntimeWindow<Runtime extends object>(
             }
             return
         }
+        activatePair(work.selection, acquired)
+    }
+
+    function createPair(
+        selected: Exclude<FlowTimeSelection, Readonly<{ kind: 'gap' }>>,
+        acquired: readonly RuntimeLease<Runtime>[]
+    ): RuntimePair<Runtime> {
+
         const byKey = new Map(acquired.map(lease => [ lease.sample.sampleKey, lease ]))
-        const lowerSample = work.selection.kind === 'exact'
-            ? work.selection.sample
-            : work.selection.lower
-        const upperSample = work.selection.kind === 'exact'
-            ? work.selection.sample
-            : work.selection.upper
+        const lowerSample = selected.kind === 'exact' ? selected.sample : selected.lower
+        const upperSample = selected.kind === 'exact' ? selected.sample : selected.upper
         const lower = byKey.get(lowerSample.sampleKey)
         const upper = byKey.get(upperSample.sampleKey)
         if (lower === undefined || upper === undefined) {
-            const cleanupFailures = await releaseLeases(acquired)
-            const incompleteFailure = aggregate(
-                new Error('Flow temporal runtime candidate is incomplete'),
-                cleanupFailures,
-                'Flow temporal runtime candidate failed'
-            )
-            enterFailure(
-                incompleteFailure,
-                cleanupFailures.length > 0
-                    ? 'runtime-cleanup-failed'
-                    : 'runtime-failed'
-            )
-            return
+            throw new Error('Flow temporal runtime candidate is incomplete')
         }
-        const pair: RuntimePair<Runtime> = {
-            key: work.key,
-            selection: work.selection,
+        return {
+            key: selectionPairKey(selected),
+            selection: selected,
             leases: Object.freeze([ ...new Set([ lower, upper ]) ]),
             lower,
             upper,
@@ -496,13 +696,32 @@ export function createFlowTemporalRuntimeWindow<Runtime extends object>(
             retiring: false,
             released: false,
         }
+    }
+
+    function activatePair(
+        selected: Exclude<FlowTimeSelection, Readonly<{ kind: 'gap' }>>,
+        acquired: readonly RuntimeLease<Runtime>[]
+    ): void {
+
+        const pair = createPair(selected, acquired)
         const retired = active
         active = pair
         pairGeneration++
         state = 'ready'
-        selection = work.selection
+        selection = selected
         settleTicket(latestTicket, 'ready')
         if (retired !== undefined) retirePair(retired)
+        if (prefetchSample !== undefined && pair.leases.some(lease =>
+            lease.sample.sampleKey === prefetchSample?.sampleKey
+        )) {
+            prefetchSample = undefined
+            prefetchState = 'idle'
+            prefetchFailure = undefined
+        }
+        if (prefetched !== undefined && pair.leases.includes(prefetched.lower)) {
+            retirePrefetched()
+        }
+        schedulePrefetchPump()
     }
 
     async function acquireLease(
@@ -511,7 +730,7 @@ export function createFlowTemporalRuntimeWindow<Runtime extends object>(
     ): Promise<RuntimeLease<Runtime>> {
 
         const existing = leases.get(sample.sampleKey)
-        if (existing !== undefined && !existing.disposed) {
+        if (existing !== undefined && existing.reusable && !existing.disposed) {
             existing.references++
             return existing
         }
@@ -555,6 +774,7 @@ export function createFlowTemporalRuntimeWindow<Runtime extends object>(
                 sample,
                 runtime,
                 references: 1,
+                reusable: true,
                 disposed: false,
             }
             runtimeOwners.set(runtime, sample.sampleKey)
@@ -590,14 +810,14 @@ export function createFlowTemporalRuntimeWindow<Runtime extends object>(
         })
     }
 
-    function retirePair(pair: RuntimePair<Runtime>): void {
+    function retirePair(pair: RuntimePair<Runtime>): Promise<void> | undefined {
 
         pair.retiring = true
         retiringPairs.add(pair)
         if (pair.captures !== 0 || pair.released) return
         pair.released = true
         retiringPairs.delete(pair)
-        trackRetirement(releaseLeases(pair.leases))
+        const cleanup = trackRetirement(releaseLeases(pair.leases))
         if (retiringPairs.size === 0) {
             for (const waiter of captureWaiters) {
                 waiter.settled = true
@@ -605,9 +825,10 @@ export function createFlowTemporalRuntimeWindow<Runtime extends object>(
             }
             captureWaiters.clear()
         }
+        return cleanup
     }
 
-    function trackRetirement(cleanup: Promise<unknown[]>): void {
+    function trackRetirement(cleanup: Promise<unknown[]>): Promise<void> {
 
         let tracked: Promise<void>
         tracked = cleanup.then(cleanupFailures => {
@@ -623,6 +844,7 @@ export function createFlowTemporalRuntimeWindow<Runtime extends object>(
             backgroundFailures.add(error)
             enterFailure(error, 'runtime-cleanup-failed')
         })
+        return tracked
     }
 
     async function releaseLeases(
@@ -724,6 +946,7 @@ export function createFlowTemporalRuntimeWindow<Runtime extends object>(
         state = 'failed'
         settleTicket(latestTicket, 'failed', error)
         cancelCandidate('Flow temporal runtime entered a failed state')
+        clearPrefetch('Flow temporal runtime entered a failed state')
         signalCapacityChange()
     }
 
@@ -747,6 +970,7 @@ export function createFlowTemporalRuntimeWindow<Runtime extends object>(
         requestsStopped = true
         settleTicket(latestTicket, 'disposed')
         cancelCandidate('Flow temporal runtime requests were stopped')
+        clearPrefetch('Flow temporal runtime requests were stopped')
         signalCapacityChange()
         const stopping = Promise.allSettled(
             [ ...ownedRuntimes ].map(stopRuntimeRequestsOnce)
@@ -791,6 +1015,10 @@ export function createFlowTemporalRuntimeWindow<Runtime extends object>(
         }
         if (pumpPromise !== undefined) {
             const settlement = await Promise.allSettled([ pumpPromise ])
+            if (settlement[0]?.status === 'rejected') failures.add(settlement[0].reason)
+        }
+        if (prefetchPumpPromise !== undefined) {
+            const settlement = await Promise.allSettled([ prefetchPumpPromise ])
             if (settlement[0]?.status === 'rejected') failures.add(settlement[0].reason)
         }
         while (retiringPairs.size > 0) {
@@ -890,6 +1118,9 @@ export function createFlowTemporalRuntimeWindow<Runtime extends object>(
 
     return Object.freeze({
         request,
+        prefetch,
+        capturePrefetch,
+        rejectPrefetch,
         termination: termination.promise,
         snapshot,
         capture,
@@ -911,7 +1142,7 @@ export function createFlowTemporalRuntimeWindow<Runtime extends object>(
                     .map(sample => sample.sampleKey)
                     .filter(sampleKey => {
                         const lease = leases.get(sampleKey)
-                        return lease === undefined || lease.disposed
+                        return lease === undefined || !lease.reusable || lease.disposed
                     })
             ).size
             if (ownedRuntimes.size + pendingCreationCount + missingCount <=

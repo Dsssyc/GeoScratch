@@ -5,6 +5,7 @@
 Accepted and implemented by the `Flow Field` application, demand coordinator, temporal bindings,
 and renderer. The fixed three-slot temporal owner is no longer on the active path. This decision
 does not change the frozen `Flow Layer` example or public Geo/Scratch APIs.
+ADR-105 adds optional directional lookahead to this owner while preserving its bounds.
 
 ## Date
 

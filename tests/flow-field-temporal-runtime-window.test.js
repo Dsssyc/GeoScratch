@@ -12,6 +12,375 @@ const DATASET_IDENTITY = Object.freeze({
 
 describe('Flow temporal runtime window', () => {
 
+    it('retires an abandoned joined holder before installing a newer lookahead', async() => {
+        const axis = timeAxis([0,1,2,3,4], [0,10,20,30,40])
+        const harness = immediateHarness(axis)
+        await harness.window.request(interpolated(axis,0,1,5),1).settled
+        harness.window.prefetch(axis.samples[2])
+        await waitFor(() => harness.window.snapshot().prefetchState === 'ready')
+        const abandoned = harness.window.request(interpolated(axis,2,3,25),1)
+        harness.window.prefetch(axis.samples[4])
+        await harness.window.request(interpolated(axis,0,1,5),1).settled
+        expect((await abandoned.settled).status).to.equal('superseded')
+        await waitFor(() => harness.window.snapshot().prefetchSampleKey === 't04' &&
+            harness.window.snapshot().prefetchState === 'ready')
+        await harness.window.dispose()
+        expect(harness.window.snapshot().ownedRuntimeCount).to.equal(0)
+        expect(harness.disposed).to.have.length(harness.created.length)
+    })
+
+    it('prepares one optional sample without changing foreground selection or revisions', async() => {
+
+        const harness = immediateHarness(timeAxis([ 0, 1, 2 ], [ 0, 10, 20 ]))
+        await harness.window.request(interpolated(harness.axis, 0, 1, 5), 1).settled
+        const before = harness.window.snapshot()
+        harness.window.prefetch(harness.axis.samples[2])
+        harness.window.prefetch({ ...harness.axis.samples[2] })
+        await waitFor(() => harness.window.snapshot().prefetchState === 'ready')
+        expect(harness.window.snapshot()).to.deep.include({
+            state: before.state,
+            requestedRevision: before.requestedRevision,
+            pairGeneration: before.pairGeneration,
+            selection: before.selection,
+            activeSampleKeys: before.activeSampleKeys,
+            prefetchSampleKey: 't02',
+            ownedRuntimeCount: 3,
+        })
+        expect(harness.created).to.deep.equal([ 't00', 't01', 't02' ])
+        const warm = harness.window.capturePrefetch()
+        expect(warm.sample.sampleKey).to.equal('t02')
+        harness.window.prefetch(undefined)
+        expect(harness.window.capturePrefetch()).to.equal(undefined)
+        expect(harness.window.snapshot()).to.deep.include({
+            prefetchState: 'idle', prefetchSampleKey: undefined, activeCaptureCount: 1,
+        })
+        expect(harness.disposed).to.deep.equal([])
+        warm.release()
+        warm.release()
+        await waitFor(() => harness.disposed.includes(warm.runtime.id))
+        await harness.window.dispose()
+    })
+
+    it('promotes a warmed sample synchronously and preserves exact endpoint contraction', async() => {
+
+        const harness = immediateHarness(timeAxis([ 0, 1, 2 ], [ 0, 10, 20 ]))
+        await harness.window.request(interpolated(harness.axis, 0, 1, 5), 1).settled
+        harness.window.prefetch(harness.axis.samples[2])
+        await waitFor(() => harness.window.snapshot().prefetchState === 'ready')
+        const warm = harness.window.capturePrefetch()
+        const exactTicket = harness.window.request(exact(harness.axis.samples[1]), 1)
+        expect(harness.window.snapshot()).to.deep.include({
+            state: 'ready', prefetchState: 'ready', prefetchSampleKey: 't02',
+        })
+        expect(await exactTicket.settled).to.deep.include({ status: 'ready' })
+        const next = harness.window.request(interpolated(harness.axis, 1, 2, 15), 1)
+        const capture = harness.window.capture()
+        expect(capture.state).to.equal('ready')
+        expect(capture.upper.runtime).to.equal(warm.runtime)
+        expect(harness.window.snapshot()).to.deep.include({
+            prefetchState: 'idle', prefetchSampleKey: undefined, pairGeneration: 3,
+        })
+        expect(await next.settled).to.deep.include({ status: 'ready' })
+        expect(harness.created).to.deep.equal([ 't00', 't01', 't02' ])
+        warm.release()
+        capture.release()
+        await harness.window.dispose()
+        expect(new Set(harness.disposed).size).to.equal(3)
+    })
+
+    it('joins an in-flight matching prefetch rather than invoking its factory twice', async() => {
+
+        const axis = timeAxis([ 0, 1, 2 ], [ 0, 10, 20 ])
+        const factory = controlledFactory()
+        const harness = windowHarness(axis, factory.create)
+        const first = harness.window.request(interpolated(axis, 0, 1, 5), 1)
+        await waitFor(() => factory.calls.length === 2)
+        factory.resolveAll()
+        await first.settled
+        harness.window.prefetch(axis.samples[2])
+        await waitFor(() => factory.calls.length === 3)
+        const next = harness.window.request(interpolated(axis, 1, 2, 15), 1)
+        await settleMicrotasks(6)
+        expect(factory.calls).to.have.length(3)
+        expect(factory.calls[2].signal.aborted).to.equal(false)
+        factory.resolve('t02')
+        expect(await next.settled).to.deep.include({ status: 'ready' })
+        expect(factory.calls).to.have.length(3)
+        const ready = harness.window.capture()
+        expect(ready.upper.runtime).to.equal(factory.calls[2].runtime)
+        ready.release()
+        await harness.window.dispose()
+    })
+
+    it('prioritizes a seek after cancelling and cleaning up unrelated pending lookahead', async() => {
+
+        const axis = timeAxis([ 0, 1, 2, 3, 4 ], [ 0, 10, 20, 30, 40 ])
+        const factory = controlledFactory()
+        const harness = windowHarness(axis, factory.create)
+        const first = harness.window.request(interpolated(axis, 0, 1, 5), 1)
+        await waitFor(() => factory.calls.length === 2)
+        factory.resolveAll()
+        await first.settled
+        harness.window.prefetch(axis.samples[2])
+        await waitFor(() => factory.calls.length === 3)
+        const seek = harness.window.request(interpolated(axis, 3, 4, 35), 1)
+        expect(factory.calls[2].signal.aborted).to.equal(true)
+        await settleMicrotasks(6)
+        expect(factory.calls).to.have.length(3)
+        factory.resolve('t02')
+        await waitFor(() => factory.calls.length === 5)
+        expect(harness.disposed).to.include('runtime-t02-3')
+        const reverse = harness.window.request(interpolated(axis, 0, 1, 5), -1)
+        expect(await reverse.settled).to.deep.include({ status: 'ready' })
+        expect(await seek.settled).to.deep.include({ status: 'superseded' })
+        factory.resolveAll()
+        await harness.window.dispose()
+        expect(new Set(harness.disposed).size).to.equal(5)
+    })
+
+    it('keeps a joined foreground factory when pause clears speculative intent', async() => {
+
+        const axis = timeAxis([ 0, 1, 2, 3 ], [ 0, 10, 20, 30 ])
+        const factory = controlledFactory()
+        const harness = windowHarness(axis, factory.create)
+        const first = harness.window.request(interpolated(axis, 0, 1, 5), 1)
+        await waitFor(() => factory.calls.length === 2)
+        factory.resolveAll()
+        await first.settled
+        harness.window.prefetch(axis.samples[2])
+        await waitFor(() => factory.calls.length === 3)
+        const next = harness.window.request(interpolated(axis, 1, 2, 15), 1)
+        harness.window.prefetch(undefined)
+        expect(harness.window.snapshot()).to.deep.include({
+            prefetchSampleKey: undefined, prefetchState: 'idle', state: 'loading',
+        })
+        expect(factory.calls[2].signal.aborted).to.equal(false)
+        // A newer optional intent must not discard the pending foreground sample.
+        harness.window.prefetch(axis.samples[3])
+        factory.resolve('t02')
+        expect(await next.settled).to.deep.include({ status: 'ready' })
+        await waitFor(() => factory.calls.length === 4)
+        expect(factory.calls.map(call => call.sampleKey)).to.deep.equal([
+            't00', 't01', 't02', 't03',
+        ])
+        factory.resolve('t03')
+        await waitFor(() => harness.window.snapshot().prefetchState === 'ready')
+        expect(harness.window.snapshot().prefetchSampleKey).to.equal('t03')
+        await harness.window.dispose()
+    })
+
+    it('isolates ordinary lookahead failure and does not retry the same sample every frame', async() => {
+
+        const axis = timeAxis([ 0, 1, 2 ], [ 0, 10, 20 ])
+        let warmAttempts = 0
+        const harness = windowHarness(axis, async sample => {
+            if (sample.sampleKey === 't02' && ++warmAttempts === 1) {
+                throw new Error('optional lookup failed')
+            }
+            return { id: `runtime-${sample.sampleKey}`, sampleKey: sample.sampleKey }
+        })
+        await harness.window.request(interpolated(axis, 0, 1, 5), 1).settled
+        harness.window.prefetch(axis.samples[2])
+        await waitFor(() => harness.window.snapshot().prefetchState === 'failed')
+        harness.window.prefetch(axis.samples[2])
+        await settleMicrotasks(6)
+        expect(warmAttempts).to.equal(1)
+        expect(harness.window.snapshot()).to.deep.include({ state: 'ready', failureCode: undefined })
+        harness.window.prefetch(undefined)
+        harness.window.prefetch(axis.samples[2])
+        await waitFor(() => harness.window.snapshot().prefetchState === 'ready')
+        expect(warmAttempts).to.equal(2)
+        await harness.window.dispose()
+    })
+
+    it('cancels replaced lookahead and waits for a warm capture before disposal completes', async() => {
+
+        const axis = timeAxis([ 0, 1, 2 ], [ 0, 10, 20 ])
+        const factory = controlledFactory()
+        const harness = windowHarness(axis, factory.create)
+        const first = harness.window.request(exact(axis.samples[0]), 1)
+        await waitFor(() => factory.calls.length === 1)
+        factory.resolveAll()
+        await first.settled
+        harness.window.prefetch(axis.samples[1])
+        await waitFor(() => factory.calls.length === 2)
+        harness.window.prefetch(axis.samples[2])
+        expect(factory.calls[1].signal.aborted).to.equal(true)
+        factory.resolve('t01')
+        await waitFor(() => factory.calls.length === 3)
+        factory.resolve('t02')
+        await waitFor(() => harness.window.snapshot().prefetchState === 'ready')
+        const held = harness.window.capturePrefetch()
+        let finished = false
+        const disposing = harness.window.dispose().then(() => { finished = true })
+        await settleMicrotasks(6)
+        expect(finished).to.equal(false)
+        expect(harness.disposed).to.not.include(held.runtime.id)
+        held.release()
+        await disposing
+        expect(new Set(harness.disposed).size).to.equal(3)
+    })
+
+    it('keeps captured, retiring and prefetched runtimes within the four-runtime budget', async() => {
+
+        const axis = timeAxis([ 0, 1, 2, 3, 4 ], [ 0, 10, 20, 30, 40 ])
+        const harness = immediateHarness(axis)
+        await harness.window.request(interpolated(axis, 0, 1, 5), 1).settled
+        const old = harness.window.capture()
+        await harness.window.request(interpolated(axis, 1, 2, 15), 1).settled
+        harness.window.prefetch(axis.samples[3])
+        await waitFor(() => harness.window.snapshot().prefetchState === 'ready')
+        const warm = harness.window.capturePrefetch()
+        harness.window.prefetch(axis.samples[4])
+        await settleMicrotasks(8)
+        expect(harness.created).to.deep.equal([ 't00', 't01', 't02', 't03' ])
+        expect(harness.window.snapshot()).to.deep.include({
+            ownedRuntimeCount: 4, pendingCreationCount: 0, prefetchState: 'loading',
+        })
+        warm.release()
+        await waitFor(() => harness.window.snapshot().prefetchState === 'ready')
+        expect(harness.window.snapshot().ownedRuntimeCount).to.equal(4)
+        const next = harness.window.request(interpolated(axis, 3, 4, 35), 1)
+        await settleMicrotasks(8)
+        expect(harness.created).to.have.length(5)
+        old.release()
+        expect(await next.settled).to.deep.include({ status: 'ready' })
+        expect(harness.created).to.have.length(6)
+        expect(harness.window.snapshot().ownedRuntimeCount).to.be.at.most(4)
+        await harness.window.dispose()
+        expect(new Set(harness.disposed).size).to.equal(6)
+    })
+
+    it('treats an unresponsive optional factory as fatal and cleans its late result once', async() => {
+
+        const axis = timeAxis([ 0, 1 ], [ 0, 10 ])
+        const factory = controlledFactory()
+        const harness = windowHarness(axis, factory.create, 15)
+        const first = harness.window.request(exact(axis.samples[0]), 1)
+        await waitFor(() => factory.calls.length === 1)
+        factory.resolveAll()
+        await first.settled
+        harness.window.prefetch(axis.samples[1])
+        expect(await harness.window.termination).to.deep.include({
+            status: 'fatal', failureCode: 'factory-unresponsive',
+        })
+        factory.resolve('t01')
+        let error
+        try { await harness.window.dispose() } catch (failure) { error = failure }
+        expect(error).to.be.instanceOf(AggregateError)
+        expect(harness.disposed).to.have.members([ 'runtime-t00-1', 'runtime-t01-2' ])
+    })
+
+    it('waits for cancelled warm cleanup before creating an unrelated foreground pair', async() => {
+
+        const axis = timeAxis([ 0, 1, 2, 3 ], [ 0, 10, 20, 30 ])
+        const created = []
+        let finishCleanup
+        const cleanupGate = new Promise(resolve => { finishCleanup = resolve })
+        const window = createFlowTemporalRuntimeWindow({
+            datasetIdentity: DATASET_IDENTITY, timeAxis: axis, maxOwnedRuntimes: 4,
+            maxCreationSettleMs: 1000,
+            async createReadyRuntime(sample) {
+                created.push(sample.sampleKey)
+                return { sampleKey: sample.sampleKey }
+            },
+            async stopRuntimeRequests() {},
+            async disposeRuntime(runtime) {
+                if (runtime.sampleKey === 't01') await cleanupGate
+            },
+        })
+        await window.request(exact(axis.samples[0]), 1).settled
+        window.prefetch(axis.samples[1])
+        await waitFor(() => window.snapshot().prefetchState === 'ready')
+        const seek = window.request(interpolated(axis, 2, 3, 25), 1)
+        await settleMicrotasks(8)
+        expect(created).to.deep.equal([ 't00', 't01' ])
+        finishCleanup()
+        expect(await seek.settled).to.deep.include({ status: 'ready' })
+        expect(created).to.deep.equal([ 't00', 't01', 't02', 't03' ])
+        await window.dispose()
+    })
+
+    it('cancels lookahead on gaps, direction changes and request shutdown', async() => {
+
+        const axis = timeAxis([ 0, 1, 4 ], [ 0, 10, 40 ])
+        const harness = immediateHarness(axis)
+        await harness.window.request(exact(axis.samples[1]), 1).settled
+        harness.window.prefetch(axis.samples[2])
+        await waitFor(() => harness.window.snapshot().prefetchState === 'ready')
+        await harness.window.request(gap(axis, 1, 2, 20), 1).settled
+        expect(harness.window.snapshot()).to.deep.include({ state: 'gap', prefetchState: 'idle' })
+        await harness.window.request(exact(axis.samples[1]), 1).settled
+        harness.window.prefetch(axis.samples[2])
+        await waitFor(() => harness.window.snapshot().prefetchState === 'ready')
+        await harness.window.request(exact(axis.samples[1]), -1).settled
+        expect(harness.window.snapshot()).to.deep.include({ state: 'ready', prefetchState: 'idle' })
+        harness.window.prefetch(axis.samples[0])
+        await waitFor(() => harness.window.snapshot().prefetchState === 'ready')
+        await harness.window.stopRequests()
+        expect(harness.window.snapshot().prefetchState).to.equal('idle')
+        expect(harness.window.capturePrefetch()).to.equal(undefined)
+        expect(() => harness.window.prefetch(axis.samples[0])).to.throw(/requests are stopped/)
+        await harness.window.dispose()
+    })
+
+    it('treats optional-runtime cleanup failure as fatal', async() => {
+
+        const axis = timeAxis([ 0, 1 ], [ 0, 10 ])
+        const window = createFlowTemporalRuntimeWindow({
+            datasetIdentity: DATASET_IDENTITY, timeAxis: axis, maxOwnedRuntimes: 4,
+            maxCreationSettleMs: 1000,
+            async createReadyRuntime(sample) { return { sampleKey: sample.sampleKey } },
+            async stopRuntimeRequests() {},
+            async disposeRuntime(runtime) {
+                if (runtime.sampleKey === 't01') throw new Error('warm cleanup failed')
+            },
+        })
+        await window.request(exact(axis.samples[0]), 1).settled
+        window.prefetch(axis.samples[1])
+        await waitFor(() => window.snapshot().prefetchState === 'ready')
+        window.prefetch(undefined)
+        expect(await window.termination).to.deep.include({
+            status: 'fatal', failureCode: 'runtime-cleanup-failed',
+        })
+        let error
+        try { await window.dispose() } catch (failure) { error = failure }
+        expect(error).to.be.instanceOf(AggregateError)
+    })
+
+    it('rejects speculative detail failure without poisoning the active pair or reusing the failed runtime', async() => {
+
+        const axis = timeAxis([ 0, 1, 2 ], [ 0, 10, 20 ])
+        const harness = immediateHarness(axis)
+        await harness.window.request(interpolated(axis, 0, 1, 5), 1).settled
+        harness.window.prefetch(axis.samples[2])
+        await waitFor(() => harness.window.snapshot().prefetchState === 'ready')
+        const held = harness.window.capturePrefetch()
+        const error = new Error('speculative detail failed')
+        harness.window.rejectPrefetch(held.runtime, error)
+        expect(harness.window.snapshot()).to.deep.include({
+            state: 'ready', prefetchState: 'failed', prefetchSampleKey: 't02',
+            prefetchFailure: error,
+        })
+        harness.window.prefetch(axis.samples[2])
+        await settleMicrotasks(6)
+        expect(harness.created).to.have.length(3)
+        expect(harness.window.capturePrefetch()).to.equal(undefined)
+        expect(harness.disposed).to.not.include(held.runtime.id)
+        await harness.window.request(interpolated(axis, 1, 2, 15), 1).settled
+        const current = harness.window.capture()
+        expect(current.upper.runtime).to.not.equal(held.runtime)
+        expect(harness.created).to.deep.equal([ 't00', 't01', 't02', 't02' ])
+        // A stale report must not reject the promoted replacement runtime.
+        harness.window.rejectPrefetch(held.runtime, error)
+        harness.window.rejectPrefetch(current.upper.runtime, error)
+        expect(harness.window.snapshot()).to.deep.include({ state: 'ready', prefetchState: 'idle' })
+        held.release()
+        current.release()
+        await harness.window.dispose()
+        expect(new Set(harness.disposed).size).to.equal(4)
+    })
+
     it('owns one unique runtime for an exact selection', async() => {
 
         const harness = immediateHarness(timeAxis([ 0 ], [ 5 ]))
