@@ -53,8 +53,15 @@ fn FlowVelocity_sample(
             let velocity = mix(current.value.xy, next.value.xy, temporal.progress);
             let speed = length(velocity);
             let advectable = speed > 0.0 && speed >= temporal.activityKill;
-            return FlowVelocitySample(
+            // A common-level retry changes where both pages are resident, not
+            // the original request. Keep fallback provenance even for zero UV.
+            let status = select(
                 max(current.status, next.status),
+                2u,
+                common_level > requested_level,
+            );
+            return FlowVelocitySample(
+                status,
                 velocity,
                 speed,
                 advectable,
