@@ -5,6 +5,7 @@
 Accepted. Example-local repair of temporal fallback provenance and inspector
 presentation. The source format, Virtual Raster runtime window, and frozen Flow
 Layer are unchanged.
+ADR-104 subsequently applies readiness to every current view, not only new pairs.
 
 ## Date
 

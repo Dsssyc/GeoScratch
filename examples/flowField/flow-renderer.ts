@@ -328,7 +328,6 @@ export async function createFlowFieldRenderer(
         let temporalResidencyEpoch = 0
         let lastTemporalSignature = ''
         let requestedLevel = 0
-        let presentedPairGeneration = 0
         let populatedParticleView: GeoViewSnapshot | undefined
         let packedCells: FlowDemandFrame['candidateCells'] | undefined
         let packedCandidates = new Uint8Array(new ArrayBuffer(0))
@@ -419,14 +418,12 @@ export async function createFlowFieldRenderer(
                 const needsViewFollowUp = !viewDemand.hasFeedbackFor(view)
                 const demandFrame = demand.encode(builder, view, prepared.temporal)
                 requestedLevel = demandFrame.requestedLevel
-                if (presentedPairGeneration !== prepared.pairGeneration &&
-                    !needsViewFollowUp &&
+                // A previously presented time pair does not make a new camera/LoD
+                // ready. Never use transient missing/coarse-zero data to erase ink.
+                const presentationReady = !needsViewFollowUp &&
                     prepared.requestedLevel === requestedLevel &&
                     (demandFrame.candidatePages.length === 0 ||
-                        flowPairViewReady(prepared.temporal, demandFrame.candidatePages))) {
-                    presentedPairGeneration = prepared.pairGeneration
-                }
-                const presentationReady = presentedPairGeneration === prepared.pairGeneration
+                        flowPairViewReady(prepared.temporal, demandFrame.candidatePages))
                 if (clearedPresentationRevision !== framePresentationRevision) {
                     history.reset()
                     clearedPresentationRevision = framePresentationRevision
@@ -464,10 +461,7 @@ export async function createFlowFieldRenderer(
                 if (presentationReady && framePresentation.view === 'particles') {
                     if (populatedParticleView === undefined) {
                         populatedParticleView = view
-                    } else if (!sameParticleView(populatedParticleView, view) &&
-                        !needsViewFollowUp && prepared.requestedLevel === requestedLevel &&
-                        (demandFrame.candidatePages.length === 0 ||
-                            flowPairViewReady(prepared.temporal, demandFrame.candidatePages))) {
+                    } else if (!sameParticleView(populatedParticleView, view)) {
                         // A newly exposed view must not wait several seconds for natural
                         // retirement to release slots occupied by the previous view.
                         particles.refillView(populatedParticleView)

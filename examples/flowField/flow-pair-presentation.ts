@@ -2,7 +2,7 @@ import type { VirtualRasterPageIdentity } from 'geoscratch/geo'
 import type { FlowTemporalReadyCapture } from './flow-temporal-runtime-window.ts'
 import type { FlowVelocitySampleRuntime } from './velocity-source.ts'
 
-/** Holds a newly selected pair's particle history until its requested view pages are published. */
+/** Checks both current endpoints' requested view pages; readiness is not sticky across camera changes. */
 export function flowPairViewReady(
     capture: FlowTemporalReadyCapture<FlowVelocitySampleRuntime>,
     pages: readonly VirtualRasterPageIdentity[]

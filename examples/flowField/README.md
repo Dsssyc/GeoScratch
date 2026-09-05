@@ -19,8 +19,11 @@ sampler. Status colors are green for resident moving data, amber for fallback,
 gray for zero velocity, magenta for unavailable data, and red for invalid sampling.
 Activity contour is an optional velocity threshold overlay and does not enter trails.
 
-During a time-pair handoff the inspector retains the previous complete image until
-the requested pages are ready. Loading and the old presented time remain visible.
+During a time-pair handoff or camera/LoD change, presentation retains the previous
+complete image until current-view feedback and requested pages are ready. Loading
+and the old presented time remain visible. Particle advancement pauses during this
+wait, while retained history follows the map; completion resumes automatically even
+when model playback is paused. The optional contour is hidden during the wait.
 Fallback is always reported relative to the original sampling request, including
 when a coarser page contains zero velocity. Changing the inspection mode explicitly
 invalidates the old image rather than relabeling it.
@@ -42,6 +45,7 @@ node tests/browser/flow-field-inspector-handoff.mjs
 node tests/browser/flow-field-motion-performance.mjs
 node tests/browser/flow-field-reveal-index.mjs
 node tests/browser/flow-field-camera-reveal.mjs
+node tests/browser/flow-field-spatial-handoff.mjs
 node tests/browser/scratch-flow-field.mjs
 ```
 
@@ -65,6 +69,10 @@ replacement particles into that region once the current view's pages are ready.
 It preserves history and normal stationary retirement, with no extra source data
 or texture. The quota uses candidate counts rather than exact projected area; see
 [ADR-103](../../docs/decisions/ADR-103-flow-camera-reveal-refill.md).
+
+The per-view readiness gate also prevents loading-time samples from erasing old
+trails within an already admitted time pair; see
+[ADR-104](../../docs/decisions/ADR-104-flow-spatial-presentation-readiness.md).
 
 `node tests/browser/flow-field-pitch.mjs` checks tilted particle and Speed views at
 model time 6.93, including screenshot colors against COG U/V samples.

@@ -57,6 +57,18 @@ describe('Flow Field renderer composition', () => {
         expect(source).to.not.include('initialize()')
     })
 
+    it('rechecks spatial readiness before any presentation within an already selected pair', () => {
+
+        const source = fs.readFileSync(sourcePath, 'utf8')
+        expect(source).to.not.include('presentedPairGeneration')
+        expect(source).to.include('const presentationReady = !needsViewFollowUp &&')
+        expect(source).to.include('prepared.requestedLevel === requestedLevel &&')
+        expect(source).to.include('demandFrame.candidatePages.length === 0 ||')
+        expect(source).to.include('flowPairViewReady(prepared.temporal, demandFrame.candidatePages)')
+        expect(source).to.include(') : history.presentRetained(builder, view)')
+        expect(source.match(/flowPairViewReady\(prepared\.temporal/g)).to.have.length(1)
+    })
+
     it('uses only velocity-derived products and public package entrypoints', () => {
 
         const source = fs.readFileSync(sourcePath, 'utf8')
