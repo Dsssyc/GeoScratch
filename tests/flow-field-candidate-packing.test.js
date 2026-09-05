@@ -135,7 +135,94 @@ describe('Flow Field candidate packing', () => {
         expect(view.getUint32(52, true)).to.equal(1)
         expect(view.getUint32(48, true)).to.equal(view.getUint32(16, true) * 2)
     })
+
+    it('matches canonical BigInt encoding across complete coarse and fine page grids', () => {
+
+        const coverage = tileMatrixCoverage({
+            tileMatrixSet: WebMercatorQuad,
+            limits: [
+                { matrixId: '4', minTileRow: 6, maxTileRow: 7, minTileCol: 13, maxTileCol: 14 },
+                { matrixId: '10', minTileRow: 400, maxTileRow: 401, minTileCol: 850, maxTileCol: 851 },
+            ],
+        })
+        const codec = webMercatorQuadAddressCodec({ coverage, coordinateBits: 40 })
+        const addressSpace = virtualRasterTileAddressSpace({ id: 'flow-packing-batch', coverage })
+        const cells = []
+        for (const limit of coverage.limits) {
+            for (let tileRow = limit.minTileRow; tileRow <= limit.maxTileRow; tileRow++) {
+                for (let tileCol = limit.minTileCol; tileCol <= limit.maxTileCol; tileCol++) {
+                    const page = addressSpace.pageFromTile({
+                        matrixId: limit.matrixId, tileRow, tileCol,
+                    })
+                    for (let cellY = 0; cellY < 64; cellY++) {
+                        for (let cellX = 0; cellX < 64; cellX++) {
+                            cells.push({ page, cellX, cellY, requestedLevel: (cellX + cellY) % 2 })
+                        }
+                    }
+                }
+            }
+        }
+        let originEncodings = 0
+        const countedCodec = {
+            coverage,
+            worldQuanta: codec.worldQuanta,
+            fromWorldQuanta(values) {
+                originEncodings++
+                return codec.fromWorldQuanta(values)
+            },
+        }
+        const packed = packFlowCandidateCells(cells, countedCodec, 64)
+        const expected = canonicalPackedCells(cells, codec, 64)
+
+        expect(packed).to.deep.equal(expected)
+        expect(originEncodings).to.equal(8)
+        // z4 cells cross the u32 low limb many times within each page.
+        const view = new DataView(packed.buffer)
+        expect(view.getUint32(4 * 32 + 4, true)).to.equal(view.getUint32(4, true) + 1)
+    })
+
+    it('validates each cell and distinct page object even after preparing its page identity', () => {
+
+        const fixture = createMultiLevelFixture()
+        const valid = candidateAtMatrix(fixture, '9', 210, 428, 0)
+        for (const invalid of [
+            { ...valid, requestedLevel: 2 },
+            { ...valid, cellX: 64 },
+            { ...valid, cellY: 0.5 },
+        ]) {
+            expect(() => packFlowCandidateCells([ valid, invalid ], fixture.codec, 64))
+                .to.throw(RangeError)
+        }
+        const forged = { ...valid, page: { ...valid.page, dimensions: 3 } }
+        expect(() => packFlowCandidateCells([ valid, forged ], fixture.codec, 64))
+            .to.throw(TypeError)
+    })
 })
+
+function canonicalPackedCells(cells, codec, cellsPerPageEdge) {
+
+    const output = new Uint8Array(cells.length * FLOW_CANDIDATE_RECORD_BYTES)
+    const view = new DataView(output.buffer)
+    for (let index = 0; index < cells.length; index++) {
+        const cell = cells[index]
+        const tile = cell.page.tile
+        const pageQuanta = codec.worldQuanta /
+            BigInt(WebMercatorQuad.matrix(tile.matrixId).matrixWidth)
+        const step = pageQuanta / BigInt(cellsPerPageEdge)
+        const origin = codec.fromWorldQuanta([
+            BigInt(tile.tileCol) * pageQuanta + BigInt(cell.cellX) * step,
+            BigInt(tile.tileRow) * pageQuanta + BigInt(cell.cellY) * step,
+        ]).fixed.limbs
+        const offset = index * FLOW_CANDIDATE_RECORD_BYTES
+        for (let axis = 0; axis < 2; axis++) {
+            view.setUint32(offset + axis * 8, origin[axis].low, true)
+            view.setUint32(offset + axis * 8 + 4, origin[axis].high, true)
+        }
+        view.setUint32(offset + 16, Number(step), true)
+        view.setUint32(offset + 20, cell.requestedLevel, true)
+    }
+    return output
+}
 
 function createFixture(matrixId, bounds) {
 
