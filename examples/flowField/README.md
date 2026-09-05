@@ -40,6 +40,8 @@ node tests/browser/flow-field-controls.mjs
 node tests/browser/flow-field-temporal-status.mjs
 node tests/browser/flow-field-inspector-handoff.mjs
 node tests/browser/flow-field-motion-performance.mjs
+node tests/browser/flow-field-reveal-index.mjs
+node tests/browser/flow-field-camera-reveal.mjs
 node tests/browser/scratch-flow-field.mjs
 ```
 
@@ -57,6 +59,12 @@ the same camera for visual comparison without changing the reference.
 retained-history reprojection during delayed time loading, and steady animation
 throughput. Large view demands select a coarser complete cover within the existing
 page budget; they do not increase the budget or discard arbitrary visible tiles.
+
+When camera movement reveals new supported flow, a bounded GPU index directs
+replacement particles into that region once the current view's pages are ready.
+It preserves history and normal stationary retirement, with no extra source data
+or texture. The quota uses candidate counts rather than exact projected area; see
+[ADR-103](../../docs/decisions/ADR-103-flow-camera-reveal-refill.md).
 
 `node tests/browser/flow-field-pitch.mjs` checks tilted particle and Speed views at
 model time 6.93, including screenshot colors against COG U/V samples.

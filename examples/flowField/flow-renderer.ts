@@ -329,6 +329,7 @@ export async function createFlowFieldRenderer(
         let lastTemporalSignature = ''
         let requestedLevel = 0
         let presentedPairGeneration = 0
+        let populatedParticleView: GeoViewSnapshot | undefined
         let packedCells: FlowDemandFrame['candidateCells'] | undefined
         let packedCandidates = new Uint8Array(new ArrayBuffer(0))
 
@@ -433,6 +434,7 @@ export async function createFlowFieldRenderer(
                 if (presentationReady && appliedResetRevision !== frameResetRevision) {
                     history.reset()
                     particles.reset()
+                    populatedParticleView = undefined
                     appliedResetRevision = frameResetRevision
                 }
                 renderView.encode(builder, view)
@@ -458,7 +460,20 @@ export async function createFlowFieldRenderer(
                     supportSnapshot,
                     prepared
                 )
+                let refilledParticleView = false
                 if (presentationReady && framePresentation.view === 'particles') {
+                    if (populatedParticleView === undefined) {
+                        populatedParticleView = view
+                    } else if (!sameParticleView(populatedParticleView, view) &&
+                        !needsViewFollowUp && prepared.requestedLevel === requestedLevel &&
+                        (demandFrame.candidatePages.length === 0 ||
+                            flowPairViewReady(prepared.temporal, demandFrame.candidatePages))) {
+                        // A newly exposed view must not wait several seconds for natural
+                        // retirement to release slots occupied by the previous view.
+                        particles.refillView(populatedParticleView)
+                        populatedParticleView = view
+                        refilledParticleView = true
+                    }
                     particles.encode(builder, particleSpawn.bindings, prepared, view)
                 }
                 if (presentationReady && framePresentation.contour) contour.encode(builder, candidates, demandFrame.candidateCells.length, {
@@ -499,7 +514,7 @@ export async function createFlowFieldRenderer(
                 return Object.freeze({
                     observation,
                     settlement,
-                    needsFollowUp: needsViewFollowUp || prepared.requestedLevel !== requestedLevel,
+                    needsFollowUp: needsViewFollowUp || prepared.requestedLevel !== requestedLevel || refilledParticleView,
                     value: Object.freeze({
                         state: 'rendered' as const,
                         submitted,
@@ -759,6 +774,13 @@ function flowDemandSettlement(
         residencyWorkCount,
         needsFollowUp: false,
     })
+}
+
+function sameParticleView(first: GeoViewSnapshot, second: GeoViewSnapshot): boolean {
+    return first.clipFromRelativeWorld.every((value, index) => value === second.clipFromRelativeWorld[index]) &&
+        first.cameraHigh.every((value, index) => value === second.cameraHigh[index]) &&
+        first.cameraLow.every((value, index) => value === second.cameraLow[index]) &&
+        first.referenceViewport.every((value, index) => value === second.referenceViewport[index])
 }
 
 function uniqueCaptureRuntimes(

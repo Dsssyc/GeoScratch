@@ -35,11 +35,17 @@ export type FlowParticleTemporalBindings = Readonly<{
 export type FlowParticleSpawnModule = Readonly<{
     wgsl: string
     layout: BindLayout
+    capacity: number
 }>
 
 export type FlowParticleSpawnBindings = Readonly<{
     bindSet: BindSet
     resources: readonly FlowParticleGpuResource[]
+    refill: Readonly<{
+        resources: readonly [BufferResource, BufferResource]
+        clear: ClearBufferCommand
+        initializeIndices: ClearBufferCommand
+    }>
 }>
 
 export type FlowParticleSpawnIndexResources = Readonly<{
@@ -79,6 +85,8 @@ export type FlowParticleFacts = Readonly<{
     legacyDisplacementScale: 50
     resetPending: boolean
     resetCount: number
+    /** Encoded reveal-index passes, not a CPU-observed count of replaced GPU particles. */
+    viewRefillCount: number
 }>
 
 export type FlowParticles = Readonly<{
@@ -101,6 +109,8 @@ export type FlowParticles = Readonly<{
     ): void
     /** Defers canonical state clearing to the next encoded simulation tick. */
     reset(): void
+    /** Seeds newly visible support on the next tick, bounded to one quarter of slots. */
+    refillView(previousView: GeoViewSnapshot): void
     facts(): FlowParticleFacts
     dispose(): void
 }>
@@ -125,7 +135,7 @@ export type FlowParticlesOptions = Readonly<{
 const BUFFER_COPY_DST = 0x08
 const BUFFER_UNIFORM = 0x40
 const BUFFER_STORAGE = 0x80
-const CONFIG_BYTES = 176
+const CONFIG_BYTES = 272
 const COUNTER_BYTES = 16
 const WORKGROUP_SIZE = 256
 
@@ -141,57 +151,100 @@ export async function prepareFlowParticleSpawnBindings(
         index.resources?.output?.buffer === undefined) {
         throw new TypeError('Flow particle spawn bindings require one live GPU spawn index')
     }
-    const layout = await runtime.createBindLayout({
-        label: 'Flow Field particle spawn selection layout',
-        group: 2,
-        entries: [
-            {
-                binding: 0,
-                name: 'flowParticleSpawnCount',
-                type: 'read-storage',
-                visibility: [ 'compute' ],
-                minBindingSize: 4,
-            },
-            {
-                binding: 1,
-                name: 'flowParticleSpawnCandidates',
-                type: 'read-storage',
-                visibility: [ 'compute' ],
-                minBindingSize: 32,
-            },
-        ],
-    })
-    let bindSet: BindSet
+    const owned: { dispose(): void }[] = []
+    const own = <T extends { dispose(): void }>(value: T): T => {
+        owned.push(value)
+        return value
+    }
     try {
-        bindSet = await runtime.createBindSet(layout, {
+        const refillCount = own(await runtime.createBuffer({
+            label: 'Flow Field revealed spawn counters',
+            size: 8,
+            usage: BUFFER_STORAGE | BUFFER_COPY_DST,
+        }))
+        const refillIndices = own(await runtime.createBuffer({
+            label: 'Flow Field revealed spawn indices',
+            size: index.capacity * 4,
+            usage: BUFFER_STORAGE | BUFFER_COPY_DST,
+        }))
+        const layout = own(await runtime.createBindLayout({
+            label: 'Flow Field particle spawn selection layout',
+            group: 2,
+            entries: [
+                {
+                    binding: 0,
+                    name: 'flowParticleSpawnCount',
+                    type: 'read-storage',
+                    visibility: [ 'compute' ],
+                    minBindingSize: 4,
+                },
+                {
+                    binding: 1,
+                    name: 'flowParticleSpawnCandidates',
+                    type: 'read-storage',
+                    visibility: [ 'compute' ],
+                    minBindingSize: 32,
+                },
+                {
+                    binding: 2,
+                    name: 'flowParticleSpawnRefillCount',
+                    type: 'storage',
+                    visibility: [ 'compute' ],
+                    minBindingSize: 8,
+                },
+                {
+                    binding: 3,
+                    name: 'flowParticleSpawnRefillIndices',
+                    type: 'storage',
+                    visibility: [ 'compute' ],
+                    minBindingSize: 4,
+                },
+            ],
+        }))
+        const bindSet = own(await runtime.createBindSet(layout, {
             flowParticleSpawnCount: index.resources.counter,
             flowParticleSpawnCandidates: index.resources.output,
-        }, { label: 'Flow Field particle spawn selection bindings' })
+            flowParticleSpawnRefillCount: refillCount.region(),
+            flowParticleSpawnRefillIndices: refillIndices.region(),
+        }, { label: 'Flow Field particle spawn selection bindings' }))
+        const clear = own(runtime.createClearBufferCommand({
+            label: 'Clear Flow Field revealed spawn counters',
+            target: refillCount.region(),
+        }))
+        const initializeIndices = own(runtime.createClearBufferCommand({
+            label: 'Initialize Flow Field revealed spawn indices',
+            target: refillIndices.region(),
+        }))
+        const refillResources = Object.freeze([refillCount, refillIndices]) as
+            readonly [BufferResource, BufferResource]
+        let disposed = false
+        return Object.freeze({
+            module: Object.freeze({
+                wgsl: particleSpawnSelectionWgsl(),
+                layout,
+                capacity: index.capacity,
+            }),
+            bindings: Object.freeze({
+                bindSet,
+                resources: Object.freeze([
+                    index.resources.counter.buffer,
+                    index.resources.output.buffer,
+                    ...refillResources,
+                ]),
+                refill: Object.freeze({ resources: refillResources, clear, initializeIndices }),
+            }),
+            dispose() {
+
+                if (disposed) return
+                disposed = true
+                for (const resource of owned.reverse()) resource.dispose()
+                owned.length = 0
+            },
+        })
     } catch (error) {
-        layout.dispose()
+        for (const resource of owned.reverse()) resource.dispose()
         throw error
     }
-    let disposed = false
-    return Object.freeze({
-        module: Object.freeze({
-            wgsl: particleSpawnSelectionWgsl(),
-            layout,
-        }),
-        bindings: Object.freeze({
-            bindSet,
-            resources: Object.freeze([
-                index.resources.counter.buffer,
-                index.resources.output.buffer,
-            ]),
-        }),
-        dispose() {
-
-            if (disposed) return
-            disposed = true
-            bindSet.dispose()
-            layout.dispose()
-        },
-    })
 }
 
 /** Creates bounded canonical particle resources and a reusable simulation graph. */
@@ -208,6 +261,8 @@ export async function createFlowParticles(
         return value
     }
     let lastSimulation: DispatchCommand | undefined
+    let lastRefillSimulation: DispatchCommand | undefined
+    let lastRefillIndex: DispatchCommand | undefined
     let lastTemporalSet: BindSet | undefined
     let lastSpawnSet: BindSet | undefined
     try {
@@ -285,6 +340,25 @@ export async function createFlowParticles(
                 bindLayouts: [ layout, options.temporal.layout, options.spawn.layout ],
             },
         }))
+        const refillSimulationProgram = own(runtime.createProgram({
+            label: 'Flow Field refill simulation program',
+            compute: { module: shader, entryPoint: 'FlowParticles_simulate',
+                constants: { FLOW_PARTICLES_REFILL_ENABLED: 1 } },
+        }))
+        const refillSimulationPipeline = own(await runtime.createComputePipeline({
+            label: 'Flow Field refill simulation pipeline',
+            program: refillSimulationProgram,
+            layout: { mode: 'explicit', bindLayouts: [ layout, options.temporal.layout, options.spawn.layout ] },
+        }))
+        const refillProgram = own(runtime.createProgram({
+            label: 'Flow Field revealed spawn index program',
+            compute: { module: shader, entryPoint: 'FlowParticles_build_refill_index' },
+        }))
+        const refillPipeline = own(await runtime.createComputePipeline({
+            label: 'Flow Field revealed spawn index pipeline',
+            program: refillProgram,
+            layout: { mode: 'explicit', bindLayouts: [ layout, options.temporal.layout, options.spawn.layout ] },
+        }))
         const pass = own(runtime.createComputePass({
             label: 'Flow Field particle simulation pass',
         }))
@@ -302,6 +376,8 @@ export async function createFlowParticles(
         let encodedSteps = 0
         let resetPending = false
         let resetCount = 0
+        let viewRefillPending: GeoViewSnapshot | undefined
+        let viewRefillCount = 0
 
         function encode(
             builder: SubmissionBuilder,
@@ -313,22 +389,26 @@ export async function createFlowParticles(
             assertActive()
             validateFrame(temporal, options.temporal.layout, 'temporal')
             validateSpawn(spawn, options.spawn.layout)
+            const refill = initialized && !resetPending ? viewRefillPending : undefined
             writeParticleConfig(
                 configBytes,
                 options,
                 maximumCount,
                 temporal,
                 encodedSteps + 1,
-                view
+                view,
+                refill
             )
             if (lastSimulation === undefined || lastTemporalSet !== temporal.bindSet ||
                 lastSpawnSet !== spawn.bindSet) {
                 lastSimulation?.dispose()
+                lastRefillSimulation?.dispose()
+                lastRefillIndex?.dispose()
                 lastTemporalSet = temporal.bindSet
                 lastSpawnSet = spawn.bindSet
-                lastSimulation = runtime.createDispatchCommand({
-                    label: 'Simulate Flow Field canonical particles',
-                    pipeline,
+                const makeSimulation = (selectedPipeline: ComputePipeline, label: string) => runtime.createDispatchCommand({
+                    label,
+                    pipeline: selectedPipeline,
                     bindSets: [
                         { set: bindSet },
                         { set: temporal.bindSet },
@@ -348,19 +428,41 @@ export async function createFlowParticles(
                             resource,
                             contentEpoch: 'current-at-step' as const,
                         })),
-                        write: [ particles, counters ],
+                        write: [ particles, counters, ...spawn.refill.resources ],
+                    },
+                    whenMissing: 'throw',
+                })
+                lastSimulation = makeSimulation(pipeline, 'Simulate Flow Field canonical particles')
+                lastRefillSimulation = makeSimulation(refillSimulationPipeline, 'Simulate Flow Field revealed particles')
+                lastRefillIndex = runtime.createDispatchCommand({
+                    label: 'Index newly visible Flow Field support',
+                    pipeline: refillPipeline,
+                    bindSets: [{ set: bindSet }, { set: temporal.bindSet }, { set: spawn.bindSet }],
+                    count: { workgroups: [ Math.ceil(options.spawn.capacity / WORKGROUP_SIZE), 1, 1 ] },
+                    resources: {
+                        read: dedupeResources([config, particles, counters, ...temporal.resources, ...spawn.resources])
+                            .map(resource => ({resource, contentEpoch: 'current-at-step' as const})),
+                        write: [particles, counters, ...spawn.refill.resources],
                     },
                     whenMissing: 'throw',
                 })
             }
             if (!initialized || resetPending) {
                 builder.clear(initializeParticles)
+                builder.clear(spawn.refill.clear)
+                builder.clear(spawn.refill.initializeIndices)
                 initialized = true
                 resetPending = false
             }
             builder.upload(configUpload)
             builder.clear(clearCounters)
-            builder.compute(pass, [ lastSimulation ])
+            if (refill !== undefined) {
+                builder.clear(spawn.refill.clear)
+                builder.compute(pass, [lastRefillIndex!])
+            }
+            builder.compute(pass, [ refill === undefined ? lastSimulation : lastRefillSimulation! ])
+            viewRefillPending = undefined
+            if (refill !== undefined) viewRefillCount++
             encodedSteps++
         }
 
@@ -369,6 +471,13 @@ export async function createFlowParticles(
             assertActive()
             resetPending = true
             resetCount++
+        }
+
+        function refillView(previousView: GeoViewSnapshot): void {
+            assertActive()
+            // Validate immutable camera facts; keep the earliest pending view.
+            flowRenderViewValues(previousView, options.addressCodec)
+            viewRefillPending ??= previousView
         }
 
         function facts(): FlowParticleFacts {
@@ -392,6 +501,7 @@ export async function createFlowParticles(
                 legacyDisplacementScale: FLOW_PARTICLE_LEGACY_DISPLACEMENT_SCALE,
                 resetPending,
                 resetCount,
+                viewRefillCount,
             })
         }
 
@@ -400,6 +510,8 @@ export async function createFlowParticles(
             if (disposed) return
             disposed = true
             lastSimulation?.dispose()
+            lastRefillSimulation?.dispose()
+            lastRefillIndex?.dispose()
             for (const value of owned.reverse()) value.dispose()
             owned.length = 0
         }
@@ -420,11 +532,14 @@ export async function createFlowParticles(
             commands,
             encode,
             reset,
+            refillView,
             facts,
             dispose,
         })
     } catch (error) {
         lastSimulation?.dispose()
+        lastRefillSimulation?.dispose()
+        lastRefillIndex?.dispose()
         for (const value of owned.reverse()) value.dispose()
         throw error
     }
@@ -436,7 +551,8 @@ function writeParticleConfig(
     maximumCount: number,
     temporal: FlowParticleTemporalFrame,
     frameSeed: number,
-    frameView?: GeoViewSnapshot
+    frameView?: GeoViewSnapshot,
+    refillView?: GeoViewSnapshot
 ): void {
 
     bytes.fill(0)
@@ -454,6 +570,7 @@ function writeParticleConfig(
     view.setFloat32(40, options.minimumDisplacementMeters, true)
     view.setFloat32(44, FLOW_PARTICLE_LEGACY_DISPLACEMENT_SCALE, true)
     view.setFloat32(48, options.maximumSpeed ?? 1, true)
+    view.setUint32(56, refillView === undefined ? 0 : 1, true)
     if (frameView !== undefined) {
         const camera = flowRenderViewValues(frameView, options.addressCodec)
         view.setUint32(52, 1, true)
@@ -464,6 +581,13 @@ function writeParticleConfig(
         camera.cameraY.forEach((value, index) => view.setUint32(136 + index * 4, value, true))
         camera.cameraZ.forEach((value, index) => view.setFloat32(144 + index * 4, value, true))
         view.setFloat32(152, camera.metersPerQuantum, true)
+    }
+    if (refillView !== undefined) {
+        const previous = flowRenderViewValues(refillView, options.addressCodec)
+        previous.clipFromRelativeWorld.forEach((value, index) => view.setFloat32(176 + index * 4, value, true))
+        previous.cameraX.forEach((value, index) => view.setUint32(240 + index * 4, value, true))
+        previous.cameraY.forEach((value, index) => view.setUint32(248 + index * 4, value, true))
+        previous.cameraZ.forEach((value, index) => view.setFloat32(256 + index * 4, value, true))
     }
 }
 
@@ -478,6 +602,7 @@ function validateOptions(options: FlowParticlesOptions): void {
         typeof options.temporal?.wgsl !== 'string' || options.temporal.wgsl.length === 0 ||
         options.temporal.layout?.group !== 1 ||
         typeof options.spawn?.wgsl !== 'string' || options.spawn.wgsl.length === 0 ||
+        !positiveInteger(options.spawn.capacity) ||
         options.spawn.layout?.group !== 2 || !nonNegativeFinite(options.activityKill) ||
         !positiveFinite(options.activitySpawn) ||
         options.activitySpawn <= options.activityKill || !positiveFinite(options.timeStep) ||
@@ -510,7 +635,9 @@ function validateSpawn(
     layout: BindLayout
 ): void {
 
-    if (spawn?.bindSet?.layout !== layout || !Array.isArray(spawn.resources)) {
+    if (spawn?.bindSet?.layout !== layout || !Array.isArray(spawn.resources) ||
+        !Array.isArray(spawn.refill?.resources) || spawn.refill.resources.length !== 2 ||
+        spawn.refill.clear === undefined || spawn.refill.initializeIndices === undefined) {
         throw new TypeError('Flow particle spawn bindings are invalid')
     }
 }
@@ -538,6 +665,15 @@ struct FlowParticleSpawnCount {
     value: u32,
 }
 
+struct FlowParticleSpawnRefillCount {
+    visible: atomic<u32>,
+    revealed: atomic<u32>,
+}
+
+struct FlowParticleSpawnRefillIndices {
+    values: array<u32>,
+}
+
 struct FlowSpawnIndexSelection {
     position: FlowVelocityAddressFixedPosition,
     requested_level: u32,
@@ -548,17 +684,55 @@ struct FlowSpawnIndexSelection {
     FlowParticleSpawnCount;
 @group(2) @binding(1) var<storage, read> flowParticleSpawnCandidates:
     FlowParticleSpawnCandidates;
+@group(2) @binding(2) var<storage, read_write> flowParticleSpawnRefillCount:
+    FlowParticleSpawnRefillCount;
+@group(2) @binding(3) var<storage, read_write> flowParticleSpawnRefillIndices:
+    FlowParticleSpawnRefillIndices;
 
-fn FlowSpawnIndex_select(random_state: u32) -> FlowSpawnIndexSelection {
-    let count = min(
+fn FlowSpawnIndex_candidate_count() -> u32 {
+    return min(
         flowParticleSpawnCount.value,
         arrayLength(&flowParticleSpawnCandidates.values),
     );
-    if (count == 0u) {
+}
+
+fn FlowSpawnIndex_candidate_center(index: u32) -> FlowVelocityAddressAdvance {
+    if (index >= FlowSpawnIndex_candidate_count()) {
+        var invalid_position: FlowVelocityAddressFixedPosition;
+        return FlowVelocityAddressAdvance(invalid_position, 0u);
+    }
+    let candidate = flowParticleSpawnCandidates.values[index];
+    if (candidate.texel_step_quanta == 0u || candidate.texel_step_quanta > 0x7fffffffu) {
+        return FlowVelocityAddressAdvance(candidate.origin, 0u);
+    }
+    let half_step = i32(candidate.texel_step_quanta / 2u);
+    return FlowVelocityAddress_advance_i32(candidate.origin, vec2i(half_step));
+}
+
+fn FlowSpawnIndex_record_visible(index: u32, revealed: bool) {
+    atomicAdd(&flowParticleSpawnRefillCount.visible, 1u);
+    if (!revealed) { return; }
+    let output_index = atomicAdd(&flowParticleSpawnRefillCount.revealed, 1u);
+    if (output_index < arrayLength(&flowParticleSpawnRefillIndices.values)) {
+        flowParticleSpawnRefillIndices.values[output_index] = index;
+    }
+}
+
+fn FlowSpawnIndex_refill_quota(particle_count: u32) -> u32 {
+    let visible = atomicLoad(&flowParticleSpawnRefillCount.visible);
+    let revealed = min(atomicLoad(&flowParticleSpawnRefillCount.revealed),
+        arrayLength(&flowParticleSpawnRefillIndices.values));
+    if (visible == 0u || revealed == 0u) { return 0u; }
+    return min(particle_count / 4u,
+        u32(ceil(f32(particle_count) * f32(revealed) / f32(visible))));
+}
+
+fn FlowSpawnIndex_select_candidate(index: u32, random_state: u32) -> FlowSpawnIndexSelection {
+    if (index >= FlowSpawnIndex_candidate_count()) {
         var empty_position: FlowVelocityAddressFixedPosition;
         return FlowSpawnIndexSelection(empty_position, 0u, 0u);
     }
-    let candidate = flowParticleSpawnCandidates.values[random_state % count];
+    let candidate = flowParticleSpawnCandidates.values[index];
     if (candidate.texel_step_quanta == 0u || candidate.texel_step_quanta > 0x7fffffffu) {
         var invalid_position: FlowVelocityAddressFixedPosition;
         return FlowSpawnIndexSelection(invalid_position, candidate.requested_level, 0u);
@@ -575,6 +749,26 @@ fn FlowSpawnIndex_select(random_state: u32) -> FlowSpawnIndexSelection {
         candidate.requested_level,
         advanced.north_south_valid,
     );
+}
+
+fn FlowSpawnIndex_select(random_state: u32) -> FlowSpawnIndexSelection {
+    let count = FlowSpawnIndex_candidate_count();
+    if (count == 0u) {
+        var empty_position: FlowVelocityAddressFixedPosition;
+        return FlowSpawnIndexSelection(empty_position, 0u, 0u);
+    }
+    return FlowSpawnIndex_select_candidate(random_state % count, random_state);
+}
+
+fn FlowSpawnIndex_select_refill(random_state: u32) -> FlowSpawnIndexSelection {
+    let count = min(atomicLoad(&flowParticleSpawnRefillCount.revealed),
+        arrayLength(&flowParticleSpawnRefillIndices.values));
+    if (count == 0u) {
+        var empty_position: FlowVelocityAddressFixedPosition;
+        return FlowSpawnIndexSelection(empty_position, 0u, 0u);
+    }
+    return FlowSpawnIndex_select_candidate(
+        flowParticleSpawnRefillIndices.values[random_state % count], random_state);
 }`
 }
 

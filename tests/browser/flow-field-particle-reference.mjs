@@ -25,14 +25,27 @@ struct FlowSpawnIndexSelection {
     position: FlowVelocityAddressFixedPosition, requested_level: u32, available: u32,
 }
 @group(1) @binding(0) var<uniform> test_velocity: vec4f;
+@group(1) @binding(1) var<uniform> test_spawn_position: vec4u;
 fn FlowVelocity_sample(position: FlowVelocityAddressFixedPosition, level: u32, temporal: FlowVelocityTemporal) -> FlowVelocitySample {
     let speed = length(test_velocity.xy);
     return FlowVelocitySample(test_velocity.xy, speed, u32(test_velocity.z), speed >= temporal.activity_kill);
 }
 fn FlowSpawnIndex_select(seed: u32) -> FlowSpawnIndexSelection {
     var position: FlowVelocityAddressFixedPosition;
-    return FlowSpawnIndexSelection(position, 0u, 0u);
+    position.axes[0] = FlowVelocityAddressFixedAxis(test_spawn_position.x, test_spawn_position.y);
+    position.axes[1] = FlowVelocityAddressFixedAxis(test_spawn_position.z, test_spawn_position.w);
+    return FlowSpawnIndexSelection(position, 0u, u32(test_velocity.w));
 }
+fn FlowSpawnIndex_select_refill(seed: u32) -> FlowSpawnIndexSelection {
+    return FlowSpawnIndex_select(seed);
+}
+fn FlowSpawnIndex_candidate_count() -> u32 { return 0u; }
+fn FlowSpawnIndex_candidate_center(index: u32) -> FlowVelocityAddressAdvance {
+    var position: FlowVelocityAddressFixedPosition;
+    return FlowVelocityAddressAdvance(position, 0u);
+}
+fn FlowSpawnIndex_record_visible(index: u32, revealed: bool) {}
+fn FlowSpawnIndex_refill_quota(particle_count: u32) -> u32 { return particle_count / 4u; }
 `
 const shader = addressCodec.wgslModule({ namespace: 'FlowVelocityAddress' }) + '\n' +
     flowScreenProjectionWgsl(addressCodec) + '\n' + fixtureShader + '\n' + particleShader
@@ -46,9 +59,14 @@ const cases = [
     { name: 'unavailable-dies', latitude: 45, velocity: [ 1, 1 ], status: 0, dead: true },
     { name: 'leaving-viewport-dies', latitude: 45, velocity: [ 2, 0 ], viewRadius: 20, dead: true },
     { name: 'bounded-random-retirement', latitude: 45, velocity: [ 1, 0 ], count: 4096 },
+    { name: 'natural-rebirth-without-view-refill', latitude: 45, velocity: [ 1, 0 ], count: 4096, rebirth: true },
+    { name: 'bounded-quarter-view-refill', latitude: 45, velocity: [ 1, 0 ], count: 4096, rebirth: true, refill: true },
+    { name: 'next-camera-refill-cohort', latitude: 45, velocity: [ 1, 0 ], count: 4096, rebirth: true, refill: true, seed: 2 },
 ].map(entry => ({
     ...entry,
     origin: addressCodec.fromLonLat([ 120, entry.latitude ]).fixed.limbs
+        .flatMap(axis => [ axis.low, axis.high ]),
+    spawnPosition: addressCodec.fromLonLat([ 121, entry.latitude ]).fixed.limbs
         .flatMap(axis => [ axis.low, axis.high ]),
 }))
 const server = createServer((_request, response) => {
@@ -71,24 +89,26 @@ try {
         const errors = compilation.messages.filter(message => message.type === 'error')
         if (errors.length > 0) throw new Error(errors.map(error => error.message).join('\n'))
         const pipeline = await device.createComputePipelineAsync({
-            layout: 'auto', compute: { module, entryPoint: 'FlowParticles_simulate' },
+            layout: 'auto', compute: { module, entryPoint: 'FlowParticles_simulate',
+                constants: { FLOW_PARTICLES_REFILL_ENABLED: 1 } },
         })
         const results = []
         for (const fixture of cases) {
             const count = fixture.count ?? 1
-            const configBytes = new ArrayBuffer(176)
+            const configBytes = new ArrayBuffer(272)
             const config = new DataView(configBytes)
             config.setUint32(0, count, true)
             config.setUint32(8, 1, true)
             config.setUint32(12, 3600, true)
             config.setUint32(16, 20, true)
-            config.setUint32(20, 1, true)
+            config.setUint32(20, fixture.seed ?? 1, true)
             config.setFloat32(28, 0.002, true)
             config.setFloat32(32, fixture.kill ?? 0.001, true)
             config.setFloat32(36, 1, true)
             config.setFloat32(40, 0.01, true)
             config.setFloat32(44, 50, true)
             config.setFloat32(48, 4, true)
+            config.setUint32(56, fixture.refill ? 1 : 0, true)
             if (fixture.viewRadius !== undefined) {
                 config.setUint32(52, 1, true)
                 config.setFloat32(64, 1 / fixture.viewRadius, true)
@@ -117,7 +137,10 @@ try {
             const configBuffer = buffer(configBytes, GPUBufferUsage.UNIFORM)
             const particles = buffer(records, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC)
             const counters = buffer(new Uint32Array(4), GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC)
-            const velocity = buffer(new Float32Array([ ...fixture.velocity, fixture.status ?? 1, 0 ]), GPUBufferUsage.UNIFORM)
+            const velocity = buffer(new Float32Array([
+                ...fixture.velocity, fixture.status ?? 1, fixture.rebirth ? 1 : 0,
+            ]), GPUBufferUsage.UNIFORM)
+            const spawnPosition = buffer(new Uint32Array(fixture.spawnPosition), GPUBufferUsage.UNIFORM)
             const group = device.createBindGroup({ layout: pipeline.getBindGroupLayout(0), entries: [
                 { binding: 0, resource: { buffer: configBuffer } },
                 { binding: 1, resource: { buffer: particles } },
@@ -125,6 +148,7 @@ try {
             ] })
             const sampleGroup = device.createBindGroup({ layout: pipeline.getBindGroupLayout(1), entries: [
                 { binding: 0, resource: { buffer: velocity } },
+                { binding: 1, resource: { buffer: spawnPosition } },
             ] })
             const output = device.createBuffer({ size: records.byteLength + 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ })
             const encoder = device.createCommandEncoder()
@@ -143,15 +167,53 @@ try {
                 (BigInt(observed.getUint32(offset + 4, true)) << 32n)
             const originalAxis = index => BigInt(fixture.origin[index]) +
                 (BigInt(fixture.origin[index + 1]) << 32n)
+            let refill
+            if (fixture.rebirth) {
+                refill = { reborn: 0, forcedReborn: 0, naturalRetirements: 0, mismatches: 0, bridges: 0 }
+                let cohort = Math.imul(fixture.seed ?? 1, 0x9e3779b9) >>> 0
+                cohort = (cohort ^ (cohort << 13)) >>> 0
+                cohort = (cohort ^ (cohort >>> 17)) >>> 0
+                cohort = (cohort ^ (cohort << 5)) >>> 0
+                const cohortOffset = cohort % count
+                refill.cohortOffset = cohortOffset
+                for (let index = 0; index < count; index++) {
+                    let random = (((index + 1) * 7919) ^ (fixture.seed ?? 1)) >>> 0
+                    if (random === 0) random = 0x9e3779b9
+                    random = (random ^ (random << 13)) >>> 0
+                    random = (random ^ (random >>> 17)) >>> 0
+                    random = (random ^ (random << 5)) >>> 0
+                    const natural = (random >>> 8) / 16777216 < Math.fround(0.003 + 0.001 / 4)
+                    const forced = Boolean(fixture.refill) && (index + cohortOffset) % count < count / 4
+                    const expectedRebirth = natural || forced
+                    if (natural) refill.naturalRetirements++
+                    const offset = index * 56
+                    const current = [ 0, 1, 2, 3 ].map(limb => observed.getUint32(offset + limb * 4, true))
+                    const previous = [ 0, 1, 2, 3 ].map(limb => observed.getUint32(offset + 16 + limb * 4, true))
+                    const reborn = observed.getUint32(offset + 40, true) === 0
+                    if (reborn) refill.reborn++
+                    if (forced && reborn) refill.forcedReborn++
+                    if (reborn !== expectedRebirth || observed.getUint32(offset + 52, true) !== 1) {
+                        refill.mismatches++
+                    }
+                    if (reborn) {
+                        if (current.some((limb, i) => limb !== fixture.spawnPosition[i]) ||
+                            previous.some((limb, i) => limb !== current[i]) ||
+                            observed.getFloat32(offset + 32, true) !== 0 ||
+                            observed.getFloat32(offset + 36, true) !== 0) refill.bridges++
+                    } else if (previous.some((limb, i) => limb !== fixture.origin[i]) ||
+                        observed.getUint32(offset + 40, true) !== 1) refill.mismatches++
+                }
+            }
             results.push({
                 name: fixture.name,
                 displacement: [ Number(axis(0) - originalAxis(0)) * quantum,
                     -Number(axis(8) - originalAxis(2)) * quantum ],
                 state: observed.getUint32(52, true),
                 counters: [ 0, 1, 2 ].map(index => observed.getUint32(records.byteLength + index * 4, true)),
+                ...(refill === undefined ? {} : { refill }),
             })
             output.unmap()
-            for (const resource of [ configBuffer, particles, counters, velocity, output ]) resource.destroy()
+            for (const resource of [ configBuffer, particles, counters, velocity, spawnPosition, output ]) resource.destroy()
         }
         const renderModule = device.createShaderModule({
             code: `const FLOW_PARTICLE_MAXIMUM_SPEED = 4.0f;\n${renderShader}`,
@@ -235,11 +297,30 @@ try {
         device.destroy()
         return { results, colors }
     }, { shader, renderShader, cases, quantum: addressCodec.quantumMeters })
+    const cohorts = proof.results.filter(result => result.refill?.forcedReborn > 0)
+    const cohortSlots = offset => new Set(Array.from({length:4096}, (_v,index) => index)
+        .filter(index => (index + offset) % 4096 < 1024))
+    const firstCohort = cohortSlots(cohorts[0].refill.cohortOffset)
+    const nextCohort = cohortSlots(cohorts[1].refill.cohortOffset)
+    assert.ok([...firstCohort].filter(index => nextCohort.has(index)).length < 512,
+        'Consecutive camera refills must not immediately retire the same newborn cohort')
     for (const [ index, result ] of proof.results.entries()) {
         const fixture = cases[index]
         if (fixture.dead) {
             assert.equal(result.state, 0, fixture.name)
             assert.deepEqual(result.counters, [ 0, 1, 1 ], fixture.name)
+        } else if (fixture.rebirth) {
+            assert.equal(result.refill.mismatches, 0, `${fixture.name}: exact natural/forced slot ownership`)
+            assert.equal(result.refill.bridges, 0, `${fixture.name}: replacements must start with a zero-length segment`)
+            assert.equal(result.refill.forcedReborn, fixture.refill ? fixture.count / 4 : 0, fixture.name)
+            assert.ok(result.refill.naturalRetirements > 4 && result.refill.naturalRetirements < 40, fixture.name)
+            assert.equal(result.counters[0], fixture.count, fixture.name)
+            assert.equal(result.counters[1], 0, fixture.name)
+            assert.equal(result.counters[2], result.refill.reborn, fixture.name)
+            if (fixture.refill) {
+                assert.ok(result.refill.reborn >= fixture.count / 4 &&
+                    result.refill.reborn <= fixture.count / 4 + result.refill.naturalRetirements, fixture.name)
+            } else assert.equal(result.refill.reborn, result.refill.naturalRetirements, fixture.name)
         } else if (fixture.count !== undefined) {
             assert.ok(result.counters[2] > 4 && result.counters[2] < 40, `${fixture.name}: ${result.counters}`)
             assert.equal(result.counters[0] + result.counters[1], fixture.count)

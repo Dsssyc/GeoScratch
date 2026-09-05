@@ -1,6 +1,7 @@
 const FLOW_PARTICLE_DORMANT = 0u;
 const FLOW_PARTICLE_ACTIVE = 1u;
 const FLOW_PARTICLE_WORKGROUP_SIZE = 256u;
+override FLOW_PARTICLES_REFILL_ENABLED = false;
 
 struct FlowParticle {
     current: FlowVelocityAddressFixedPosition,
@@ -27,7 +28,7 @@ struct FlowParticleConfig {
     legacy_displacement_scale: f32,
     maximum_speed: f32,
     view_enabled: u32,
-    reserved_2: u32,
+    refill_view: u32,
     reserved_3: u32,
     clip_from_relative_world: mat4x4f,
     camera_x: vec2u,
@@ -35,6 +36,10 @@ struct FlowParticleConfig {
     camera_z: vec2f,
     meters_per_quantum: f32,
     reserved_view: vec3f,
+    previous_clip_from_relative_world: mat4x4f,
+    previous_camera_x: vec2u,
+    previous_camera_y: vec2u,
+    previous_camera_z: vec2f,
 }
 
 struct FlowParticleCounters {
@@ -78,7 +83,21 @@ fn FlowParticles_relative_meters(value: FlowVelocityAddressFixedAxis, origin: ve
     return select(meters, -meters, negative);
 }
 
+fn FlowParticles_in_camera(position: FlowVelocityAddressFixedPosition,
+    matrix: mat4x4f, camera_x: vec2u, camera_y: vec2u, camera_z: vec2f) -> bool {
+    let relative = vec4f(
+        FlowParticles_relative_meters(position.axes[0], camera_x),
+        -FlowParticles_relative_meters(position.axes[1], camera_y),
+        -(camera_z.x + camera_z.y),
+        1.0,
+    );
+    let clip = matrix * relative;
+    return clip.w > 0.0 && all(abs(clip.xy) <= vec2f(clip.w)) &&
+        clip.z >= 0.0 && clip.z <= clip.w;
+}
+
 fn FlowParticles_in_view(position: FlowVelocityAddressFixedPosition) -> bool {
+    // Keep the reference hot path specialized to its current-camera uniforms.
     if (flowParticleConfig.view_enabled == 0u) { return true; }
     let relative = vec4f(
         FlowParticles_relative_meters(position.axes[0], flowParticleConfig.camera_x),
@@ -89,6 +108,21 @@ fn FlowParticles_in_view(position: FlowVelocityAddressFixedPosition) -> bool {
     let clip = flowParticleConfig.clip_from_relative_world * relative;
     return clip.w > 0.0 && all(abs(clip.xy) <= vec2f(clip.w)) &&
         clip.z >= 0.0 && clip.z <= clip.w;
+}
+
+fn FlowParticles_in_previous_view(position: FlowVelocityAddressFixedPosition) -> bool {
+    return FlowParticles_in_camera(position, flowParticleConfig.previous_clip_from_relative_world,
+        flowParticleConfig.previous_camera_x, flowParticleConfig.previous_camera_y,
+        flowParticleConfig.previous_camera_z);
+}
+
+@compute @workgroup_size(256)
+fn FlowParticles_build_refill_index(@builtin(global_invocation_id) id: vec3u) {
+    if (id.x >= FlowSpawnIndex_candidate_count()) { return; }
+    let center = FlowSpawnIndex_candidate_center(id.x);
+    if (center.north_south_valid == 0u || !FlowParticles_in_view(center.position)) { return; }
+    let was_visible = FlowParticles_in_previous_view(center.position);
+    FlowSpawnIndex_record_visible(id.x, !was_visible);
 }
 
 fn FlowParticles_canonical_displacement(
@@ -115,11 +149,14 @@ fn FlowParticles_dormant(particle: ptr<function, FlowParticle>) {
     atomicAdd(&flowParticleCounters.dormant_count, 1u);
 }
 
-fn FlowParticles_rebirth(particle: ptr<function, FlowParticle>) -> bool {
+fn FlowParticles_rebirth(particle: ptr<function, FlowParticle>, refill: bool) -> bool {
     (*particle).random_state = FlowParticles_random(
         (*particle).random_state ^ flowParticleConfig.frame_seed
     );
-    let selection = FlowSpawnIndex_select((*particle).random_state);
+    var selection = FlowSpawnIndex_select((*particle).random_state);
+    if (FLOW_PARTICLES_REFILL_ENABLED && refill) {
+        selection = FlowSpawnIndex_select_refill((*particle).random_state);
+    }
     if (selection.available == 0u) {
         FlowParticles_dormant(particle);
         return false;
@@ -130,7 +167,8 @@ fn FlowParticles_rebirth(particle: ptr<function, FlowParticle>) -> bool {
         FlowParticles_temporal(),
     );
     if (!FlowParticles_available(sample) || sample.speed < flowParticleConfig.activity_spawn ||
-        !FlowParticles_in_view(selection.position)) {
+        !FlowParticles_in_view(selection.position) ||
+        (FLOW_PARTICLES_REFILL_ENABLED && refill && FlowParticles_in_previous_view(selection.position))) {
         FlowParticles_dormant(particle);
         return false;
     }
@@ -170,6 +208,14 @@ fn FlowParticles_simulate(@builtin(global_invocation_id) global_id: vec3u) {
         flowParticleConfig.maximum_speed, 0.0, 1.0);
     let random_fraction = f32(particle.random_state >> 8u) / 16777216.0;
     retire = retire || random_fraction < drop_probability;
+    var refill = false;
+    if (FLOW_PARTICLES_REFILL_ENABLED && flowParticleConfig.refill_view != 0u) {
+        let quota = FlowSpawnIndex_refill_quota(flowParticleConfig.particle_count);
+        let cohort_offset = FlowParticles_random(flowParticleConfig.frame_seed * 0x9e3779b9u) %
+            flowParticleConfig.particle_count;
+        refill = (index + cohort_offset) % flowParticleConfig.particle_count < quota;
+    }
+    retire = retire || refill;
 
     if (!retire) {
         let old_position = particle.current;
@@ -218,7 +264,7 @@ fn FlowParticles_simulate(@builtin(global_invocation_id) global_id: vec3u) {
         if (particle.lifecycle_state == FLOW_PARTICLE_ACTIVE) {
             atomicAdd(&flowParticleCounters.retired_count, 1u);
         }
-        _ = FlowParticles_rebirth(&particle);
+        _ = FlowParticles_rebirth(&particle, refill);
     }
     flowParticles[index] = particle;
 }
