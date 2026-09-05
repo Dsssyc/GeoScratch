@@ -16,7 +16,7 @@ describe('Flow Field renderer composition', () => {
         expect(source).to.include('active.gpu.encode(builder, publication.update)')
         expect(source).to.include('runtime.acknowledge(publication, submitted)')
         expect(source).to.include('Promise.allSettled([')
-        expect(source).to.not.match(/\.prefetch|advanceFrame|framesPerTime/)
+        expect(source).to.not.match(/temporalWindow\.prefetch\(|advanceFrame|framesPerTime/)
     })
 
     it('orders publication support simulation contour history and submission explicitly', () => {
@@ -67,6 +67,22 @@ describe('Flow Field renderer composition', () => {
         expect(source).to.include('flowPairViewReady(prepared.temporal, demandFrame.candidatePages)')
         expect(source).to.include(') : history.presentRetained(builder, view)')
         expect(source.match(/flowPairViewReady\(prepared\.temporal/g)).to.have.length(1)
+    })
+
+    it('borrows optional pages through observation and reuses only their completed spatial plan', () => {
+
+        const source = fs.readFileSync(sourcePath, 'utf8')
+        expect(source).to.include('prefetchFrame = temporalWindow.capturePrefetch()')
+        expect(source).to.include('demand.reconcilePrefetch(demandFrame, prefetchFrame.runtime)')
+        expect(source).to.include('prefetchPlan?.runtime !== prefetchFrame.runtime')
+        expect(source).to.include('prefetchPlan.pages !== demandFrame.candidatePages')
+        expect(source).to.include('prefetchPlan !== undefined && !prefetchPlan.observedReady')
+        expect(source).to.include('publications.some(value=>value.runtime===warmRuntime)')
+        expect(source).to.include('observation = observing.then(() => {')
+        expect(source).to.include('prefetchPlan === observedPrefetchPlan')
+        expect(source).to.include('observedPrefetchPlan.observedReady = prefetchPagesResident')
+        expect(source.match(/prefetchFrame\?\.release\(\)/g)).to.have.length(2)
+        expect(source).to.include('temporalWindow.rejectPrefetch(prefetchFrame.runtime, error)')
     })
 
     it('uses only velocity-derived products and public package entrypoints', () => {

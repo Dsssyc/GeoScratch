@@ -32,6 +32,13 @@ background prefetch intent. Its pending publications are uploaded and acknowledg
 through the renderer's existing submission/observation path before activation; no
 second Surface, scheduler, decoded-data cache or boundary plane is introduced.
 
+The renderer remembers only the optional runtime and the current immutable spatial
+plan identity. A plan becomes complete after its resident pages have passed native
+submission observation and publication acknowledgement. An unchanged completed
+plan skips repeated reconciliation, availability scans and publication; replacing
+the runtime or spatial plan invalidates that marker. Late observation can complete
+only its own still-current plan. This metadata is not a decoded-payload cache.
+
 Already-owned endpoints can be promoted synchronously. A foreground selection joins
 a matching pending factory rather than creating a duplicate. Unrelated speculative
 work yields capacity; captured or disposing runtimes continue to count. Returning
@@ -59,3 +66,17 @@ pending joins, changed intent, rejection, cancellation, captured retirement, sha
 capacity, fatal failure and zero-runtime disposal. Pure selection tests cover
 direction, pause, gaps, loop destinations and singleton axes. View warming and
 browser cadence are verified separately from safety-only factory readiness.
+
+`flow-field-lookahead.mjs` holds a 1512 × 861, DPR 2, zoom-10 camera fixed at the
+default 0.2 rate and observes four forward and two reverse handoffs. All new
+endpoints must have GPU-observed current-view pages before activation, with no
+loading frames or particle-step gaps above 100 ms, at most four owned/creating
+runtimes, and zero runtimes/captures after disposal. The initial implementation
+met handoff timing but repeatedly processed already-complete optional plans; the
+completed-plan marker restored the separate zoom-9 motion benchmark to about 60 Hz.
+
+`flow-field-prefetch-failure.mjs` fails future detail pages while current particles
+continue, verifies no frame-by-frame retries, then admits a fresh foreground runtime.
+It also disposes while a future detail request is deliberately blocked. The existing
+spatial and inspector handoff tests retain their missing-data gates; prefetch must
+not turn source failures or insufficient preparation into falsely ready frames.

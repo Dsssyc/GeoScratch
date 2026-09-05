@@ -28,6 +28,16 @@ Fallback is always reported relative to the original sampling request, including
 when a coarser page contains zero velocity. Changing the inspection mode explicitly
 invalidates the old image rather than relabeling it.
 
+While playing, one next sample in the playback direction is prepared ahead of the
+active pair. The same current-view detail pages are requested with background
+priority and uploaded through the existing GPU submission/acknowledgement path.
+This stays inside the four-runtime aggregate budget, including captured and retiring
+runtimes. Completed unchanged plans incur no repeated prefetch publication work.
+Pause cancels speculation; gaps are not silently crossed. Seeks, discontinuous loop
+wraps, changed views, high rates or slow sources can still use the retained loading
+path. Factory readiness alone does not mean current-view pages are GPU-ready. See
+[ADR-105](../../docs/decisions/ADR-105-flow-directional-lookahead.md).
+
 Flow-specific controls, screen projection, particles, and history stay local to this
 example. The former `flowLayer` is a frozen rendering reference. See
 [ADR-098](../../docs/decisions/ADR-098-flow-field-reference-presentation.md) for the
@@ -46,6 +56,8 @@ node tests/browser/flow-field-motion-performance.mjs
 node tests/browser/flow-field-reveal-index.mjs
 node tests/browser/flow-field-camera-reveal.mjs
 node tests/browser/flow-field-spatial-handoff.mjs
+node tests/browser/flow-field-lookahead.mjs
+node tests/browser/flow-field-prefetch-failure.mjs
 node tests/browser/scratch-flow-field.mjs
 ```
 

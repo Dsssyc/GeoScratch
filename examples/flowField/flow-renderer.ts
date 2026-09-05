@@ -5,6 +5,7 @@ import type {
     GeoViewSourceCapture,
     MapLibrePlanarCameraState,
     VirtualRasterRuntimePublication,
+    VirtualRasterFeedbackReconciliation,
 } from 'geoscratch/geo'
 import {
     gpuWebMercatorQuadCoverPolicy,
@@ -87,6 +88,7 @@ import type {
 import type {
     FlowTemporalReadyCapture,
     FlowTemporalRuntimeWindow,
+    FlowTemporalPrefetchCapture,
 } from './flow-temporal-runtime-window.ts'
 import type {
     FlowTimelineSnapshot,
@@ -106,7 +108,7 @@ import type {
 import { FLOW_FIELD_PRESENTATION, flowFieldPresentation } from './flow-presentation.ts'
 import type { FlowFieldPresentation } from './flow-presentation.ts'
 import { createFlowScreenInspector } from './flow-screen-inspector.ts'
-import { flowPairViewReady } from './flow-pair-presentation.ts'
+import { flowPairViewReady, flowRuntimeViewReady } from './flow-pair-presentation.ts'
 
 export type FlowFieldRendererOptions = Readonly<{
     runtime: GPURuntime
@@ -144,6 +146,7 @@ export type FlowFieldRendererFacts = Readonly<{
     particles: ReturnType<FlowParticles['facts']>
     contour: ReturnType<FlowContour['facts']>
     history: ReturnType<FlowHistory['facts']>
+    prefetch: Readonly<{ sampleKey: string, requestedPages: number, pagesResident: boolean }> | undefined
 }>
 
 export type FlowFieldRenderer = Readonly<{
@@ -329,6 +332,12 @@ export async function createFlowFieldRenderer(
         let lastTemporalSignature = ''
         let requestedLevel = 0
         let populatedParticleView: GeoViewSnapshot | undefined
+        let prefetchFacts: FlowFieldRendererFacts['prefetch']
+        let prefetchPlan: {
+            runtime: FlowVelocitySampleRuntime
+            pages: FlowDemandFrame['candidatePages']
+            observedReady: boolean
+        } | undefined
         let packedCells: FlowDemandFrame['candidateCells'] | undefined
         let packedCandidates = new Uint8Array(new ArrayBuffer(0))
 
@@ -351,6 +360,7 @@ export async function createFlowFieldRenderer(
             let finishConstruction!: () => void
             constructionInFlight = new Promise(resolve => { finishConstruction = resolve })
             let temporalFrame: FlowTemporalReadyBindingFrame | undefined
+            let prefetchFrame: FlowTemporalPrefetchCapture<FlowVelocitySampleRuntime> | undefined
             let frameOwnershipTransferred = false
             try {
                 const framePresentation = presentation
@@ -384,7 +394,8 @@ export async function createFlowFieldRenderer(
                 } catch (error) {
                     throw new FlowTemporalFrameUnavailableError('superseded', { cause: error })
                 }
-                const publications = takeFramePublications(prepared)
+                prefetchFrame = temporalWindow.capturePrefetch()
+                const publications = [...takeFramePublications(prepared)]
                 const lowerSnapshotEpoch = publicationEpoch(
                     publications,
                     prepared.temporal.lower.runtime
@@ -424,6 +435,42 @@ export async function createFlowFieldRenderer(
                     prepared.requestedLevel === requestedLevel &&
                     (demandFrame.candidatePages.length === 0 ||
                         flowPairViewReady(prepared.temporal, demandFrame.candidatePages))
+                let prefetchReconciliation: VirtualRasterFeedbackReconciliation | undefined
+                let observedPrefetchPlan: typeof prefetchPlan
+                let prefetchPagesResident = false
+                prefetchFacts = undefined
+                if (prefetchFrame === undefined) prefetchPlan = undefined
+                if (prefetchFrame !== undefined && !needsViewFollowUp) {
+                    try {
+                        if (prefetchPlan?.runtime !== prefetchFrame.runtime ||
+                            prefetchPlan.pages !== demandFrame.candidatePages) {
+                            prefetchPlan = {runtime:prefetchFrame.runtime,
+                                pages:demandFrame.candidatePages, observedReady:false}
+                            prefetchReconciliation = demand.reconcilePrefetch(demandFrame, prefetchFrame.runtime)
+                        }
+                        prefetchPagesResident = prefetchPlan.observedReady ||
+                            flowRuntimeViewReady(prefetchFrame.runtime, demandFrame.candidatePages)
+                        prefetchFacts = Object.freeze({
+                            sampleKey: prefetchFrame.sample.sampleKey,
+                            requestedPages: demandFrame.candidatePages.length,
+                            pagesResident: prefetchPlan.observedReady,
+                        })
+                    } catch (error) {
+                        temporalWindow.rejectPrefetch(prefetchFrame.runtime, error)
+                        prefetchPlan = undefined
+                    }
+                    // An immutable completed lookahead has no other producer. Do not
+                    // republish/reconcile its unchanged resident plan every display tick.
+                    if (prefetchPlan !== undefined && !prefetchPlan.observedReady) {
+                        observedPrefetchPlan = prefetchPlan
+                        const warmRuntime = prefetchFrame.runtime
+                        if (!publications.some(value=>value.runtime===warmRuntime)) {
+                            const member = {runtime:warmRuntime, publication:warmRuntime.publish()}
+                            member.runtime.gpu.encode(builder, member.publication.update)
+                            publications.push(member)
+                        }
+                    }
+                }
                 if (clearedPresentationRevision !== framePresentationRevision) {
                     history.reset()
                     clearedPresentationRevision = framePresentationRevision
@@ -497,13 +544,18 @@ export async function createFlowFieldRenderer(
                     presentationReady && framePresentation.contour ? contour : undefined
                 )
                 let observation: Promise<unknown>
-                observation = observing.finally(() => {
+                observation = observing.then(() => {
+                    if (observedPrefetchPlan !== undefined && prefetchPlan === observedPrefetchPlan) {
+                        observedPrefetchPlan.observedReady = prefetchPagesResident
+                    }
+                }).finally(() => {
                     prepared.release()
+                    prefetchFrame?.release()
                     if (frameInFlight === observation) frameInFlight = undefined
                 })
                 frameOwnershipTransferred = true
                 frameInFlight = observation
-                const settlement = reconciliations.then(flowDemandSettlement)
+                const settlement = reconciliations.then(value => flowDemandSettlement(value, prefetchReconciliation))
                 frameCount = frameNumber
                 return Object.freeze({
                     observation,
@@ -523,6 +575,7 @@ export async function createFlowFieldRenderer(
                 if (temporalFrame !== undefined && !frameOwnershipTransferred) {
                     temporalFrame.release()
                 }
+                if (!frameOwnershipTransferred) prefetchFrame?.release()
                 finishConstruction()
                 constructionInFlight = undefined
             }
@@ -667,6 +720,7 @@ export async function createFlowFieldRenderer(
                 particles: particles.facts(),
                 contour: contour.facts(),
                 history: history.facts(),
+                prefetch: prefetchFacts,
             })
         }
 
@@ -674,6 +728,8 @@ export async function createFlowFieldRenderer(
 
             if (disposePromise !== undefined) return disposePromise
             disposed = true
+            prefetchPlan = undefined
+            prefetchFacts = undefined
             disposePromise = (async() => {
                 const failures: unknown[] = []
                 if (constructionInFlight !== undefined) await constructionInFlight
@@ -754,17 +810,18 @@ function requireFlowDemandReconciliations(value: unknown): FlowDemandReconciliat
 }
 
 function flowDemandSettlement(
-    reconciliations: FlowDemandReconciliations
+    reconciliations: FlowDemandReconciliations,
+    prefetch?: VirtualRasterFeedbackReconciliation
 ): GeoFrameSettlement {
 
     const residencyWorkCount = reconciliations.members.reduce(
         (sum, member) => sum + member.reconciliation.requestedCount,
-        0
+        prefetch?.requestedCount ?? 0
     )
     return Object.freeze({
-        residencySettlement: Promise.all(reconciliations.members.map(
+        residencySettlement: Promise.all([...reconciliations.members.map(
             member => member.reconciliation.settlement
-        )),
+        ), ...(prefetch === undefined ? [] : [prefetch.settlement])]),
         residencyWorkCount,
         needsFollowUp: false,
     })

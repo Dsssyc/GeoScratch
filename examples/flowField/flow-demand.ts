@@ -98,6 +98,8 @@ export type FlowDemandCoordinator = Readonly<{
         temporal: FlowDemandTemporalCapture
     ): FlowDemandFrame
     reconcile(frame: FlowDemandFrame): Promise<FlowDemandReconciliations>
+    /** Applies the same bounded spatial plan to a borrowed, optional time sample. */
+    reconcilePrefetch(frame: FlowDemandFrame, runtime: FlowDemandRuntime): VirtualRasterFeedbackReconciliation | undefined
     dispose(): Promise<void>
 }>
 
@@ -250,6 +252,19 @@ export function createFlowDemandCoordinator<CoverFrame>(
         })
     }
 
+    function reconcilePrefetch(
+        frame: FlowDemandFrame,
+        runtime: FlowDemandRuntime
+    ): VirtualRasterFeedbackReconciliation | undefined {
+        assertActive()
+        const record = frameRecords.get(frame)
+        if (record?.owner !== owner || latestFrame !== frame) {
+            throw new Error('Flow prefetch requires the current owned demand frame')
+        }
+        if (record.members.some(member => member.runtime === runtime)) return undefined
+        return runtime.reconcileViewDemands(produceDemandSet(runtime, record.spatial, frame, true))
+    }
+
     function dispose(): Promise<void> {
 
         if (disposePromise !== undefined) return disposePromise
@@ -264,7 +279,7 @@ export function createFlowDemandCoordinator<CoverFrame>(
         if (disposed) throw new Error('Flow demand coordinator is disposed')
     }
 
-    return Object.freeze({ encode, reconcile, dispose })
+    return Object.freeze({ encode, reconcile, reconcilePrefetch, dispose })
 }
 
 function buildCandidates(options: FlowDemandCandidateOptions): CandidateBuild {
@@ -477,7 +492,8 @@ function completeCoverageFallback(
 function produceDemandSet(
     runtime: FlowDemandRuntime,
     spatial: readonly SpatialCandidate[],
-    frame: FlowDemandFrame
+    frame: FlowDemandFrame,
+    prefetch = false
 ): ViewTileDemandSet {
 
     if (spatial.length > runtime.viewDemandProducer.maxDemands) {
@@ -495,11 +511,11 @@ function produceDemandSet(
             desiredSampleLevel: candidate.requestedLevel,
             sourceLevelCeiling: candidate.sourceLevelCeiling,
             priority: Object.freeze({
-                class: 'user-visible' as const,
+                class: prefetch ? 'background' as const : 'user-visible' as const,
                 score: candidate.priorityScore,
             }),
-            intent: 'refinement' as const,
-            reason: `flow-velocity-required:z${candidate.requestedLevel}`,
+            intent: prefetch ? 'prefetch' as const : 'refinement' as const,
+            reason: `flow-velocity-${prefetch ? 'prefetch' : 'required'}:z${candidate.requestedLevel}`,
         })),
     })
     if (produced.demands.length !== spatial.length) {

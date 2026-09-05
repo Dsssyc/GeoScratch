@@ -1,5 +1,5 @@
 import { expect } from 'chai'
-import { flowPairViewReady } from '../examples/flowField/flow-pair-presentation.ts'
+import { flowPairViewReady, flowRuntimeViewReady } from '../examples/flowField/flow-pair-presentation.ts'
 
 describe('Flow Field temporal pair presentation', () => {
     function runtime(sampleKey, availability) {
@@ -36,5 +36,14 @@ describe('Flow Field temporal pair presentation', () => {
         expect(() => flowPairViewReady(capture(
             runtime('t00', 'resident'), runtime('t01', 'failed')
         ), pages)).to.throw(/t01/)
+    })
+
+    it('checks an optional source without confusing factory readiness with detail residency', () => {
+        expect(flowRuntimeViewReady(runtime('t02', 'missing'), [])).to.equal(true)
+        for (const state of ['missing', 'staged']) {
+            expect(flowRuntimeViewReady(runtime('t02', state), pages)).to.equal(false)
+        }
+        expect(flowRuntimeViewReady(runtime('t02', 'resident'), pages)).to.equal(true)
+        expect(() => flowRuntimeViewReady(runtime('t02', 'failed'), pages)).to.throw(/t02/)
     })
 })

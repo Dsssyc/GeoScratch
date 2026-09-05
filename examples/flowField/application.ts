@@ -38,6 +38,7 @@ import { createFlowTimeline } from './flow-timeline.ts'
 import { FLOW_FIELD_PRESENTATION, flowFieldPresentation } from './flow-presentation.ts'
 import type { FlowFieldControlSnapshot, FlowFieldPresentation } from './flow-presentation.ts'
 import type { FlowTemporalFrameSnapshot } from './flow-frame-provenance.ts'
+import { flowPrefetchSample } from './flow-prefetch-policy.ts'
 import type {
     FlowTimelineLoop,
     FlowTimelineReadiness,
@@ -356,6 +357,7 @@ export async function startFlowFieldApplication(
             setStatus(lastFrame.state === 'rendered'
                 ? lastFrame.presentationReady ? 'ready' : 'loading' : lastFrame.state)
             emitControls()
+            updatePrefetch(timeline.snapshot())
             if (timeline.snapshot().needsTick) frameController.invalidate()
         },
         onError(error) {
@@ -446,9 +448,19 @@ export async function startFlowFieldApplication(
     function applyControl(snapshot: FlowTimelineSnapshot): FlowTimelineSnapshot {
 
         requestWindow(snapshot, true, true)
+        updatePrefetch(snapshot)
         frameController!.invalidate()
         emitControls()
         return snapshot
+    }
+
+    function updatePrefetch(snapshot: FlowTimelineSnapshot): void {
+        if (!snapshot.playing || snapshot.selection.kind === 'gap') {
+            temporalWindow.prefetch(undefined)
+        } else if (temporalWindow.snapshot().state === 'ready' && lastFrame.state === 'rendered' &&
+            lastFrame.presentationReady && lastFrame.temporal.selectionRevision === snapshot.selectionRevision) {
+            temporalWindow.prefetch(flowPrefetchSample(dataset.timeAxis, snapshot))
+        }
     }
 
     function play(input: Readonly<{ wallTime: number }>): FlowTimelineSnapshot {

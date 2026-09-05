@@ -278,13 +278,7 @@ export function createFlowTemporalRuntimeWindow<Runtime extends object>(
             if (prefetchSample === undefined) {
                 clearPrefetch('Flow foreground no longer needs joined lookahead')
             } else {
-                const joined = prefetchWork?.selection
-                if (joined?.kind === 'exact' && joined.sample.sampleKey !== prefetchSample.sampleKey) {
-                    prefetchWork!.controller.abort(new Error('Flow foreground abandoned joined lookahead'))
-                }
-                if (prefetched !== undefined && prefetched.lower.sample.sampleKey !== prefetchSample.sampleKey) {
-                    retirePrefetched()
-                }
+                releaseAbandonedLookahead()
             }
             settleTicket(ticket, 'ready')
             schedulePrefetchPump()
@@ -463,6 +457,16 @@ export function createFlowTemporalRuntimeWindow<Runtime extends object>(
         return !disposed && !requestsStopped && state === 'loading' &&
             selection !== undefined && selection.kind !== 'gap' &&
             candidateSamples(selection).some(sample => sample.sampleKey === sampleKey)
+    }
+
+    function releaseAbandonedLookahead(): void {
+        const joined = prefetchWork?.selection
+        if (joined?.kind === 'exact' && joined.sample.sampleKey !== prefetchSample?.sampleKey &&
+            !foregroundNeeds(joined.sample.sampleKey)) {
+            prefetchWork!.controller.abort(new Error('Flow foreground abandoned joined lookahead'))
+        }
+        if (prefetched !== undefined && prefetched.lower.sample.sampleKey !== prefetchSample?.sampleKey &&
+            !foregroundNeeds(prefetched.lower.sample.sampleKey)) retirePrefetched()
     }
 
     function retirePrefetched(): void {
@@ -721,6 +725,7 @@ export function createFlowTemporalRuntimeWindow<Runtime extends object>(
         if (prefetched !== undefined && pair.leases.includes(prefetched.lower)) {
             retirePrefetched()
         }
+        releaseAbandonedLookahead()
         schedulePrefetchPump()
     }
 

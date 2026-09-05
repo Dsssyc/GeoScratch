@@ -535,6 +535,29 @@ describe('Flow Field demand', () => {
         await coordinator.dispose()
     })
 
+    it('warms the same spatial pages under a distinct source owner and background intent', async () => {
+        const view = viewAt(4,0)
+        const active = fakeRuntime('active-prefetch-test','active-producer')
+        const warm = fakeRuntime('warm-prefetch-test','warm-producer')
+        const graph = hooks(batch(view,[projected(view)]))
+        const coordinator = createFlowDemandCoordinator({cover:graph.cover,projection:graph.projection,
+            maximumDisplacementMeters:0,maximumCandidatePages:64,cellsPerPageEdge:1,maximumCandidateCells:64})
+        const frame = coordinator.encode({},view,readyCapture(active,active))
+        await coordinator.reconcile(frame)
+        coordinator.reconcilePrefetch(frame,warm)
+        expect(active.reconciliations).to.have.length(1)
+        expect(warm.reconciliations).to.have.length(1)
+        const set = warm.reconciliations[0]
+        expect(set.demands.map(value=>value.page.tile.key)).to.have.members(frame.candidatePages.map(value=>value.tile.key))
+        expect(set.demands.every(value=>value.page.addressSpaceId===warm.addressSpace.id &&
+            value.priority.class==='background' && value.intent==='prefetch')).to.equal(true)
+        expect(virtualRasterDemandSetFromViewDemands(set).demands.every(value=>value.usage==='prefetch')).to.equal(true)
+        expect(coordinator.reconcilePrefetch(frame,active)).to.equal(undefined)
+        coordinator.encode({},view,readyCapture(active,active))
+        expect(()=>coordinator.reconcilePrefetch(frame,warm)).to.throw(/current owned/)
+        await coordinator.dispose()
+    })
+
     it('returns fine settlement without awaiting it or controlling temporal readiness', async () => {
 
         const view = viewAt(4, 0)

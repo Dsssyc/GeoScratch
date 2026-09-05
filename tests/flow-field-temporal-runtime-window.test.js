@@ -12,6 +12,29 @@ const DATASET_IDENTITY = Object.freeze({
 
 describe('Flow temporal runtime window', () => {
 
+    it('frees an abandoned joined holder after synchronous activation of another available selection', async() => {
+        const axis = timeAxis([0,1,2,3,4,5], [0,10,20,30,40,50])
+        const harness = immediateHarness(axis)
+        await harness.window.request(interpolated(axis,0,1,5),1).settled
+        const oldAB = harness.window.capture()
+        await harness.window.request(interpolated(axis,1,2,15),1).settled
+        const oldBC = harness.window.capture()
+        harness.window.prefetch(axis.samples[3])
+        await waitFor(()=>harness.window.snapshot().prefetchState==='ready')
+        expect(harness.window.snapshot().ownedRuntimeCount).to.equal(4)
+        const abandoned = harness.window.request(interpolated(axis,3,4,35),1)
+        harness.window.prefetch(axis.samples[5])
+        await harness.window.request(exact(axis.samples[1]),1).settled
+        expect((await abandoned.settled).status).to.equal('superseded')
+        await waitFor(()=>harness.window.snapshot().prefetchState==='ready' &&
+            harness.window.snapshot().prefetchSampleKey==='t05')
+        expect(harness.window.snapshot().ownedRuntimeCount).to.equal(4)
+        oldAB.release(); oldBC.release()
+        await harness.window.dispose()
+        expect(harness.window.snapshot().ownedRuntimeCount).to.equal(0)
+        expect(harness.disposed).to.have.length(harness.created.length)
+    })
+
     it('retires an abandoned joined holder before installing a newer lookahead', async() => {
         const axis = timeAxis([0,1,2,3,4], [0,10,20,30,40])
         const harness = immediateHarness(axis)
