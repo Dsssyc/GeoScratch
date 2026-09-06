@@ -43,6 +43,8 @@ fn FlowBoundary_coverage(position: FlowVelocityAddressFixedPosition) -> f32 {
     // Unknown halo/fallback is not dry. Fall back to the unchanged A display.
     if (min(min(tl, tr), min(br, bl)) < 0) { return 1.0; }
     let corners = u32(tl) | (u32(tr) << 1u) | (u32(br) << 2u) | (u32(bl) << 3u);
+    // For an all-active cell, any external contour is at least sqrt(1/8)
+    // texels away. The entire allowed feather band (<= 0.35) is already opaque.
     if (corners == 15u) { return 1.0; }
     // Respect the actual temporal sampler's common-level/transition decision.
     // A sparse LoD halo must not create a finer artificial boundary over fallback ink.
@@ -50,7 +52,32 @@ fn FlowBoundary_coverage(position: FlowVelocityAddressFixedPosition) -> f32 {
         FlowVelocityTemporal(boundaryUniform.progress, boundaryUniform.activityKill));
     if (actual.status != 1u || actual.resolved_level != level) { return 1.0; }
     if (!actual.advectable || actual.speed <= 0.0) { return 0.0; }
-    return FlowBoundary_inner_coverage(FlowBoundary_distance(p, corners));
+    if (corners == 0u) { return 0.0; }
+    var centers: array<i32, 16>;
+    for (var i = 0u; i < 16u; i++) { centers[i] = -2; }
+    centers[5] = tl; centers[6] = tr; centers[10] = br; centers[9] = bl;
+    var masks: array<u32, 9>;
+    for (var i = 0u; i < 9u; i++) {
+        let cell = vec2f(f32(i % 3u) - 1.0, f32(i / 3u) - 1.0);
+        let separation = max(max(cell - p, p - cell - vec2f(1.0)), vec2f(0.0));
+        // A farther cell cannot affect this bounded distance, even if missing.
+        // Query the same geometric footprint on both sides of a shared edge.
+        if (length(separation) >= 0.35) { masks[i] = 0u; continue; }
+        let origin = i % 3u + (i / 3u) * 4u;
+        let indices = array<u32, 4>(origin, origin + 1u, origin + 5u, origin + 4u);
+        for (var corner = 0u; corner < 4u; corner++) {
+            let index = indices[corner];
+            if (centers[index] == -2) {
+                centers[index] = FlowBoundary_center(base +
+                    vec2i(i32(index % 4u) - 1, i32(index / 4u) - 1), level);
+            }
+            // Only a relevant unknown halo disables B; it never seeds a dry edge.
+            if (centers[index] < 0) { return 1.0; }
+        }
+        masks[i] = u32(centers[origin]) | (u32(centers[origin + 1u]) << 1u) |
+            (u32(centers[origin + 5u]) << 2u) | (u32(centers[origin + 4u]) << 3u);
+    }
+    return FlowBoundary_inner_coverage(FlowBoundary_neighborhood_distance(p, masks));
 }
 
 @fragment

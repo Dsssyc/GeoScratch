@@ -21,7 +21,8 @@ Activity contour is an optional velocity threshold overlay and does not enter tr
 
 In **Particles**, the **Boundary** selector compares **A · Hard texture** (default)
 with **B · SDF (inward)**. B reconstructs a local marching-squares contour from
-current-time U/V at source texel centers, computes its signed distance and applies
+current-time U/V at source texel centers, searches neighboring cells for the nearest
+finite contour segment, computes its signed distance and applies
 a quarter-texel inward feather only during final display. Convex pixel corners are
 chamfered; diagonal active cells are not connected across a dry gap. This is a local
 truncated SDF evaluated in shader registers, not an uploaded SDF texture or a JFA pass.
@@ -34,15 +35,19 @@ It is deliberately an **inner-edge display comparison**, not reconstructed true 
 The distance uses source texels, so DPR/pitch do not redefine its width. At minification
 this is not a replacement for screen-space antialiasing.
 
-The four logical center loads per endpoint cross tiles through the existing Virtual
-Raster sampler. Unknown, missing halo, fallback or an unavailable temporal capture
+Four initial logical center loads per endpoint cross tiles through the existing
+Virtual Raster sampler. Near mixed boundaries, additional nearby cells contribute
+the true nearest contour distance within a 0.35-texel band, with at most nine loaded
+source centers per endpoint. Unrelated distant halos are not sampled. Relevant
+unknown/missing halo, fallback or an unavailable temporal capture
 uses the unmodified A display, not a fabricated dry contour. Current alpha is evaluated
 each time: opposite endpoint velocities can cancel, and a zero endpoint can activate.
 No endpoint SDF interpolation or alpha-independent spawn-union cache is used. B adds
 fragment work and one stable pipeline, but no texture, CPU raster, readback, compute
 dispatch, or backend channel. Inspector views and activity contour remain raw; their
 disabled Boundary control retains the selection for the next Particles view. See
-[ADR-110](../../docs/decisions/ADR-110-flow-boundary-sdf-comparison.md).
+[ADR-110](../../docs/decisions/ADR-110-flow-boundary-sdf-comparison.md) and the
+[continuity correction](../../docs/decisions/ADR-111-flow-continuous-boundary-distance.md).
 
 New v3 COGs store ordinary triangle-linear center velocities without neighborhood
 erosion. Their zero-absorbing 2x2 overviews also omit the extra 3x3 erosion. The

@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted as an example-local visual comparison. ADR-107's U/V support and ADR-108's
+Partially superseded: ADR-111 replaces the cell-local distance calculation below.
+The example-local A/B ownership and presentation restrictions remain accepted.
+ADR-107's U/V support and ADR-108's
 spawn/lifecycle rules remain unchanged. No Scratch/Geo public API or backend change.
 
 ## Date
