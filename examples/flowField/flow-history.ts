@@ -24,6 +24,9 @@ import type {
 import historyShader from './shaders/history.wgsl?raw'
 import historySupportShader from './shaders/history-support.wgsl?raw'
 import presentationShader from './shaders/presentation.wgsl?raw'
+import boundaryDistanceShader from './shaders/boundary-distance.wgsl?raw'
+import boundarySdfShader from './shaders/boundary-sdf.wgsl?raw'
+import type { FlowFieldBoundaryMode } from './flow-presentation.ts'
 import { flowScreenProjectionWgsl, flowScreenViewValues } from './flow-screen-projection.ts'
 import type { FlowScreenViewValues } from './flow-screen-projection.ts'
 import type { FlowTemporalReadyBindingFrame } from './flow-temporal-bindings.ts'
@@ -51,6 +54,8 @@ export type FlowHistoryFrame = Readonly<{
     historyValid: boolean
     cleared: boolean
     resizeGeneration: number
+    /** Encoded pipeline; unavailable per-pixel support can still use unchanged A ink. */
+    boundary: FlowFieldBoundaryMode
 }>
 
 export type FlowHistoryFacts = Readonly<{
@@ -61,6 +66,11 @@ export type FlowHistoryFacts = Readonly<{
     resizeGeneration: number
     hasPreviousView: boolean
     disposed: boolean
+    /** Most recently encoded pipeline, not a per-pixel coverage guarantee. */
+    boundary: FlowFieldBoundaryMode
+    /** Encoded B draws, not a native-completion counter. */
+    sdfPresentationCount: number
+    sdfExtraTextureBytes: 0
 }>
 
 export type FlowHistory = Readonly<{
@@ -72,7 +82,8 @@ export type FlowHistory = Readonly<{
         view: GeoViewSnapshot,
         content: readonly DrawCommand[] | undefined,
         accumulate: boolean | undefined,
-        prepared: FlowTemporalReadyBindingFrame
+        prepared: FlowTemporalReadyBindingFrame,
+        boundary?: FlowFieldBoundaryMode
     ): FlowHistoryFrame
     facts(): FlowHistoryFacts
     dispose(): void
@@ -268,6 +279,12 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
             label: 'Flow Field history presentation shader',
             sourceParts: [ { code: presentationShader } ],
         }))
+        const sdfModule = own(await runtime.createShaderModule({
+            label: 'Flow Field inward SDF presentation shader',
+            sourceParts: [ { code: temporal.wgsl }, { code: screenProjection },
+                { code: codec.wgslAccessors() }, { code: boundaryDistanceShader },
+                { code: boundarySdfShader } ],
+        }))
         const requirement: ProgramBufferLayoutRequirement = {
             group: 0,
             binding: 0,
@@ -292,6 +309,12 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
             vertex: { module: presentationModule, entryPoint: 'vMain' },
             fragment: { module: presentationModule, entryPoint: 'fMain' },
         }))
+        const sdfProgram = own(runtime.createProgram({
+            label: 'Flow Field inward SDF presentation program',
+            vertex: { module: sdfModule, entryPoint: 'vMain' },
+            fragment: { module: sdfModule, entryPoint: 'fMain' },
+            layoutRequirements: [ requirement ],
+        }))
         const historyPipeline = own(await runtime.createRenderPipeline({
             label: 'Flow Field history pipeline',
             program: historyProgram,
@@ -310,6 +333,13 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
             label: 'Flow Field history presentation pipeline',
             program: presentationProgram,
             layout: { mode: 'explicit', bindLayouts: [ presentationLayout ] },
+            targets: [ { format: surface.format, blend: NORMAL_BLEND } ],
+            primitive: { topology: 'triangle-strip' },
+        }))
+        const sdfPipeline = own(await runtime.createRenderPipeline({
+            label: 'Flow Field inward SDF presentation pipeline',
+            program: sdfProgram,
+            layout: { mode: 'explicit', bindLayouts: [ uniformLayout, temporal.layout, historyLayout ] },
             targets: [ { format: surface.format, blend: NORMAL_BLEND } ],
             primitive: { topology: 'triangle-strip' },
         }))
@@ -375,9 +405,9 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
             uniformUpload,
             bindLayouts: Object.freeze([ uniformLayout, historyLayout, presentationLayout ]),
             bindSets: historyBindSets,
-            shaderModules: Object.freeze([ historyModule, retainedModule, presentationModule ]),
-            programs: Object.freeze([ historyProgram, retainedProgram, presentationProgram ]),
-            pipelines: Object.freeze([ historyPipeline, retainedPipeline, presentationPipeline ]),
+            shaderModules: Object.freeze([ historyModule, retainedModule, presentationModule, sdfModule ]),
+            programs: Object.freeze([ historyProgram, retainedProgram, presentationProgram, sdfProgram ]),
+            pipelines: Object.freeze([ historyPipeline, retainedPipeline, presentationPipeline, sdfPipeline ]),
             passes: Object.freeze([ clearPass, passBToA, passAToB, presentationPass ]),
             commands: Object.freeze([ presentA, presentB, ...retainedCommands ]),
         })
@@ -385,6 +415,9 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
             bindSet: BindSet
             commands: readonly [DrawCommand, DrawCommand]
         }> | undefined
+        let sdfPair: typeof composePair
+        let boundary: FlowFieldBoundaryMode = 'hard'
+        let sdfPresentationCount = 0
         let directionIndex = 0
         let resizeGeneration = 0
         let previousView: HistoryViewFacts | undefined
@@ -417,7 +450,8 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
             view: GeoViewSnapshot,
             content: readonly DrawCommand[] = [],
             accumulate = true,
-            prepared?: FlowTemporalReadyBindingFrame
+            prepared?: FlowTemporalReadyBindingFrame,
+            requestedBoundary: FlowFieldBoundaryMode = 'hard'
         ): FlowHistoryFrame {
             assertActive()
             if (resizePending) throw new Error('Flow Field history cannot encode during resize')
@@ -426,6 +460,17 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
             }
             if (prepared !== undefined && (prepared.state !== 'ready' || prepared.bindSet.runtime !== runtime)) {
                 throw new TypeError('Flow Field history requires the current same-runtime temporal frame')
+            }
+            if (requestedBoundary !== 'hard' && requestedBoundary !== 'sdf') {
+                throw new TypeError('Flow Field history boundary must be hard or sdf')
+            }
+            // No temporal lease is retained for presentation. An unavailable frame
+            // reprojects unmodified A ink, rather than inventing a stale/dry SDF.
+            const sdf = requestedBoundary === 'sdf' && prepared !== undefined
+                ? prepareSdfPair(prepared)[directionIndex]! : undefined
+            if (sdf === undefined && sdfPair !== undefined) {
+                for (const command of sdfPair.commands) command.dispose()
+                sdfPair = undefined
             }
             const screenView = flowScreenViewValues(view, options.addressCodec)
             const compose = !accumulate ? undefined : prepared === undefined
@@ -462,7 +507,9 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
                 clearPending = false
             }
             builder.render(direction.pass, compose === undefined ? [ ...content ] : [ compose, ...content ])
-            builder.render(presentationPass, [ direction.presentation ])
+            builder.render(presentationPass, [ sdf ?? direction.presentation ])
+            boundary = sdf === undefined ? 'hard' : 'sdf'
+            if (sdf !== undefined) sdfPresentationCount++
             previousView = currentView
             directionIndex = (directionIndex + 1) % directions.length
             return Object.freeze({
@@ -472,7 +519,30 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
                 historyValid,
                 cleared,
                 resizeGeneration,
+                boundary,
             })
+        }
+
+        function prepareSdfPair(prepared: FlowTemporalReadyBindingFrame): readonly [DrawCommand, DrawCommand] {
+            if (sdfPair?.bindSet === prepared.bindSet) return sdfPair.commands
+            // Presentation reads the newly composed target, opposite to history's source.
+            const presentA = composeCommand(runtime, sdfPipeline, uniformSet, historyAToB,
+                uniformBuffer, historyA, prepared, 'Present Flow Field inward SDF A')
+            let presentB: DrawCommand
+            try {
+                presentB = composeCommand(runtime, sdfPipeline, uniformSet, historyBToA,
+                    uniformBuffer, historyB, prepared, 'Present Flow Field inward SDF B')
+            } catch (error) {
+                presentA.dispose()
+                throw error
+            }
+            const previous = sdfPair
+            sdfPair = Object.freeze({
+                bindSet: prepared.bindSet,
+                commands: Object.freeze([ presentA, presentB ]) as readonly [DrawCommand, DrawCommand],
+            })
+            for (const command of previous?.commands ?? []) command.dispose()
+            return sdfPair.commands
         }
 
         function prepareComposePair(prepared: FlowTemporalReadyBindingFrame): readonly [DrawCommand, DrawCommand] {
@@ -511,6 +581,9 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
                 resizeGeneration,
                 hasPreviousView: previousView !== undefined,
                 disposed,
+                boundary,
+                sdfPresentationCount,
+                sdfExtraTextureBytes: 0,
             })
         }
 
@@ -519,6 +592,8 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
             disposed = true
             for (const command of composePair?.commands ?? []) command.dispose()
             composePair = undefined
+            for (const command of sdfPair?.commands ?? []) command.dispose()
+            sdfPair = undefined
             for (const command of graph.commands) command.dispose()
             graph.uniformUpload.dispose()
             for (const pass of graph.passes) pass.dispose()

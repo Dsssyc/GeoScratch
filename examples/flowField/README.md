@@ -19,6 +19,31 @@ sampler. Status colors are green for resident moving data, amber for fallback,
 gray for zero velocity, magenta for unavailable data, and red for invalid sampling.
 Activity contour is an optional velocity threshold overlay and does not enter trails.
 
+In **Particles**, the **Boundary** selector compares **A · Hard texture** (default)
+with **B · SDF (inward)**. B reconstructs a local marching-squares contour from
+current-time U/V at source texel centers, computes its signed distance and applies
+a quarter-texel inward feather only during final display. Convex pixel corners are
+chamfered; diagonal active cells are not connected across a dry gap. This is a local
+truncated SDF evaluated in shader registers, not an uploaded SDF texture or a JFA pass.
+
+Both choices use exactly the same particles and raw hard-cleaned trail history.
+Switching A/B neither resets nor softens that history, changes velocity/death, nor
+adds source requests. B cannot extend color into empty hard footprints, round every
+concave step, restore missing narrow channels, or increase the z10 source precision.
+It is deliberately an **inner-edge display comparison**, not reconstructed true banks.
+The distance uses source texels, so DPR/pitch do not redefine its width. At minification
+this is not a replacement for screen-space antialiasing.
+
+The four logical center loads per endpoint cross tiles through the existing Virtual
+Raster sampler. Unknown, missing halo, fallback or an unavailable temporal capture
+uses the unmodified A display, not a fabricated dry contour. Current alpha is evaluated
+each time: opposite endpoint velocities can cancel, and a zero endpoint can activate.
+No endpoint SDF interpolation or alpha-independent spawn-union cache is used. B adds
+fragment work and one stable pipeline, but no texture, CPU raster, readback, compute
+dispatch, or backend channel. Inspector views and activity contour remain raw; their
+disabled Boundary control retains the selection for the next Particles view. See
+[ADR-110](../../docs/decisions/ADR-110-flow-boundary-sdf-comparison.md).
+
 New v3 COGs store ordinary triangle-linear center velocities without neighborhood
 erosion. Their zero-absorbing 2x2 overviews also omit the extra 3x3 erosion. The
 manifest explicitly requests `nearest-texel-zero` activity: each zero texel's whole
@@ -75,6 +100,9 @@ node tests/browser/flow-screen-projection.mjs
 node tests/browser/flow-field-particle-reference.mjs
 node tests/browser/flow-field-history.mjs
 node tests/browser/flow-field-controls.mjs
+node tests/browser/flow-field-boundary-distance.mjs
+node tests/browser/flow-field-boundary-sdf.mjs
+node tests/browser/flow-field-boundary-ab.mjs
 node tests/browser/flow-field-normal-startup.mjs
 node tests/browser/flow-field-temporal-status.mjs
 node tests/browser/flow-field-zero-footprint.mjs

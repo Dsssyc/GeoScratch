@@ -1,5 +1,6 @@
 import {
     FLOW_FIELD_PRESENTATION,
+    flowFieldPresentation,
     type FlowFieldControlSnapshot,
     type FlowFieldPresentation,
 } from './flow-presentation.ts'
@@ -42,6 +43,7 @@ export function mountFlowFieldControls(options: FlowFieldControlOptions): FlowFi
     const loop = find<HTMLSelectElement>('loop')
     const view = find<HTMLSelectElement>('view')
     const sample = find<HTMLSelectElement>('sample')
+    const boundary = find<HTMLSelectElement>('boundary')
     const trails = find<HTMLInputElement>('trails')
     const contour = find<HTMLInputElement>('contour')
     const status = find('status')
@@ -55,7 +57,7 @@ export function mountFlowFieldControls(options: FlowFieldControlOptions): FlowFi
     const end = find('end')
     const rateUnit = find('rate-unit')
     const legend = find('legend')
-    const inputs = [ playback, time, rate, loop, view, sample, trails, contour ]
+    const inputs = [ playback, time, rate, loop, view, sample, boundary, trails, contour ]
     let snapshot: FlowFieldControlSnapshot | undefined
     let currentPresentation = FLOW_FIELD_PRESENTATION
     let state: FlowFieldControlSnapshot['state'] = 'loading'
@@ -77,6 +79,7 @@ export function mountFlowFieldControls(options: FlowFieldControlOptions): FlowFi
         time.disabled ||= snapshot?.dataset.minimumTime === snapshot?.dataset.maximumTime
         sample.disabled ||= currentPresentation.view === 'particles'
         trails.disabled ||= currentPresentation.view !== 'particles'
+        boundary.disabled ||= currentPresentation.view !== 'particles'
     }
 
     function setStatus(nextState: FlowFieldControlSnapshot['state'], error?: unknown): void {
@@ -104,6 +107,7 @@ export function mountFlowFieldControls(options: FlowFieldControlOptions): FlowFi
     function renderPresentation(): void {
         view.value = currentPresentation.view
         sample.value = currentPresentation.sample
+        boundary.value = currentPresentation.boundary
         trails.checked = currentPresentation.trails
         contour.checked = currentPresentation.contour
         legend.textContent = presentationLegend(currentPresentation, snapshot?.dataset.velocityUnit)
@@ -154,7 +158,7 @@ export function mountFlowFieldControls(options: FlowFieldControlOptions): FlowFi
             : selection.kind === 'gap'
                 ? `${selection.lower.sampleKey} → ${selection.upper.sampleKey} · gap`
                 : `${selection.lower.sampleKey} → ${selection.upper.sampleKey} · ${formatNumber(selection.alpha * 100)}%`
-        currentPresentation = next.presentation
+        currentPresentation = flowFieldPresentation(next.presentation)
         renderPresentation()
     }
 
@@ -186,13 +190,14 @@ export function mountFlowFieldControls(options: FlowFieldControlOptions): FlowFi
     time.addEventListener('blur', cancelPreview, eventOptions)
     rate.addEventListener('change', () => invoke(() => options.onRate(Number(rate.value))), eventOptions)
     loop.addEventListener('change', () => invoke(() => options.onLoop(loop.value as FlowTimelineLoop)), eventOptions)
-    for (const input of [ view, sample, trails, contour ]) {
+    for (const input of [ view, sample, boundary, trails, contour ]) {
         input.addEventListener('change', () => {
-            currentPresentation = Object.freeze({
+            currentPresentation = flowFieldPresentation({
                 view: view.value as FlowFieldPresentation['view'],
                 sample: sample.value as FlowFieldPresentation['sample'],
                 trails: trails.checked,
                 contour: contour.checked,
+                boundary: boundary.value as FlowFieldPresentation['boundary'],
             })
             renderPresentation()
             invoke(() => options.onPresentation(currentPresentation))
@@ -222,9 +227,12 @@ function formatTime(value: number, unit: string): string {
 }
 
 function presentationLegend(value: FlowFieldPresentation, unit = 'm/s'): string {
-    if (value.view === 'particles') return 'Particles follow the interpolated velocity.'
+    if (value.view === 'particles') return value.boundary === 'sdf'
+        ? 'Particles follow the interpolated velocity. B: Inner-edge display only; no extra source detail.'
+        : 'Particles follow the interpolated velocity. A: Hard texture boundary.'
     const field = ({ speed: `Speed (${unit})`, direction: 'Flow direction', u: `U · eastward (${unit})`, v: `V · northward (${unit})`, status: 'Velocity sampling status' })[value.view]
-    return value.sample === 'delta' ? `${field} · upper − lower` : `${field} · ${value.sample} sample`
+    const sampled = value.sample === 'delta' ? `${field} · upper − lower` : `${field} · ${value.sample} sample`
+    return `${sampled}. Unfiltered diagnostics; boundary A/B inactive.`
 }
 
 const NUMBER_FORMAT = new Intl.NumberFormat('en', { maximumFractionDigits: 3 })
@@ -242,6 +250,10 @@ const CONTROL_MARKUP = `
             <label class="flow-field">Sample <select data-flow-control="sample">
                 <option value="interpolated">Interpolated</option><option value="lower">Lower time</option>
                 <option value="upper">Upper time</option><option value="delta">Upper − lower</option>
+            </select></label>
+            <label class="flow-field">Boundary <select data-flow-control="boundary">
+                <option value="hard">A · Hard texture</option>
+                <option value="sdf">B · SDF (inward)</option>
             </select></label>
             <div class="flow-checks">
                 <label><input type="checkbox" data-flow-control="trails" /> Particle trails</label>

@@ -66,6 +66,10 @@ try {
     assert.equal(await control('sample').isDisabled(), true, 'Particle view always samples interpolated velocity')
     assert.equal(await control('requested').textContent(), '2.5 index')
     assert.equal(await control('presented').textContent(), '2.4 index')
+    assert.equal(await control('boundary').inputValue(), 'hard')
+    await control('boundary').selectOption('sdf')
+    assert.equal(await page.evaluate(() => fixture.snapshot.presentation.boundary), 'sdf')
+    assert.match(await control('legend').textContent(), /Inner-edge display only/)
 
     await control('play-pause').click()
     assert.equal(await control('status').textContent(), 'Playing')
@@ -89,12 +93,14 @@ try {
     await control('rate').selectOption('-1')
     await control('loop').selectOption('clamp')
     await control('view').selectOption('speed')
+    assert.equal(await control('boundary').isDisabled(), true)
+    assert.equal(await control('boundary').inputValue(), 'sdf')
     assert.equal(await control('sample').isDisabled(), false)
     assert.equal(await control('trails').isDisabled(), true)
     await control('sample').selectOption('delta')
     await control('contour').check()
     assert.deepEqual(await page.evaluate(() => fixture.snapshot.presentation), {
-        view: 'speed', sample: 'delta', trails: true, contour: true,
+        view: 'speed', sample: 'delta', trails: true, contour: true, boundary: 'sdf',
     })
     await page.evaluate(() => { fixture.snapshot.state = 'loading'; fixture.controls.update(fixture.snapshot) })
     assert.equal(await control('time').isDisabled(), false, 'A loading seek must remain replaceable')
