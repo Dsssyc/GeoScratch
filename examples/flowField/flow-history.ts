@@ -25,6 +25,7 @@ import historyShader from './shaders/history.wgsl?raw'
 import historySupportShader from './shaders/history-support.wgsl?raw'
 import presentationShader from './shaders/presentation.wgsl?raw'
 import boundaryDistanceShader from './shaders/boundary-distance.wgsl?raw'
+import boundaryActivityShader from './shaders/boundary-activity.wgsl?raw'
 import boundarySdfShader from './shaders/boundary-sdf.wgsl?raw'
 import type { FlowFieldBoundaryMode } from './flow-presentation.ts'
 import { FLOW_FIELD_SDF_FEATHER, flowFieldSdfFeatherTexels } from './flow-presentation.ts'
@@ -289,7 +290,7 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
         const sdfModule = own(await runtime.createShaderModule({
             label: 'Flow Field inward SDF presentation shader',
             sourceParts: [ { code: temporal.wgsl }, { code: screenProjection },
-                { code: codec.wgslAccessors() }, { code: boundaryDistanceShader },
+                { code: codec.wgslAccessors() }, { code: boundaryDistanceShader }, { code: boundaryActivityShader },
                 { code: boundarySdfShader } ],
         }))
         const requirement: ProgramBufferLayoutRequirement = {

@@ -13,18 +13,24 @@ fn vMain(@builtin(vertex_index) index: u32) -> FlowBoundaryVertex {
     return FlowBoundaryVertex(vec4f(p, 0.0, 1.0), vec2f(p.x * 0.5 + 0.5, 0.5 - p.y * 0.5));
 }
 
-// Each center uses the *current interpolated* U/V, not the endpoint support
-// union or a mix of endpoint SDFs. Only exact same-level resident values may
-// create a contour. The public logical loads cross physical atlas/page edges.
-fn FlowBoundary_center(global: vec2i, level: u32) -> i32 {
+struct FlowBoundaryCenter {
+    activity: f32,
+    current: vec2f,
+    next: vec2f,
+};
+
+// Continuous current-time activity, including cancellation of endpoint vectors.
+// Only exact same-level resident values may define this display reconstruction.
+fn FlowBoundary_center(global: vec2i, level: u32) -> FlowBoundaryCenter {
+    let unknown = FlowBoundaryCenter(-1.0, vec2f(0.0), vec2f(0.0));
     if (any(global < vec2i(FlowVelocityCurrent_minimum_texel[level])) ||
-        any(global > vec2i(FlowVelocityCurrent_maximum_texel[level]))) { return -1; }
+        any(global > vec2i(FlowVelocityCurrent_maximum_texel[level]))) { return unknown; }
     let current = FlowVelocityCurrent_load_global(global, level);
     let next = FlowVelocityNext_load_global(global, level);
     if (current.status != 1u || next.status != 1u ||
-        current.resolved_level != level || next.resolved_level != level) { return -1; }
-    let speed = length(mix(current.value.xy, next.value.xy, boundaryUniform.progress));
-    return select(0, 1, speed > 0.0 && speed >= boundaryUniform.activityKill);
+        current.resolved_level != level || next.resolved_level != level) { return unknown; }
+    return FlowBoundaryCenter(FlowBoundary_activity(current.value.xy, next.value.xy,
+        boundaryUniform.progress, boundaryUniform.activityKill), current.value.xy, next.value.xy);
 }
 
 fn FlowBoundary_coverage(position: FlowVelocityAddressFixedPosition) -> f32 {
@@ -41,43 +47,68 @@ fn FlowBoundary_coverage(position: FlowVelocityAddressFixedPosition) -> f32 {
     let br = FlowBoundary_center(base + vec2i(1, 1), level);
     let bl = FlowBoundary_center(base + vec2i(0, 1), level);
     // Unknown halo/fallback is not dry. Fall back to the unchanged A display.
-    if (min(min(tl, tr), min(br, bl)) < 0) { return 1.0; }
-    let corners = u32(tl) | (u32(tr) << 1u) | (u32(br) << 2u) | (u32(bl) << 3u);
-    // For an all-active cell, any external contour is at least sqrt(1/8)
-    // texels away. The entire allowed feather band (<= 0.35) is already opaque.
-    if (corners == 15u) { return 1.0; }
+    let q = vec4f(tl.activity, tr.activity, br.activity, bl.activity);
+    let minimum = min(min(q.x, q.y), min(q.z, q.w));
+    let maximum = max(max(q.x, q.y), max(q.z, q.w));
+    if (minimum < 0.0) { return 1.0; }
+    if (minimum == 1.0) {
+        // Check cancellation using already loaded, pixel-center-aligned texels.
+        // Keep the nearest-zero gate even when q rounds to 1 at tiny alpha.
+        var lower = mix(mix(tl.current, tr.current, p.x), mix(bl.current, br.current, p.x), p.y);
+        var upper = mix(mix(tl.next, tr.next, p.x), mix(bl.next, br.next, p.x), p.y);
+        // Ownership is integer-address derived; fract can round to the other
+        // half of a texel at wide-fixed positions infinitesimally below an edge.
+        let owning = -vec2i(floor(offset));
+        let lower_nearest = select(select(tl.current, tr.current, owning.x != 0),
+            select(bl.current, br.current, owning.x != 0), owning.y != 0);
+        let upper_nearest = select(select(tl.next, tr.next, owning.x != 0),
+            select(bl.next, br.next, owning.x != 0), owning.y != 0);
+        if (all(lower_nearest == vec2f(0.0))) { lower = vec2f(0.0); }
+        if (all(upper_nearest == vec2f(0.0))) { upper = vec2f(0.0); }
+        var velocity = mix(lower, upper, boundaryUniform.progress);
+        if (boundaryUniform.progress <= 0.0) { velocity = lower; }
+        if (boundaryUniform.progress >= 1.0) { velocity = upper; }
+        if (length(velocity) >= 4.0 * boundaryUniform.activityKill && length(velocity) > 0.0) {
+            return 1.0;
+        }
+    }
     // Respect the actual temporal sampler's common-level/transition decision.
     // A sparse LoD halo must not create a finer artificial boundary over fallback ink.
     let actual = FlowVelocity_sample(position, level,
         FlowVelocityTemporal(boundaryUniform.progress, boundaryUniform.activityKill));
     if (actual.status != 1u || actual.resolved_level != level) { return 1.0; }
-    if (!actual.advectable || actual.speed <= 0.0) { return 0.0; }
-    if (corners == 0u) { return 0.0; }
-    var centers: array<i32, 16>;
-    for (var i = 0u; i < 16u; i++) { centers[i] = -2; }
-    centers[5] = tl; centers[6] = tr; centers[10] = br; centers[9] = bl;
-    var masks: array<u32, 9>;
+    let point_gain = FlowBoundary_speed_gain(actual.speed, boundaryUniform.activityKill);
+    if (point_gain == 0.0) { return 0.0; }
+    // Uniform central activity has integral q, independent of halo topology.
+    if (minimum == maximum) { return min(minimum, point_gain); }
+    var centers: array<f32, 16>;
+    for (var i = 0u; i < 16u; i++) { centers[i] = -2.0; }
+    centers[5] = q.x; centers[6] = q.y; centers[10] = q.z; centers[9] = q.w;
     for (var i = 0u; i < 9u; i++) {
         let cell = vec2f(f32(i % 3u) - 1.0, f32(i / 3u) - 1.0);
         let separation = max(max(cell - p, p - cell - vec2f(1.0)), vec2f(0.0));
         // A farther cell cannot affect this bounded distance, even if missing.
         // Query the same geometric footprint on both sides of a shared edge.
-        if (length(separation) >= 0.35) { masks[i] = 0u; continue; }
+        if (dot(separation, separation) >= 0.35 * 0.35) { continue; }
         let origin = i % 3u + (i / 3u) * 4u;
         let indices = array<u32, 4>(origin, origin + 1u, origin + 5u, origin + 4u);
         for (var corner = 0u; corner < 4u; corner++) {
             let index = indices[corner];
-            if (centers[index] == -2) {
+            if (centers[index] == -2.0) {
                 centers[index] = FlowBoundary_center(base +
-                    vec2i(i32(index % 4u) - 1, i32(index / 4u) - 1), level);
+                    vec2i(i32(index % 4u) - 1, i32(index / 4u) - 1), level).activity;
             }
             // Only a relevant unknown halo disables B; it never seeds a dry edge.
-            if (centers[index] < 0) { return 1.0; }
+            if (centers[index] < 0.0) { return 1.0; }
         }
-        masks[i] = u32(centers[origin]) | (u32(centers[origin + 1u]) << 1u) |
-            (u32(centers[origin + 5u]) << 2u) | (u32(centers[origin + 4u]) << 3u);
     }
-    return FlowBoundary_inner_coverage(FlowBoundary_neighborhood_distance(p, masks), boundaryUniform.presentationFeather);
+    // Unqueried centers belong only to irrelevant far cells; their values cannot
+    // affect this narrow band. No missing *queried* center reaches the integral.
+    for (var i = 0u; i < 16u; i++) { centers[i] = max(centers[i], 0.0); }
+    let coverage = FlowBoundary_continuous_coverage(p, centers, boundaryUniform.presentationFeather);
+    // Cap rather than multiply: steady uniform low-speed q is not attenuated twice.
+    // Point-level cancellation fades before the unchanged hard-history kill.
+    return min(coverage, point_gain);
 }
 
 @fragment

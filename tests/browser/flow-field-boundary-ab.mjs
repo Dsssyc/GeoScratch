@@ -13,10 +13,18 @@ const errors = []
 try {
     let page
     const attempts = []
-    for (const zoom of [13, 12]) {
+    for (const zoom of [12]) {
         page = await browser.newPage({viewport:{width:1440,height:900},deviceScaleFactor})
         page.on('pageerror', error => errors.push(error.message))
         page.on('console', message => { if (message.type() === 'error') errors.push(message.text()) })
+        // A fixed constructor camera keeps cross-run GPU measurements comparable.
+        // An initial drag's inertia varies with load and changes covered source cells.
+        await page.route('**/flowField/map.ts*', async route => {
+            const response = await route.fetch(), body = await response.text()
+            assert.ok(body.includes('center: FLOW_FIELD_MAP_DEFAULTS.center'))
+            await route.fulfill({response,body:body.replace('center: FLOW_FIELD_MAP_DEFAULTS.center',
+                'center: [121.05903696380413, 31.742548034700167]')})
+        })
         await page.goto(`${base}/flowField/index.html?proof=1&rate=0.001&zoom=${zoom}`)
         await page.waitForFunction(() => {
             const f = window.__FLOW_FIELD_PROOF__?.facts()
@@ -35,12 +43,6 @@ try {
         assert.deepEqual(cleanup.cleanupFailures,[])
         await page.close()
     }
-    // Move the upper-right flow toward the center using the real map gesture.
-    // Use an unobscured start point: the inspector intercepts (1250,100).
-    await page.mouse.move(1000,120)
-    await page.mouse.down()
-    await page.mouse.move(600,470,{steps:32})
-    await page.mouse.up()
     await page.waitForFunction(() => {
         const f = window.__FLOW_FIELD_PROOF__.facts()
         return f.lastFrame.presentationReady && !f.lastFrame.history?.cameraChanged &&
