@@ -95,8 +95,8 @@ fn test_boundary_distance(@builtin(global_invocation_id) id: vec3u) {
     if (probe.kind == 2u) {
         distance = ${legacyBaseline ? 'local_distance' : 'FlowBoundary_neighborhood_distance(probe.p, probe.masks)'};
     }
-    output[id.x] = vec4f(distance, FlowBoundary_inner_coverage(distance),
-        local_distance, FlowBoundary_inner_coverage(local_distance));
+    output[id.x] = vec4f(distance, FlowBoundary_inner_coverage(distance, 0.25),
+        local_distance, FlowBoundary_inner_coverage(local_distance, 0.25));
 }`
 const server = createServer((_request, response) => response.end('<!doctype html><title>Flow boundary distance proof</title>'))
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))

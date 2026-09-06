@@ -47,6 +47,9 @@
 .flow-inspector-body { padding: 0 12px 12px; }
 .flow-metadata { margin: 0 0 12px; color: var(--flow-muted); }
 .flow-field { display: grid; grid-template-columns: 52px minmax(0, 1fr); align-items: center; gap: 8px; margin-block: 8px; }
+.flow-feather { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; min-width: 0; }
+.flow-feather input { width: 100%; min-width: 0; height: 28px; margin: 0; accent-color: var(--flow-accent); }
+.flow-feather output { color: var(--flow-muted); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .flow-checks { display: flex; flex-wrap: wrap; gap: 8px 12px; margin-block: 12px; }
 .flow-checks label { display: inline-flex; align-items: center; gap: 4px; }
 .flow-checks input { width: 16px; height: 16px; margin: 0; accent-color: var(--flow-accent); }

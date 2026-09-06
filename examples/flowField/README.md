@@ -23,9 +23,18 @@ In **Particles**, the **Boundary** selector compares **A · Hard texture** (defa
 with **B · SDF (inward)**. B reconstructs a local marching-squares contour from
 current-time U/V at source texel centers, searches neighboring cells for the nearest
 finite contour segment, computes its signed distance and applies
-a quarter-texel inward feather only during final display. Convex pixel corners are
+an inward feather only during final display (default: 0.25 source texel). Convex pixel corners are
 chamfered; diagonal active cells are not connected across a dry gap. This is a local
 truncated SDF evaluated in shader registers, not an uploaded SDF texture or a JFA pass.
+
+With B selected, **Feather** adjusts the inward fade width from **0.05 to 0.35 source
+texel**, in 0.01 UI steps. Smaller is sharper; larger makes a wider inward transition.
+It does not move the reconstructed zero contour or change the activity threshold.
+The numeric readout and keyboard arrows use the same source-texel units, not screen
+pixels. Changes apply while dragging and preserve raw history and particle state.
+A and inspector views disable the slider but retain its value for the next B view.
+Programmatic `sdfFeatherTexels` inputs default to 0.25 when omitted; non-finite or
+out-of-range values are rejected rather than silently changing the user's input.
 
 Both choices use exactly the same particles and raw hard-cleaned trail history.
 Switching A/B neither resets nor softens that history, changes velocity/death, nor

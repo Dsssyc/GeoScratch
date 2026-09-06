@@ -541,7 +541,8 @@ export async function createFlowFieldRenderer(
                     content,
                     framePresentation.view === 'particles' && framePresentation.trails,
                     prepared,
-                    framePresentation.view === 'particles' ? framePresentation.boundary : 'hard'
+                    framePresentation.view === 'particles' ? framePresentation.boundary : 'hard',
+                    framePresentation.sdfFeatherTexels
                 ) : history.presentRetained(builder, view)
                 if (presentationReady && framePresentation.contour) builder.render(overlayPass, [contour.draw])
                 const submitted = builder.submit()

@@ -16,6 +16,12 @@ describe('Flow Field boundary controls (Node DOM fixture)', () => {
         ])
         expect(fixture.find('sample').disabled).to.equal(true)
         expect(fixture.find('trails').disabled).to.equal(false)
+        expect(fixture.find('feather').disabled).to.equal(true)
+        expect(fixture.find('feather').valueAsNumber).to.equal(0.25)
+        expect(fixture.find('feather').min).to.equal('0.05')
+        expect(fixture.find('feather').max).to.equal('0.35')
+        expect(fixture.find('feather').step).to.equal('0.01')
+        expect(fixture.find('feather-value').textContent).to.equal('0.25 texel')
         fixture.controls.dispose()
     })
 
@@ -30,6 +36,7 @@ describe('Flow Field boundary controls (Node DOM fixture)', () => {
             fixture.change('view', view)
             expect(fixture.find('boundary').disabled).to.equal(true)
             expect(fixture.find('boundary').value).to.equal('sdf')
+            expect(fixture.find('feather').disabled).to.equal(true)
             expect(fixture.find('legend').textContent).to.include('Unfiltered diagnostics')
             expect(fixture.find('legend').textContent).to.include('boundary A/B inactive')
             expect(fixture.find('sample').disabled).to.equal(false)
@@ -39,6 +46,7 @@ describe('Flow Field boundary controls (Node DOM fixture)', () => {
         fixture.change('view', 'particles')
         expect(fixture.find('boundary').disabled).to.equal(false)
         expect(fixture.find('boundary').value).to.equal('sdf')
+        expect(fixture.find('feather').disabled).to.equal(false)
         expect(fixture.snapshot.presentation.sample).to.equal('upper')
         expect(fixture.snapshot.presentation.trails).to.equal(true)
         expect(fixture.snapshot.presentation.contour).to.equal(false)
@@ -56,15 +64,70 @@ describe('Flow Field boundary controls (Node DOM fixture)', () => {
         expect(fixture.find('boundary').value).to.equal('hard')
         expect(legacy).to.not.have.property('boundary')
         fixture.change('boundary', 'sdf')
-        expect(fixture.events.at(-1)).to.deep.equal({...legacy,boundary:'sdf'})
+        expect(fixture.events.at(-1)).to.deep.equal({...legacy,boundary:'sdf',sdfFeatherTexels:0.25})
         fixture.controls.setStatus('stopped')
         expect(fixture.find('boundary').disabled).to.equal(true)
+        expect(fixture.find('feather').disabled).to.equal(true)
         const boundary = fixture.find('boundary'), eventCount = fixture.events.length
         fixture.controls.dispose()
         fixture.controls.dispose()
         boundary.dispatchEvent(new Event('change'))
         expect(fixture.events.length).to.equal(eventCount)
         expect(fixture.container.children).to.have.length(0)
+    })
+
+    it('emits each feather input immediately, ignores duplicate change, and preserves width across views', () => {
+        const fixture = controlsFixture()
+        fixture.controls.update(fixture.snapshot)
+        fixture.change('boundary','sdf')
+        const feather = fixture.find('feather')
+        expect(feather.disabled).to.equal(false)
+        for (const width of [0.05,0.35,0.25]) {
+            const before = fixture.events.length
+            feather.valueAsNumber = width
+            feather.dispatchEvent(new Event('input'))
+            expect(fixture.events.length).to.equal(before+1)
+            expect(fixture.events.at(-1).sdfFeatherTexels).to.equal(width)
+            expect(fixture.find('feather-value').textContent).to.equal(`${width.toFixed(2)} texel`)
+            expect(feather.getAttribute('aria-valuetext')).to.equal(`${width.toFixed(2)} source texel`)
+            feather.dispatchEvent(new Event('change'))
+            expect(fixture.events.length).to.equal(before+1)
+        }
+        feather.valueAsNumber = 0.35
+        feather.dispatchEvent(new Event('input'))
+        for (const [control,value] of [['boundary','hard'],['boundary','sdf'],['view','status'],['view','particles']]) {
+            fixture.change(control,value)
+            expect(feather.valueAsNumber).to.equal(0.35)
+            expect(fixture.events.at(-1).sdfFeatherTexels).to.equal(0.35)
+            expect(feather.disabled).to.equal(fixture.snapshot.presentation.view!=='particles' ||
+                fixture.snapshot.presentation.boundary!=='sdf')
+        }
+        expect(fixture.snapshot.presentation.sample).to.equal('interpolated')
+        expect(fixture.snapshot.presentation.trails).to.equal(true)
+        expect(fixture.snapshot.presentation.contour).to.equal(false)
+        const eventCount = fixture.events.length
+        fixture.controls.dispose()
+        feather.dispatchEvent(new Event('input'))
+        expect(fixture.events.length).to.equal(eventCount)
+    })
+
+    it('preserves a non-step caller width through unrelated A/B and view changes', () => {
+        const fixture = controlsFixture()
+        fixture.snapshot.presentation = {...FLOW_FIELD_PRESENTATION,boundary:'sdf',sdfFeatherTexels:0.123}
+        fixture.controls.update(fixture.snapshot)
+        const feather = fixture.find('feather')
+        for (const [control,value] of [['boundary','hard'],['boundary','sdf'],['view','status'],['view','particles']]) {
+            // Native range inputs snap their displayed value to the declared
+            // step. That DOM normalization is not a user feather edit.
+            feather.valueAsNumber = 0.12
+            fixture.change(control,value)
+            expect(fixture.events.at(-1).sdfFeatherTexels).to.equal(0.123)
+            expect(fixture.snapshot.presentation.sdfFeatherTexels).to.equal(0.123)
+        }
+        feather.valueAsNumber = 0.13
+        feather.dispatchEvent(new Event('input'))
+        expect(fixture.snapshot.presentation.sdfFeatherTexels).to.equal(0.13)
+        fixture.controls.dispose()
     })
 })
 
@@ -103,6 +166,9 @@ class ElementFixture extends EventTarget {
         this.attributes = new Map()
         this.dataset = {}
         this.value = ''
+        this.min = ''
+        this.max = ''
+        this.step = ''
         this.checked = false
         this.hidden = false
         this.disabled = false
@@ -112,6 +178,10 @@ class ElementFixture extends EventTarget {
         for (const match of markup.matchAll(/<([a-z][a-z0-9]*)\b([^>]*\bdata-flow-control="([^"]+)"[^>]*)>/g)) {
             const element = this.ownerDocument.createElement(match[1])
             element.hidden = /\bhidden\b/.test(match[2])
+            for (const name of ['min','max','step','value','type']) {
+                const attribute = match[2].match(new RegExp(`\\b${name}="([^"]*)"`))
+                if (attribute) element[name] = attribute[1]
+            }
             this.controls.set(match[3], element)
             if (match[1] === 'select') {
                 const end = markup.indexOf('</select>', match.index)
@@ -126,6 +196,7 @@ class ElementFixture extends EventTarget {
         }
     }
     setAttribute(name, value) { this.attributes.set(name, value) }
+    getAttribute(name) { return this.attributes.get(name) ?? null }
     querySelector(selector) {
         if (selector === '[data-custom-rate]') return this.options.find(value => value.dataset.customRate) ?? null
         const match = selector.match(/^\[data-flow-control="([^"]+)"\]$/)
@@ -147,4 +218,5 @@ class ElementFixture extends EventTarget {
         super.addEventListener(type, callback, options)
     }
     get valueAsNumber() { return Number(this.value) }
+    set valueAsNumber(value) { this.value = String(value) }
 }

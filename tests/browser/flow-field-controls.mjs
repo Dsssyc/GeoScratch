@@ -67,9 +67,55 @@ try {
     assert.equal(await control('requested').textContent(), '2.5 index')
     assert.equal(await control('presented').textContent(), '2.4 index')
     assert.equal(await control('boundary').inputValue(), 'hard')
+    assert.equal(await control('feather').isDisabled(), true)
+    assert.equal(await control('feather').inputValue(), '0.25')
+    assert.equal(await control('feather-value').textContent(), '0.25 texel')
+    assert.equal(await control('feather').getAttribute('min'), '0.05')
+    assert.equal(await control('feather').getAttribute('max'), '0.35')
+    assert.equal(await control('feather').getAttribute('step'), '0.01')
     await control('boundary').selectOption('sdf')
     assert.equal(await page.evaluate(() => fixture.snapshot.presentation.boundary), 'sdf')
     assert.match(await control('legend').textContent(), /Inner-edge display only/)
+    assert.equal(await control('feather').isDisabled(), false)
+    const beforeInput = await page.evaluate(() => fixture.events.length)
+    await page.evaluate(() => {
+        const feather = document.querySelector('[data-flow-control="feather"]')
+        feather.valueAsNumber = 0.05
+        feather.dispatchEvent(new Event('input', {bubbles:true}))
+    })
+    assert.equal(await page.evaluate(() => fixture.events.length), beforeInput+1)
+    assert.equal(await page.evaluate(() => fixture.snapshot.presentation.sdfFeatherTexels), 0.05)
+    assert.equal(await control('feather').getAttribute('aria-valuetext'), '0.05 source texel')
+    await control('feather').dispatchEvent('change')
+    assert.equal(await page.evaluate(() => fixture.events.length), beforeInput+1, 'Range change must not duplicate input submission')
+    await control('feather').focus()
+    await page.keyboard.press('ArrowRight')
+    assert.equal(await page.evaluate(() => fixture.snapshot.presentation.sdfFeatherTexels), 0.06)
+    assert.equal(await page.evaluate(() => fixture.events.length), beforeInput+2, 'Keyboard range input submits once')
+    await page.keyboard.press('End')
+    assert.equal(await control('feather-value').textContent(), '0.35 texel')
+    await control('boundary').selectOption('hard')
+    assert.equal(await control('feather').isDisabled(), true)
+    assert.equal(await control('feather').inputValue(), '0.35')
+    await control('boundary').selectOption('sdf')
+    assert.equal(await control('feather').isDisabled(), false)
+    assert.equal(await control('feather').inputValue(), '0.35')
+
+    await page.evaluate(() => {
+        fixture.snapshot.presentation = {...fixture.snapshot.presentation,sdfFeatherTexels:0.123}
+        fixture.controls.update(fixture.snapshot)
+    })
+    assert.equal(Number(await control('feather').inputValue()), 0.12,
+        'The native range display may snap a valid non-step caller value')
+    for (const [name,value] of [['boundary','hard'],['boundary','sdf'],['view','status'],['view','particles']]) {
+        await control(name).selectOption(value)
+        assert.equal(await page.evaluate(() => fixture.snapshot.presentation.sdfFeatherTexels), 0.123,
+            'An unrelated display change must not adopt the range element rounding')
+    }
+    await control('feather').focus()
+    await page.keyboard.press('End')
+    assert.equal(await page.evaluate(() => fixture.snapshot.presentation.sdfFeatherTexels), 0.35,
+        'An actual range input intentionally adopts its stepped value')
 
     await control('play-pause').click()
     assert.equal(await control('status').textContent(), 'Playing')
@@ -95,12 +141,14 @@ try {
     await control('view').selectOption('speed')
     assert.equal(await control('boundary').isDisabled(), true)
     assert.equal(await control('boundary').inputValue(), 'sdf')
+    assert.equal(await control('feather').isDisabled(), true)
+    assert.equal(await control('feather').inputValue(), '0.35')
     assert.equal(await control('sample').isDisabled(), false)
     assert.equal(await control('trails').isDisabled(), true)
     await control('sample').selectOption('delta')
     await control('contour').check()
     assert.deepEqual(await page.evaluate(() => fixture.snapshot.presentation), {
-        view: 'speed', sample: 'delta', trails: true, contour: true, boundary: 'sdf',
+        view: 'speed', sample: 'delta', trails: true, contour: true, boundary: 'sdf', sdfFeatherTexels: 0.35,
     })
     await page.evaluate(() => { fixture.snapshot.state = 'loading'; fixture.controls.update(fixture.snapshot) })
     assert.equal(await control('time').isDisabled(), false, 'A loading seek must remain replaceable')
@@ -142,16 +190,18 @@ try {
     assert.equal(await control('error').isHidden(), true)
     const disposal = await page.evaluate(() => {
         const button = document.querySelector('[data-flow-control="play-pause"]')
+        const feather = document.querySelector('[data-flow-control="feather"]')
         const eventCount = fixture.events.length
         fixture.controls.dispose()
         fixture.controls.dispose()
         button.click()
+        feather.dispatchEvent(new Event('input'))
         fixture.controls.update(fixture.snapshot)
         return { detachedEvents: fixture.events.length - eventCount, roots: document.querySelectorAll('.flow-controls').length, existing: document.querySelector('#existing') !== null }
     })
     assert.deepEqual(disposal, { detachedEvents: 0, roots: 0, existing: true })
     assert.deepEqual(errors, [])
-    process.stdout.write(`${JSON.stringify({ status: 'passed', widths: [ 320, 768, 1024, 1440 ], source: fileURLToPath(sourceRoot), checks: [ 'loading', 'play-pause', 'seek-preview', 'single-seek', 'signed-rate', 'presentation', 'gap', 'responsive', 'keyboard', 'error', 'dispose' ] }, null, 2)}\n`)
+    process.stdout.write(`${JSON.stringify({ status: 'passed', widths: [ 320, 768, 1024, 1440 ], source: fileURLToPath(sourceRoot), checks: [ 'loading', 'play-pause', 'seek-preview', 'single-seek', 'signed-rate', 'presentation', 'feather-input-once', 'feather-keyboard', 'feather-retained-disabled', 'feather-nonstep-preserved', 'gap', 'responsive', 'keyboard', 'error', 'dispose' ] }, null, 2)}\n`)
 } finally {
     await browser?.close()
     await new Promise(resolve => server.close(resolve))

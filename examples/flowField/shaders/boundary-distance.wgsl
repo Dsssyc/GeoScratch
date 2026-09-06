@@ -66,7 +66,8 @@ fn FlowBoundary_neighborhood_distance(p: vec2f, masks: array<u32, 9>) -> f32 {
     return sign(FlowBoundary_distance(p, masks[4])) * distance;
 }
 
-fn FlowBoundary_inner_coverage(distance: f32) -> f32 {
-    // Fixed source-space quarter-texel band; it does not widen with DPR or pitch.
-    return smoothstep(0.0, 0.25, distance);
+fn FlowBoundary_inner_coverage(distance: f32, featherTexels: f32) -> f32 {
+    // Source-space display width, bounded by the neighborhood-distance proof.
+    // A positive minimum also prevents the undefined smoothstep(0, 0, d) case.
+    return smoothstep(0.0, clamp(featherTexels, 0.05, 0.35), distance);
 }

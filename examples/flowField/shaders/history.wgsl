@@ -24,6 +24,7 @@ struct FlowFieldHistoryUniform {
     requestedLevel: u32,
     progress: f32,
     activityKill: f32,
+    presentationFeather: f32,
 };
 
 struct HistoryProjection {

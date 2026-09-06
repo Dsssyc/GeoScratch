@@ -77,7 +77,7 @@ fn FlowBoundary_coverage(position: FlowVelocityAddressFixedPosition) -> f32 {
         masks[i] = u32(centers[origin]) | (u32(centers[origin + 1u]) << 1u) |
             (u32(centers[origin + 5u]) << 2u) | (u32(centers[origin + 4u]) << 3u);
     }
-    return FlowBoundary_inner_coverage(FlowBoundary_neighborhood_distance(p, masks));
+    return FlowBoundary_inner_coverage(FlowBoundary_neighborhood_distance(p, masks), boundaryUniform.presentationFeather);
 }
 
 @fragment

@@ -1,5 +1,6 @@
 import {
     FLOW_FIELD_PRESENTATION,
+    FLOW_FIELD_SDF_FEATHER,
     flowFieldPresentation,
     type FlowFieldControlSnapshot,
     type FlowFieldPresentation,
@@ -44,6 +45,8 @@ export function mountFlowFieldControls(options: FlowFieldControlOptions): FlowFi
     const view = find<HTMLSelectElement>('view')
     const sample = find<HTMLSelectElement>('sample')
     const boundary = find<HTMLSelectElement>('boundary')
+    const feather = find<HTMLInputElement>('feather')
+    const featherValue = find<HTMLOutputElement>('feather-value')
     const trails = find<HTMLInputElement>('trails')
     const contour = find<HTMLInputElement>('contour')
     const status = find('status')
@@ -57,7 +60,7 @@ export function mountFlowFieldControls(options: FlowFieldControlOptions): FlowFi
     const end = find('end')
     const rateUnit = find('rate-unit')
     const legend = find('legend')
-    const inputs = [ playback, time, rate, loop, view, sample, boundary, trails, contour ]
+    const inputs = [ playback, time, rate, loop, view, sample, boundary, feather, trails, contour ]
     let snapshot: FlowFieldControlSnapshot | undefined
     let currentPresentation = FLOW_FIELD_PRESENTATION
     let state: FlowFieldControlSnapshot['state'] = 'loading'
@@ -80,6 +83,7 @@ export function mountFlowFieldControls(options: FlowFieldControlOptions): FlowFi
         sample.disabled ||= currentPresentation.view === 'particles'
         trails.disabled ||= currentPresentation.view !== 'particles'
         boundary.disabled ||= currentPresentation.view !== 'particles'
+        feather.disabled ||= currentPresentation.view !== 'particles' || currentPresentation.boundary !== 'sdf'
     }
 
     function setStatus(nextState: FlowFieldControlSnapshot['state'], error?: unknown): void {
@@ -108,6 +112,9 @@ export function mountFlowFieldControls(options: FlowFieldControlOptions): FlowFi
         view.value = currentPresentation.view
         sample.value = currentPresentation.sample
         boundary.value = currentPresentation.boundary
+        feather.value = String(currentPresentation.sdfFeatherTexels)
+        featherValue.textContent = `${currentPresentation.sdfFeatherTexels.toFixed(2)} texel`
+        feather.setAttribute('aria-valuetext', `${currentPresentation.sdfFeatherTexels.toFixed(2)} source texel`)
         trails.checked = currentPresentation.trails
         contour.checked = currentPresentation.contour
         legend.textContent = presentationLegend(currentPresentation, snapshot?.dataset.velocityUnit)
@@ -190,19 +197,24 @@ export function mountFlowFieldControls(options: FlowFieldControlOptions): FlowFi
     time.addEventListener('blur', cancelPreview, eventOptions)
     rate.addEventListener('change', () => invoke(() => options.onRate(Number(rate.value))), eventOptions)
     loop.addEventListener('change', () => invoke(() => options.onLoop(loop.value as FlowTimelineLoop)), eventOptions)
-    for (const input of [ view, sample, boundary, trails, contour ]) {
-        input.addEventListener('change', () => {
-            currentPresentation = flowFieldPresentation({
-                view: view.value as FlowFieldPresentation['view'],
-                sample: sample.value as FlowFieldPresentation['sample'],
-                trails: trails.checked,
-                contour: contour.checked,
-                boundary: boundary.value as FlowFieldPresentation['boundary'],
-            })
-            renderPresentation()
-            invoke(() => options.onPresentation(currentPresentation))
-        }, eventOptions)
+    function applyPresentation(sdfFeatherTexels = currentPresentation.sdfFeatherTexels): void {
+        currentPresentation = flowFieldPresentation({
+            view: view.value as FlowFieldPresentation['view'],
+            sample: sample.value as FlowFieldPresentation['sample'],
+            trails: trails.checked,
+            contour: contour.checked,
+            boundary: boundary.value as FlowFieldPresentation['boundary'],
+            sdfFeatherTexels,
+        })
+        renderPresentation()
+        invoke(() => options.onPresentation(currentPresentation))
     }
+    for (const input of [ view, sample, boundary, trails, contour ]) {
+        input.addEventListener('change', () => applyPresentation(), eventOptions)
+    }
+    // Native range input covers pointer dragging and keyboard steps. Do not
+    // submit again on change when the same gesture is committed.
+    feather.addEventListener('input', () => applyPresentation(feather.valueAsNumber), eventOptions)
     renderPresentation()
 
     return Object.freeze({
@@ -255,6 +267,12 @@ const CONTROL_MARKUP = `
                 <option value="hard">A · Hard texture</option>
                 <option value="sdf">B · SDF (inward)</option>
             </select></label>
+            <label class="flow-field">Feather <span class="flow-feather">
+                <input type="range" data-flow-control="feather" aria-label="SDF feather width"
+                    min="${FLOW_FIELD_SDF_FEATHER.minimum}" max="${FLOW_FIELD_SDF_FEATHER.maximum}"
+                    step="0.01" value="${FLOW_FIELD_SDF_FEATHER.default}" />
+                <output data-flow-control="feather-value">0.25 texel</output>
+            </span></label>
             <div class="flow-checks">
                 <label><input type="checkbox" data-flow-control="trails" /> Particle trails</label>
                 <label><input type="checkbox" data-flow-control="contour" /> Activity contour</label>

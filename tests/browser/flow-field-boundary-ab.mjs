@@ -56,6 +56,7 @@ try {
                 steps:f.renderer.particles.encodedSteps, resets:f.renderer.particles.resetCount,
                 boundary:f.renderer.history.boundary,
                 sdfPresentationCount:f.renderer.history.sdfPresentationCount,
+                sdfFeatherTexels:f.renderer.history.sdfFeatherTexels,
                 sdfExtraTextureBytes:f.renderer.history.sdfExtraTextureBytes,
                 resizeGeneration:f.renderer.history.resizeGeneration,
                 size:{...f.renderer.history.size},
@@ -144,6 +145,8 @@ try {
 
     assert.equal(await control('boundary').inputValue(),'hard','A is the default')
     assert.equal(await control('boundary').isDisabled(),false)
+    assert.equal(await control('feather').isDisabled(),true)
+    assert.equal(await control('feather').inputValue(),'0.25')
     const beforePause = await facts()
     const aAdmission = await measure('Pause at A',async () => {
         await control('play-pause').click()
@@ -167,12 +170,42 @@ try {
     assert.ok(b.after.steps>a.after.steps,'The paused B toggle admits a particle step; it does not imply autonomous animation')
     assert.ok(b.after.sdfPresentationCount>a.after.sdfPresentationCount)
     assert.equal(b.after.sdfExtraTextureBytes,0)
+    assert.equal(await control('feather').isDisabled(),false)
+    const featherChecks = []
+    for (const width of [0.05,0.35,0.25]) {
+        const admission = await measure(`Paused feather ${width}`,async () => {
+            await page.evaluate(width => {
+                const slider = document.querySelector('[data-flow-control="feather"]')
+                slider.valueAsNumber = width
+                slider.dispatchEvent(new Event('input',{bubbles:true}))
+            },width)
+            await page.waitForFunction(width => {
+                const f = window.__FLOW_FIELD_PROOF__.facts()
+                return f.renderer.history.boundary==='sdf' &&
+                    f.renderer.history.sdfFeatherTexels===width && f.lastFrame.presentationReady
+            },width)
+            await page.waitForTimeout(100)
+        })
+        const observed = await facts()
+        assert.equal(observed.sdfFeatherTexels,width)
+        assert.equal(observed.resets,paused.resets)
+        assert.equal(observed.historyCleared,false)
+        assert.equal(observed.modelTime,paused.modelTime)
+        assert.equal(observed.camera,paused.camera)
+        assert.equal(await control('feather-value').textContent(),`${width.toFixed(2)} texel`)
+        assert.equal(await control('feather').getAttribute('aria-valuetext'),`${width.toFixed(2)} source texel`)
+        await screenshot(`b-sdf-feather-${width}`)
+        featherChecks.push({width,admission,observed})
+    }
+    await page.screenshot({path:`${output}/feather-controls.png`})
     const returnAdmission = await measure('Paused B to A',async () => {
         await control('boundary').selectOption('hard')
         await waitBoundary('hard')
         await page.waitForTimeout(150)
     })
     const returned = await screenshot('a-hard-return')
+    assert.equal(await control('feather').isDisabled(),true)
+    assert.equal(await control('feather').inputValue(),'0.25')
     for (const shot of [a,b,returned]) {
         assert.equal(shot.after.modelTime,paused.modelTime)
         assert.equal(shot.after.camera,paused.camera)
@@ -199,10 +232,22 @@ try {
 
     await control('boundary').selectOption('sdf')
     await waitBoundary('sdf')
+    // Preserve a non-default width through diagnostic views; B must remain off
+    // there even though the user's particle-display preference remains 0.35.
+    const retainedFeather = await measure('Paused feather retained across views',async () => {
+        await page.evaluate(() => {
+            const slider = document.querySelector('[data-flow-control="feather"]')
+            slider.valueAsNumber = 0.35
+            slider.dispatchEvent(new Event('input',{bubbles:true}))
+        })
+        await page.waitForFunction(() => window.__FLOW_FIELD_PROOF__.facts().renderer.history.sdfFeatherTexels===0.35)
+    })
     await control('view').selectOption('status')
     await waitBoundary('hard')
     assert.equal(await control('boundary').isDisabled(),true)
     assert.equal(await control('boundary').inputValue(),'sdf','Inspection preserves the selection but does not apply B')
+    assert.equal(await control('feather').isDisabled(),true)
+    assert.equal(await control('feather').inputValue(),'0.35')
     assert.ok((await control('legend').textContent()).includes('Unfiltered diagnostics'))
     const status = await facts()
     await page.waitForTimeout(200)
@@ -211,6 +256,9 @@ try {
     await waitBoundary('sdf')
     assert.equal(await control('boundary').isDisabled(),false)
     assert.equal(await control('boundary').inputValue(),'sdf')
+    assert.equal(await control('feather').isDisabled(),false)
+    assert.equal(await control('feather').inputValue(),'0.35')
+    assert.equal((await facts()).sdfFeatherTexels,0.35)
     // The view-mode change intentionally resets the pool. Begin camera checks
     // only after that reset has been applied; camera input itself must not reset.
     await page.waitForTimeout(200)
@@ -328,7 +376,7 @@ try {
     console.log(JSON.stringify({status:'passed',viewport:{width:1440,height:900},deviceScaleFactor,
         attempts,screenshots:[a,b,returned],
         comparison:'Fixed model time/camera; each display toggle may advance the admitted particle step, not bit-exact',
-        admissionChecks:[aAdmission,bAdmission,returnAdmission],
+        admissionChecks:[aAdmission,bAdmission,returnAdmission],featherChecks,retainedFeather,
         performance:[aPerformance,bPerformance],cameraChecks:[pitchCheck,wheelCheck],
         statusView:status,handoff,afterCamera,resizes,final,errors}))
 } finally {

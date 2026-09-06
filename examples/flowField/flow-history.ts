@@ -27,6 +27,7 @@ import presentationShader from './shaders/presentation.wgsl?raw'
 import boundaryDistanceShader from './shaders/boundary-distance.wgsl?raw'
 import boundarySdfShader from './shaders/boundary-sdf.wgsl?raw'
 import type { FlowFieldBoundaryMode } from './flow-presentation.ts'
+import { FLOW_FIELD_SDF_FEATHER, flowFieldSdfFeatherTexels } from './flow-presentation.ts'
 import { flowScreenProjectionWgsl, flowScreenViewValues } from './flow-screen-projection.ts'
 import type { FlowScreenViewValues } from './flow-screen-projection.ts'
 import type { FlowTemporalReadyBindingFrame } from './flow-temporal-bindings.ts'
@@ -56,6 +57,8 @@ export type FlowHistoryFrame = Readonly<{
     resizeGeneration: number
     /** Encoded pipeline; unavailable per-pixel support can still use unchanged A ink. */
     boundary: FlowFieldBoundaryMode
+    /** Last encoded uniform; inactive for hard/retained presentation. */
+    sdfFeatherTexels: number
 }>
 
 export type FlowHistoryFacts = Readonly<{
@@ -71,6 +74,8 @@ export type FlowHistoryFacts = Readonly<{
     /** Encoded B draws, not a native-completion counter. */
     sdfPresentationCount: number
     sdfExtraTextureBytes: 0
+    /** Last encoded uniform, not the application's retained selection. */
+    sdfFeatherTexels: number
 }>
 
 export type FlowHistory = Readonly<{
@@ -83,7 +88,8 @@ export type FlowHistory = Readonly<{
         content: readonly DrawCommand[] | undefined,
         accumulate: boolean | undefined,
         prepared: FlowTemporalReadyBindingFrame,
-        boundary?: FlowFieldBoundaryMode
+        boundary?: FlowFieldBoundaryMode,
+        sdfFeatherTexels?: number
     ): FlowHistoryFrame
     facts(): FlowHistoryFacts
     dispose(): void
@@ -110,6 +116,7 @@ type HistoryUniformValues = {
     requestedLevel: number
     progress: number
     activityKill: number
+    presentationFeather: number
 }
 
 type HistoryViewFacts = Readonly<{
@@ -418,6 +425,7 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
         let sdfPair: typeof composePair
         let boundary: FlowFieldBoundaryMode = 'hard'
         let sdfPresentationCount = 0
+        let sdfFeatherTexels: number = FLOW_FIELD_SDF_FEATHER.default
         let directionIndex = 0
         let resizeGeneration = 0
         let previousView: HistoryViewFacts | undefined
@@ -451,7 +459,8 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
             content: readonly DrawCommand[] = [],
             accumulate = true,
             prepared?: FlowTemporalReadyBindingFrame,
-            requestedBoundary: FlowFieldBoundaryMode = 'hard'
+            requestedBoundary: FlowFieldBoundaryMode = 'hard',
+            requestedFeatherTexels: number = FLOW_FIELD_SDF_FEATHER.default
         ): FlowHistoryFrame {
             assertActive()
             if (resizePending) throw new Error('Flow Field history cannot encode during resize')
@@ -464,6 +473,7 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
             if (requestedBoundary !== 'hard' && requestedBoundary !== 'sdf') {
                 throw new TypeError('Flow Field history boundary must be hard or sdf')
             }
+            const feather = flowFieldSdfFeatherTexels(requestedFeatherTexels)
             // No temporal lease is retained for presentation. An unavailable frame
             // reprojects unmodified A ink, rather than inventing a stale/dry SDF.
             const sdf = requestedBoundary === 'sdf' && prepared !== undefined
@@ -498,6 +508,7 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
                 activityKill,
                 screenView,
                 prepared,
+                presentationFeather: feather,
             }))
             const direction = directions[directionIndex]!
             builder.upload(uniformUpload)
@@ -509,6 +520,7 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
             builder.render(direction.pass, compose === undefined ? [ ...content ] : [ compose, ...content ])
             builder.render(presentationPass, [ sdf ?? direction.presentation ])
             boundary = sdf === undefined ? 'hard' : 'sdf'
+            sdfFeatherTexels = feather
             if (sdf !== undefined) sdfPresentationCount++
             previousView = currentView
             directionIndex = (directionIndex + 1) % directions.length
@@ -520,6 +532,7 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
                 cleared,
                 resizeGeneration,
                 boundary,
+                sdfFeatherTexels,
             })
         }
 
@@ -584,6 +597,7 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
                 boundary,
                 sdfPresentationCount,
                 sdfExtraTextureBytes: 0,
+                sdfFeatherTexels,
             })
         }
 
@@ -656,6 +670,7 @@ function historyUniformCodec(): LayoutCodec {
         { name: 'requestedLevel', type: 'u32' },
         { name: 'progress', type: 'f32' },
         { name: 'activityKill', type: 'f32' },
+        { name: 'presentationFeather', type: 'f32' },
     ]
     return layoutCodec({ name: 'FlowFieldHistoryUniform', fields }, { usage: [ 'uniform' ] })
 }
@@ -757,6 +772,7 @@ function uniformValues(
         activityKill: number
         screenView?: FlowScreenViewValues
         prepared?: FlowTemporalReadyBindingFrame
+        presentationFeather?: number
     }>
 ): HistoryUniformValues {
     const currentView = current ?? {
@@ -787,6 +803,7 @@ function uniformValues(
         requestedLevel: options.prepared?.requestedLevel ?? 0,
         progress: options.prepared?.progress ?? 0,
         activityKill: options.activityKill,
+        presentationFeather: options.presentationFeather ?? FLOW_FIELD_SDF_FEATHER.default,
     }
 }
 
