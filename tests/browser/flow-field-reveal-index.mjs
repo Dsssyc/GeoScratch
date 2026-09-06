@@ -30,6 +30,7 @@ const particleShader = await readFile(new URL(
 const shader = [codec.wgslModule({ namespace: 'FlowVelocityAddress' }), flowScreenProjectionWgsl(codec), `
 struct FlowVelocityTemporal { progress: f32, activity_kill: f32, }
 struct FlowVelocitySample { velocity: vec2f, speed: f32, status: u32, advectable: bool, }
+fn FlowVelocity_source_contains(position: FlowVelocityAddressFixedPosition) -> bool { return true; }
 fn FlowVelocity_sample(position: FlowVelocityAddressFixedPosition, level: u32,
     temporal: FlowVelocityTemporal) -> FlowVelocitySample {
     return FlowVelocitySample(vec2f(1.0, 0.0), 1.0, 1u, true);

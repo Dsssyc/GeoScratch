@@ -69,6 +69,29 @@ fn FlowParticles_available(sample: FlowVelocitySample) -> bool {
     return (sample.status == 1u || sample.status == 2u) && sample.advectable && sample.speed > 0.0;
 }
 
+fn FlowParticles_unknown(position: FlowVelocityAddressFixedPosition, sample: FlowVelocitySample) -> bool {
+    // Only an in-source sample may be pending. A conservative coarse zero does
+    // not establish that the finer flow has stopped or left the wet support.
+    // The temporal sampler returns status 0 outside its source; resident samples
+    // have already passed that guard and need no second wide-address range test.
+    if (sample.status == 0u) { return FlowVelocity_source_contains(position); }
+    return sample.status == 3u ||
+        (sample.status == 2u && !FlowParticles_available(sample));
+}
+
+fn FlowParticles_increment_saturated(value: u32) -> u32 {
+    return min(value, 0xfffffffeu) + 1u;
+}
+
+fn FlowParticles_hold(particle: ptr<function, FlowParticle>) {
+    // Preserve the canonical slot, but never draw a bridge through unknown UV.
+    // Waiting consumes finite lifetime, not the real-displacement stagnation budget.
+    (*particle).previous = (*particle).current;
+    (*particle).velocity = vec2f(0.0);
+    (*particle).age_steps = FlowParticles_increment_saturated((*particle).age_steps);
+    atomicAdd(&flowParticleCounters.active_count, 1u);
+}
+
 fn FlowParticles_relative_meters(value: FlowVelocityAddressFixedAxis, origin: vec2u) -> f32 {
     let borrow = select(0u, 1u, value.low < origin.x);
     var low = value.low - origin.x;
@@ -197,11 +220,16 @@ fn FlowParticles_simulate(@builtin(global_invocation_id) global_id: vec3u) {
         flowParticleConfig.requested_level,
         FlowParticles_temporal(),
     );
-    retire = retire || !FlowParticles_available(sample) ||
-        !FlowParticles_in_view(particle.current) ||
-        sample.speed < flowParticleConfig.activity_kill ||
+    retire = retire || !FlowParticles_in_view(particle.current) ||
         particle.age_steps >= flowParticleConfig.maximum_age_steps ||
         particle.stagnant_steps >= flowParticleConfig.maximum_stagnant_steps;
+    if (!retire && FlowParticles_unknown(particle.current, sample)) {
+        FlowParticles_hold(&particle);
+        flowParticles[index] = particle;
+        return;
+    }
+    retire = retire || !FlowParticles_available(sample) ||
+        sample.speed < flowParticleConfig.activity_kill;
 
     particle.random_state = FlowParticles_random(particle.random_state ^ flowParticleConfig.frame_seed);
     let drop_probability = clamp(0.003 + 0.001 * sample.speed /
@@ -221,6 +249,7 @@ fn FlowParticles_simulate(@builtin(global_invocation_id) global_id: vec3u) {
         let old_position = particle.current;
         var candidate = particle.current;
         var displacement_meters = vec2f(0.0);
+        var pending = false;
         for (var substep = 0u; substep < flowParticleConfig.substeps; substep++) {
             let delta_meters = sample.velocity * flowParticleConfig.time_step *
                 flowParticleConfig.legacy_displacement_scale /
@@ -240,19 +269,31 @@ fn FlowParticles_simulate(@builtin(global_invocation_id) global_id: vec3u) {
                 flowParticleConfig.requested_level,
                 FlowParticles_temporal(),
             );
-            if (!FlowParticles_available(sample) || !FlowParticles_in_view(candidate) ||
+            if (!FlowParticles_in_view(candidate)) {
+                retire = true;
+                break;
+            }
+            if (FlowParticles_unknown(candidate, sample)) {
+                pending = true;
+                break;
+            }
+            if (!FlowParticles_available(sample) ||
                 sample.speed < flowParticleConfig.activity_kill) {
                 retire = true;
                 break;
             }
         }
-        if (!retire) {
+        if (pending) {
+            // current was never published during substeps: discard every tentative
+            // advance, including reliable earlier substeps, and retain the origin.
+            FlowParticles_hold(&particle);
+        } else if (!retire) {
             particle.previous = old_position;
             particle.current = candidate;
             particle.velocity = sample.velocity;
-            particle.age_steps = min(0xffffffffu, particle.age_steps + 1u);
+            particle.age_steps = FlowParticles_increment_saturated(particle.age_steps);
             particle.stagnant_steps = select(
-                min(0xffffffffu, particle.stagnant_steps + 1u),
+                FlowParticles_increment_saturated(particle.stagnant_steps),
                 0u,
                 length(displacement_meters) >= flowParticleConfig.minimum_displacement_meters,
             );

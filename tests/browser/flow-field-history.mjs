@@ -31,6 +31,11 @@ struct FlowVelocityTemporal { progress: f32, activityKill: f32, }
 struct FlowVelocitySample { status: u32, velocity: vec2f, speed: f32, advectable: bool, }
 @group(1) @binding(0) var<uniform> testVelocity: vec4f;
 @group(1) @binding(1) var<storage, read_write> testSampleCalls: atomic<u32>;
+fn FlowVelocity_source_contains(position: FlowVelocityAddressFixedPosition) -> bool {
+    let x = position.axes[0];
+    return testVelocity.w < 1.5 && !(testVelocity.w > 0.5 &&
+        (x.high > ${camera[0].high}u || (x.high == ${camera[0].high}u && x.low >= ${camera[0].low}u)));
+}
 fn FlowVelocity_sample(position: FlowVelocityAddressFixedPosition, level: u32, temporal: FlowVelocityTemporal) -> FlowVelocitySample {
     atomicAdd(&testSampleCalls, 1u);
     let speed = length(testVelocity.xy);
@@ -95,6 +100,8 @@ try {
         const fixtures = [
             { name: 'moving', velocity: [ 1, 0, 1, 0 ] },
             { name: 'fallback-moving', velocity: [ 1, 0, 2, 0 ] },
+            { name: 'fallback-zero-unknown', velocity: [ 0, 0, 2, 0 ] },
+            { name: 'outside-source', velocity: [ 0, 0, 0, 2 ] },
             { name: 'zero-even-with-zero-threshold', velocity: [ 0, 0, 1, 0 ], threshold: 0 },
             { name: 'unavailable', velocity: [ 1, 0, 0, 0 ] },
             { name: 'missing', velocity: [ 1, 0, 3, 0 ] },
@@ -202,7 +209,10 @@ try {
     const expected = Array.from({ length: 32 }, (_, index) => Math.floor([ 16 + Math.floor(index / 4) * 24, 255, 128, 255 ][index % 4] * 0.996))
     assert.deepEqual(row('moving'), expected)
     assert.deepEqual(row('fallback-moving'), expected)
-    for (const name of [ 'zero-even-with-zero-threshold', 'unavailable', 'missing', 'invalid', 'below-threshold' ]) {
+    for (const name of ['unavailable', 'missing', 'fallback-zero-unknown']) {
+        assert.deepEqual(row(name), expected, `${name} must retain ink with finite decay`)
+    }
+    for (const name of [ 'zero-even-with-zero-threshold', 'outside-source', 'invalid', 'below-threshold' ]) {
         assert.deepEqual(row(name), Array(32).fill(0), name)
     }
     assert.deepEqual(row('no-camera-drift'), expected)

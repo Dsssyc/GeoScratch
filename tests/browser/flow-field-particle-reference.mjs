@@ -26,9 +26,24 @@ struct FlowSpawnIndexSelection {
 }
 @group(1) @binding(0) var<uniform> test_velocity: vec4f;
 @group(1) @binding(1) var<uniform> test_spawn_position: vec4u;
+@group(1) @binding(2) var<uniform> test_field_state: vec4u;
+@group(1) @binding(3) var<uniform> test_boundary: vec4u;
+fn FlowTest_after_boundary(position: FlowVelocityAddressFixedPosition) -> bool {
+    let x = position.axes[0];
+    return x.high > test_boundary.y || (x.high == test_boundary.y && x.low >= test_boundary.x);
+}
+fn FlowVelocity_source_contains(position: FlowVelocityAddressFixedPosition) -> bool {
+    return test_field_state.x != 0u &&
+        !((test_field_state.z & 2u) != 0u && FlowTest_after_boundary(position));
+}
 fn FlowVelocity_sample(position: FlowVelocityAddressFixedPosition, level: u32, temporal: FlowVelocityTemporal) -> FlowVelocitySample {
-    let speed = length(test_velocity.xy);
-    return FlowVelocitySample(test_velocity.xy, speed, u32(test_velocity.z), speed >= temporal.activity_kill);
+    let after = (test_field_state.z & 1u) != 0u && FlowTest_after_boundary(position);
+    let velocity = select(test_velocity.xy, vec2f(0.0), after && (test_field_state.z & 4u) != 0u);
+    let speed = length(velocity);
+    // Match the real sampler's source-domain contract independently of its status fixture.
+    let status = select(0u, select(u32(test_velocity.z), test_field_state.y, after),
+        FlowVelocity_source_contains(position));
+    return FlowVelocitySample(velocity, speed, status, speed >= temporal.activity_kill);
 }
 fn FlowSpawnIndex_select(seed: u32) -> FlowSpawnIndexSelection {
     var position: FlowVelocityAddressFixedPosition;
@@ -56,19 +71,50 @@ const cases = [
     { name: 'highlatitude-east-north', latitude: 80, velocity: [ 1, 1 ] },
     { name: 'zero-velocity-dies', latitude: 45, velocity: [ 0, 0 ], dead: true },
     { name: 'zero-velocity-zero-threshold-dies', latitude: 45, velocity: [ 0, 0 ], kill: 0, dead: true },
-    { name: 'unavailable-dies', latitude: 45, velocity: [ 1, 1 ], status: 0, dead: true },
+    { name: 'unavailable-in-source-holds', latitude: 45, velocity: [ 1, 1 ], status: 0, pending: true },
+    { name: 'missing-in-source-holds', latitude: 45, velocity: [ 1, 1 ], status: 3, pending: true },
+    { name: 'missing-does-not-consume-stagnation', latitude: 45, velocity: [ 1, 1 ],
+        status: 3, stagnant: 19, pending: true, steps: [ {}, {}, {} ] },
+    { name: 'fallback-zero-holds', latitude: 45, velocity: [ 0, 0 ], status: 2, pending: true },
+    { name: 'fallback-zero-zero-threshold-holds', latitude: 45, velocity: [ 0, 0 ], status: 2, kill: 0, pending: true },
+    { name: 'fallback-nonadvectable-holds', latitude: 45, velocity: [ 0.0001, 0 ], status: 2, pending: true },
+    { name: 'resident-nonadvectable-dies', latitude: 45, velocity: [ 0.0001, 0 ], dead: true },
+    { name: 'outside-source-unavailable-dies', latitude: 45, velocity: [ 1, 1 ], status: 0, insideSource: false, dead: true },
+    { name: 'outside-source-moving-dies', latitude: 45, velocity: [ 1, 1 ], insideSource: false, dead: true },
+    { name: 'invalid-sample-dies', latitude: 45, velocity: [ 1, 1 ], status: 4, dead: true },
+    { name: 'later-unknown-substep-rolls-back', latitude: 45, velocity: [ 2, 0 ], substeps: 4,
+        boundaryOffsetMeters: 60, advanceStatus: 3, pending: true },
+    { name: 'later-fallback-zero-substep-rolls-back', latitude: 45, velocity: [ 2, 0 ], substeps: 4,
+        boundaryOffsetMeters: 60, advanceStatus: 2, advanceZero: true, pending: true },
+    { name: 'later-outside-source-substep-dies', latitude: 45, velocity: [ 2, 0 ], substeps: 4,
+        boundaryOffsetMeters: 60, outsideAfterBoundary: true, dead: true },
+    { name: 'pending-resumes-without-bridge', latitude: 45, velocity: [ 1, 0 ], age: 7, stagnant: 5,
+        steps: [ { status: 3 }, { status: 1 } ], resumed: true },
+    { name: 'pending-expires-at-age-bound', latitude: 45, velocity: [ 1, 0 ], age: 2, maximumAge: 3,
+        status: 3, steps: [ {}, {} ], expires: true, dead: true },
+    { name: 'pending-age-saturates-without-wrap', latitude: 45, velocity: [ 1, 0 ],
+        age: 0xfffffffe, maximumAge: 0xffffffff, status: 0, steps: [ {}, {} ], expires: true, dead: true },
+    { name: 'unknown-cannot-spawn', latitude: 45, velocity: [ 1, 0 ], status: 3,
+        initialState: 0, spawnAvailable: true, dead: true, expectedRetired: 0 },
     { name: 'leaving-viewport-dies', latitude: 45, velocity: [ 2, 0 ], viewRadius: 20, dead: true },
     { name: 'bounded-random-retirement', latitude: 45, velocity: [ 1, 0 ], count: 4096 },
     { name: 'natural-rebirth-without-view-refill', latitude: 45, velocity: [ 1, 0 ], count: 4096, rebirth: true },
     { name: 'bounded-quarter-view-refill', latitude: 45, velocity: [ 1, 0 ], count: 4096, rebirth: true, refill: true },
     { name: 'next-camera-refill-cohort', latitude: 45, velocity: [ 1, 0 ], count: 4096, rebirth: true, refill: true, seed: 2 },
-].map(entry => ({
-    ...entry,
-    origin: addressCodec.fromLonLat([ 120, entry.latitude ]).fixed.limbs
-        .flatMap(axis => [ axis.low, axis.high ]),
-    spawnPosition: addressCodec.fromLonLat([ 121, entry.latitude ]).fixed.limbs
-        .flatMap(axis => [ axis.low, axis.high ]),
-}))
+].map(entry => {
+    const origin = addressCodec.fromLonLat([ 120, entry.latitude ]).fixed.limbs
+        .flatMap(axis => [ axis.low, axis.high ])
+    const boundary = BigInt(origin[0]) + (BigInt(origin[1]) << 32n) +
+        BigInt(Math.round((entry.boundaryOffsetMeters ?? 60) / addressCodec.quantumMeters))
+    return {
+        ...entry, origin,
+        previous: (entry.pending || entry.resumed || entry.expires)
+            ? [ origin[0] - 1, ...origin.slice(1) ] : origin,
+        boundary: [ Number(boundary & 0xffffffffn), Number(boundary >> 32n), 0, 0 ],
+        spawnPosition: addressCodec.fromLonLat([ 121, entry.latitude ]).fixed.limbs
+            .flatMap(axis => [ axis.low, axis.high ]),
+    }
+})
 const server = createServer((_request, response) => {
     response.setHeader('content-type', 'text/html')
     response.end('<!doctype html><title>Flow particle numerical proof</title>')
@@ -98,8 +144,8 @@ try {
             const configBytes = new ArrayBuffer(272)
             const config = new DataView(configBytes)
             config.setUint32(0, count, true)
-            config.setUint32(8, 1, true)
-            config.setUint32(12, 3600, true)
+            config.setUint32(8, fixture.substeps ?? 1, true)
+            config.setUint32(12, fixture.maximumAge ?? 3600, true)
             config.setUint32(16, 20, true)
             config.setUint32(20, fixture.seed ?? 1, true)
             config.setFloat32(28, 0.002, true)
@@ -124,10 +170,15 @@ try {
             for (let index = 0; index < count; index++) {
                 fixture.origin.forEach((limb, limbIndex) => {
                     record.setUint32(index * 56 + limbIndex * 4, limb, true)
-                    record.setUint32(index * 56 + 16 + limbIndex * 4, limb, true)
+                    record.setUint32(index * 56 + 16 + limbIndex * 4, fixture.previous[limbIndex], true)
                 })
+                if (fixture.pending || fixture.resumed || fixture.expires) {
+                    record.setFloat32(index * 56 + 32, 1, true)
+                }
                 record.setUint32(index * 56 + 48, count > 1 ? (index + 1) * 7919 : 0x12345678, true)
-                record.setUint32(index * 56 + 52, 1, true)
+                record.setUint32(index * 56 + 40, fixture.age ?? 0, true)
+                record.setUint32(index * 56 + 44, fixture.stagnant ?? 0, true)
+                record.setUint32(index * 56 + 52, fixture.initialState ?? 1, true)
             }
             const buffer = (data, usage) => {
                 const target = device.createBuffer({ size: data.byteLength, usage: usage | GPUBufferUsage.COPY_DST })
@@ -138,9 +189,17 @@ try {
             const particles = buffer(records, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC)
             const counters = buffer(new Uint32Array(4), GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC)
             const velocity = buffer(new Float32Array([
-                ...fixture.velocity, fixture.status ?? 1, fixture.rebirth ? 1 : 0,
+                ...fixture.velocity, fixture.status ?? 1, fixture.rebirth || fixture.spawnAvailable ? 1 : 0,
             ]), GPUBufferUsage.UNIFORM)
             const spawnPosition = buffer(new Uint32Array(fixture.spawnPosition), GPUBufferUsage.UNIFORM)
+            const fieldState = buffer(new Uint32Array([
+                fixture.insideSource === false ? 0 : 1,
+                fixture.advanceStatus ?? 1,
+                (fixture.advanceStatus === undefined ? 0 : 1) |
+                    (fixture.outsideAfterBoundary ? 2 : 0) | (fixture.advanceZero ? 4 : 0),
+                0,
+            ]), GPUBufferUsage.UNIFORM)
+            const boundary = buffer(new Uint32Array(fixture.boundary), GPUBufferUsage.UNIFORM)
             const group = device.createBindGroup({ layout: pipeline.getBindGroupLayout(0), entries: [
                 { binding: 0, resource: { buffer: configBuffer } },
                 { binding: 1, resource: { buffer: particles } },
@@ -149,20 +208,42 @@ try {
             const sampleGroup = device.createBindGroup({ layout: pipeline.getBindGroupLayout(1), entries: [
                 { binding: 0, resource: { buffer: velocity } },
                 { binding: 1, resource: { buffer: spawnPosition } },
+                { binding: 2, resource: { buffer: fieldState } },
+                { binding: 3, resource: { buffer: boundary } },
             ] })
             const output = device.createBuffer({ size: records.byteLength + 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ })
-            const encoder = device.createCommandEncoder()
-            const pass = encoder.beginComputePass()
-            pass.setPipeline(pipeline)
-            pass.setBindGroup(0, group)
-            pass.setBindGroup(1, sampleGroup)
-            pass.dispatchWorkgroups(Math.ceil(count / 256))
-            pass.end()
-            encoder.copyBufferToBuffer(particles, 0, output, 0, records.byteLength)
-            encoder.copyBufferToBuffer(counters, 0, output, records.byteLength, 16)
-            device.queue.submit([ encoder.finish() ])
-            await output.mapAsync(GPUMapMode.READ)
-            const observed = new DataView(output.getMappedRange())
+            const steps = []
+            let observed
+            for (const [stepIndex, step] of (fixture.steps ?? [ {} ]).entries()) {
+                if (stepIndex > 0) output.unmap()
+                device.queue.writeBuffer(velocity, 0, new Float32Array([
+                    ...fixture.velocity, step.status ?? fixture.status ?? 1,
+                    fixture.rebirth || fixture.spawnAvailable ? 1 : 0,
+                ]))
+                const encoder = device.createCommandEncoder()
+                encoder.clearBuffer(counters)
+                const pass = encoder.beginComputePass()
+                pass.setPipeline(pipeline)
+                pass.setBindGroup(0, group)
+                pass.setBindGroup(1, sampleGroup)
+                pass.dispatchWorkgroups(Math.ceil(count / 256))
+                pass.end()
+                encoder.copyBufferToBuffer(particles, 0, output, 0, records.byteLength)
+                encoder.copyBufferToBuffer(counters, 0, output, records.byteLength, 16)
+                device.queue.submit([ encoder.finish() ])
+                await output.mapAsync(GPUMapMode.READ)
+                observed = new DataView(output.getMappedRange())
+                const snapshot = observed
+                steps.push({
+                    current: [ 0, 1, 2, 3 ].map(index => snapshot.getUint32(index * 4, true)),
+                    previous: [ 0, 1, 2, 3 ].map(index => snapshot.getUint32(16 + index * 4, true)),
+                    velocity: [ snapshot.getFloat32(32, true), snapshot.getFloat32(36, true) ],
+                    age: snapshot.getUint32(40, true),
+                    stagnant: snapshot.getUint32(44, true),
+                    state: snapshot.getUint32(52, true),
+                    counters: [ 0, 1, 2 ].map(index => snapshot.getUint32(records.byteLength + index * 4, true)),
+                })
+            }
             const axis = offset => BigInt(observed.getUint32(offset, true)) +
                 (BigInt(observed.getUint32(offset + 4, true)) << 32n)
             const originalAxis = index => BigInt(fixture.origin[index]) +
@@ -210,10 +291,12 @@ try {
                     -Number(axis(8) - originalAxis(2)) * quantum ],
                 state: observed.getUint32(52, true),
                 counters: [ 0, 1, 2 ].map(index => observed.getUint32(records.byteLength + index * 4, true)),
+                steps,
                 ...(refill === undefined ? {} : { refill }),
             })
             output.unmap()
-            for (const resource of [ configBuffer, particles, counters, velocity, spawnPosition, output ]) resource.destroy()
+            for (const resource of [ configBuffer, particles, counters, velocity, spawnPosition,
+                fieldState, boundary, output ]) resource.destroy()
         }
         const renderModule = device.createShaderModule({
             code: `const FLOW_PARTICLE_MAXIMUM_SPEED = 4.0f;\n${renderShader}`,
@@ -306,9 +389,34 @@ try {
         'Consecutive camera refills must not immediately retire the same newborn cohort')
     for (const [ index, result ] of proof.results.entries()) {
         const fixture = cases[index]
+        if (fixture.pending || fixture.resumed || fixture.expires) {
+            const held = result.steps[0]
+            assert.equal(held.state, 1, `${fixture.name}: pending slot remains active`)
+            assert.deepEqual(held.current, fixture.origin, `${fixture.name}: no partial substep publication`)
+            assert.deepEqual(held.previous, fixture.origin, `${fixture.name}: no bridge while waiting`)
+            assert.deepEqual(held.velocity, [ 0, 0 ], `${fixture.name}: waiting is not moving`)
+            assert.equal(held.age, (fixture.age ?? 0) + 1, `${fixture.name}: waiting consumes bounded lifetime`)
+            assert.equal(held.stagnant, fixture.stagnant ?? 0, `${fixture.name}: waiting is not real stagnation`)
+            assert.deepEqual(held.counters, [ 1, 0, 0 ], `${fixture.name}: no missing-data retirement or birth`)
+        }
+        if (fixture.resumed) {
+            assert.deepEqual(result.steps[1].previous, fixture.origin, `${fixture.name}: resume begins at retained origin`)
+            assert.equal(result.steps[1].age, fixture.age + 2, `${fixture.name}: lifetime continues across residency`)
+            assert.equal(result.steps[1].stagnant, 0, `${fixture.name}: real displacement clears stagnation`)
+            assert.deepEqual(result.steps[1].counters, [ 1, 0, 0 ], `${fixture.name}: resume does not rebirth`)
+        }
         if (fixture.dead) {
             assert.equal(result.state, 0, fixture.name)
-            assert.deepEqual(result.counters, [ 0, 1, 1 ], fixture.name)
+            assert.deepEqual(result.counters, [ 0, 1, fixture.expectedRetired ?? 1 ], fixture.name)
+        } else if (fixture.pending) {
+            assert.ok(result.displacement.every(value => value === 0), `${fixture.name}: canonical position is unchanged`)
+            for (const [stepIndex, held] of result.steps.entries()) {
+                assert.deepEqual(held.previous, held.current, `${fixture.name}: every waiting frame suppresses its segment`)
+                assert.deepEqual(held.velocity, [ 0, 0 ], fixture.name)
+                assert.equal(held.age, (fixture.age ?? 0) + stepIndex + 1, fixture.name)
+                assert.equal(held.stagnant, fixture.stagnant ?? 0, fixture.name)
+                assert.deepEqual(held.counters, [ 1, 0, 0 ], fixture.name)
+            }
         } else if (fixture.rebirth) {
             assert.equal(result.refill.mismatches, 0, `${fixture.name}: exact natural/forced slot ownership`)
             assert.equal(result.refill.bridges, 0, `${fixture.name}: replacements must start with a zero-length segment`)
