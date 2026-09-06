@@ -50,7 +50,17 @@ fn FlowVelocity_sample(
             );
         }
         if (current.resolved_level == common_level && next.resolved_level == common_level) {
-            let velocity = mix(current.value.xy, next.value.xy, temporal.progress);
+            var current_velocity = current.value.xy;
+            var next_velocity = next.value.xy;
+            if (FlowVelocity_nearest_zero_gate) {
+                // These nearest texels belong to the already-resolved common
+                // footprint. Zero support occupies a whole texel, not just its center.
+                let current_center = FlowVelocityCurrent_load_position(position, common_level);
+                let next_center = FlowVelocityNext_load_position(position, common_level);
+                if (all(current_center.value.xy == vec2f(0.0))) { current_velocity = vec2f(0.0); }
+                if (all(next_center.value.xy == vec2f(0.0))) { next_velocity = vec2f(0.0); }
+            }
+            let velocity = mix(current_velocity, next_velocity, temporal.progress);
             let speed = length(velocity);
             let advectable = speed > 0.0 && speed >= temporal.activityKill;
             // A common-level retry changes where both pages are resident, not

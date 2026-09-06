@@ -17,11 +17,13 @@ export type TemporalVelocityWgslOptions = Readonly<{
     wrapper: string
     transitionTexels?: number
     sampleRegistration?: 'global-texel-lattice' | 'pixel-center'
+    activitySupport?: 'bilinear' | 'nearest-texel-zero'
 }>
 
 export type TemporalVelocityWgslModule = Readonly<{
     kind: 'temporal-velocity-wgsl-module'
     sampleRegistration: 'global-texel-lattice' | 'pixel-center'
+    activitySupport: 'bilinear' | 'nearest-texel-zero'
     code: string
     bindings: Readonly<{
         group: number
@@ -39,6 +41,11 @@ export function temporalVelocityWgslModule(
 
     assertCompatibleModels(current, next)
     const sampleRegistration = options?.sampleRegistration ?? 'global-texel-lattice'
+    const activitySupport = options?.activitySupport ?? 'bilinear'
+    if ((activitySupport !== 'bilinear' && activitySupport !== 'nearest-texel-zero') ||
+        (activitySupport === 'nearest-texel-zero' && sampleRegistration !== 'pixel-center')) {
+        throw new TypeError('Flow activity support requires bilinear or pixel-center nearest-texel-zero')
+    }
     if (sampleRegistration !== 'global-texel-lattice' &&
         sampleRegistration !== 'pixel-center') {
         throw new TypeError(
@@ -102,12 +109,15 @@ export function temporalVelocityWgslModule(
     return Object.freeze({
         kind: 'temporal-velocity-wgsl-module',
         sampleRegistration,
+        activitySupport,
         code: [
             sharedAddress,
             currentModule.code.slice(prefix.length),
             nextModule.code.slice(prefix.length),
             registration,
             flowVelocitySourceBoundsWgsl(current),
+            `const FlowVelocity_nearest_zero_gate = ${activitySupport === 'nearest-texel-zero'};`,
+            flowSpawnSupportWgsl(),
             options.wrapper,
         ].join('\n\n'),
         bindings: Object.freeze({
@@ -122,6 +132,17 @@ export function temporalVelocityWgslModule(
             }),
         }),
     })
+}
+
+function flowSpawnSupportWgsl(): string {
+    return `fn FlowVelocity_spawn_possible(position: FlowVelocityAddressFixedPosition, level: u32) -> bool {
+    if (level >= FlowVelocityCurrent_level_count || !FlowVelocity_source_contains(position)) { return false; }
+    let current = FlowVelocityCurrent_load_position(position, level);
+    let next = FlowVelocityNext_load_position(position, level);
+    if (current.status == 4u || next.status == 4u) { return false; }
+    if (current.status != 1u || next.status != 1u) { return true; }
+    return any(current.value.xy != vec2f(0.0)) || any(next.value.xy != vec2f(0.0));
+}`
 }
 
 function flowGlobalTexelRegistrationWgsl(

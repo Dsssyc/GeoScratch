@@ -739,9 +739,24 @@ fn FlowSpawnIndex_select_candidate(index: u32, random_state: u32) -> FlowSpawnIn
     }
     let random_x = FlowParticles_random(random_state ^ candidate.identity);
     let random_y = FlowParticles_random(random_x + 0x9e3779b9u);
+    let side_log2 = candidate.reserved >> 16u;
+    let side = 1u << min(side_log2, 2u);
+    let valid_bits = (1u << (side * side)) - 1u;
+    var occupancy = candidate.reserved & valid_bits;
+    if (side_log2 > 2u || occupancy == 0u ||
+        candidate.texel_step_quanta % side != 0u) {
+        return FlowSpawnIndexSelection(candidate.origin, candidate.requested_level, 0u);
+    }
+    let subcell_step = candidate.texel_step_quanta / side;
+    if (subcell_step == 0u) {
+        return FlowSpawnIndexSelection(candidate.origin, candidate.requested_level, 0u);
+    }
+    let choice = FlowParticles_random(random_y) % countOneBits(occupancy);
+    for (var rank = 0u; rank < choice; rank++) { occupancy &= occupancy - 1u; }
+    let subcell = firstTrailingBit(occupancy);
     let offset = vec2i(
-        i32(random_x % candidate.texel_step_quanta),
-        i32(random_y % candidate.texel_step_quanta),
+        i32((subcell % side) * subcell_step + random_x % subcell_step),
+        i32((subcell / side) * subcell_step + random_y % subcell_step),
     );
     let advanced = FlowVelocityAddress_advance_i32(candidate.origin, offset);
     return FlowSpawnIndexSelection(

@@ -72,7 +72,7 @@ describe('Flow Field temporal velocity WGSL', () => {
             'resolved_level >= FlowVelocityCurrent_level_count'
         )
         expect(module.code).to.include(
-            'let velocity = mix(current.value.xy, next.value.xy, temporal.progress);'
+            'let velocity = mix(current_velocity, next_velocity, temporal.progress);'
         )
         expect(module.code).to.not.match(/slot[_-]?table/i)
         expect(module.code).to.not.match(/prefetch/i)
@@ -87,6 +87,8 @@ describe('Flow Field temporal velocity WGSL', () => {
             sampleRegistration: 'global-texel-lattice',
         })
         expect(explicitGlobal.code).to.equal(module.code)
+        expect(module.activitySupport).to.equal('bilinear')
+        expect(module.code).to.include('const FlowVelocity_nearest_zero_gate = false;')
     })
 
     it('adds wide-fixed registration only for explicit pixel-center sampling', async() => {

@@ -112,6 +112,34 @@ describe('Flow Field runtime dataset', () => {
         expect(dataset.tileMatrixSet.maxTileMatrix).to.equal('10')
     })
 
+    it('binds v3 construction to its zero-footprint activity contract', async() => {
+        const input = runtimeManifest()
+        input.construction.adapterVersion = 'flow-cog-wmq-rg32f-v3'
+        input.construction.algorithmVersion = 'flow-cog-wmq-rg32f-v3'
+        input.construction.supportFilter = 'recursive-zero-preserving-vector-box-v2'
+        input.representation.activitySupport = 'nearest-texel-zero'
+        const dataset = await loadManifest(input)
+        expect(dataset.representation.activitySupport).to.equal('nearest-texel-zero')
+        expect(dataset.construction.adapterVersion).to.equal('flow-cog-wmq-rg32f-v3')
+        for (const mutate of [
+            value => { delete value.representation.activitySupport },
+            value => { value.construction.supportFilter = 'recursive-conservative-vector-box-v1' },
+            value => { value.construction.algorithmVersion = 'flow-cog-wmq-rg32f-v2' },
+            value => { value.representation.activitySupport = 'any-neighbor' },
+        ]) {
+            const bad = structuredClone(input)
+            mutate(bad)
+            let failure
+            try { await loadManifest(bad) } catch (error) { failure = error }
+            expect(failure).to.be.instanceOf(Error)
+        }
+        const old = runtimeManifest()
+        old.representation.activitySupport = 'nearest-texel-zero'
+        let failure
+        try { await loadManifest(old) } catch (error) { failure = error }
+        expect(failure).to.be.instanceOf(Error)
+    })
+
     it('accepts a complete dense time axis with declared linear adjacency', async() => {
 
         const input = runtimeManifest({ timeIndices: [ 0, 1, 2 ], sourceSampleCount: 3 })

@@ -17,6 +17,7 @@ import type {
     Program,
     ProgramBufferLayoutRequirement,
     ShaderModule,
+    SubmittedWork,
     SubmissionBuilder,
     TextureResource,
     UploadCommand,
@@ -113,6 +114,7 @@ export type FlowSpawnIndexOptions = Readonly<{
     runtime: GPURuntime
     maximumCandidateCount: number
     capacity: number
+    subcellSide?: 1 | 2 | 4
     temporal: FlowSpawnTemporalBinding
 }>
 
@@ -122,6 +124,9 @@ export type FlowSpawnIndexFrame = Readonly<{
     currentSnapshotEpoch: number
     nextSnapshotEpoch: number
     dispatchWorkgroups: number
+    buildRevision: number
+    built: boolean
+    reused: boolean
 }>
 
 export type FlowSpawnIndexFacts = Readonly<{
@@ -130,6 +135,10 @@ export type FlowSpawnIndexFacts = Readonly<{
     candidateByteLength: 32
     candidateCount: number
     dispatchWorkgroups: number
+    subcellSide: 1 | 2 | 4
+    buildCount: number
+    cacheHitCount: number
+    cacheState: 'empty' | 'encoded' | 'observing' | 'ready' | 'failed'
     generation: number
     currentSnapshotEpoch: number
     nextSnapshotEpoch: number
@@ -155,6 +164,8 @@ export type FlowSpawnIndex = Readonly<{
         snapshot: FlowSpawnSnapshotParameters,
         temporal: FlowSpawnTemporalFrame
     ): FlowSpawnIndexFrame
+    /** Commits a built support index only after its owning native submission succeeds. */
+    observe(frame: FlowSpawnIndexFrame, submitted: SubmittedWork): Promise<void>
     facts(): FlowSpawnIndexFacts
     dispose(): void
 }>
@@ -163,11 +174,19 @@ type SpawnUniformValues = {
     candidateCount: number
     capacity: number
     generation: number
-    reservedU32: number
+    subcellSide: number
     progress: number
     activitySpawn: number
     activityKill: number
     reservedF32: number
+}
+
+type SpawnBuildRecord = {
+    key: string
+    bindSet: BindSet
+    commandId: string | undefined
+    submittedId?: string
+    observing?: Promise<void>
 }
 
 type OwnedSpawnGraph = Readonly<{
@@ -195,6 +214,10 @@ export async function createFlowSpawnIndex(
         'maximumCandidateCount'
     )
     const capacity = positiveInteger(options.capacity, 'capacity')
+    const subcellSide = options.subcellSide ?? 4
+    if (subcellSide !== 1 && subcellSide !== 2 && subcellSide !== 4) {
+        throw new RangeError('Flow spawn subcellSide must be 1, 2, or 4')
+    }
     if (capacity > maximumCandidateCount) {
         throw new RangeError('Flow spawn capacity cannot exceed its candidate capacity')
     }
@@ -207,7 +230,7 @@ export async function createFlowSpawnIndex(
         maximumCandidateCount * FLOW_SPAWN_CANDIDATE_BYTE_LENGTH
     )
     const uniformCodec = spawnUniformCodec()
-    const uniformBytes = uniformCodec.pack(spawnUniformValues(0, capacity, {
+    const uniformBytes = uniformCodec.pack(spawnUniformValues(0, capacity, subcellSide, {
         generation: 1,
         currentSnapshotEpoch: 1,
         nextSnapshotEpoch: 1,
@@ -356,11 +379,21 @@ export async function createFlowSpawnIndex(
     })
     let lastDispatch: DispatchCommand | undefined
     let lastTemporalSet: BindSet | undefined
-    let outputInitialized = false
     let candidateCount = 0
     let generation = 0
     let currentSnapshotEpoch = 0
     let nextSnapshotEpoch = 0
+    let buildCount = 0
+    let cacheHitCount = 0
+    let cacheState: FlowSpawnIndexFacts['cacheState'] = 'empty'
+    let committedKey: string | undefined
+    let committedResources: readonly Readonly<{
+        resource: BufferResource
+        contentEpoch: number
+        allocationVersion: number
+    }>[] = []
+    let latestBuild: SpawnBuildRecord | undefined
+    const frameRecords = new WeakMap<FlowSpawnIndexFrame, SpawnBuildRecord>()
     let disposed = false
 
     function encode(
@@ -381,64 +414,151 @@ export async function createFlowSpawnIndex(
                 nextCandidateCount * FLOW_SPAWN_CANDIDATE_BYTE_LENGTH) {
             throw new RangeError('Flow spawn candidate bytes must match a bounded record count')
         }
+        if (nextCandidateCount > capacity) {
+            throw new RangeError('Flow spawn capacity must cover every input group without truncation')
+        }
         validateSnapshot(snapshot)
         validateTemporalFrame(runtime, temporal.layout, temporalFrame)
         if (temporalFrame.pairGeneration !== snapshot.generation ||
             temporalFrame.progress !== snapshot.progress) {
             throw new Error('Flow spawn index temporal frame progress is stale')
         }
-        if (lastDispatch === undefined || lastTemporalSet !== temporalFrame.bindSet) {
-            lastDispatch?.dispose()
-            lastTemporalSet = temporalFrame.bindSet
-            lastDispatch = runtime.createDispatchCommand({
-                label: 'Compact Flow Field spawn index',
-                pipeline,
-                bindSets: [ { set: spawnSet }, { set: temporalFrame.bindSet } ],
-                count: { workgroups: [ dispatchWorkgroups ] },
-                resources: {
-                    read: [
-                        { resource: candidates, contentEpoch: 'current-at-step' },
-                        { resource: uniform, contentEpoch: 'current-at-step' },
-                        { resource: counter, contentEpoch: 'current-at-step' },
-                        { resource: output, contentEpoch: 'current-at-step' },
-                        { resource: overflow, contentEpoch: 'current-at-step' },
-                        ...currentReads(temporalFrame.resources),
-                    ],
-                    write: [ counter, output, overflow ],
-                },
-                whenMissing: 'throw',
-            })
+        if (cacheState === 'observing') {
+            throw new Error('Flow spawn index requires its previous observation to settle')
         }
-        candidateStaging.fill(0)
-        candidateStaging.set(new Uint8Array(
+        // The caller may mutate or replace an ArrayBufferView. Compare owned bytes
+        // even on identity matches; alpha alone does not change endpoint-union support.
+        const bytes = new Uint8Array(
             packedCandidates.buffer,
             packedCandidates.byteOffset,
             packedCandidates.byteLength
-        ))
-        uniformCodec.write(
-            uniformBytes,
-            spawnUniformValues(nextCandidateCount, capacity, snapshot)
         )
-        builder.upload(candidateUpload)
-        builder.upload(uniformUpload)
-        if (!outputInitialized) {
-            builder.clear(clearOutput)
-            outputInitialized = true
-        }
-        builder.clear(clearCounter)
-        builder.clear(clearOverflow)
-        builder.compute(pass, [ lastDispatch ])
+        const key = [snapshot.generation, snapshot.currentSnapshotEpoch,
+            snapshot.nextSnapshotEpoch, nextCandidateCount, subcellSide].join(':')
+        const reused = cacheState === 'ready' && committedKey === key &&
+            lastTemporalSet === temporalFrame.bindSet && candidateCount === nextCandidateCount &&
+            equalCandidateBytes(candidateStaging, bytes) && committedResources.every(value =>
+                value.resource.contentEpoch === value.contentEpoch &&
+                value.resource.allocationVersion === value.allocationVersion)
         candidateCount = nextCandidateCount
         generation = snapshot.generation
         currentSnapshotEpoch = snapshot.currentSnapshotEpoch
         nextSnapshotEpoch = snapshot.nextSnapshotEpoch
-        return Object.freeze({
+        if (reused) {
+            cacheHitCount++
+            return ticket(undefined, key, temporalFrame.bindSet)
+        }
+        committedKey = undefined
+        committedResources = []
+        cacheState = 'encoded'
+        lastDispatch?.dispose()
+        lastTemporalSet = temporalFrame.bindSet
+        lastDispatch = runtime.createDispatchCommand({
+            label: 'Compact Flow Field spawn index',
+            pipeline,
+            bindSets: [ { set: spawnSet }, { set: temporalFrame.bindSet } ],
+            count: { workgroups: [ dispatchWorkgroups ] },
+            resources: {
+                read: [
+                    { resource: candidates, contentEpoch: 'current-at-step' },
+                    { resource: uniform, contentEpoch: 'current-at-step' },
+                    { resource: counter, contentEpoch: 'current-at-step' },
+                    { resource: output, contentEpoch: 'current-at-step' },
+                    { resource: overflow, contentEpoch: 'current-at-step' },
+                    ...currentReads(temporalFrame.resources),
+                ],
+                write: [ counter, output, overflow ],
+            },
+            whenMissing: 'throw',
+        })
+        candidateStaging.fill(0)
+        candidateStaging.set(bytes)
+        uniformCodec.write(
+            uniformBytes,
+            spawnUniformValues(nextCandidateCount, capacity, subcellSide, snapshot)
+        )
+        builder.upload(candidateUpload)
+        builder.upload(uniformUpload)
+        // Reinitialize on every actual build so abandoned or failed submissions
+        // cannot leave a CPU-only "initialized" flag ahead of GPU ownership.
+        builder.clear(clearOutput)
+        builder.clear(clearCounter)
+        builder.clear(clearOverflow)
+        builder.compute(pass, [ lastDispatch ])
+        buildCount++
+        return ticket(lastDispatch.id, key, temporalFrame.bindSet)
+    }
+
+    function ticket(commandId: string | undefined, key: string, bindSet: BindSet): FlowSpawnIndexFrame {
+        const frame = Object.freeze({
             candidateCount,
             generation,
             currentSnapshotEpoch,
             nextSnapshotEpoch,
-            dispatchWorkgroups,
+            dispatchWorkgroups: commandId === undefined ? 0 : dispatchWorkgroups,
+            buildRevision: buildCount,
+            built: commandId !== undefined,
+            reused: commandId === undefined,
         })
+        const record = { key, bindSet, commandId }
+        frameRecords.set(frame, record)
+        if (commandId !== undefined) latestBuild = record
+        return frame
+    }
+
+    function observe(frame: FlowSpawnIndexFrame, submitted: SubmittedWork): Promise<void> {
+        assertActive()
+        const record = frameRecords.get(frame)
+        if (record === undefined || submitted?.runtime !== runtime ||
+            typeof submitted.id !== 'string') {
+            throw new TypeError('Flow spawn observation requires its owned frame and same-runtime submission')
+        }
+        if (record.observing !== undefined) {
+            if (record.submittedId !== submitted.id) {
+                throw new Error('Flow spawn frame was observed with another submission')
+            }
+            return record.observing
+        }
+        record.submittedId = submitted.id
+        if (frame.built && latestBuild === record) cacheState = 'observing'
+        record.observing = (async() => {
+            if (frame.built && !submitted.executionOutcomes.some(value =>
+                value.outcomeKind === 'command' && value.status === 'executed' &&
+                value.executedCommandId === record.commandId)) {
+                throw new Error('Flow spawn observation submission did not execute its build command')
+            }
+            const [outcome] = await Promise.all([submitted.nativeOutcome, submitted.done])
+            if (outcome.status !== 'observed-succeeded' &&
+                !(frame.reused && outcome.status === 'no-native-work')) {
+                throw new Error(`Flow spawn native build was ${outcome.status}`)
+            }
+            if (!frame.built || latestBuild !== record || disposed) return
+            const produced = [counter, output, overflow].map(resource => {
+                // One submission records both initialization clears and the later
+                // dispatch write. Adopt the build's final epoch, not the first write.
+                const epoch = submitted.producerEpochs.find(value => value.resourceId === resource.id &&
+                    value.producedBy.commandId === record.commandId &&
+                    value.contentEpoch === resource.contentEpoch)
+                if (epoch === undefined || epoch.producedBy.commandId !== record.commandId ||
+                    resource.contentEpoch !== epoch.contentEpoch ||
+                    resource.allocationVersion !== epoch.allocationVersion) {
+                    throw new Error('Flow spawn observation lost its output publication ownership')
+                }
+                return { resource, contentEpoch: epoch.contentEpoch,
+                    allocationVersion: epoch.allocationVersion }
+            })
+            committedKey = record.key
+            committedResources = produced
+            cacheState = 'ready'
+        })().catch(error => {
+            if (latestBuild === record) {
+                committedKey = undefined
+                committedResources = []
+                cacheState = 'failed'
+            }
+            throw error
+        })
+        return record.observing
     }
 
     function facts(): FlowSpawnIndexFacts {
@@ -448,6 +568,10 @@ export async function createFlowSpawnIndex(
             candidateByteLength: FLOW_SPAWN_CANDIDATE_BYTE_LENGTH,
             candidateCount,
             dispatchWorkgroups,
+            subcellSide,
+            buildCount,
+            cacheHitCount,
+            cacheState,
             generation,
             currentSnapshotEpoch,
             nextSnapshotEpoch,
@@ -476,7 +600,7 @@ export async function createFlowSpawnIndex(
         if (disposed) throw new Error('Flow spawn index is disposed')
     }
 
-    return Object.freeze({ capacity, resources, encode, facts, dispose })
+    return Object.freeze({ capacity, resources, encode, observe, facts, dispose })
 }
 
 function spawnUniformCodec(): LayoutCodec {
@@ -484,7 +608,7 @@ function spawnUniformCodec(): LayoutCodec {
         { name: 'candidateCount', type: 'u32' },
         { name: 'capacity', type: 'u32' },
         { name: 'generation', type: 'u32' },
-        { name: 'reservedU32', type: 'u32' },
+        { name: 'subcellSide', type: 'u32' },
         { name: 'progress', type: 'f32' },
         { name: 'activitySpawn', type: 'f32' },
         { name: 'activityKill', type: 'f32' },
@@ -496,13 +620,14 @@ function spawnUniformCodec(): LayoutCodec {
 function spawnUniformValues(
     candidateCount: number,
     capacity: number,
+    subcellSide: number,
     snapshot: FlowSpawnSnapshotParameters
 ): SpawnUniformValues {
     return {
         candidateCount,
         capacity,
         generation: snapshot.generation,
-        reservedU32: 0,
+        subcellSide,
         progress: snapshot.progress,
         activitySpawn: snapshot.activitySpawn,
         activityKill: snapshot.activityKill,
@@ -561,6 +686,21 @@ function currentReads(
         resource,
         contentEpoch: 'current-at-step',
     }))
+}
+
+function equalCandidateBytes(owned: Uint8Array, input: Uint8Array): boolean {
+    if (input.byteOffset % 4 === 0 && input.byteLength % 4 === 0) {
+        const left = new Uint32Array(owned.buffer, owned.byteOffset, input.byteLength / 4)
+        const right = new Uint32Array(input.buffer, input.byteOffset, input.byteLength / 4)
+        for (let index = 0; index < right.length; index++) {
+            if (left[index] !== right[index]) return false
+        }
+    } else {
+        for (let index = 0; index < input.byteLength; index++) {
+            if (owned[index] !== input[index]) return false
+        }
+    }
+    return true
 }
 
 async function fetchTextAsset(url: URL): Promise<string> {

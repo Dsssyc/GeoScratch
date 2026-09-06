@@ -478,7 +478,9 @@ function createModule(
     const lower = capture.lower.runtime
     const upper = capture.upper.runtime
     const sampleRegistration = lower.source.sampleRegistration
-    if (upper.source.sampleRegistration !== sampleRegistration) {
+    const activitySupport = lower.source.representation?.activitySupport ?? 'bilinear'
+    if (upper.source.sampleRegistration !== sampleRegistration ||
+        (upper.source.representation?.activitySupport ?? 'bilinear') !== activitySupport) {
         throw new TypeError('Flow temporal samples require one shared registration')
     }
     return temporalVelocityWgslModule(lower.model, upper.model, {
@@ -489,6 +491,7 @@ function createModule(
         nextAtlasBinding: 3,
         wrapper,
         sampleRegistration,
+        activitySupport,
     })
 }
 

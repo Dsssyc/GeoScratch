@@ -89,6 +89,7 @@ struct FlowVelocityAddressFixedPosition { fixture: u32, }
 struct TestSample { value: vec2f, status: u32, resolved_level: u32, }
 struct TestControl { requested: u32, inside: u32, progress: f32, kill: f32, }
 const FlowVelocityCurrent_level_count = ${levelCount}u;
+const FlowVelocity_nearest_zero_gate = false;
 @group(0) @binding(0) var<storage, read> controls: array<TestControl>;
 @group(0) @binding(1) var<storage, read> samples: array<TestSample>;
 @group(0) @binding(2) var<storage, read_write> output: array<u32>;
@@ -103,6 +104,12 @@ fn FlowVelocityRegistration_sample_current(position: FlowVelocityAddressFixedPos
 }
 fn FlowVelocityRegistration_sample_next(position: FlowVelocityAddressFixedPosition, level: u32) -> TestSample {
     return samples[position.fixture * ${levelCount * 2}u + level * 2u + 1u];
+}
+fn FlowVelocityCurrent_load_position(position: FlowVelocityAddressFixedPosition, level: u32) -> TestSample {
+    return FlowVelocityRegistration_sample_current(position, level);
+}
+fn FlowVelocityNext_load_position(position: FlowVelocityAddressFixedPosition, level: u32) -> TestSample {
+    return FlowVelocityRegistration_sample_next(position, level);
 }
 `
 const compute = `${fixtureCode}\n${wrapper}\n

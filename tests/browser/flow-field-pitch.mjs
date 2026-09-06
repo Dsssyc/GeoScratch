@@ -104,8 +104,8 @@ try {
     const maximumErrors=[]
     for(const probe of probes.filter((_value,index)=>index%Math.max(1,Math.floor(probes.length/30))===0)) {
         const world = groundAt(probe.x+0.5,probe.y+0.5,finalView,inverse)
-        const lower=await velocityAt(world,matrix,'t06',limits,cache)
-        const upper=await velocityAt(world,matrix,'t07',limits,cache)
+        const lower=await velocityAt(world,matrix,'t06',limits,cache,manifest.representation.activitySupport)
+        const upper=await velocityAt(world,matrix,'t07',limits,cache,manifest.representation.activitySupport)
         assert.ok(lower&&upper,'Colored Speed pixel is outside the published COG coverage')
         const speed=Math.hypot(lower[0]*.07+upper[0]*.93,lower[1]*.07+upper[1]*.93)
         assert.ok(speed>0,'Speed colored a zero-velocity COG pixel')
@@ -134,7 +134,7 @@ function groundAt(x,y,view,inverse) {
     return [0,1].map(i=>view.cameraHigh[i]+view.cameraLow[i]+near[i]+(far[i]-near[i])*t)
 }
 
-async function velocityAt(world,matrix,sample,limit,cache) {
+async function velocityAt(world,matrix,sample,limit,cache,activitySupport) {
     const size=2**matrix*256, span=40075016.68557849
     const position=[(world[0]/span+.5)*size-.5,(.5-world[1]/span)*size-.5]
     const origin=position.map(Math.floor), fraction=position.map((v,i)=>v-origin[i])
@@ -150,6 +150,10 @@ async function velocityAt(world,matrix,sample,limit,cache) {
         }
         const offset=((y%256)*256+x%256)*8
         values.push([cache.get(key).getFloat32(offset,true),cache.get(key).getFloat32(offset+4,true)])
+    }
+    if(activitySupport==='nearest-texel-zero') {
+        const nearest=values[Number(fraction[0]>=.5)+2*Number(fraction[1]>=.5)]
+        if(nearest[0]===0 && nearest[1]===0) return [0,0]
     }
     return [0,1].map(i=> (values[0][i]*(1-fraction[0])+values[1][i]*fraction[0])*(1-fraction[1])+
         (values[2][i]*(1-fraction[0])+values[3][i]*fraction[0])*fraction[1])

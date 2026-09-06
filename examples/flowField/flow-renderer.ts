@@ -276,6 +276,7 @@ export async function createFlowFieldRenderer(
             maximumCandidateCount,
             capacity: maximumCandidateCount,
             temporal: temporalBindings,
+            subcellSide: (256 / cellsPerPageEdge) as 1 | 2 | 4,
         }))
         const particleSpawn = own(await prepareFlowParticleSpawnBindings(runtime, spawn))
         const particles = own(await createFlowParticles({
@@ -505,7 +506,7 @@ export async function createFlowFieldRenderer(
                     activitySpawn: thresholds.spawn,
                     activityKill: thresholds.kill,
                 })
-                spawn.encode(
+                const spawnFrame = spawn.encode(
                     builder,
                     candidates,
                     demandFrame.candidateCells.length,
@@ -551,7 +552,8 @@ export async function createFlowFieldRenderer(
                     publications,
                     reconciliations,
                     viewDemand,
-                    presentationReady && framePresentation.contour ? contour : undefined
+                    presentationReady && framePresentation.contour ? contour : undefined,
+                    Promise.resolve().then(() => spawn.observe(spawnFrame, submitted))
                 )
                 let observation: Promise<unknown>
                 observation = observing.then(() => {
@@ -888,7 +890,8 @@ async function settleFrameObservations(
     publications: FlowFramePublications,
     reconciliations: Promise<FlowDemandReconciliations>,
     viewDemand: FlowViewDemandAdapter,
-    contour: FlowContour | undefined
+    contour: FlowContour | undefined,
+    spawnObservation: Promise<void>
 ): Promise<unknown> {
 
     const settlements = await Promise.allSettled([
@@ -896,6 +899,7 @@ async function settleFrameObservations(
         viewDemand.observe(submitted),
         contour?.observeOverflow(submitted),
         reconciliations,
+        spawnObservation,
     ])
     throwSettledFailures(settlements, 'Flow Field frame observation failed')
     return settlements[1]!.status === 'fulfilled' ? settlements[1]!.value : undefined

@@ -17,7 +17,7 @@ struct FlowSpawnUniform {
     candidateCount: u32,
     capacity: u32,
     generation: u32,
-    reservedU32: u32,
+    subcellSide: u32,
     progress: f32,
     activitySpawn: f32,
     activityKill: f32,
@@ -57,21 +57,25 @@ fn compactSpawnIndex(@builtin(global_invocation_id) globalId: vec3u) {
     if (candidate.texelStepQuanta == 0u || candidate.texelStepQuanta > 0x7fffffffu) {
         return;
     }
-    let halfStep = candidate.texelStepQuanta / 2u;
-    let center = FlowVelocityAddress_advance_i32(
-        candidate.origin,
-        vec2i(i32(halfStep), i32(halfStep)),
-    );
-    if (center.north_south_valid == 0u) { return; }
-    let sample = FlowVelocity_sample(
-        center.position,
-        candidate.requestedLevel,
-        FlowVelocityTemporal(spawnUniform.progress, spawnUniform.activityKill)
-    );
-    if (sample.status == 0u || sample.status == 3u || sample.status == 4u ||
-        sample.speed < spawnUniform.activitySpawn) {
-        return;
+    let side = spawnUniform.subcellSide;
+    if (side != 1u && side != 2u && side != 4u) { return; }
+    if (candidate.texelStepQuanta % side != 0u) { return; }
+    let subcellStep = candidate.texelStepQuanta / side;
+    if (subcellStep < 2u) { return; }
+    var occupancy = 0u;
+    for (var y = 0u; y < side; y++) {
+        for (var x = 0u; x < side; x++) {
+            let center = FlowVelocityAddress_advance_i32(candidate.origin, vec2i(
+                i32(x * subcellStep + subcellStep / 2u),
+                i32(y * subcellStep + subcellStep / 2u),
+            ));
+            if (center.north_south_valid != 0u &&
+                FlowVelocity_spawn_possible(center.position, candidate.requestedLevel)) {
+                occupancy |= 1u << (y * side + x);
+            }
+        }
     }
+    if (occupancy == 0u) { return; }
     let outputIndex = atomicAdd(&counter.value, 1u);
     if (outputIndex >= spawnUniform.capacity) {
         atomicStore(&overflow.value, 1u);
@@ -82,6 +86,6 @@ fn compactSpawnIndex(@builtin(global_invocation_id) globalId: vec3u) {
         candidate.texelStepQuanta,
         candidate.requestedLevel,
         FlowSpawn_identity(candidateIndex),
-        0u,
+        occupancy | (firstLeadingBit(side) << 16u),
     );
 }

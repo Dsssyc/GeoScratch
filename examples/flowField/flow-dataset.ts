@@ -62,6 +62,8 @@ export type FlowFieldRuntimeRepresentation = Readonly<{
     layout: 'rg-interleaved'
     sampleRegistration: 'pixel-center'
     spatialInterpolation: 'bilinear'
+    /** v3 constrains bilinear activity to each nearest stored texel's footprint. */
+    activitySupport?: 'nearest-texel-zero'
     tileWidth: 256
     tileHeight: 256
     unsupportedVelocity: readonly [0, 0]
@@ -133,12 +135,12 @@ export type FlowFieldDataset = Readonly<{
         totalRawPageBytes: number
     }>
     construction: Readonly<{
-        algorithmVersion: 'flow-cog-wmq-rg32f-v2'
-        adapterVersion: 'flow-cog-wmq-rg32f-v2'
+        algorithmVersion: 'flow-cog-wmq-rg32f-v2' | 'flow-cog-wmq-rg32f-v3'
+        adapterVersion: 'flow-cog-wmq-rg32f-v2' | 'flow-cog-wmq-rg32f-v3'
         collectionContentVersion: string
         pageSetSha256: string
         levelConstruction: 'cog-physical-or-global-semantic-recursive'
-        supportFilter: 'recursive-conservative-vector-box-v1'
+        supportFilter: 'recursive-conservative-vector-box-v1' | 'recursive-zero-preserving-vector-box-v2'
         publicationPolicy: Readonly<{
             kind: 'bounded-source-ceiling'
             minimumMatrixId: '4'
@@ -205,6 +207,7 @@ type RuntimePageInput = Readonly<{
 const FLOW_FIELD_RUNTIME_ARTIFACT = 'flow-field-cog-runtime'
 const FLOW_FIELD_RUNTIME_MEDIA_TYPE = 'application/vnd.geoscratch.flow-rg32f'
 const FLOW_FIELD_RUNTIME_ADAPTER = 'flow-cog-wmq-rg32f-v2'
+const FLOW_FIELD_RUNTIME_ADAPTER_V3 = 'flow-cog-wmq-rg32f-v3'
 const WEB_MERCATOR_QUAD_URI =
     'http://www.opengis.net/def/tilematrixset/OGC/1.0/WebMercatorQuad'
 const WEB_MERCATOR_QUAD_CRS = 'http://www.opengis.net/def/crs/EPSG/0/3857'
@@ -213,6 +216,7 @@ const RUNTIME_MINIMUM_MATRIX = 4
 const RUNTIME_MAXIMUM_MATRIX_CAP = 10
 const RUNTIME_LEVEL_CONSTRUCTION = 'cog-physical-or-global-semantic-recursive'
 const RUNTIME_SUPPORT_FILTER = 'recursive-conservative-vector-box-v1'
+const RUNTIME_SUPPORT_FILTER_V3 = 'recursive-zero-preserving-vector-box-v2'
 const RUNTIME_MANIFEST_KEYS = Object.freeze([
     'schemaVersion',
     'artifactType',
@@ -316,7 +320,8 @@ async function normalizeFlowFieldDataset(
         manifest.construction,
         manifest.contentVersion,
         matrixSet.maxTileMatrix,
-        pages
+        pages,
+        representation
     )
     const quality = normalizeRuntimeQuality(manifest.quality)
     const samplesByKey = new Map(samples.map(sample => [ sample.sampleKey, sample ]))
@@ -698,6 +703,8 @@ function normalizeRuntimeRepresentation(value: unknown): FlowFieldRuntimeReprese
         representation.layout !== 'rg-interleaved' ||
         representation.sampleRegistration !== 'pixel-center' ||
         representation.spatialInterpolation !== 'bilinear' ||
+        (representation.activitySupport !== undefined &&
+            representation.activitySupport !== 'nearest-texel-zero') ||
         representation.tileWidth !== 256 || representation.tileHeight !== 256 ||
         !sameZeroVelocity(representation.unsupportedVelocity) ||
         representation.missingPageSemantics !== 'unavailable') {
@@ -835,7 +842,8 @@ async function normalizeRuntimeConstruction(
     value: unknown,
     contentVersion: string,
     resolvedMaximumMatrixId: string,
-    pages: readonly FlowFieldRuntimePage[]
+    pages: readonly FlowFieldRuntimePage[],
+    representation: FlowFieldRuntimeRepresentation
 ): Promise<FlowFieldDataset['construction']> {
 
     const construction = value as Readonly<{
@@ -853,6 +861,9 @@ async function normalizeRuntimeConstruction(
         maximumMatrixCap?: unknown
         resolvedMaximumMatrixId?: unknown
     }> | null
+    const version = construction?.adapterVersion
+    const zeroFootprint = version === FLOW_FIELD_RUNTIME_ADAPTER_V3
+    const supportFilter = zeroFootprint ? RUNTIME_SUPPORT_FILTER_V3 : RUNTIME_SUPPORT_FILTER
     if (construction === null || typeof construction !== 'object' ||
         !sameObjectKeys(construction, [
             'algorithmVersion',
@@ -863,12 +874,14 @@ async function normalizeRuntimeConstruction(
             'supportFilter',
             'publicationPolicy',
         ]) ||
-        construction.algorithmVersion !== FLOW_FIELD_RUNTIME_ADAPTER ||
-        construction.adapterVersion !== FLOW_FIELD_RUNTIME_ADAPTER ||
+        (version !== FLOW_FIELD_RUNTIME_ADAPTER && version !== FLOW_FIELD_RUNTIME_ADAPTER_V3) ||
+        construction.algorithmVersion !== version ||
         construction.collectionContentVersion !== contentVersion ||
         !sha256(construction.pageSetSha256) ||
         construction.levelConstruction !== RUNTIME_LEVEL_CONSTRUCTION ||
-        construction.supportFilter !== RUNTIME_SUPPORT_FILTER ||
+        construction.supportFilter !== supportFilter ||
+        (zeroFootprint ? representation.activitySupport !== 'nearest-texel-zero'
+            : Object.hasOwn(representation, 'activitySupport')) ||
         policy === null || typeof policy !== 'object' ||
         !sameObjectKeys(policy, [
             'kind',
@@ -884,12 +897,12 @@ async function normalizeRuntimeConstruction(
         throw invalidRuntimeManifest()
     }
     return Object.freeze({
-        algorithmVersion: FLOW_FIELD_RUNTIME_ADAPTER,
-        adapterVersion: FLOW_FIELD_RUNTIME_ADAPTER,
+        algorithmVersion: version,
+        adapterVersion: version,
         collectionContentVersion: contentVersion,
         pageSetSha256: construction.pageSetSha256,
         levelConstruction: RUNTIME_LEVEL_CONSTRUCTION,
-        supportFilter: RUNTIME_SUPPORT_FILTER,
+        supportFilter,
         publicationPolicy: Object.freeze({
             kind: 'bounded-source-ceiling' as const,
             minimumMatrixId: '4' as const,

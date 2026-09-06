@@ -19,6 +19,21 @@ sampler. Status colors are green for resident moving data, amber for fallback,
 gray for zero velocity, magenta for unavailable data, and red for invalid sampling.
 Activity contour is an optional velocity threshold overlay and does not enter trails.
 
+New v3 COGs store ordinary triangle-linear center velocities without neighborhood
+erosion. Their zero-absorbing 2x2 overviews also omit the extra 3x3 erosion. The
+manifest explicitly requests `nearest-texel-zero` activity: each zero texel's whole
+footprint stays inactive, while nonzero footprints keep ordinary bilinear velocity
+and time interpolation. Old v2 data remains readable under its original contract.
+See [ADR-107](../../docs/decisions/ADR-107-flow-zero-footprint-cog-support.md).
+
+The bounded spawn index examines every source texel in each group, using a subcell
+mask in the existing 32-byte record instead of checking only the group center.
+Observed endpoint-union support is reused across alpha changes; page/pair/content
+changes rebuild it. Birth still validates the current interpolated velocity, so
+future support or opposing endpoint vectors cannot create a stationary zombie.
+No candidate-capacity, texture or backend-channel increase is required; see
+[ADR-108](../../docs/decisions/ADR-108-flow-subcell-spawn-support.md).
+
 During camera/LoD changes, available flow continues to animate using the current
 temporal capture. Missing data suspends only affected particles without redrawing
 their previous segment; waiting still consumes their finite lifetime. Missing or
@@ -61,6 +76,8 @@ node tests/browser/flow-field-particle-reference.mjs
 node tests/browser/flow-field-history.mjs
 node tests/browser/flow-field-controls.mjs
 node tests/browser/flow-field-temporal-status.mjs
+node tests/browser/flow-field-zero-footprint.mjs
+node tests/browser/flow-field-spawn-subcells.mjs
 node tests/browser/flow-field-inspector-handoff.mjs
 node tests/browser/flow-field-motion-performance.mjs
 node tests/browser/flow-field-reveal-index.mjs
@@ -103,3 +120,9 @@ newly exposed regions may temporarily be less dense while existing flow keeps mo
 model time 6.93, including screenshot colors against COG U/V samples.
 `node tests/browser/flow-field-pitch-projection.mjs` checks real MapLibre camera
 unprojection on GPU at 0/60/75/85 degrees and DPR 1/2.
+
+`flow-field-boundary-source.mjs` compares separately served v2 and v3 data at the
+same fixed camera/time (URLs through `FLOW_BOUNDARY_OLD` / `FLOW_BOUNDARY_NEW`). It
+checks restored Speed/particle coverage and actual reuse of the observed spawn index.
+It does not treat a basemap shoreline as model truth. A z10 source remains roughly
+130 metres per texel here, so subpixel channels/banks still need finer source data.

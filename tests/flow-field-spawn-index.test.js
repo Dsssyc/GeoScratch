@@ -118,7 +118,7 @@ describe('Flow Field spawn index reference', () => {
         expect(source).to.include('temporalFrame.progress !== snapshot.progress')
         expect(source).to.include('{ set: temporalFrame.bindSet }')
         expect(source).to.include('...currentReads(temporalFrame.resources)')
-        expect(source).to.include('lastTemporalSet !== temporalFrame.bindSet')
+        expect(source).to.include('lastTemporalSet === temporalFrame.bindSet')
         expect(source).to.include('lastDispatch?.dispose()')
         expect(source).to.include('bindLayouts: [ spawnLayout, temporal.layout ]')
         expect(source).not.to.include('temporal.layout.dispose()')
@@ -147,7 +147,7 @@ describe('Flow Field spawn index reference', () => {
         expect(source).not.to.match(/particle/i)
     })
 
-    it('compacts temporal speed support atomically and hard-signals overflow', () => {
+    it('compacts endpoint-union subcell support atomically and hard-signals overflow', () => {
 
         const shader = fs.readFileSync(shaderPath, 'utf8')
         expect(shader).to.include('struct FlowSpawnCellCandidate')
@@ -160,11 +160,13 @@ describe('Flow Field spawn index reference', () => {
         expect(shader).to.include('var<storage, read_write> counter')
         expect(shader).to.include('var<storage, read_write> output')
         expect(shader).to.include('var<storage, read_write> overflow')
-        expect(shader).to.include('FlowVelocity_sample(')
-        expect(shader).to.include('let halfStep = candidate.texelStepQuanta / 2u')
+        expect(shader).to.include('FlowVelocity_spawn_possible(')
+        expect(shader).to.include('let subcellStep = candidate.texelStepQuanta / side')
         expect(shader).to.include('FlowVelocityAddress_advance_i32(')
         expect(shader).to.include('FlowSpawn_identity(candidateIndex)')
-        expect(shader).to.include('sample.speed < spawnUniform.activitySpawn')
+        expect(shader).to.include('occupancy |= 1u << (y * side + x)')
+        expect(shader).to.include('occupancy | (firstLeadingBit(side) << 16u)')
+        expect(shader).not.to.include('sample.speed < spawnUniform.activitySpawn')
         expect(shader).to.include('let outputIndex = atomicAdd(&counter.value, 1u)')
         expect(shader).to.include('atomicStore(&overflow.value, 1u)')
         expect(shader).not.to.match(/textureStore|readback/i)
