@@ -40,7 +40,7 @@ def test_source_specs_round_trip_as_typed_public_contracts():
     }
     assert interpolation.manifest() == {
         "kind": "triangle-linear",
-        "stationaryPolicy": "require-all-moving",
+        "stationaryPolicy": "interpolate",
         "stationaryEpsilon": 0.0,
     }
 
@@ -83,6 +83,8 @@ def test_delaunay_configuration_is_validated_at_the_api_boundary(arguments, mess
 
 
 def test_triangle_linear_stationary_policy_is_validated_at_the_api_boundary():
+    assert TriangleLinearInterpolation().stationary_policy == "interpolate"
+    assert read_interpolation_spec({"kind": "triangle-linear", "stationaryPolicy": "require-all-moving"}).stationary_policy == "require-all-moving"
     with pytest.raises(ValueError, match="stationary_policy"):
         TriangleLinearInterpolation(stationary_policy="continuous")
     with pytest.raises(ValueError, match="stationary_epsilon"):

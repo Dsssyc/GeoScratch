@@ -333,7 +333,7 @@ def test_batch_two_is_byte_equivalent_and_reuses_topology_and_stencils(
     sequential_counts = {"topology": 0, "stencil": 0, "apply": 0}
     original_cog_topology = cog_module.prepare_topology
     original_stencil = cog_module.prepare_triangle_linear_stencil
-    original_apply = cog_module.apply_bilinear_safe_block
+    original_apply = cog_module.apply_pixel_center_block
 
     def sequential_topology(*args, **kwargs):
         sequential_counts["topology"] += 1
@@ -353,7 +353,7 @@ def test_batch_two_is_byte_equivalent_and_reuses_topology_and_stencils(
         "prepare_triangle_linear_stencil",
         sequential_stencil,
     )
-    monkeypatch.setattr(cog_module, "apply_bilinear_safe_block", sequential_apply)
+    monkeypatch.setattr(cog_module, "apply_pixel_center_block", sequential_apply)
     sequential = []
     for time_index in (0, 1):
         parent = tmp_path / "sequential" / f"t{time_index:02d}"
@@ -372,7 +372,7 @@ def test_batch_two_is_byte_equivalent_and_reuses_topology_and_stencils(
         "prepare_triangle_linear_stencil",
         original_stencil,
     )
-    monkeypatch.setattr(cog_module, "apply_bilinear_safe_block", original_apply)
+    monkeypatch.setattr(cog_module, "apply_pixel_center_block", original_apply)
 
     batch_counts = {
         "source": [],
@@ -420,7 +420,7 @@ def test_batch_two_is_byte_equivalent_and_reuses_topology_and_stencils(
         batch_duplicate_statistics,
     )
     monkeypatch.setattr(cog_module, "prepare_triangle_linear_stencil", batch_stencil)
-    monkeypatch.setattr(cog_module, "apply_bilinear_safe_block", batch_apply)
+    monkeypatch.setattr(cog_module, "apply_pixel_center_block", batch_apply)
     items = []
     for time_index in (1, 0):
         parent = tmp_path / "batch" / f"t{time_index:02d}"
@@ -533,7 +533,7 @@ def test_batch_finalize_failure_preserves_first_verified_snapshot(
     first_output = items[0].output_directory
     second_output = items[1].output_directory
     assert verify_velocity_cog_snapshot(first_output)["contentVersion"].endswith(
-        "-t00-z9-v2"
+        "-t00-z9-v3"
     )
     assert not second_output.exists()
     assert list(first_output.parent.glob(".cog-cache.build-*")) == []
@@ -583,7 +583,7 @@ def test_batch_cleanup_does_not_remove_a_recreated_completed_staging_path(
     assert sentinel.read_text(encoding="utf-8") == "preserve me\n"
     assert verify_velocity_cog_snapshot(items[0].output_directory)[
         "contentVersion"
-    ].endswith("-t00-z9-v2")
+    ].endswith("-t00-z9-v3")
     assert not items[1].output_directory.exists()
 
 
@@ -635,7 +635,7 @@ def test_batch_cleanup_does_not_remove_a_replaced_active_staging_path(
     assert moved_staging[0].is_dir()
     assert verify_velocity_cog_snapshot(items[0].output_directory)[
         "contentVersion"
-    ].endswith("-t00-z9-v2")
+    ].endswith("-t00-z9-v3")
 
 
 def test_batch_records_each_output_parents_available_bytes(
@@ -709,7 +709,7 @@ def test_batch_second_replacement_rolls_back_when_install_sink_fails(
 
     assert verify_velocity_cog_snapshot(items[0].output_directory)[
         "contentVersion"
-    ].endswith("-t00-z9-v2")
+    ].endswith("-t00-z9-v3")
     assert previous_second.manifest_path.read_bytes() == previous_manifest
     assert verify_velocity_cog_snapshot(second_output)["contentVersion"] == (
         previous_second.content_version

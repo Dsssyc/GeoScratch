@@ -16,7 +16,8 @@ from rasterio.transform import Affine
 from rasterio.windows import Window
 
 
-SEMANTIC_OVERVIEW_POLICY = "recursive-conservative-vector-box-v1"
+LEGACY_SEMANTIC_OVERVIEW_POLICY = "recursive-conservative-vector-box-v1"
+SEMANTIC_OVERVIEW_POLICY = "recursive-zero-preserving-vector-box-v2"
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,7 +58,7 @@ class SemanticOverviewLevel:
 class SemanticOverviewBlock:
     values: np.ndarray
     candidate_valid_count: int
-    bilinear_safe_count: int
+    stored_nonzero_count: int
     cancellation_to_zero_count: int
 
 
@@ -67,7 +68,7 @@ class SemanticOverviewArtifact:
     path: Path
     pixel_sha256: str
     candidate_valid_count: int
-    bilinear_safe_count: int
+    stored_nonzero_count: int
     cancellation_to_zero_count: int
     size_bytes: int
 
@@ -76,7 +77,7 @@ class SemanticOverviewArtifact:
             **self.level.manifest(),
             "pixelSha256": self.pixel_sha256,
             "candidateValidPixelCount": self.candidate_valid_count,
-            "bilinearSafePixelCount": self.bilinear_safe_count,
+            "storedNonzeroPixelCount": self.stored_nonzero_count,
             "cancellationToZeroPixelCount": self.cancellation_to_zero_count,
             "intermediateSizeBytes": self.size_bytes,
         }
@@ -166,7 +167,9 @@ def plan_semantic_overview_levels(
     return tuple(levels)
 
 
-def reduce_semantic_overview(child_values: np.ndarray) -> SemanticOverviewBlock:
+def reduce_semantic_overview(
+    child_values: np.ndarray, *, policy: str = SEMANTIC_OVERVIEW_POLICY
+) -> SemanticOverviewBlock:
     values = _require_velocity_values(child_values)
     child_height, child_width, _components = values.shape
     parent_height = (child_height + 1) // 2
@@ -180,6 +183,7 @@ def reduce_semantic_overview(child_values: np.ndarray) -> SemanticOverviewBlock:
         padded,
         output_height=parent_height,
         output_width=parent_width,
+        policy=policy,
     )
 
 
@@ -188,7 +192,10 @@ def reduce_semantic_overview_block(
     *,
     output_height: int,
     output_width: int,
+    policy: str = SEMANTIC_OVERVIEW_POLICY,
 ) -> SemanticOverviewBlock:
+    if not isinstance(policy, str) or policy not in {SEMANTIC_OVERVIEW_POLICY, LEGACY_SEMANTIC_OVERVIEW_POLICY}:
+        raise ValueError("unknown semantic overview policy")
     _require_positive_integer(output_height, "output_height")
     _require_positive_integer(output_width, "output_width")
     values = _require_velocity_values(child_values_with_parent_halo)
@@ -200,16 +207,19 @@ def reduce_semantic_overview_block(
         )
 
     candidate_values, candidate_valid, cancellation = _reduce_candidates(values)
-    bilinear_safe = _erode_3x3(candidate_valid)
     central_values = candidate_values[1:-1, 1:-1].copy()
     central_candidates = candidate_valid[1:-1, 1:-1]
     central_cancellation = cancellation[1:-1, 1:-1]
-    central_values[~bilinear_safe] = 0.0
+    # Old snapshots are interpreted by their immutable policy identity. New
+    # snapshots preserve zero children but do not erode neighboring footprints.
+    stored_support = (_erode_3x3(candidate_valid)
+        if policy == LEGACY_SEMANTIC_OVERVIEW_POLICY else central_candidates)
+    central_values[~stored_support] = 0.0
     central_values[central_values == 0.0] = 0.0
     return SemanticOverviewBlock(
         values=central_values.astype("<f4", copy=False),
         candidate_valid_count=int(np.count_nonzero(central_candidates)),
-        bilinear_safe_count=int(np.count_nonzero(bilinear_safe)),
+        stored_nonzero_count=int(np.count_nonzero(stored_support)),
         cancellation_to_zero_count=int(np.count_nonzero(central_cancellation)),
     )
 
@@ -332,7 +342,7 @@ def _write_semantic_overviews_in_environment(
             }
             digest = hashlib.sha256()
             candidate_count = 0
-            bilinear_safe_count = 0
+            stored_nonzero_count = 0
             cancellation_count = 0
             with rasterio.open(destination, "w", **profile) as target:
                 target.set_band_description(1, "U")
@@ -369,7 +379,7 @@ def _write_semantic_overviews_in_environment(
                     target.write(band_first, window=window)
                     digest.update(band_first.tobytes(order="C"))
                     candidate_count += reduced.candidate_valid_count
-                    bilinear_safe_count += reduced.bilinear_safe_count
+                    stored_nonzero_count += reduced.stored_nonzero_count
                     cancellation_count += reduced.cancellation_to_zero_count
                     completed_blocks = block_index + 1
                     if staging_observer is not None and completed_blocks % 64 == 0:
@@ -404,7 +414,7 @@ def _write_semantic_overviews_in_environment(
             path=destination,
             pixel_sha256=digest.hexdigest(),
             candidate_valid_count=candidate_count,
-            bilinear_safe_count=bilinear_safe_count,
+            stored_nonzero_count=stored_nonzero_count,
             cancellation_to_zero_count=cancellation_count,
             size_bytes=destination.stat().st_size,
         ))

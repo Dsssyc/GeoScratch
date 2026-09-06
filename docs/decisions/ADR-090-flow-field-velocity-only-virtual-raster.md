@@ -2,6 +2,9 @@
 
 ## Status
 
+ADR-107 supersedes the default all-moving triangle rule and neighborhood erosion
+for new COG products; existing v2 data retains the interpretation recorded below.
+
 Accepted. Supersedes the D3-specific, fixed-degree support, texel-center storage, and
 recursive coarse-reduction clauses in the Flow Field implementation plan. It does not
 change the frozen `Flow Layer` example or add a Geo/Scratch public API. ADR-091 records the

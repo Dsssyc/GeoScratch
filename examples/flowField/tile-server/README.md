@@ -68,7 +68,7 @@ The repository source descriptor is schema version 2. Its current strategy is ex
   },
   "interpolation": {
     "kind": "triangle-linear",
-    "stationaryPolicy": "require-all-moving",
+    "stationaryPolicy": "interpolate",
     "stationaryEpsilon": 0.0
   }
 }
@@ -80,7 +80,13 @@ pairs of coincident coordinates with conflicting U/V values. Construction record
 source count, unique vertex count, duplicate count, maximum duplicate velocity difference,
 and chosen policy instead of allowing the triangulation library to discard duplicates.
 
-The builder:
+The active COG builder stores ordinary triangle-linear U/V at each pixel center,
+without a neighboring-support erosion. A zero station does not erase its entire
+triangle; interpolated exact `(0, 0)` remains non-advectable. Explicit
+`TriangleLinearInterpolation(stationary_policy="require-all-moving")` is still
+accepted when a source intentionally requests the historical triangle support rule.
+
+The historical direct-tile builder (not the active COG data path):
 
 1. validates every source byte length, SHA-256, and finite float32 pair;
 2. projects unique stations to EPSG:3857 and prepares one SciPy Delaunay topology;
@@ -88,8 +94,8 @@ The builder:
    metric local-spacing facts;
 4. compiles one float64 barycentric stencil for each spatial page and reuses it for every
    model time;
-5. writes a triangle only when all three station velocities can move a particle in that model
-   time; otherwise its targets remain exact U/V zero without another raster plane;
+5. applies its explicit interpolation strategy; `require-all-moving` rejects a triangle
+   with any stationary vertex, while `interpolate` keeps ordinary linear values;
 6. evaluates a one-texel halo across page seams and keeps a central sample only when its 3x3
    neighborhood is advectable, so ordinary bilinear filtering cannot bleed velocity across
    representable invalid support;
@@ -159,10 +165,24 @@ turn a rejected z15 plan into z10.
 The COG contains recursively generated semantic overviews until its terminal level fits the
 COG access requirement. A parent candidate requires all four child vectors to be finite and
 nonzero, uses one fixed-order float64 component mean and one float32 cast, treats a mean that
-rounds to `(0, 0)` as non-advectable, then applies a new cross-block 3 by 3 support erosion
-before storing the parent. This prevents ordinary bilinear filtering at every overview from
-leaking velocity across a representable zero boundary. The support booleans are temporary
-construction state and never enter the COG.
+rounds to `(0, 0)` as non-advectable, and stores that candidate without eroding adjacent
+parent footprints. Thus a nonzero stored parent implies that every represented base
+descendant is nonzero. The frontend must gate bilinear support using the nearest texel's
+zero/nonzero value; ordinary unrestricted bilinear sampling does not preserve zero cells.
+Support booleans remain temporary construction state and never enter the COG. This
+contract cannot recover a geometric dry barrier that no base pixel center sampled.
+
+New snapshots and collections use artifact schema 3 and `-v3` content identities. Their
+overview policy is `recursive-zero-preserving-vector-box-v2`, and support records use
+`storedNonzeroPixelCount` rather than claiming historical bilinear safety. The
+base support record also declares `candidatePixelCount` and `zeroStoredCandidatePixelCount`;
+the latter includes exact vector cancellation as well as Float32 rounding to zero for an
+explicit all-moving source rule. It does not claim these are only rounding losses. The runtime
+manifest remains schema 2; adapter/algorithm `flow-cog-wmq-rg32f-v3` requires
+`representation.activitySupport: nearest-texel-zero`. Schema-2 artifacts retain their
+original all-3x3 overview semantics, adapter-v2 identity and representation without the
+new field, including byte-identical server-derived lower levels. Old and new schemas,
+policies and hashes cannot be combined. New builders do not generate old artifacts.
 
 The default z15 artifact has nine nominal factors `2..512`; its first eight levels preserve
 exact power-of-two WebMercator pixel registration, while the terminal `138 x 151` level has
@@ -171,7 +191,7 @@ extent-preserving GDAL decimation 510. The explicit z10 artifact has four exact 
 bound into the manifest. Custom pixels are assembled through VRT explicit overviews and GDAL
 COG `OVERVIEWS=FORCE_USE_EXISTING`; rio-cogeo is used only for strict structural validation.
 
-The verified local t00 artifact is schema 2 / package 0.4.0:
+Historical schema-2 t00 proof (not the current construction default), package 0.4.0:
 
 - content version `flow-cog-00343edcd11320c9-t00-z15-v2`;
 - `1,584,930,583` compressed bytes;
@@ -522,14 +542,16 @@ reports `cogWindowReads` for the collection backend.
 
 The collection service returns the exact page bytes and SHA declared at publication. Published
 z7 through `min(sourceCeiling, z10)` physical values use exact integer IFD windows. z6-z4 are
-recursively derived from globally aligned z7 values with the same conservative vector reducer;
+recursively derived from globally aligned physical values using the artifact's declared reducer;
 the terminal COG IFD is validated as container content but never treated as WebMercator address
 authority.
 It never invokes generic image resampling, exposes the `.tif`, or returns partial Range data.
 `runtime-manifest.json` schema 2 declares
 `representation.sampleRegistration: pixel-center`; the active Flow Field browser loads that
 manifest, requests pages by `sampleKey`, and applies the example-local wide-fixed half-texel
-registration adapter before sampling both temporal endpoints.
+registration adapter before sampling both temporal endpoints. Adapter v3 additionally
+declares the nearest-texel-zero activity support gate; adapter v2 keeps historical bilinear
+support. This is immutable manifest interpretation, not a runtime legacy/new feature flag.
 
 The server snapshots collection identity and COG fingerprints at startup; it does not hot reload.
 Replacing a collection while its old process is running makes that process fail requests with 503

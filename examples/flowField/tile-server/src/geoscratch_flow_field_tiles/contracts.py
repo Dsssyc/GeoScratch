@@ -87,15 +87,15 @@ class DelaunayTopology:
 
 @dataclass(frozen=True, slots=True)
 class TriangleLinearInterpolation:
-    """Interpolates U/V only where every triangle vertex can advect a particle."""
+    """Interpolates U/V with an explicit ordinary or all-moving-vertex support rule."""
 
     kind: Literal["triangle-linear"] = field(default="triangle-linear", init=False)
-    stationary_policy: Literal["require-all-moving"] = "require-all-moving"
+    stationary_policy: Literal["interpolate", "require-all-moving"] = "interpolate"
     stationary_epsilon: float = 0.0
 
     def __post_init__(self) -> None:
-        if self.stationary_policy != "require-all-moving":
-            raise ValueError("stationary_policy must be require-all-moving")
+        if not isinstance(self.stationary_policy, str) or self.stationary_policy not in {"interpolate", "require-all-moving"}:
+            raise ValueError("stationary_policy must be interpolate or require-all-moving")
         if (
             isinstance(self.stationary_epsilon, bool)
             or not isinstance(self.stationary_epsilon, (int, float))
@@ -172,6 +172,6 @@ def read_interpolation_spec(value: Any) -> TriangleLinearInterpolation:
             f"{sorted(unknown)}"
         )
     return TriangleLinearInterpolation(
-        stationary_policy=value.get("stationaryPolicy", "require-all-moving"),
+        stationary_policy=value.get("stationaryPolicy", "interpolate"),
         stationary_epsilon=value.get("stationaryEpsilon", 0.0),
     )

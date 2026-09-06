@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 from geoscratch_flow_field_tiles.cog_overviews import (
+    LEGACY_SEMANTIC_OVERVIEW_POLICY,
     plan_semantic_overview_levels,
     reduce_semantic_overview,
 )
@@ -31,7 +32,7 @@ def test_overview_plan_reduces_the_real_grid_to_one_cog_block():
     assert levels[-1].height <= 256
 
 
-def test_all_valid_children_are_averaged_then_eroded_for_bilinear_safety():
+def test_all_valid_children_are_averaged_without_eroding_neighbors():
     child = np.empty((10, 10, 2), dtype=np.float32)
     child[..., 0] = np.arange(100, dtype=np.float32).reshape(10, 10) + 1.0
     child[..., 1] = 2.0
@@ -40,22 +41,22 @@ def test_all_valid_children_are_averaged_then_eroded_for_bilinear_safety():
 
     assert reduced.values.shape == (5, 5, 2)
     assert reduced.candidate_valid_count == 25
-    assert reduced.bilinear_safe_count == 9
+    assert reduced.stored_nonzero_count == 25
     assert reduced.cancellation_to_zero_count == 0
-    assert np.array_equal(reduced.values[0], np.zeros((5, 2), dtype=np.float32))
-    assert np.array_equal(reduced.values[-1], np.zeros((5, 2), dtype=np.float32))
+    assert np.all(reduced.values[..., 1] == 2.0)
     assert reduced.values[2, 2] == pytest.approx([50.5, 2.0])
 
 
-def test_one_invalid_child_erodes_the_neighboring_parent_footprint():
+def test_one_zero_child_rejects_only_its_own_parent_footprint():
     child = np.ones((10, 10, 2), dtype=np.float32)
     child[4, 4] = 0.0
 
     reduced = reduce_semantic_overview(child)
 
     assert reduced.candidate_valid_count == 24
-    assert reduced.bilinear_safe_count == 0
-    assert np.array_equal(reduced.values, np.zeros((5, 5, 2), dtype=np.float32))
+    assert reduced.stored_nonzero_count == 24
+    assert np.array_equal(reduced.values[2, 2], [0.0, 0.0])
+    assert np.array_equal(reduced.values[2, 1], [1.0, 1.0])
     assert not np.signbit(reduced.values).any()
 
 
@@ -84,7 +85,7 @@ def test_float32_underflow_is_non_advectable_before_support_erosion():
     reduced = reduce_semantic_overview(child)
 
     assert reduced.candidate_valid_count == 0
-    assert reduced.bilinear_safe_count == 0
+    assert reduced.stored_nonzero_count == 0
     assert reduced.cancellation_to_zero_count == 25
     assert np.array_equal(reduced.values, np.zeros((5, 5, 2), dtype=np.float32))
     assert not np.signbit(reduced.values).any()
@@ -97,7 +98,7 @@ def test_odd_missing_edge_children_are_invalid():
 
     assert reduced.values.shape == (5, 5, 2)
     assert reduced.candidate_valid_count == 16
-    assert reduced.bilinear_safe_count == 4
+    assert reduced.stored_nonzero_count == 16
     assert np.array_equal(reduced.values[-1], np.zeros((5, 2), dtype=np.float32))
     assert np.array_equal(reduced.values[:, -1], np.zeros((5, 2), dtype=np.float32))
 
@@ -116,3 +117,18 @@ def test_overview_contract_rejects_nonfinite_and_invalid_shapes():
             (1.0, 0.0, 0.0, 0.0, -1.0, 256.0),
             block_size=0,
         )
+
+
+def test_explicit_historical_policy_keeps_its_original_neighbor_erosion():
+    child = np.ones((10, 10, 2), dtype=np.float32)
+    assert reduce_semantic_overview(child, policy=LEGACY_SEMANTIC_OVERVIEW_POLICY).stored_nonzero_count == 9
+    child[4, 4] = 0.0
+    assert reduce_semantic_overview(child, policy=LEGACY_SEMANTIC_OVERVIEW_POLICY).stored_nonzero_count == 0
+
+
+def test_current_policy_preserves_one_pixel_dry_separator_at_every_coarser_level():
+    current = np.ones((64, 64, 2), dtype=np.float32)
+    current[:, 17] = 0.0
+    for level in range(1, 7):
+        current = reduce_semantic_overview(current).values
+        assert np.all(current[:, 17 // 2 ** level] == 0.0)

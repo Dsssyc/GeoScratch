@@ -123,6 +123,10 @@ def test_collection_publishes_immutable_snapshots_runtime_pages_and_identity(
     assert runtime["contentVersion"] == manifest["contentVersion"]
     assert len(runtime["pages"]) == 18
     assert runtime["schemaVersion"] == 2
+    assert manifest["schemaVersion"] == 3
+    assert manifest["contentVersion"].endswith("-v3")
+    assert runtime["construction"]["adapterVersion"] == "flow-cog-wmq-rg32f-v3"
+    assert runtime["representation"]["activitySupport"] == "nearest-texel-zero"
     assert runtime["representation"]["sampleRegistration"] == "pixel-center"
     assert runtime["representation"]["missingPageSemantics"] == "unavailable"
     assert runtime["quality"] == manifest["quality"]
@@ -383,7 +387,7 @@ def test_resume_promotes_batch_partial_success_and_only_builds_remaining_time(
     work = output.parent / f".{output.name}.work-{plan.request_sha256[:24]}"
     completed_t00 = work / "snapshot-builds" / "t00" / "cog-cache"
     assert verify_velocity_cog_snapshot(completed_t00)["contentVersion"].endswith(
-        "-t00-z9-v2"
+        "-t00-z9-v3"
     )
     assert not (work / "snapshot-builds" / "t01" / "cog-cache").exists()
     deep_verify_calls = []
@@ -619,6 +623,29 @@ def test_collection_validator_rejects_self_consistent_adapter_drift(
 
     with pytest.raises(ValueError, match="semantic contract"):
         _validate_collection_manifest_identity(manifest, runtime_bytes)
+
+
+@pytest.mark.parametrize("target", ["schema", "shared-schema", "page-index-adapter"])
+def test_collection_rejects_mixed_old_and_new_versions_after_rehash(built_collection, target):
+    manifest = json.loads(built_collection.manifest_path.read_text(encoding="utf-8"))
+    facts = manifest["construction"]["facts"]
+    if target == "schema":
+        manifest["schemaVersion"] = 2
+    elif target == "shared-schema":
+        facts["sharedSnapshotContract"].pop("snapshotSchemaVersion")
+    else:
+        facts["runtimePageIndex"]["adapterVersion"] = "flow-cog-wmq-rg32f-v2"
+    manifest["construction"]["sha256"] = hashlib.sha256(json.dumps(
+        facts, sort_keys=True, separators=(",", ":")
+    ).encode()).hexdigest()
+    with pytest.raises(ValueError, match="construction version"):
+        _validate_collection_manifest_identity(manifest, built_collection.runtime_manifest_path.read_bytes())
+
+
+@pytest.mark.parametrize("schema", [[], {}, True, 2.0, "3"])
+def test_collection_rejects_invalid_schema_types_as_contract_errors(schema):
+    with pytest.raises(ValueError, match="manifest contract"):
+        _validate_collection_manifest_identity({"schemaVersion": schema}, b"{}")
 
 
 def test_collection_validator_cross_binds_source_authority_to_children(

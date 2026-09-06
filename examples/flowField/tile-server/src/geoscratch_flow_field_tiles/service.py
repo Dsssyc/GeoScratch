@@ -388,6 +388,7 @@ class CogCollectionTileStore:
             or snapshot.get("velocityHash") != record.get("velocityHash")
             or snapshot_manifest.get("contentVersion") != record.get("contentVersion")
             or snapshot_manifest.get("sourceHash") != record.get("sourceHash")
+            or snapshot_manifest.get("schemaVersion") != self.collection_manifest.get("schemaVersion")
             or cog.get("sha256") != record.get("cogSha256")
             or cog.get("sizeBytes") != record.get("cogSizeBytes")
             or cog_path.name != cog.get("path")

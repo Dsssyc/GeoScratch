@@ -57,19 +57,17 @@ class TriangleLinearStencil:
             if int(self.vertex_indices.max(initial=-1)) >= values_by_vertex.shape[0]:
                 raise ValueError("prepared velocity field does not cover the stencil vertices")
             values = values_by_vertex[self.vertex_indices]
-            moving = np.all(
-                np.linalg.norm(values, axis=2)
-                > self.interpolation.stationary_epsilon,
-                axis=1,
-            )
+            interpolated = np.einsum("ki,kic->kc", self.weights, values, optimize=True)
+            if self.interpolation.stationary_policy == "require-all-moving":
+                moving = np.all(
+                    np.linalg.norm(values, axis=2) > self.interpolation.stationary_epsilon,
+                    axis=1,
+                )
+            else:
+                moving = np.linalg.norm(interpolated, axis=1) > self.interpolation.stationary_epsilon
             if moving.any():
                 selected_targets = self.target_indices[moving]
-                output[selected_targets] = np.einsum(
-                    "ki,kic->kc",
-                    self.weights[moving],
-                    values[moving],
-                    optimize=True,
-                )
+                output[selected_targets] = interpolated[moving]
                 advectable[selected_targets] = True
         return output.astype("<f4"), advectable
 
@@ -93,6 +91,41 @@ class BilinearSafeBlock:
     representable_advectable_count: int
     rounded_zero_count: int
     bilinear_safe_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class PixelCenterBlock:
+    """Un-eroded U/V samples; the consumer owns nearest-texel activity support."""
+
+    values: np.ndarray
+    candidate_count: int
+    zero_stored_candidate_count: int
+    stored_nonzero_count: int
+
+
+def apply_pixel_center_block(
+    stencil: TriangleLinearStencil,
+    unique_field: np.ndarray,
+    *,
+    block_size: int,
+) -> PixelCenterBlock:
+    """Store only the block's center samples without rejecting neighboring pixels."""
+    if isinstance(block_size, bool) or not isinstance(block_size, int) or block_size <= 0:
+        raise ValueError("block_size must be a positive integer")
+    side = block_size + 2
+    if stencil.target_count != side * side:
+        raise ValueError("pixel-center block requires the shared one-texel stencil halo")
+    values, raw = stencil.apply_unique_with_support(unique_field)
+    block = values.reshape(side, side, 2)[1:-1, 1:-1].copy()
+    raw = raw.reshape(side, side)[1:-1, 1:-1]
+    stored = np.any(block != 0.0, axis=2)
+    block[block == 0.0] = 0.0
+    return PixelCenterBlock(
+        values=block,
+        candidate_count=int(raw.sum()),
+        zero_stored_candidate_count=int((raw & ~stored).sum()),
+        stored_nonzero_count=int(stored.sum()),
+    )
 
 
 def apply_bilinear_safe_block(

@@ -77,7 +77,7 @@ def test_source_descriptor_freezes_all_verified_repository_hashes():
     assert raw["interpolation"] == {
         "kind": "triangle-linear",
         "stationaryEpsilon": 0.0,
-        "stationaryPolicy": "require-all-moving",
+        "stationaryPolicy": "interpolate",
     }
     assert raw["station"]["sha256"] == EXPECTED_STATION_HASH
     assert tuple(field["sha256"] for field in raw["fields"]) == EXPECTED_FIELD_HASHES
@@ -99,7 +99,7 @@ def test_source_loads_little_endian_pairs_and_typed_build_strategies(
 
     assert descriptor.station_count == 4
     assert descriptor.topology == DelaunayTopology(maximum_edge_ratio=None)
-    assert descriptor.interpolation == TriangleLinearInterpolation()
+    assert descriptor.interpolation == TriangleLinearInterpolation(stationary_policy="require-all-moving")
     assert dataset.stations.dtype == np.dtype("<f4")
     assert dataset.stations.shape == (4, 2)
     assert np.array_equal(dataset.stations, synthetic_source.stations.astype(np.float32))

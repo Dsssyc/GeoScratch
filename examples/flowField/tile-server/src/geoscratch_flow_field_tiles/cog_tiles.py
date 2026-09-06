@@ -13,7 +13,12 @@ import rasterio
 from rasterio.enums import MaskFlags
 from rasterio.windows import Window
 
-from .cog_overviews import reduce_semantic_overview_block
+from .cog import CogEncoding
+from .cog_overviews import (
+    LEGACY_SEMANTIC_OVERVIEW_POLICY,
+    SEMANTIC_OVERVIEW_POLICY,
+    reduce_semantic_overview_block,
+)
 
 
 TILE_SIZE = 256
@@ -62,6 +67,8 @@ class CogVelocityTileReader:
 
         manifest = json.loads(self.manifest_path.read_text(encoding="utf-8"))
         parsed = _parse_manifest(manifest, self.cog_path)
+        self._schema_version = parsed["schema_version"]
+        self._overview_policy = parsed["overview_policy"]
         self.time_index = parsed["time_index"]
         self.base_matrix = parsed["base_matrix"]
         self.source_bounds = parsed["source_bounds"]
@@ -71,6 +78,16 @@ class CogVelocityTileReader:
         self._coverage = _coverage(self.source_bounds, self.base_matrix)
         self._validate_container()
         self._derived_levels = self._derive_lower_levels()
+
+    @property
+    def schema_version(self) -> int:
+        """Immutable artifact schema controlling this reader's sampling semantics."""
+        return self._schema_version
+
+    @property
+    def overview_policy(self) -> str:
+        """Verified reduction policy shared by physical and derived overview pages."""
+        return self._overview_policy
 
     @property
     def supported_matrices(self) -> tuple[int, ...]:
@@ -152,6 +169,8 @@ class CogVelocityTileReader:
             )
             if len(dataset.overviews(1)) != len(self._overview_shapes):
                 raise ValueError("Flow Field COG overview count does not match its manifest")
+            if dataset.tags().get("GEOSCRATCH_OVERVIEW_POLICY") != self.overview_policy:
+                raise ValueError("Flow Field COG stored overview policy is inconsistent")
         for overview_index, width, height in self._overview_shapes:
             with rasterio.open(self.cog_path, OVERVIEW_LEVEL=overview_index) as dataset:
                 _validate_dataset(
@@ -226,7 +245,7 @@ class CogVelocityTileReader:
         )
         derived: dict[int, _ArrayLevel] = {}
         for matrix in range(self.minimum_physical_matrix - 1, MINIMUM_MATRIX - 1, -1):
-            source = _reduce_global_level(source, matrix)
+            source = _reduce_global_level(source, matrix, policy=self.overview_policy)
             derived[matrix] = source
         return derived
 
@@ -236,8 +255,11 @@ def _parse_manifest(manifest: object, cog_path: Path) -> dict[str, Any]:
         raise ValueError("Flow Field COG manifest must be an object")
     construction = manifest.get("construction")
     facts = construction.get("facts") if isinstance(construction, dict) else None
+    schema_version = manifest.get("schemaVersion")
     if (
-        manifest.get("schemaVersion") != 2
+        isinstance(schema_version, bool)
+        or not isinstance(schema_version, int)
+        or schema_version not in {2, 3}
         or manifest.get("artifactType") != "flow-field-cog-snapshot"
         or not isinstance(facts, dict)
     ):
@@ -258,11 +280,15 @@ def _parse_manifest(manifest: object, cog_path: Path) -> dict[str, Any]:
     grid = plan.get("grid")
     overviews = plan.get("overviewLevels")
     overview_policy = encoding.get("overviewPolicy")
+    expected_policy = (
+        LEGACY_SEMANTIC_OVERVIEW_POLICY if schema_version == 2
+        else SEMANTIC_OVERVIEW_POLICY
+    )
     if (
         not isinstance(grid, dict)
         or not isinstance(overviews, list)
         or not isinstance(overview_policy, dict)
-        or overview_policy.get("kind") != "recursive-conservative-vector-box-v1"
+        or encoding != CogEncoding(overview_policy=expected_policy).manifest()
         or grid.get("sampleRegistration") != "pixel-center"
         or encoding.get("bands") != 2
         or encoding.get("sampleType") != "float32"
@@ -343,7 +369,15 @@ def _parse_manifest(manifest: object, cog_path: Path) -> dict[str, Any]:
     ):
         raise ValueError("Flow Field COG geographic bounds are invalid")
     time_index = _canonical_integer(snapshot.get("timeIndex"), "timeIndex", 0)
+    expected_version = (
+        f"flow-cog-{expected_construction[:16]}-t{time_index:02d}-"
+        f"z{base_matrix}-v{schema_version}"
+    )
+    if manifest.get("contentVersion") != expected_version:
+        raise ValueError("Flow Field COG content identity is invalid")
     return {
+        "schema_version": schema_version,
+        "overview_policy": expected_policy,
         "time_index": time_index,
         "base_matrix": base_matrix,
         "source_bounds": tuple(float(value) for value in source_bounds),
@@ -372,7 +406,12 @@ def _validate_dataset(
         raise ValueError(f"{label} structure is invalid")
 
 
-def _reduce_global_level(source: _ArrayLevel, matrix: int) -> _ArrayLevel:
+def _reduce_global_level(
+    source: _ArrayLevel,
+    matrix: int,
+    *,
+    policy: str = SEMANTIC_OVERVIEW_POLICY,
+) -> _ArrayLevel:
     if matrix != source.matrix - 1:
         raise ValueError("Flow Field semantic reduction matrices must be contiguous")
     source_height, source_width, _channels = source.values.shape
@@ -393,6 +432,7 @@ def _reduce_global_level(source: _ArrayLevel, matrix: int) -> _ArrayLevel:
         child,
         output_height=parent_height,
         output_width=parent_width,
+        policy=policy,
     ).values
     _validate_values(reduced, f"Flow Field derived z{matrix} level")
     reduced.setflags(write=False)

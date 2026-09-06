@@ -123,7 +123,7 @@ def test_streamed_overviews_equal_the_recursive_whole_array_reference(
         assert artifact.candidate_valid_count == (
             reference_result.candidate_valid_count
         )
-        assert artifact.bilinear_safe_count == reference_result.bilinear_safe_count
+        assert artifact.stored_nonzero_count == reference_result.stored_nonzero_count
         assert artifact.cancellation_to_zero_count == (
             reference_result.cancellation_to_zero_count
         )
@@ -241,7 +241,7 @@ def test_semantic_verifier_rejects_a_strict_valid_forged_overview(tmp_path):
         base_transform = tuple(source.transform)[:6]
 
     forged_values = np.zeros((level.height, level.width, 2), dtype=np.float32)
-    forged_values[127, 127] = 1.0
+    forged_values[127, 127] = 2.0
     forged_path = tmp_path / "forged-overview.tif"
     with rasterio.open(
         forged_path,
@@ -268,7 +268,7 @@ def test_semantic_verifier_rejects_a_strict_valid_forged_overview(tmp_path):
         path=forged_path,
         pixel_sha256=_block_digest(forged_path),
         candidate_valid_count=1,
-        bilinear_safe_count=1,
+        stored_nonzero_count=1,
         cancellation_to_zero_count=0,
         size_bytes=forged_path.stat().st_size,
     )
@@ -289,10 +289,9 @@ def test_semantic_verifier_rejects_a_strict_valid_forged_overview(tmp_path):
     record = artifact.manifest()
     support = {
         "pixelSha256": _block_digest(base),
-        "rawAdvectablePixelCount": 4,
-        "representableAdvectablePixelCount": 4,
-        "roundedZeroPixelCount": 0,
-        "bilinearSafePixelCount": 4,
+        "candidatePixelCount": 4,
+        "zeroStoredCandidatePixelCount": 0,
+        "storedNonzeroPixelCount": 4,
         "overviewPolicy": encoding.manifest()["overviewPolicy"],
         "overviewLevels": [record],
     }

@@ -783,7 +783,7 @@ def validate_artifact_manifest(manifest: dict[str, Any]) -> None:
         or not isinstance(interpolation, dict)
         or interpolation.get("requested") != "triangle-linear"
         or interpolation.get("resolved") != "triangle-linear"
-        or interpolation.get("stationaryPolicy") != "require-all-moving"
+        or interpolation.get("stationaryPolicy") not in {"interpolate", "require-all-moving"}
         or isinstance(interpolation.get("stationaryEpsilon"), bool)
         or not _nonnegative_number(interpolation.get("stationaryEpsilon"))
         or not isinstance(mapping, list)

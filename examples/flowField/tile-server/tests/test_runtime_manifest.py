@@ -7,12 +7,17 @@ import pytest
 
 from geoscratch_flow_field_tiles.cog import build_velocity_cog_snapshot
 from geoscratch_flow_field_tiles.cog_tiles import CogVelocityTileReader
+from geoscratch_flow_field_tiles.cog_overviews import (
+    LEGACY_SEMANTIC_OVERVIEW_POLICY,
+    SEMANTIC_OVERVIEW_POLICY,
+)
 from geoscratch_flow_field_tiles.resolution import (
     FixedWebMercatorResolution,
     StationSpacingResolution,
 )
 from geoscratch_flow_field_tiles.runtime_manifest import (
     FLOW_RG32F_MEDIA_TYPE,
+    LEGACY_RUNTIME_ADAPTER_VERSION,
     RUNTIME_ADAPTER_VERSION,
     RUNTIME_MAXIMUM_MATRIX_CAP,
     RUNTIME_MINIMUM_MATRIX,
@@ -20,6 +25,8 @@ from geoscratch_flow_field_tiles.runtime_manifest import (
     build_cog_runtime_manifest,
     build_cog_runtime_page_index,
     runtime_matrices_for_source_ceiling,
+    runtime_adapter_version_for_snapshot_schema,
+    runtime_support_filter,
     validate_cog_runtime_manifest,
 )
 from geoscratch_flow_field_tiles.source import (
@@ -72,7 +79,7 @@ def runtime_fixture(synthetic_source, tmp_path_factory):
     )
     manifest = build_cog_runtime_manifest(
         descriptor,
-        "flow-cog-collection-synthetic-v2",
+        "flow-cog-collection-synthetic-v3",
         page_index,
         quality,
         source_ceiling_selection_relation="statistically-selected",
@@ -116,7 +123,7 @@ def test_page_index_freezes_time_matrix_row_column_order_and_actual_bytes(runtim
          "minTileCol": 427, "maxTileCol": 428},
     )
     assert page_index.page_set_sha256 == (
-        "991d45396c372531d2cd752b6897d43f0707b534c0a19ff27e1448c0c2c4077d"
+        "2672cd0c08d07fe6298394802abce03f3a49b630ff8fd794ea324954a7a082fa"
     )
     for page in (page_index.pages[0], page_index.pages[-1]):
         tile = readers[page["timeIndex"]].read_tile(
@@ -191,7 +198,9 @@ def test_runtime_manifest_is_a_schema_two_browser_contract(runtime_fixture):
 
     validate_cog_runtime_manifest(manifest)
     assert manifest["schemaVersion"] == 2
-    assert manifest["contentVersion"] == "flow-cog-collection-synthetic-v2"
+    assert manifest["contentVersion"] == "flow-cog-collection-synthetic-v3"
+    assert page_index.adapter_version == RUNTIME_ADAPTER_VERSION
+    assert page_index.manifest()["adapterVersion"] == RUNTIME_ADAPTER_VERSION
     assert manifest["stationCount"] == descriptor.station_count
     assert manifest["authority"] == descriptor.authority.manifest()
     assert [time["sampleKey"] for time in manifest["times"]] == ["t00", "t01"]
@@ -229,15 +238,16 @@ def test_runtime_manifest_is_a_schema_two_browser_contract(runtime_fixture):
         "tileHeight": 256,
         "unsupportedVelocity": [0.0, 0.0],
         "missingPageSemantics": "unavailable",
+        "activitySupport": "nearest-texel-zero",
     }
     assert manifest["quality"] == quality
     assert manifest["construction"] == {
         "algorithmVersion": RUNTIME_ADAPTER_VERSION,
         "adapterVersion": RUNTIME_ADAPTER_VERSION,
-        "collectionContentVersion": "flow-cog-collection-synthetic-v2",
+        "collectionContentVersion": "flow-cog-collection-synthetic-v3",
         "pageSetSha256": page_index.page_set_sha256,
         "levelConstruction": "cog-physical-or-global-semantic-recursive",
-        "supportFilter": "recursive-conservative-vector-box-v1",
+        "supportFilter": SEMANTIC_OVERVIEW_POLICY,
         "publicationPolicy": {
             "kind": "bounded-source-ceiling",
             "minimumMatrixId": str(RUNTIME_MINIMUM_MATRIX),
@@ -245,6 +255,61 @@ def test_runtime_manifest_is_a_schema_two_browser_contract(runtime_fixture):
             "resolvedMaximumMatrixId": "9",
         },
     }
+
+
+@pytest.mark.parametrize("adapter_version", (
+    LEGACY_RUNTIME_ADAPTER_VERSION,
+    RUNTIME_ADAPTER_VERSION,
+))
+@pytest.mark.parametrize("mutation", (
+    lambda value: value["construction"].update({"adapterVersion": "unsupported"}),
+    lambda value: value["construction"].update({"algorithmVersion": "unsupported"}),
+    lambda value: value["construction"].update({"supportFilter": "ordinary-average"}),
+    lambda value: value["representation"].update({"activitySupport": "bilinear"}),
+    lambda value: value.update({"schemaVersion": 3}),
+))
+def test_runtime_rejects_cross_version_sampling_contracts(runtime_fixture, adapter_version, mutation):
+    descriptor, _bounds, _readers, quality, page_index, _manifest = runtime_fixture
+    manifest = build_cog_runtime_manifest(
+        descriptor,
+        "isolated-adapter-contract",
+        replace(page_index, adapter_version=adapter_version),
+        quality,
+        source_ceiling_selection_relation="statistically-selected",
+    )
+    validate_cog_runtime_manifest(manifest)
+    mutation(manifest)
+    with pytest.raises(ValueError):
+        validate_cog_runtime_manifest(manifest)
+
+
+def test_runtime_requires_exact_adapter_specific_activity_support(runtime_fixture):
+    _descriptor, _bounds, _readers, _quality, _page_index, manifest = runtime_fixture
+    missing = copy.deepcopy(manifest)
+    missing["representation"].pop("activitySupport")
+    with pytest.raises(ValueError, match="representation"):
+        validate_cog_runtime_manifest(missing)
+    relabelled = copy.deepcopy(manifest)
+    relabelled["construction"].update({
+        "adapterVersion": LEGACY_RUNTIME_ADAPTER_VERSION,
+        "algorithmVersion": LEGACY_RUNTIME_ADAPTER_VERSION,
+        "supportFilter": LEGACY_SEMANTIC_OVERVIEW_POLICY,
+    })
+    with pytest.raises(ValueError, match="representation"):
+        validate_cog_runtime_manifest(relabelled)
+
+
+def test_runtime_rejects_unknown_snapshot_and_adapter_versions():
+    assert runtime_adapter_version_for_snapshot_schema(2) == LEGACY_RUNTIME_ADAPTER_VERSION
+    assert runtime_adapter_version_for_snapshot_schema(3) == RUNTIME_ADAPTER_VERSION
+    assert runtime_support_filter(LEGACY_RUNTIME_ADAPTER_VERSION) == LEGACY_SEMANTIC_OVERVIEW_POLICY
+    assert runtime_support_filter(RUNTIME_ADAPTER_VERSION) == SEMANTIC_OVERVIEW_POLICY
+    for value in (None, True, 1, 4, "3", 3.0):
+        with pytest.raises(ValueError):
+            runtime_adapter_version_for_snapshot_schema(value)
+    for value in (None, [], {}, "flow-cog-wmq-rg32f-v4"):
+        with pytest.raises(ValueError):
+            runtime_support_filter(value)
 
 
 @pytest.mark.parametrize(

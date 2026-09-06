@@ -2,6 +2,9 @@
 
 ## Status
 
+ADR-107 supersedes this record's repeated 3x3 erosion and defines the v3 source-pixel
+support contract. The v2 algorithm and measurements below remain historical facts.
+
 Accepted and implemented for the example-owned offline Flow Field resource tool. This
 supersedes ADR-091's explicit matrix override, z12 artifact, and no-overview clauses. ADR-094
 later supersedes only this decision's requirement that statistical selection be the sole base

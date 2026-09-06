@@ -10,12 +10,14 @@ from typing import Any
 import morecantile
 
 from .cog_tiles import TILE_BYTE_LENGTH, CogVelocityTileReader
+from .cog_overviews import LEGACY_SEMANTIC_OVERVIEW_POLICY, SEMANTIC_OVERVIEW_POLICY
 from .source import SourceDescriptor, source_descriptor_hash
 
 
 RUNTIME_MINIMUM_MATRIX = 4
 RUNTIME_MAXIMUM_MATRIX_CAP = 10
-RUNTIME_ADAPTER_VERSION = "flow-cog-wmq-rg32f-v2"
+LEGACY_RUNTIME_ADAPTER_VERSION = "flow-cog-wmq-rg32f-v2"
+RUNTIME_ADAPTER_VERSION = "flow-cog-wmq-rg32f-v3"
 FLOW_RG32F_MEDIA_TYPE = "application/vnd.geoscratch.flow-rg32f"
 WEB_MERCATOR_QUAD_URI = (
     "http://www.opengis.net/def/tilematrixset/OGC/1.0/WebMercatorQuad"
@@ -26,8 +28,30 @@ WEB_MERCATOR_LATITUDE_LIMIT = 85.0511287798066
 WEB_MERCATOR_QUAD = morecantile.tms.get("WebMercatorQuad")
 
 
+def runtime_adapter_version_for_snapshot_schema(schema_version: int) -> str:
+    """Resolve the immutable runtime sampling contract of a supported COG schema."""
+    if isinstance(schema_version, bool) or not isinstance(schema_version, int):
+        raise ValueError("Flow Field COG snapshot schema is invalid")
+    if schema_version == 2:
+        return LEGACY_RUNTIME_ADAPTER_VERSION
+    if schema_version == 3:
+        return RUNTIME_ADAPTER_VERSION
+    raise ValueError("Flow Field COG snapshot schema is unsupported")
+
+
+def runtime_support_filter(adapter_version: str) -> str:
+    """Return the exact stored and derived overview policy for one adapter."""
+    if adapter_version == LEGACY_RUNTIME_ADAPTER_VERSION:
+        return LEGACY_SEMANTIC_OVERVIEW_POLICY
+    if adapter_version == RUNTIME_ADAPTER_VERSION:
+        return SEMANTIC_OVERVIEW_POLICY
+    raise ValueError("Flow Field COG runtime adapter is unsupported")
+
+
 @dataclass(frozen=True, slots=True)
 class CogRuntimePageIndex:
+    """Immutable page identities and the homogeneous readers' sampling contract."""
+
     descriptor_sha256: str
     source_bounds: tuple[float, float, float, float]
     source_ceiling_matrix: int
@@ -38,9 +62,13 @@ class CogRuntimePageIndex:
     page_set_sha256: str
     time_maximum_speeds: tuple[dict[str, int | float], ...]
     maximum_speed: float
+    adapter_version: str
 
     def manifest(self) -> dict[str, Any]:
+        runtime_support_filter(self.adapter_version)
         return {
+            **({"adapterVersion": self.adapter_version}
+               if self.adapter_version == RUNTIME_ADAPTER_VERSION else {}),
             "descriptorSha256": self.descriptor_sha256,
             "sourceBounds": list(self.source_bounds),
             "sourceCeilingMatrixId": str(self.source_ceiling_matrix),
@@ -63,12 +91,24 @@ def build_cog_runtime_page_index(
     *,
     source_ceiling_matrix: int,
 ) -> CogRuntimePageIndex:
-    """Materialize deterministic RG32F page identities without a runtime revision."""
+    """Index homogeneous immutable readers, preserving their versioned sampling policy."""
     if not isinstance(descriptor, SourceDescriptor):
         raise TypeError("descriptor must be a SourceDescriptor")
     bounds = _source_bounds(source_bounds)
     selected_matrices = runtime_matrices_for_source_ceiling(source_ceiling_matrix)
     selected_times = _reader_time_indices(readers, descriptor.field_count)
+    adapter_version: str | None = None
+    for time_index in selected_times:
+        reader = readers[time_index]
+        if not isinstance(reader, CogVelocityTileReader):
+            raise ValueError("Flow Field COG runtime reader is invalid")
+        reader_adapter = runtime_adapter_version_for_snapshot_schema(reader.schema_version)
+        if reader.overview_policy != runtime_support_filter(reader_adapter):
+            raise ValueError("Flow Field COG reader support contract is inconsistent")
+        if adapter_version is None:
+            adapter_version = reader_adapter
+        elif reader_adapter != adapter_version:
+            raise ValueError("Flow Field COG readers do not share one runtime adapter")
 
     limits: tuple[dict[str, int | str], ...] | None = None
     pages: list[dict[str, Any]] = []
@@ -132,7 +172,7 @@ def build_cog_runtime_page_index(
             "pageMaximumSpeed": time_maximum,
         })
 
-    if limits is None:
+    if limits is None or adapter_version is None:
         raise RuntimeError("Flow Field COG page indexing produced no limits")
     page_set_sha256 = _page_set_sha256(pages)
     return CogRuntimePageIndex(
@@ -149,6 +189,7 @@ def build_cog_runtime_page_index(
             (float(record["pageMaximumSpeed"]) for record in time_maximum_speeds),
             default=0.0,
         ),
+        adapter_version=adapter_version,
     )
 
 
@@ -160,7 +201,7 @@ def build_cog_runtime_manifest(
     *,
     source_ceiling_selection_relation: str,
 ) -> dict[str, Any]:
-    """Bind one precomputed page index to a temporal collection revision."""
+    """Bind a page index to a collection revision without changing its sampling policy."""
     if not isinstance(descriptor, SourceDescriptor):
         raise TypeError("descriptor must be a SourceDescriptor")
     if not isinstance(collection_content_version, str) or not collection_content_version:
@@ -169,6 +210,8 @@ def build_cog_runtime_manifest(
         raise TypeError("page_index must be a CogRuntimePageIndex")
     if page_index.descriptor_sha256 != source_descriptor_hash(descriptor):
         raise ValueError("Flow Field runtime page index belongs to another descriptor")
+    adapter_version = page_index.adapter_version
+    support_filter = runtime_support_filter(adapter_version)
     quality_snapshot = _quality(quality)
     source_ceiling = _source_ceiling(
         page_index.source_ceiling_matrix,
@@ -251,6 +294,8 @@ def build_cog_runtime_manifest(
             "tileHeight": 256,
             "unsupportedVelocity": [0.0, 0.0],
             "missingPageSemantics": "unavailable",
+            **({"activitySupport": "nearest-texel-zero"}
+               if adapter_version == RUNTIME_ADAPTER_VERSION else {}),
         },
         "unit": descriptor.unit,
         "basis": descriptor.basis,
@@ -267,12 +312,12 @@ def build_cog_runtime_manifest(
         },
         "quality": quality_snapshot,
         "construction": {
-            "algorithmVersion": RUNTIME_ADAPTER_VERSION,
-            "adapterVersion": RUNTIME_ADAPTER_VERSION,
+            "algorithmVersion": adapter_version,
+            "adapterVersion": adapter_version,
             "collectionContentVersion": collection_content_version,
             "pageSetSha256": page_index.page_set_sha256,
             "levelConstruction": "cog-physical-or-global-semantic-recursive",
-            "supportFilter": "recursive-conservative-vector-box-v1",
+            "supportFilter": support_filter,
             "publicationPolicy": {
                 "kind": "bounded-source-ceiling",
                 "minimumMatrixId": str(RUNTIME_MINIMUM_MATRIX),
@@ -357,6 +402,8 @@ def validate_cog_runtime_manifest(manifest: object) -> None:
         or not isinstance(time_maximum_speeds, list)
     ):
         raise ValueError("Flow Field COG runtime manifest structure is invalid")
+    adapter_version = construction.get("adapterVersion")
+    support_filter = runtime_support_filter(adapter_version)
     bounds = _source_bounds(source.get("geographicBounds"))
     if source.get("crs") != "EPSG:4326" or projected != {
         "crs": WEB_MERCATOR_CRS_URI,
@@ -465,6 +512,8 @@ def validate_cog_runtime_manifest(manifest: object) -> None:
         "tileHeight": 256,
         "unsupportedVelocity": [0.0, 0.0],
         "missingPageSemantics": "unavailable",
+        **({"activitySupport": "nearest-texel-zero"}
+           if adapter_version == RUNTIME_ADAPTER_VERSION else {}),
     }:
         raise ValueError("Flow Field COG runtime representation is invalid")
 
@@ -531,12 +580,12 @@ def validate_cog_runtime_manifest(manifest: object) -> None:
     }:
         raise ValueError("Flow Field COG runtime page budgets are invalid")
     if construction != {
-        "algorithmVersion": RUNTIME_ADAPTER_VERSION,
-        "adapterVersion": RUNTIME_ADAPTER_VERSION,
+        "algorithmVersion": adapter_version,
+        "adapterVersion": adapter_version,
         "collectionContentVersion": manifest.get("contentVersion"),
         "pageSetSha256": construction.get("pageSetSha256"),
         "levelConstruction": "cog-physical-or-global-semantic-recursive",
-        "supportFilter": "recursive-conservative-vector-box-v1",
+        "supportFilter": support_filter,
         "publicationPolicy": {
             "kind": "bounded-source-ceiling",
             "minimumMatrixId": str(RUNTIME_MINIMUM_MATRIX),

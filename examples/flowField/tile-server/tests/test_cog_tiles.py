@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 
@@ -8,8 +9,12 @@ import pytest
 import rasterio
 from rasterio.windows import Window
 
-from geoscratch_flow_field_tiles.cog import build_velocity_cog_snapshot
-from geoscratch_flow_field_tiles.cog_overviews import reduce_semantic_overview_block
+from geoscratch_flow_field_tiles.cog import CogEncoding, build_velocity_cog_snapshot
+from geoscratch_flow_field_tiles.cog_overviews import (
+    LEGACY_SEMANTIC_OVERVIEW_POLICY,
+    SEMANTIC_OVERVIEW_POLICY,
+    reduce_semantic_overview_block,
+)
 from geoscratch_flow_field_tiles.cog_tiles import (
     TILE_BYTE_LENGTH,
     CogVelocityTileReader,
@@ -259,12 +264,7 @@ def test_unaligned_terminal_ifd_is_not_address_authority_and_z6_is_derived_globa
             },
             "overviewLevels": overview_levels,
         },
-        "encoding": {
-            "bands": 2,
-            "sampleType": "float32",
-            "componentOrder": ["u", "v"],
-            "overviewPolicy": {"kind": "recursive-conservative-vector-box-v1"},
-        },
+        "encoding": CogEncoding(overview_policy=LEGACY_SEMANTIC_OVERVIEW_POLICY).manifest(),
         "cog": {"path": cog_path.name, "sizeBytes": cog_path.stat().st_size},
     }
     manifest = {
@@ -279,12 +279,17 @@ def test_unaligned_terminal_ifd_is_not_address_authority_and_z6_is_derived_globa
             ).hexdigest(),
         },
     }
+    manifest["contentVersion"] = (
+        f"flow-cog-{manifest['construction']['sha256'][:16]}-t00-z15-v2"
+    )
 
     parsed = _parse_manifest(manifest, cog_path)
 
     assert min(parsed["physical_levels"]) == 7
     assert 6 not in parsed["physical_levels"]
     assert len(parsed["overview_shapes"]) == 9
+    assert parsed["schema_version"] == 2
+    assert parsed["overview_policy"] == LEGACY_SEMANTIC_OVERVIEW_POLICY
     source = _ArrayLevel(
         matrix=7,
         global_col=27_311,
@@ -327,3 +332,158 @@ def test_value_validation_rejects_nonfinite_and_negative_zero():
     negative_zero[0, 0, 1] = np.float32(-0.0)
     with pytest.raises(ValueError, match="negative zero"):
         _validate_values(negative_zero, "test")
+
+
+def _synthetic_versioned_reader(tmp_path, schema_version, *, time_index=0):
+    """Write small immutable pixels directly; never invoke the current COG builder."""
+    directory = tmp_path / f"snapshot-v{schema_version}-t{time_index}"
+    directory.mkdir()
+    cog_path = directory / f"flow-t{time_index:02d}.cog.tif"
+    policy = (LEGACY_SEMANTIC_OVERVIEW_POLICY if schema_version == 2
+              else SEMANTIC_OVERVIEW_POLICY)
+    values = np.broadcast_to(np.asarray([1.0, 2.0], dtype="<f4"), (256, 256, 2)).copy()
+    # Already-eroded base support with a stationary strip: frozen legacy input,
+    # independent of the evolving interpolation and overview builders.
+    values[[0, -1], :, :] = 0.0
+    values[:, [0, -1], :] = 0.0
+    values[:, 126:131, :] = 0.0
+    with rasterio.open(
+        cog_path, "w", driver="COG", width=256, height=256, count=2,
+        dtype="float32", crs="EPSG:3857", blocksize=256,
+        compress="DEFLATE", predictor=3,
+        transform=rasterio.transform.from_origin(100.0, 200.0, 1.0, 1.0),
+    ) as dataset:
+        dataset.write(np.moveaxis(values, 2, 0))
+        dataset.set_band_description(1, "U")
+        dataset.set_band_description(2, "V")
+        dataset.update_tags(GEOSCRATCH_OVERVIEW_POLICY=policy)
+    facts = {
+        "source": {"geographicBounds": [120.3, 31.69, 120.4, 31.71]},
+        "snapshot": {"timeIndex": time_index},
+        "plan": {
+            "grid": {
+                "matrixId": "9", "width": 256, "height": 256,
+                "sampleRegistration": "pixel-center",
+                "tileLimits": {"minTileRow": 208, "maxTileRow": 208,
+                               "minTileCol": 427, "maxTileCol": 427},
+            },
+            "overviewLevels": [],
+        },
+        "encoding": CogEncoding(overview_policy=policy).manifest(),
+        "cog": {"path": cog_path.name, "sizeBytes": cog_path.stat().st_size},
+    }
+    digest = hashlib.sha256(json.dumps(facts, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    manifest = {
+        "schemaVersion": schema_version,
+        "artifactType": "flow-field-cog-snapshot",
+        "contentVersion": f"flow-cog-{digest[:16]}-t{time_index:02d}-z9-v{schema_version}",
+        "construction": {"facts": facts, "sha256": digest},
+    }
+    manifest_path = directory / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    return CogVelocityTileReader(manifest_path, cog_path), values, manifest
+
+
+def _legacy_reference_levels(values):
+    # Scalar-contract NumPy reference, deliberately not the production reducer.
+    expected = {}
+    col, row = 427 * 256, 208 * 256
+    for matrix in range(8, 3, -1):
+        height, width, _ = values.shape
+        parent_col, parent_row = col // 2, row // 2
+        parent_width = (col + width + 1) // 2 - parent_col
+        parent_height = (row + height + 1) // 2 - parent_row
+        padded = np.zeros((2 * (parent_height + 2), 2 * (parent_width + 2), 2), dtype="<f4")
+        x, y = col - 2 * (parent_col - 1), row - 2 * (parent_row - 1)
+        padded[y:y + height, x:x + width] = values
+        children = (padded[0::2, 0::2], padded[0::2, 1::2],
+                    padded[1::2, 0::2], padded[1::2, 1::2])
+        candidate = np.logical_and.reduce([np.any(child != 0.0, axis=2) for child in children])
+        means = sum(child.astype(np.float64) for child in children) / 4.0
+        means = means.astype("<f4")
+        candidate &= np.any(means != 0.0, axis=2)
+        safe = np.logical_and.reduce([
+            candidate[y:y + parent_height, x:x + parent_width]
+            for y in range(3) for x in range(3)
+        ])
+        values = means[1:-1, 1:-1].copy()
+        values[~safe] = 0.0
+        col, row = parent_col, parent_row
+        expected[matrix] = (col, row, values)
+    return expected
+
+
+def test_legacy_reader_preserves_old_derived_bytes_and_runtime_contract(tmp_path, synthetic_source):
+    from geoscratch_flow_field_tiles.runtime_manifest import (
+        LEGACY_RUNTIME_ADAPTER_VERSION,
+        build_cog_runtime_manifest,
+        build_cog_runtime_page_index,
+        validate_cog_runtime_manifest,
+    )
+    from geoscratch_flow_field_tiles.source import read_source_descriptor
+
+    reader, values, _manifest = _synthetic_versioned_reader(tmp_path, 2)
+    assert reader.schema_version == 2
+    assert reader.overview_policy == LEGACY_SEMANTIC_OVERVIEW_POLICY
+    for matrix, (col, row, expected) in _legacy_reference_levels(values).items():
+        actual = reader._derived_levels[matrix]
+        assert (actual.global_col, actual.global_row) == (col, row)
+        assert actual.values.tobytes() == expected.tobytes()
+        min_row, max_row, min_col, max_col = reader.tile_limits(matrix)
+        for tile_row in range(min_row, max_row + 1):
+            for tile_col in range(min_col, max_col + 1):
+                tile = reader.read_tile(matrix, tile_row, tile_col)
+                expected_tile = _expected_array_tile((col, row, expected), tile_row, tile_col)
+                assert tile.content == expected_tile.tobytes()
+                assert tile.sha256 == hashlib.sha256(expected_tile.tobytes()).hexdigest()
+    descriptor = read_source_descriptor(synthetic_source.descriptor_path)
+    page_index = build_cog_runtime_page_index(
+        descriptor, {0: reader}, reader.source_bounds, source_ceiling_matrix=9,
+    )
+    assert page_index.adapter_version == LEGACY_RUNTIME_ADAPTER_VERSION
+    assert "adapterVersion" not in page_index.manifest()
+    runtime = build_cog_runtime_manifest(
+        descriptor, "synthetic-legacy-v2", page_index,
+        {"artifactRole": "reconstruction-prototype", "particleSimulation": "not-approved",
+         "approvalReason": "inferred-topology-and-source-semantics-unapproved"},
+        source_ceiling_selection_relation="statistically-selected",
+    )
+    validate_cog_runtime_manifest(runtime)
+    assert runtime["schemaVersion"] == 2
+    assert "activitySupport" not in runtime["representation"]
+    assert runtime["construction"]["adapterVersion"] == LEGACY_RUNTIME_ADAPTER_VERSION
+    assert runtime["construction"]["supportFilter"] == LEGACY_SEMANTIC_OVERVIEW_POLICY
+
+
+def test_page_index_rejects_mixed_legacy_and_current_readers(tmp_path, synthetic_source):
+    from geoscratch_flow_field_tiles.runtime_manifest import build_cog_runtime_page_index
+    from geoscratch_flow_field_tiles.source import read_source_descriptor
+
+    legacy, values, _manifest = _synthetic_versioned_reader(tmp_path, 2)
+    current, _values, _manifest = _synthetic_versioned_reader(tmp_path, 3, time_index=1)
+    assert np.count_nonzero(current._derived_levels[8].values) > np.count_nonzero(legacy._derived_levels[8].values)
+    with pytest.raises(ValueError, match="one runtime adapter"):
+        build_cog_runtime_page_index(
+            read_source_descriptor(synthetic_source.descriptor_path),
+            {0: legacy, 1: current}, legacy.source_bounds, source_ceiling_matrix=9,
+        )
+
+
+@pytest.mark.parametrize("schema_version", (2, 3))
+@pytest.mark.parametrize("mutation", (
+    lambda manifest: manifest.update({"schemaVersion": 5}),
+    lambda manifest: manifest.update({"contentVersion": "wrong-v3"}),
+    lambda manifest: manifest["construction"]["facts"]["encoding"]["overviewPolicy"].update({
+        "bilinearSafety": "ordinary-bilinear",
+    }),
+    lambda manifest: manifest.update({"schemaVersion": 5 - manifest["schemaVersion"]}),
+))
+def test_reader_rejects_rehashed_version_policy_mixtures(tmp_path, schema_version, mutation):
+    reader, _values, manifest = _synthetic_versioned_reader(tmp_path, schema_version)
+    changed = copy.deepcopy(manifest)
+    mutation(changed)
+    changed["construction"]["sha256"] = hashlib.sha256(json.dumps(
+        changed["construction"]["facts"], sort_keys=True, separators=(",", ":"),
+    ).encode()).hexdigest()
+    with pytest.raises(ValueError):
+        _parse_manifest(changed, reader.cog_path)

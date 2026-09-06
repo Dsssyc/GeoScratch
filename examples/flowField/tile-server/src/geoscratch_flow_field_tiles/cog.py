@@ -26,6 +26,7 @@ from rio_cogeo.cogeo import cog_validate
 from .contracts import InterpolationSpec, TopologySpec, resolve_interpolation, resolve_topology
 from .cog_overviews import (
     SEMANTIC_OVERVIEW_POLICY,
+    LEGACY_SEMANTIC_OVERVIEW_POLICY,
     SemanticOverviewArtifact,
     SemanticOverviewLevel,
     SemanticOverviewProgress,
@@ -35,7 +36,7 @@ from .cog_overviews import (
     write_explicit_overview_vrt,
     write_semantic_overviews,
 )
-from .interpolation import apply_bilinear_safe_block, prepare_triangle_linear_stencil
+from .interpolation import apply_pixel_center_block, prepare_triangle_linear_stencil
 from .job_control import ProgressEmitter, ProgressSink
 from .resolution import (
     FixedWebMercatorResolution,
@@ -112,7 +113,7 @@ class CogEncoding:
             raise ValueError("compression_level must be 9")
         if self.big_tiff != "IF_SAFER":
             raise ValueError("big_tiff must be IF_SAFER")
-        if self.overview_policy != SEMANTIC_OVERVIEW_POLICY:
+        if not isinstance(self.overview_policy, str) or self.overview_policy not in {SEMANTIC_OVERVIEW_POLICY, LEGACY_SEMANTIC_OVERVIEW_POLICY}:
             raise ValueError(
                 f"overview_policy must be {SEMANTIC_OVERVIEW_POLICY}"
             )
@@ -148,7 +149,11 @@ class CogEncoding:
                     "fixed-row-major-float64-mean-cast-float32-once"
                 ),
                 "roundedZero": "non-advectable-never-resurrected",
-                "bilinearSafety": "all-3x3-representable-candidates",
+                **({"bilinearSafety": "all-3x3-representable-candidates"}
+                   if self.overview_policy == LEGACY_SEMANTIC_OVERVIEW_POLICY else {
+                       "activitySupport": "nearest-texel-zero",
+                       "spatialErosion": "none",
+                   }),
                 "outsideExtent": "non-advectable",
                 "signedZero": "canonical-positive",
                 "recursion": "immediately-finer-stored-level",
@@ -395,20 +400,16 @@ class _CogBaseWriteState:
     item: _CogBaseWriteItem
     dataset: Any
     pixel_digest: Any
-    raw_advectable_count: int = 0
-    representable_advectable_count: int = 0
-    rounded_zero_count: int = 0
-    bilinear_safe_count: int = 0
+    candidate_count: int = 0
+    zero_stored_candidate_count: int = 0
+    stored_nonzero_count: int = 0
 
     def support_manifest(self) -> dict[str, Any]:
         return {
             "pixelSha256": self.pixel_digest.hexdigest(),
-            "rawAdvectablePixelCount": self.raw_advectable_count,
-            "representableAdvectablePixelCount": (
-                self.representable_advectable_count
-            ),
-            "roundedZeroPixelCount": self.rounded_zero_count,
-            "bilinearSafePixelCount": self.bilinear_safe_count,
+            "candidatePixelCount": self.candidate_count,
+            "zeroStoredCandidatePixelCount": self.zero_stored_candidate_count,
+            "storedNonzeroPixelCount": self.stored_nonzero_count,
         }
 
 
@@ -727,6 +728,8 @@ def _write_intermediate_tiff_batch(
     interpolation,
     encoding: CogEncoding,
 ) -> tuple[dict[str, Any], ...]:
+    if encoding.overview_policy != SEMANTIC_OVERVIEW_POLICY:
+        raise ValueError("New Flow Field snapshots require the v3 support policy")
     batch = tuple(items)
     if not batch:
         raise ValueError("Flow Field COG base batch cannot be empty")
@@ -828,11 +831,10 @@ def _write_intermediate_tiff_batch_in_environment(
                     COG_BLOCK_SIZE,
                 )
                 for state in states:
-                    rendered = apply_bilinear_safe_block(
+                    rendered = apply_pixel_center_block(
                         stencil,
                         state.item.unique_field,
                         block_size=COG_BLOCK_SIZE,
-                        require_representable_motion=True,
                     )
                     band_first = np.moveaxis(rendered.values, 2, 0).astype(
                         "<f4",
@@ -843,12 +845,9 @@ def _write_intermediate_tiff_batch_in_environment(
                         window=window,
                     )
                     state.pixel_digest.update(band_first.tobytes(order="C"))
-                    state.raw_advectable_count += rendered.raw_advectable_count
-                    state.representable_advectable_count += (
-                        rendered.representable_advectable_count
-                    )
-                    state.rounded_zero_count += rendered.rounded_zero_count
-                    state.bilinear_safe_count += rendered.bilinear_safe_count
+                    state.candidate_count += rendered.candidate_count
+                    state.zero_stored_candidate_count += rendered.zero_stored_candidate_count
+                    state.stored_nonzero_count += rendered.stored_nonzero_count
                 completed_blocks += 1
                 if _staging_observation_due(completed_blocks):
                     for state in states:
@@ -949,7 +948,7 @@ def _validate_cog_in_environment(
             or root_tags.get("GEOSCRATCH_SOURCE_HASH") != expected_source_hash
             or root_tags.get("GEOSCRATCH_TIME_INDEX") != str(expected_time_index)
             or root_tags.get("GEOSCRATCH_OVERVIEW_POLICY")
-            != SEMANTIC_OVERVIEW_POLICY
+            != encoding.overview_policy
             or root_tags.get("GEOSCRATCH_OVERVIEW_COUNT")
             != str(len(expected_overviews))
             or root_tags.get("GEOSCRATCH_OVERVIEW_FACTORS")
@@ -983,9 +982,10 @@ def _validate_cog_in_environment(
         total_pixels=grid.width * grid.height,
         stored_nonzero_count=base_stored_nonzero_count,
         expected_pixel_sha256=expected_pixel_sha256,
+        overview_policy=encoding.overview_policy,
     )
     validated_overviews: list[dict[str, Any]] = []
-    previous_safe_count = base_stored_nonzero_count
+    previous_stored_count = base_stored_nonzero_count
     for index, expected in enumerate(expected_overviews):
         overview_digest = hashlib.sha256()
         overview_stored_nonzero_count = 0
@@ -1056,6 +1056,7 @@ def _validate_cog_in_environment(
                     np.moveaxis(child, 0, 2),
                     output_height=int(window.height),
                     output_width=int(window.width),
+                    policy=encoding.overview_policy,
                 )
                 expected_values = np.moveaxis(reduced.values, 2, 0)
                 if not np.array_equal(values, expected_values):
@@ -1081,11 +1082,12 @@ def _validate_cog_in_environment(
         _validate_overview_support_counts(
             expected,
             stored_nonzero_count=overview_stored_nonzero_count,
-            previous_safe_count=previous_safe_count,
+            previous_stored_count=previous_stored_count,
             observed_candidate_count=observed_candidate_count,
             observed_cancellation_count=observed_cancellation_count,
+            overview_policy=encoding.overview_policy,
         )
-        previous_safe_count = overview_stored_nonzero_count
+        previous_stored_count = overview_stored_nonzero_count
         validated_overviews.append({
             "index": index,
             "nominalFactor": expected["nominalFactor"],
@@ -1111,13 +1113,29 @@ def _validate_base_support_counts(
     total_pixels: int,
     stored_nonzero_count: int,
     expected_pixel_sha256: str,
+    overview_policy: str,
 ) -> None:
+    if overview_policy == SEMANTIC_OVERVIEW_POLICY:
+        if set(support) != {"pixelSha256", "candidatePixelCount", "storedNonzeroPixelCount",
+                            "zeroStoredCandidatePixelCount", "overviewPolicy", "overviewLevels"}:
+            raise ValueError("Flow Field COG base support facts are invalid")
+        candidate, stored, zero = (support.get(key) for key in (
+            "candidatePixelCount", "storedNonzeroPixelCount", "zeroStoredCandidatePixelCount"))
+        if any(isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= total_pixels
+               for value in (candidate, stored, zero)):
+            raise ValueError("Flow Field COG base support counts are invalid")
+        if (support["pixelSha256"] != expected_pixel_sha256 or stored != stored_nonzero_count or
+            stored + zero != candidate):
+            raise ValueError("Flow Field COG base support identity is invalid")
+        return
+    stored_count_key = ("bilinearSafePixelCount" if overview_policy == LEGACY_SEMANTIC_OVERVIEW_POLICY
+                        else "storedNonzeroPixelCount")
     expected_keys = {
         "pixelSha256",
         "rawAdvectablePixelCount",
         "representableAdvectablePixelCount",
         "roundedZeroPixelCount",
-        "bilinearSafePixelCount",
+        stored_count_key,
         "overviewPolicy",
         "overviewLevels",
     }
@@ -1129,7 +1147,7 @@ def _validate_base_support_counts(
             "rawAdvectablePixelCount",
             "representableAdvectablePixelCount",
             "roundedZeroPixelCount",
-            "bilinearSafePixelCount",
+            stored_count_key,
         )
     )
     if any(
@@ -1139,12 +1157,12 @@ def _validate_base_support_counts(
         for value in counts
     ):
         raise ValueError("Flow Field COG base support counts are invalid")
-    raw, representable, rounded_zero, bilinear_safe = counts
+    raw, representable, rounded_zero, stored = counts
     if (
         support.get("pixelSha256") != expected_pixel_sha256
         or representable + rounded_zero != raw
-        or bilinear_safe > representable
-        or bilinear_safe != stored_nonzero_count
+        or stored > representable
+        or stored != stored_nonzero_count
     ):
         raise ValueError("Flow Field COG base support identity is invalid")
 
@@ -1153,10 +1171,13 @@ def _validate_overview_support_counts(
     record: dict[str, Any],
     *,
     stored_nonzero_count: int,
-    previous_safe_count: int,
+    previous_stored_count: int,
     observed_candidate_count: int,
     observed_cancellation_count: int,
+    overview_policy: str,
 ) -> None:
+    stored_count_key = ("bilinearSafePixelCount" if overview_policy == LEGACY_SEMANTIC_OVERVIEW_POLICY
+                        else "storedNonzeroPixelCount")
     expected_keys = {
         "index",
         "nominalFactor",
@@ -1168,7 +1189,7 @@ def _validate_overview_support_counts(
         "rawBytes",
         "pixelSha256",
         "candidateValidPixelCount",
-        "bilinearSafePixelCount",
+        stored_count_key,
         "cancellationToZeroPixelCount",
         "intermediateSizeBytes",
     }
@@ -1179,7 +1200,7 @@ def _validate_overview_support_counts(
         record.get(key)
         for key in (
             "candidateValidPixelCount",
-            "bilinearSafePixelCount",
+            stored_count_key,
             "cancellationToZeroPixelCount",
         )
     )
@@ -1190,18 +1211,19 @@ def _validate_overview_support_counts(
         for value in counts
     ):
         raise ValueError("Flow Field COG overview support counts are invalid")
-    candidate, bilinear_safe, cancellation = counts
+    candidate, stored, cancellation = counts
     intermediate_size = record.get("intermediateSizeBytes")
     if (
         isinstance(intermediate_size, bool)
         or not isinstance(intermediate_size, int)
         or intermediate_size <= 0
-        or bilinear_safe > candidate
+        or stored > candidate
         or candidate + cancellation > total_pixels
         or candidate != observed_candidate_count
         or cancellation != observed_cancellation_count
-        or bilinear_safe != stored_nonzero_count
-        or 4 * (candidate + cancellation) > previous_safe_count
+        or stored != stored_nonzero_count
+        or (overview_policy == SEMANTIC_OVERVIEW_POLICY and stored != candidate)
+        or 4 * (candidate + cancellation) > previous_stored_count
     ):
         raise ValueError("Flow Field COG overview support identity is invalid")
 
@@ -1278,14 +1300,14 @@ def _build_manifest(
     ).hexdigest()
     time_index = snapshot_facts["timeIndex"]
     return {
-        "schemaVersion": 2,
+        "schemaVersion": 3,
         "artifactType": "flow-field-cog-snapshot",
         "datasetId": source_facts["datasetId"],
         "sourceRevision": source_facts["sourceRevision"],
         "sourceHash": source_facts["sourceHash"],
         "contentVersion": (
             f"flow-cog-{construction_sha256[:16]}-t{time_index:02d}-"
-            f"z{plan.grid.matrix_id}-v2"
+            f"z{plan.grid.matrix_id}-v3"
         ),
         "snapshot": snapshot_facts,
         "source": source_facts,
@@ -1571,6 +1593,8 @@ def build_velocity_cog_snapshot(
 ) -> CogBuildResult:
     if not isinstance(encoding, CogEncoding):
         raise TypeError("encoding must be a CogEncoding")
+    if encoding.overview_policy != SEMANTIC_OVERVIEW_POLICY:
+        raise ValueError("New Flow Field snapshots require the v3 support policy")
     output = _safe_cog_output(output_directory)
     emitter = ProgressEmitter(
         f"flow-cog-{uuid.uuid4().hex}" if job_id is None else job_id,
@@ -1702,7 +1726,9 @@ def verify_velocity_cog_snapshot(
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     if (
         not isinstance(manifest, dict)
-        or manifest.get("schemaVersion") != 2
+        or isinstance(manifest.get("schemaVersion"), bool)
+        or not isinstance(manifest.get("schemaVersion"), int)
+        or manifest.get("schemaVersion") not in {2, 3}
         or manifest.get("artifactType") != "flow-field-cog-snapshot"
         or manifest.get("quality")
         != {
@@ -1851,7 +1877,9 @@ def verify_velocity_cog_snapshot(
     if not preflight["budget"]["approved"]:
         raise ValueError("Flow Field COG output was not budget-approved")
     _validate_staging_manifest(preflight["staging"], preflight["budget"])
-    encoding = CogEncoding()
+    schema_version = manifest["schemaVersion"]
+    encoding = CogEncoding(overview_policy=(LEGACY_SEMANTIC_OVERVIEW_POLICY
+        if schema_version == 2 else SEMANTIC_OVERVIEW_POLICY))
     if encoding_facts != encoding.manifest():
         raise ValueError("Flow Field COG encoding identity is invalid")
     overview_records = support_facts.get("overviewLevels")
@@ -1873,7 +1901,7 @@ def verify_velocity_cog_snapshot(
         ):
             raise ValueError("Flow Field COG overview support facts are invalid")
     expected_content_version = (
-        f"flow-cog-{expected_construction[:16]}-t{time_index:02d}-z{matrix_id}-v2"
+        f"flow-cog-{expected_construction[:16]}-t{time_index:02d}-z{matrix_id}-v{schema_version}"
     )
     if manifest.get("contentVersion") != expected_content_version:
         raise ValueError("Flow Field COG content identity is invalid")

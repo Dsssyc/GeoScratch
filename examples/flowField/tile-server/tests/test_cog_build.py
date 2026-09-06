@@ -19,6 +19,7 @@ from geoscratch_flow_field_tiles.resolution import (
     FixedWebMercatorResolution,
     StationSpacingResolution,
 )
+from geoscratch_flow_field_tiles.contracts import TriangleLinearInterpolation
 
 
 class RecordingProgressSink:
@@ -110,7 +111,7 @@ def _rewrite_construction_identity(output, mutate) -> dict:
     time_index = facts["snapshot"]["timeIndex"]
     matrix_id = facts["plan"]["grid"]["matrixId"]
     content_version = (
-        f"flow-cog-{construction_sha[:16]}-t{time_index:02d}-z{matrix_id}-v2"
+        f"flow-cog-{construction_sha[:16]}-t{time_index:02d}-z{matrix_id}-v{manifest['schemaVersion']}"
     )
     manifest["contentVersion"] = content_version
     manifest_path.write_text(
@@ -168,7 +169,7 @@ def test_snapshot_builds_one_valid_two_band_float32_cog_with_semantic_overviews(
         assert dataset.overviews(1) == [2]
         assert dataset.overviews(2) == [2]
         assert dataset.tags()["GEOSCRATCH_OVERVIEW_POLICY"] == (
-            "recursive-conservative-vector-box-v1"
+            "recursive-zero-preserving-vector-box-v2"
         )
         assert dataset.transform.e < 0
         assert np.isfinite(dataset.read((1, 2))).all()
@@ -186,8 +187,8 @@ def test_cog_manifest_records_statistical_selection_and_unapproved_role(built_co
     )
 
     assert manifest["artifactType"] == "flow-field-cog-snapshot"
-    assert manifest["schemaVersion"] == 2
-    assert manifest["contentVersion"] == "flow-cog-f0a7774998ebe7cf-t00-z9-v2"
+    assert manifest["schemaVersion"] == 3
+    assert manifest["contentVersion"] == f"flow-cog-{manifest['construction']['sha256'][:16]}-t00-z9-v3"
     assert manifest["snapshot"]["timeIndex"] == 0
     assert manifest["construction"]["facts"]["plan"]["matrixDecision"] == {
         "selectedMatrixId": "9",
@@ -196,7 +197,7 @@ def test_cog_manifest_records_statistical_selection_and_unapproved_role(built_co
     }
     assert manifest["construction"]["facts"]["encoding"]["overviewPolicy"][
         "kind"
-    ] == "recursive-conservative-vector-box-v1"
+    ] == "recursive-zero-preserving-vector-box-v2"
     assert manifest["construction"]["facts"]["encoding"]["pixelDigestLayout"] == {
         "blockOrder": "top-to-bottom-left-to-right",
         "withinBlock": "band-first-north-up-row-major",
@@ -218,6 +219,34 @@ def test_cog_manifest_records_statistical_selection_and_unapproved_role(built_co
         "kind": "geoscratch-flow-field-cog-artifact",
         "contentVersion": manifest["contentVersion"],
     }
+
+
+def test_new_cog_interpolates_zero_vertex_without_rejecting_its_entire_triangle(synthetic_source, tmp_path):
+    source = tmp_path / "mixed-zero-source"
+    shutil.copytree(synthetic_source.directory, source)
+    descriptor_path = source / "source-dataset.json"
+    descriptor = json.loads(descriptor_path.read_text())
+    values = synthetic_source.fields[0].copy()
+    values[0] = [0.0, 0.0]
+    payload = np.asarray(values, dtype="<f4").tobytes()
+    (source / descriptor["fields"][0]["file"]).write_bytes(payload)
+    descriptor["fields"][0]["sha256"] = hashlib.sha256(payload).hexdigest()
+    descriptor["interpolation"]["stationaryPolicy"] = "interpolate"
+    descriptor_path.write_text(json.dumps(descriptor))
+    outputs = []
+    for policy in ("interpolate", "require-all-moving"):
+        built = build_velocity_cog_snapshot(source, tmp_path / policy / "cog-cache",
+            descriptor_path=descriptor_path, resolution=FixedWebMercatorResolution(10),
+            interpolation=TriangleLinearInterpolation(stationary_policy=policy))
+        manifest = json.loads(built.manifest_path.read_text())
+        support = manifest["construction"]["facts"]["support"]
+        assert manifest["schemaVersion"] == 3
+        assert "bilinearSafePixelCount" not in support
+        assert support["candidatePixelCount"] == support["storedNonzeroPixelCount"]
+        with rasterio.open(built.cog_path) as dataset:
+            outputs.append(np.any(dataset.read((1, 2)) != 0.0, axis=0))
+    assert np.count_nonzero(outputs[0] & ~outputs[1]) > 0
+    assert np.all(outputs[1] <= outputs[0])
 
 
 def test_schema_3_float_time_and_authority_round_trip_through_cog_manifest(
@@ -358,7 +387,7 @@ def test_batch_base_writer_reuses_spatial_stencils_and_preserves_each_snapshot(
     )
     real_centers = cog_module._cog_pixel_centers_window
     real_prepare = cog_module.prepare_triangle_linear_stencil
-    real_apply = cog_module.apply_bilinear_safe_block
+    real_apply = cog_module.apply_pixel_center_block
     calls = {"centers": 0, "prepare": 0, "apply": 0}
 
     def counted_centers(*args, **kwargs):
@@ -375,7 +404,7 @@ def test_batch_base_writer_reuses_spatial_stencils_and_preserves_each_snapshot(
 
     monkeypatch.setattr(cog_module, "_cog_pixel_centers_window", counted_centers)
     monkeypatch.setattr(cog_module, "prepare_triangle_linear_stencil", counted_prepare)
-    monkeypatch.setattr(cog_module, "apply_bilinear_safe_block", counted_apply)
+    monkeypatch.setattr(cog_module, "apply_pixel_center_block", counted_apply)
 
     sequential_items = tuple(
         _base_write_item(
@@ -474,7 +503,7 @@ def test_batch_base_writer_closes_and_removes_every_output_on_failure(
             zip(snapshots, unique_fields, strict=True)
         )
     )
-    real_apply = cog_module.apply_bilinear_safe_block
+    real_apply = cog_module.apply_pixel_center_block
     real_rasterio_open = cog_module.rasterio.open
     apply_count = 0
     opened_writers = []
@@ -492,7 +521,7 @@ def test_batch_base_writer_closes_and_removes_every_output_on_failure(
         return real_apply(*args, **kwargs)
 
     monkeypatch.setattr(cog_module.rasterio, "open", record_open_writer)
-    monkeypatch.setattr(cog_module, "apply_bilinear_safe_block", fail_second_apply)
+    monkeypatch.setattr(cog_module, "apply_pixel_center_block", fail_second_apply)
 
     with pytest.raises(RuntimeError, match="synthetic batch base failure"):
         cog_module._write_intermediate_tiff_batch(
@@ -524,7 +553,7 @@ def test_snapshot_build_reports_ordered_structured_stage_progress(
         job_id="snapshot-job-7",
     )
 
-    assert result.content_version == "flow-cog-f0a7774998ebe7cf-t00-z9-v2"
+    assert result.content_version.endswith("-t00-z9-v3")
     assert [event.sequence for event in sink.events] == list(
         range(1, len(sink.events) + 1)
     )
@@ -785,9 +814,9 @@ def test_verifier_rejects_self_consistent_false_support_counts(
     def mutate(manifest):
         support = manifest["construction"]["facts"]["support"]
         if scope == "base":
-            support["bilinearSafePixelCount"] += 1
+            support["storedNonzeroPixelCount"] += 1
         else:
-            support["overviewLevels"][0]["bilinearSafePixelCount"] += 1
+            support["overviewLevels"][0]["storedNonzeroPixelCount"] += 1
 
     _rewrite_construction_identity(output, mutate)
 

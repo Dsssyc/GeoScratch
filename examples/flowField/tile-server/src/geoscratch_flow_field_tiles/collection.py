@@ -52,6 +52,8 @@ from .runtime_manifest import (
     build_cog_runtime_page_index,
     build_cog_runtime_manifest,
     runtime_matrices_for_source_ceiling,
+    runtime_adapter_version_for_snapshot_schema,
+    runtime_support_filter,
     validate_cog_runtime_manifest,
 )
 from .job_control import (
@@ -80,7 +82,7 @@ DEFAULT_COG_COLLECTION_DIRECTORY = TILE_SERVER_ROOT / "cog-collection"
 COG_COLLECTION_MARKER = ".flow-field-cog-collection.json"
 COG_COLLECTION_WORK_MARKER = ".flow-field-cog-collection-work.json"
 COG_SNAPSHOT_WORK_MARKER = ".flow-field-cog-snapshot-work.json"
-COG_COLLECTION_SCHEMA_VERSION = 2
+COG_COLLECTION_SCHEMA_VERSION = 3
 COG_COLLECTION_ADAPTER_VERSION = RUNTIME_ADAPTER_VERSION
 MINIMUM_COLLECTION_SOURCE_CEILING = 9
 
@@ -100,10 +102,12 @@ def _runtime_matrix_contract(source_ceiling_matrix: int) -> dict[str, Any]:
     }
 
 
-def _runtime_adapter_contract(source_ceiling_matrix: int) -> dict[str, Any]:
+def _runtime_adapter_contract(
+    source_ceiling_matrix: int, schema_version: int = COG_COLLECTION_SCHEMA_VERSION
+) -> dict[str, Any]:
     matrix_contract = _runtime_matrix_contract(source_ceiling_matrix)
     return {
-        "version": COG_COLLECTION_ADAPTER_VERSION,
+        "version": runtime_adapter_version_for_snapshot_schema(schema_version),
         **matrix_contract,
         "advertisedMinimumMatrixId": matrix_contract["tileMatrixIds"][0],
         "advertisedMaximumMatrixId": matrix_contract["tileMatrixIds"][-1],
@@ -247,7 +251,9 @@ def _is_owned_collection_directory(output: Path) -> bool:
     }:
         return False
     if (
-        manifest.get("schemaVersion") != COG_COLLECTION_SCHEMA_VERSION
+        isinstance(manifest.get("schemaVersion"), bool)
+        or not isinstance(manifest.get("schemaVersion"), int)
+        or manifest.get("schemaVersion") not in {2, 3}
         or manifest.get("artifactType") != "flow-field-cog-collection"
     ):
         return False
@@ -412,6 +418,8 @@ def _shared_snapshot_contract(manifest: dict[str, Any]) -> dict[str, Any]:
         "dependencies": facts.get("dependencies"),
         "quality": manifest.get("quality"),
     }
+    if manifest.get("schemaVersion") == 3:
+        shared["snapshotSchemaVersion"] = 3
     if any(value is None for value in shared.values()):
         raise ValueError("Flow Field COG snapshot shared contract is incomplete")
     return shared
@@ -682,7 +690,7 @@ def _build_collection_manifests(
     base_matrix = shared_contract["plan"]["grid"]["matrixId"]
     content_version = (
         f"flow-cog-collection-{construction_sha256[:16]}-"
-        f"t{len(records)}-z{base_matrix}-v2"
+        f"t{len(records)}-z{base_matrix}-v3"
     )
     quality = shared_contract["quality"]
     runtime_manifest = build_cog_runtime_manifest(
@@ -760,12 +768,16 @@ def _validate_collection_manifest_identity(
     facts = construction.get("facts") if isinstance(construction, dict) else None
     runtime_record = manifest.get("runtimeManifest")
     if (
-        manifest.get("schemaVersion") != COG_COLLECTION_SCHEMA_VERSION
+        isinstance(manifest.get("schemaVersion"), bool)
+        or not isinstance(manifest.get("schemaVersion"), int)
+        or manifest.get("schemaVersion") not in {2, 3}
         or manifest.get("artifactType") != "flow-field-cog-collection"
         or not isinstance(facts, dict)
         or not isinstance(runtime_record, dict)
     ):
         raise ValueError("Flow Field COG collection manifest contract is invalid")
+    schema_version = manifest["schemaVersion"]
+    expected_adapter_version = runtime_adapter_version_for_snapshot_schema(schema_version)
     expected_construction = _canonical_sha256(facts)
     shared = facts.get("sharedSnapshotContract")
     selection = facts.get("selection")
@@ -815,7 +827,18 @@ def _validate_collection_manifest_identity(
     ):
         raise ValueError("Flow Field COG collection matrix decision is invalid")
     runtime_matrix_contract = _runtime_matrix_contract(selected_matrix)
-    expected_adapter = _runtime_adapter_contract(selected_matrix)
+    expected_adapter = _runtime_adapter_contract(selected_matrix, schema_version)
+    expected_page_index_keys = {
+        "descriptorSha256", "sourceBounds", "sourceCeilingMatrixId", "timeIndices",
+        "matrices", "limits", "pages", "pageSetSha256", "timeMaximumSpeeds", "maximumSpeed",
+    }
+    if schema_version == 3:
+        expected_page_index_keys.add("adapterVersion")
+    if (shared.get("snapshotSchemaVersion", 2) != schema_version or
+        shared.get("encoding") != CogEncoding(
+            overview_policy=runtime_support_filter(expected_adapter_version)).manifest() or
+        (schema_version == 3 and page_index.get("adapterVersion") != expected_adapter_version)):
+        raise ValueError("Flow Field COG collection construction version is inconsistent")
     descriptor_identity = source.get("descriptorIdentity")
     try:
         embedded_descriptor_hash = source_descriptor_identity_manifest_hash(
@@ -1013,7 +1036,7 @@ def _validate_collection_manifest_identity(
             ),
         }
         != shared.get("topology", {}).get("supportHeuristic")
-        or request.get("adapterVersion") != COG_COLLECTION_ADAPTER_VERSION
+        or request.get("adapterVersion") != expected_adapter_version
         or request.get("runtimeMatrices") != runtime_matrix_contract
         or adapter != expected_adapter
         or page_index.get("descriptorSha256") != source.get("sourceHash")
@@ -1021,18 +1044,7 @@ def _validate_collection_manifest_identity(
         or page_index.get("sourceCeilingMatrixId") != str(selected_matrix)
         or page_index.get("timeIndices") != time_indices
         or page_index.get("matrices") != runtime_matrix_contract["tileMatrixIds"]
-        or set(page_index) != {
-            "descriptorSha256",
-            "sourceBounds",
-            "sourceCeilingMatrixId",
-            "timeIndices",
-            "matrices",
-            "limits",
-            "pages",
-            "pageSetSha256",
-            "timeMaximumSpeeds",
-            "maximumSpeed",
-        }
+        or set(page_index) != expected_page_index_keys
     ):
         raise ValueError("Flow Field COG collection semantic contract is invalid")
     try:
@@ -1041,6 +1053,8 @@ def _validate_collection_manifest_identity(
         raise ValueError("Flow Field COG runtime manifest is unreadable") from error
     validate_cog_runtime_manifest(runtime_manifest)
     if (
+        runtime_manifest.get("construction", {}).get("adapterVersion") != expected_adapter_version
+        or
         runtime_manifest.get("tileMatrixSet", {}).get("limits")
         != page_index.get("limits")
         or runtime_manifest.get("pages") != page_index.get("pages")
@@ -1053,7 +1067,7 @@ def _validate_collection_manifest_identity(
         raise ValueError("Flow Field COG collection runtime page index is inconsistent")
     expected_version = (
         f"flow-cog-collection-{expected_construction[:16]}-"
-        f"t{len(snapshots)}-z{base_matrix}-v2"
+        f"t{len(snapshots)}-z{base_matrix}-v{schema_version}"
     )
     storage = manifest.get("storage")
     marker_byte_length = len(_encoded_json({
@@ -1211,6 +1225,7 @@ def _validate_declared_snapshot(
         or snapshot.get("modelTime") != record.get("modelTime")
         or snapshot.get("velocityHash") != record.get("velocityHash")
         or _shared_snapshot_contract(manifest) != shared_contract
+        or manifest.get("schemaVersion") != shared_contract.get("snapshotSchemaVersion", 2)
     ):
         raise ValueError("Flow Field COG collection snapshot identity is invalid")
     cog_name = cog.get("path")
@@ -2021,6 +2036,8 @@ def plan_velocity_cog_collection(
     selected = canonical_time_indices(time_indices, descriptor.field_count)
     if not isinstance(encoding, CogEncoding):
         raise TypeError("encoding must be a CogEncoding")
+    if encoding.overview_policy != runtime_support_filter(COG_COLLECTION_ADAPTER_VERSION):
+        raise ValueError("New Flow Field collections require the v3 support policy")
     if not isinstance(collection_budget, CogCollectionBudget):
         raise TypeError("collection_budget must be a CogCollectionBudget")
     if not isinstance(batch_execution_budget, CogSnapshotBatchExecutionBudget):
