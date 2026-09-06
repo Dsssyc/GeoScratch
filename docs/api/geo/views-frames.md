@@ -125,6 +125,13 @@ Later `style.load` events reattach the layer when absent. Driver stop removes on
 layer, listeners, captures, and callbacks, including when it stops before initial readiness.
 An application using this driver does not need a separate full-map `load` wait.
 
+The host contract also includes `idle`. If initialization starts after `style.load`
+but `isStyleLoaded()` is still false because source tiles are pending, the driver
+rechecks readiness on `idle` and attaches once it becomes true. Repeated idle events
+do not reattach an owned layer or request extra frames. Stopping removes this recovery
+listener too; a conflicting layer is never adopted or removed. This is recovery of a
+missed readiness event, not a new requirement to wait for idle on ordinary startup.
+
 The shape is compatible with the example's pinned MapLibre GL JS 4.7.1 callback
 `render(gl, matrix, options)` because the no-draw layer intentionally ignores all callback
 arguments. See the [4.7.1 custom-layer source](https://github.com/maplibre/maplibre-gl-js/blob/v4.7.1/src/style/style_layer/custom_style_layer.ts)

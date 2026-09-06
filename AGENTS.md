@@ -39,6 +39,9 @@ context, depth, render-pass, or presentation ownership.
 attachment and repaint until `isStyleLoaded()` or `style.load`, preserve coalesced pending work,
 and remain removable before readiness. Do not add a second application-level full-map load wait
 around a driver-owned integration.
+If `style.load` preceded driver startup while source tiles still made `isStyleLoaded()` false,
+the driver must recover by rechecking readiness on host `idle`; repeated idle cannot reattach
+an owned layer, trigger idle repaint loops, or revive a stopped driver.
 Treat `maximumInFlightFrames` as measured application policy. Underwater Terrain uses two because
 its 120 Hz proof shows one slot suppresses half of host-frame submissions; do not increase the
 bound or restore single-flight without rerunning camera-transition, stale-state, lag, and cleanup

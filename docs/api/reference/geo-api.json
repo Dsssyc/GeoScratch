@@ -1962,7 +1962,7 @@
         "locations": [
           "packages/geoscratch/src/geo/maplibre-frame-driver.ts:42"
         ],
-        "summary": "Creates a readiness-aware no-draw MapLibre custom-layer driver with revisioned capture.",
+        "summary": "Owns a no-draw host layer and revisioned capture, recovering missed style readiness on idle.",
         "declaration": "Function mapLibreFrameDriver",
         "signatures": [
           "mapLibreFrameDriver<Capture>(descriptor: MapLibreFrameDriverDescriptor<Capture>): MapLibreFrameDriver<Capture>"

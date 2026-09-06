@@ -904,7 +904,7 @@ type MapFieldLayerDescriptor<Input = unknown> = Readonly<{ demandProducer: ViewD
 
 Kind: `Function`.
 
-Creates a readiness-aware no-draw MapLibre custom-layer driver with revisioned capture.
+Owns a no-draw host layer and revisioned capture, recovering missed style readiness on idle.
 
 ```ts
 Function mapLibreFrameDriver

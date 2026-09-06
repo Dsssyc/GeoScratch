@@ -158,9 +158,55 @@ describe('MapLibre frame driver', () => {
         expect(controller.stop()).to.equal(true)
         map.setStyleLoaded(true)
         map.emit('style.load')
+        map.emit('idle')
         expect(map.layerIds).to.deep.equal([])
         expect(map.repaintCount).to.equal(0)
         expect(map.listenerCount('style.load')).to.equal(0)
+        expect(map.listenerCount('idle')).to.equal(0)
+    })
+
+    it('recovers on idle when style.load occurred before driver start', async() => {
+        const map = fakeMapLibreMap({ styleLoaded: false })
+        map.emit('style.load')
+        const frames = []
+        let camera = 1
+        const controller = createGeoFrameController({
+            driver: mapLibreFrameDriver({ id: 'flow-frames', map, capture: () => camera }),
+            render: async(_frame, value) => {
+                frames.push(value)
+                return { observation: Promise.resolve(), needsFollowUp: false, value }
+            },
+        })
+        controller.invalidate()
+        camera = 2
+        controller.invalidate()
+        map.emit('idle')
+        expect(map.layerIds).to.deep.equal([])
+        expect(map.repaintCount).to.equal(0)
+        map.setStyleLoaded(true)
+        map.emit('idle')
+        expect(map.layerIds).to.deep.equal(['flow-frames'])
+        await map.renderLayer('flow-frames')
+        expect(frames).to.deep.equal([2])
+        const repaints = map.repaintCount
+        map.emit('idle')
+        expect(map.repaintCount).to.equal(repaints)
+        controller.stop()
+        expect(map.listenerCount('idle')).to.equal(0)
+    })
+
+    it('preserves a foreign layer installed while waiting for idle readiness', () => {
+        const map = fakeMapLibreMap({ styleLoaded: false })
+        const driver = mapLibreFrameDriver({ id: 'flow-frames', map, capture: () => 1 })
+        driver.start(() => false)
+        const foreign = { id: 'flow-frames', type: 'custom', render() {} }
+        map.addLayer(foreign)
+        map.setStyleLoaded(true)
+        expect(() => map.emit('idle')).to.throw().with.nested.property(
+            'diagnostic.code', 'GEO_MAPLIBRE_FRAME_LAYER_CONFLICT')
+        driver.stop()
+        expect(map.getLayer('flow-frames')).to.equal(foreign)
+        expect(map.listenerCount('idle')).to.equal(0)
     })
 
     it('reports invalid hosts and preserves a conflicting host layer', () => {

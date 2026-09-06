@@ -13,7 +13,8 @@ try {
     page.on('pageerror', error => errors.push(error.message))
     await page.goto(`${base}/flowField/index.html?proof=1&rate=0.001&zoom=9`)
     await page.waitForFunction(() => document.body.dataset.status === 'error' ||
-        (window.__FLOW_FIELD_PROOF__?.facts()?.lastFrame.presentationReady &&
+        (document.body.dataset.status === 'ready' &&
+            window.__FLOW_FIELD_PROOF__?.facts()?.lastFrame.presentationReady &&
             window.__FLOW_FIELD_PROOF__.facts().renderer.particles.encodedSteps >= 3),
         undefined, {timeout: 90000})
     async function facts(label) {

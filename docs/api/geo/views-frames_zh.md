@@ -2,7 +2,7 @@
 docId: geo.views-frames.zh
 canonical: false
 translationOf: ./views-frames.md
-canonicalDigest: f8c91ada93768c1513ee73c0038fa6d9f33b2c76e38b9a7e102d31652ba5e531
+canonicalDigest: fd3a8e21cfea75018fc8de09e71ee40cf0b4137491b2542f43e3accf3040cd3c
 ---
 # 视图与帧控制
 
@@ -112,6 +112,12 @@ callback 前发生多个 host change 时只保留最新 revision；application c
 layer 并请求待处理 host frame；后续 `style.load` 仍会在 layer 缺失时重新挂载。
 Driver stop 只移除自己拥有的 layer、listener、capture 与 callback，包括在首次就绪前停止
 的情况。使用该 driver 的应用无需额外等待完整 map `load`。
+
+Host 契约还包括 `idle`。若 driver 初始化时 `style.load` 已经触发，但因为 source
+瓦片尚未完成而 `isStyleLoaded()` 仍为 false，driver 会在 `idle` 重查就绪状态，
+变为 true 后挂载。重复 idle 不会重复挂载已有的自有 layer，也不会请求额外 frame。
+停止时也会移除这个恢复 listener；同名外部 layer 不会被接管或删除。这只用于恢复
+错过的就绪事件，不要求正常启动额外等待 idle。
 
 这个结构兼容 example 固定使用的 MapLibre GL JS 4.7.1 callback
 `render(gl, matrix, options)`，因为 no-draw layer 会有意忽略所有 callback argument。参见

@@ -75,6 +75,7 @@ node tests/browser/flow-screen-projection.mjs
 node tests/browser/flow-field-particle-reference.mjs
 node tests/browser/flow-field-history.mjs
 node tests/browser/flow-field-controls.mjs
+node tests/browser/flow-field-normal-startup.mjs
 node tests/browser/flow-field-temporal-status.mjs
 node tests/browser/flow-field-zero-footprint.mjs
 node tests/browser/flow-field-spawn-subcells.mjs

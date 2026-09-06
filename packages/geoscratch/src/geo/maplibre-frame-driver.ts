@@ -5,7 +5,7 @@ import type {
     GeoFrameScheduler,
 } from './frame-controller.js'
 
-type MapLibreFrameEvent = 'move' | 'resize' | 'style.load'
+type MapLibreFrameEvent = 'move' | 'resize' | 'style.load' | 'idle'
 
 /** No-draw custom-layer shape used only to enter a MapLibre render frame. */
 export type MapLibreFrameLayer = Readonly<{
@@ -38,7 +38,7 @@ export type MapLibreFrameDriver<Capture> = GeoFrameDriver<Capture>
 
 type DriverState = 'idle' | 'running' | 'stopped'
 
-/** Creates a readiness-aware no-draw MapLibre custom-layer driver with revisioned capture. */
+/** Owns a no-draw host layer and revisioned capture, recovering missed style readiness on idle. */
 export function mapLibreFrameDriver<Capture>(
     descriptor: MapLibreFrameDriverDescriptor<Capture>
 ): MapLibreFrameDriver<Capture> {
@@ -104,6 +104,7 @@ export function mapLibreFrameDriver<Capture>(
             map.on('move', handleViewChange)
             map.on('resize', handleViewChange)
             map.on('style.load', handleStyleLoad)
+            map.on('idle', handleIdleReadiness)
             if (map.isStyleLoaded()) attachOwnedLayer()
         } catch (error) {
             releaseHostState()
@@ -139,6 +140,17 @@ export function mapLibreFrameDriver<Capture>(
         attachOwnedLayer()
     }
 
+    function handleIdleReadiness(): void {
+
+        // style.load may precede asynchronous application initialization, while
+        // isStyleLoaded remains false until the style's source tiles finish.
+        // idle occurs after that event sequence, avoiding duplicate attachment
+        // from an earlier style-data event in the same style.load transaction.
+        if (state !== 'running' || ownsLayer || !map.isStyleLoaded()) return
+        if (map.getLayer(id) !== undefined) return layerConflict(id)
+        attachOwnedLayer()
+    }
+
     function attachOwnedLayer(): void {
 
         const hadScheduledWork = scheduled.size > 0
@@ -164,6 +176,7 @@ export function mapLibreFrameDriver<Capture>(
         map.off('move', handleViewChange)
         map.off('resize', handleViewChange)
         map.off('style.load', handleStyleLoad)
+        map.off('idle', handleIdleReadiness)
         if (ownsLayer && map.getLayer(id) !== undefined) map.removeLayer(id)
         ownsLayer = false
     }
