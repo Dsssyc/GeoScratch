@@ -2,8 +2,10 @@
 
 ## Status
 
-Accepted. Extends ADR-101's temporal handoff protection to camera and LoD changes
-within the same temporal pair. No Scratch, Geo, backend, or frozen Flow Layer change.
+Partially superseded by ADR-106: full-view completeness remains authoritative for
+diagnostic presentation and explicit resets, but local particle advancement no longer
+requires camera-equal feedback. The shared-gate decision and evidence below record
+the earlier protection. No Scratch, Geo, backend, or frozen Flow Layer change.
 
 ## Date
 

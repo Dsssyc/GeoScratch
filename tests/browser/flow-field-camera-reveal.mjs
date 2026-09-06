@@ -19,7 +19,8 @@ try {
         })
         await page.goto(`${base}/flowField/index.html?proof=1&rate=0.001&zoom=10`)
         await page.waitForFunction(() => document.body.dataset.status === 'error' ||
-            (window.__FLOW_FIELD_PROOF__?.facts()?.renderer.particles.encodedSteps ?? 0) >= 180,
+            (window.__FLOW_FIELD_PROOF__?.facts()?.lastFrame.presentationReady &&
+                window.__FLOW_FIELD_PROOF__.facts().renderer.particles.encodedSteps >= 180),
         undefined, {timeout:90000})
         assert.equal(await page.locator('body').getAttribute('data-status'), 'ready')
         const toggle = page.locator('[data-flow-control="play-pause"]')

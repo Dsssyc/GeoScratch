@@ -19,11 +19,19 @@ sampler. Status colors are green for resident moving data, amber for fallback,
 gray for zero velocity, magenta for unavailable data, and red for invalid sampling.
 Activity contour is an optional velocity threshold overlay and does not enter trails.
 
-During a time-pair handoff or camera/LoD change, presentation retains the previous
-complete image until current-view feedback and requested pages are ready. Loading
-and the old presented time remain visible. Particle advancement pauses during this
-wait, while retained history follows the map; completion resumes automatically even
-when model playback is paused. The optional contour is hidden during the wait.
+During camera/LoD changes, available flow continues to animate using the current
+temporal capture. Missing data suspends only affected particles without redrawing
+their previous segment; waiting still consumes their finite lifetime. Missing or
+conservative coarse-zero support does not immediately erase trails: those pixels
+follow the map and decay normally. Reliable resident zero and source exclusion still
+retire particles and clear unsupported ink.
+
+Full-view completeness remains separate from local animation. Loading and the old
+presented time remain visible until feedback and requested pages agree. Inspector
+views retain their complete image, and the optional contour is hidden during this
+wait. A pending explicit seek/loop reset or a loading temporal runtime still uses
+the retained-image path; the reset must happen before drawing the new particle pool.
+Residency completion resumes automatically even with model playback paused.
 Fallback is always reported relative to the original sampling request, including
 when a coarser page contains zero velocity. Changing the inspection mode explicitly
 invalidates the old image rather than relabeling it.
@@ -31,6 +39,8 @@ invalidates the old image rather than relabeling it.
 While playing, one next sample in the playback direction is prepared ahead of the
 active pair. The same current-view detail pages are requested with background
 priority and uploaded through the existing GPU submission/acknowledgement path.
+During camera motion, lookahead may use the latest observed bounded spatial plan;
+completion of that plan is not a claim that the newest camera is fully covered.
 This stays inside the four-runtime aggregate budget, including captured and retiring
 runtimes. Completed unchanged plans incur no repeated prefetch publication work.
 Pause cancels speculation; gaps are not silently crossed. Seeks, discontinuous loop
@@ -55,6 +65,7 @@ node tests/browser/flow-field-inspector-handoff.mjs
 node tests/browser/flow-field-motion-performance.mjs
 node tests/browser/flow-field-reveal-index.mjs
 node tests/browser/flow-field-camera-reveal.mjs
+node tests/browser/flow-field-camera-continuity.mjs
 node tests/browser/flow-field-spatial-handoff.mjs
 node tests/browser/flow-field-lookahead.mjs
 node tests/browser/flow-field-prefetch-failure.mjs
@@ -82,9 +93,11 @@ It preserves history and normal stationary retirement, with no extra source data
 or texture. The quota uses candidate counts rather than exact projected area; see
 [ADR-103](../../docs/decisions/ADR-103-flow-camera-reveal-refill.md).
 
-The per-view readiness gate also prevents loading-time samples from erasing old
-trails within an already admitted time pair; see
-[ADR-104](../../docs/decisions/ADR-104-flow-spatial-presentation-readiness.md).
+Per-position uncertainty handling prevents loading-time samples from erasing old
+trails without freezing the whole field; see
+[ADR-106](../../docs/decisions/ADR-106-flow-local-streaming-motion.md).
+Targeted reveal refill still waits for a complete view. During continuous expansion,
+newly exposed regions may temporarily be less dense while existing flow keeps moving.
 
 `node tests/browser/flow-field-pitch.mjs` checks tilted particle and Speed views at
 model time 6.93, including screenshot colors against COG U/V samples.

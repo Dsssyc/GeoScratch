@@ -458,7 +458,8 @@ export async function startFlowFieldApplication(
         if (!snapshot.playing || snapshot.selection.kind === 'gap') {
             temporalWindow.prefetch(undefined)
         } else if (temporalWindow.snapshot().state === 'ready' && lastFrame.state === 'rendered' &&
-            lastFrame.presentationReady && lastFrame.temporal.selectionRevision === snapshot.selectionRevision) {
+            (lastFrame.presentationReady || lastFrame.particlesAdvancing) &&
+            lastFrame.temporal.selectionRevision === snapshot.selectionRevision) {
             temporalWindow.prefetch(flowPrefetchSample(dataset.timeAxis, snapshot))
         }
     }

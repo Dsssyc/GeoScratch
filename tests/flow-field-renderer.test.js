@@ -57,7 +57,7 @@ describe('Flow Field renderer composition', () => {
         expect(source).to.not.include('initialize()')
     })
 
-    it('rechecks spatial readiness before any presentation within an already selected pair', () => {
+    it('keeps complete-view readiness separate from reset-safe local particle work', () => {
 
         const source = fs.readFileSync(sourcePath, 'utf8')
         expect(source).to.not.include('presentedPairGeneration')
@@ -67,6 +67,13 @@ describe('Flow Field renderer composition', () => {
         expect(source).to.include('flowPairViewReady(prepared.temporal, demandFrame.candidatePages)')
         expect(source).to.include(') : history.presentRetained(builder, view)')
         expect(source.match(/flowPairViewReady\(prepared\.temporal/g)).to.have.length(1)
+        expect(source.indexOf('const viewPagesReady =')).to.be.lessThan(source.indexOf('const presentationReady ='))
+        expect(source).to.include("const particlesAdvancing = framePresentation.view === 'particles' &&")
+        expect(source).to.include('appliedResetRevision === frameResetRevision')
+        expect(source).to.include('if (particlesAdvancing) {')
+        expect(source).to.include('presentationReady || particlesAdvancing ? history.encode(')
+        expect(source).to.include('if (presentationReady && framePresentation.contour)')
+        expect(source).to.include(': presentationReady ? [inspector.encode(')
     })
 
     it('borrows optional pages through observation and reuses only their completed spatial plan', () => {

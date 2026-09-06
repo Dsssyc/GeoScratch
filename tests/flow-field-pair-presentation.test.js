@@ -15,7 +15,7 @@ describe('Flow Field temporal pair presentation', () => {
     const pages = [{tile: {matrixId: '10', tileRow: 417, tileCol: 855}}]
     const capture = (lower, upper) => ({lower: {runtime: lower}, upper: {runtime: upper}})
 
-    it('does not evolve particles against safety-only or staged endpoint pages', () => {
+    it('does not declare a view complete with safety-only or staged endpoint pages', () => {
         const ready = runtime('t00', 'resident')
         expect(flowPairViewReady(capture(ready, ready), [])).to.equal(false)
         for (const state of ['missing', 'staged']) {
@@ -35,6 +35,16 @@ describe('Flow Field temporal pair presentation', () => {
     it('reports failed view data instead of waiting indefinitely', () => {
         expect(() => flowPairViewReady(capture(
             runtime('t00', 'resident'), runtime('t01', 'failed')
+        ), pages)).to.throw(/t01/)
+    })
+
+    it('does not hide a failure behind another missing page or endpoint', () => {
+        const mixed = runtime('t02', 'missing')
+        let calls = 0
+        mixed.residency.availability = () => ++calls === 1 ? 'missing' : 'failed'
+        expect(() => flowRuntimeViewReady(mixed, [...pages, ...pages])).to.throw(/t02/)
+        expect(() => flowPairViewReady(capture(
+            runtime('t00', 'missing'), runtime('t01', 'failed')
         ), pages)).to.throw(/t01/)
     })
 

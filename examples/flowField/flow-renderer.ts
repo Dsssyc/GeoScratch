@@ -129,6 +129,8 @@ export type FlowFieldRendererFrame = Readonly<{
     demand: FlowDemandFrame
     history: FlowHistoryFrame | undefined
     presentationReady: boolean
+    /** Local particle work may proceed while full-view presentation remains incomplete. */
+    particlesAdvancing: boolean
 }>
 
 export type FlowFieldRendererFacts = Readonly<{
@@ -429,18 +431,19 @@ export async function createFlowFieldRenderer(
                 const needsViewFollowUp = !viewDemand.hasFeedbackFor(view)
                 const demandFrame = demand.encode(builder, view, prepared.temporal)
                 requestedLevel = demandFrame.requestedLevel
-                // A previously presented time pair does not make a new camera/LoD
-                // ready. Never use transient missing/coarse-zero data to erase ink.
+                // Full-view completeness remains strict. Check failures even when
+                // delayed camera feedback is pending; local work cannot hide them.
+                const viewPagesReady = demandFrame.candidatePages.length === 0 ||
+                    flowPairViewReady(prepared.temporal, demandFrame.candidatePages)
                 const presentationReady = !needsViewFollowUp &&
                     prepared.requestedLevel === requestedLevel &&
-                    (demandFrame.candidatePages.length === 0 ||
-                        flowPairViewReady(prepared.temporal, demandFrame.candidatePages))
+                    viewPagesReady
                 let prefetchReconciliation: VirtualRasterFeedbackReconciliation | undefined
                 let observedPrefetchPlan: typeof prefetchPlan
                 let prefetchPagesResident = false
                 prefetchFacts = undefined
                 if (prefetchFrame === undefined) prefetchPlan = undefined
-                if (prefetchFrame !== undefined && !needsViewFollowUp) {
+                if (prefetchFrame !== undefined && viewDemand.facts().hasSettledFeedback) {
                     try {
                         if (prefetchPlan?.runtime !== prefetchFrame.runtime ||
                             prefetchPlan.pages !== demandFrame.candidatePages) {
@@ -481,6 +484,11 @@ export async function createFlowFieldRenderer(
                     populatedParticleView = undefined
                     appliedResetRevision = frameResetRevision
                 }
+                // Sampling uses this capture's immutable publications at actual
+                // particle positions, not camera-equality as a global permission.
+                // An explicit seek/loop reset must still precede any new ink.
+                const particlesAdvancing = framePresentation.view === 'particles' &&
+                    appliedResetRevision === frameResetRevision
                 renderView.encode(builder, view)
                 if (packedCells !== demandFrame.candidateCells) {
                     packedCandidates = packFlowCandidateCells(
@@ -505,15 +513,17 @@ export async function createFlowFieldRenderer(
                     prepared
                 )
                 let refilledParticleView = false
-                if (presentationReady && framePresentation.view === 'particles') {
-                    if (populatedParticleView === undefined) {
-                        populatedParticleView = view
-                    } else if (!sameParticleView(populatedParticleView, view)) {
-                        // A newly exposed view must not wait several seconds for natural
-                        // retirement to release slots occupied by the previous view.
-                        particles.refillView(populatedParticleView)
-                        populatedParticleView = view
-                        refilledParticleView = true
+                if (particlesAdvancing) {
+                    if (presentationReady) {
+                        if (populatedParticleView === undefined) {
+                            populatedParticleView = view
+                        } else if (!sameParticleView(populatedParticleView, view)) {
+                            // Only a complete view consumes the reveal baseline.
+                            // Partial work must not repeatedly reseed the same region.
+                            particles.refillView(populatedParticleView)
+                            populatedParticleView = view
+                            refilledParticleView = true
+                        }
                     }
                     particles.encode(builder, particleSpawn.bindings, prepared, view)
                 }
@@ -526,7 +536,7 @@ export async function createFlowFieldRenderer(
                 }, prepared)
                 const content = framePresentation.view === 'particles' ? [particleRender.draw]
                     : presentationReady ? [inspector.encode(builder, view, prepared, framePresentation)] : []
-                const historyFrame = presentationReady ? history.encode(builder, view,
+                const historyFrame = presentationReady || particlesAdvancing ? history.encode(builder, view,
                     content,
                     framePresentation.view === 'particles' && framePresentation.trails,
                     prepared
@@ -569,6 +579,7 @@ export async function createFlowFieldRenderer(
                         demand: demandFrame,
                         history: historyFrame,
                         presentationReady,
+                        particlesAdvancing,
                     }),
                 })
             } finally {

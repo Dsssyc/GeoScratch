@@ -2,9 +2,9 @@
 
 ## Status
 
-Accepted for Flow Field's local sampling policy. Renderer admission is integrated
-separately from this shader change. Scratch, Geo, the frozen Flow Layer, backend
-payloads and resource budgets are unchanged.
+Accepted for Flow Field. Supersedes ADR-104's shared particle/full-view gate, but
+retains its completeness, diagnostic-view and explicit-reset protections. Scratch,
+Geo, the frozen Flow Layer, backend payloads and resource budgets are unchanged.
 
 ## Date
 
@@ -44,6 +44,37 @@ erasure or indefinite retention. Confirmed zero/domain exclusion still clears in
 Empty/faded pixels still skip velocity sampling. This keeps retention finite
 without another history texture or per-pixel age plane.
 
+## Renderer Admission
+
+Full-view completeness still requires current-camera feedback, matching requested
+level and resident pages at both temporal endpoints. The renderer checks page
+failures independently of camera equality, and scans all selected pages/endpoints:
+an earlier missing page must not hide a later terminal failure.
+
+Particles may execute on every ready temporal capture without full-view equality.
+The frame exposes `particlesAdvancing` separately from `presentationReady`; the
+former is encoded work, not a CPU observation that every particle actually moved.
+Per-position sample decisions govern local advancement and history support.
+Each query uses the current pair and publication, never a previous pair's velocity.
+Ordinary adjacent time transitions therefore do not reintroduce a camera-equality
+wait. Window/factory loading retains its existing temporal-independent image path.
+
+A pending explicit visual reset is different: seek/loop/reset waits for complete
+presentation, then resets before any new particle work. Local admission cannot
+let an old particle pool draw across a deferred reset. Inspector and contour still
+require complete presentation, and UI presented time advances only after a complete
+image is observed. Local motion is not a claim that all current pixels are ready.
+
+Only a complete view consumes the targeted reveal baseline. Partial frames use
+normal valid rebirth, never repeat a one-quarter reseed of the same unknown region.
+On continuous expansion, newly visible regions may remain less dense until normal
+retirement or the complete-view refill; this is distinct from stopping existing flow.
+
+Directional lookahead also remains live during local particle work. It may warm the
+latest bounded plan derived from observed feedback while feedback chases the camera.
+Its page-complete marker refers to that explicit plan, not proof of complete coverage
+of an as-yet-unobserved camera. No stale feedback is relabeled as full-view readiness.
+
 ## Verification
 
 Native particle tests cover hold, recovery, age expiry, u32 saturation, missing
@@ -51,3 +82,17 @@ substep rollback, source exclusion, resident zero, invalid input, displacement,
 random retirement and bounded reveal refill. Native history tests cover unknown
 retention with finite decay, authoritative zero/exclusion, reprojection and the
 empty-history sampling optimization. Production resources retain their existing ABI.
+
+`flow-field-camera-continuity.mjs` drives real continuous pan, pitch and wheel input
+and checks particle-step admission per submitted frame rather than a machine FPS
+threshold. The old gate fails even with no new tile requests. Spatial handoff and
+explicit-reset proofs check partial drawing, honest completeness, retained ink,
+delayed reset, automatic residency recovery and zero-resource disposal.
+
+The integrated run admitted one particle step per submitted frame for stationary,
+pan, pitch, wheel and default-rate wheel playback. The last case crossed two
+ordinary time-pair handoffs while the camera continued changing. These are kernel
+admission measurements; the native per-position fixtures separately prove that
+unknown particles hold while reliable samples move. The isolated zoom-9,
+1512 × 861, DPR-2 motion benchmark measured 59.63 steps/s against the frozen
+reference's 59.92 steps/s, with no console errors in either path.

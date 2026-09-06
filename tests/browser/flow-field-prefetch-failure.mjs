@@ -41,11 +41,17 @@ try {
 
     const pending=await browser.newPage({viewport:{width:960,height:720}})
     const gate=new Promise(resolve=>{release=resolve})
+    let entered
+    const firstBlocked=new Promise(resolve=>{entered=resolve})
     let blocked=0
-    await pending.route(future,async route=>{blocked++;await gate;await route.continue().catch(()=>undefined)})
+    await pending.route(future,async route=>{blocked++;entered();await gate;await route.continue().catch(()=>undefined)})
     await pending.goto(`${base}/flowField/index.html?proof=1&rate=0.001&zoom=10`)
-    await pending.waitForFunction(()=>window.__FLOW_FIELD_PROOF__?.facts()?.temporalWindow.prefetchState==='ready'&&
-        window.__FLOW_FIELD_PROOF__.facts().workers.activeTaskCount>0,undefined,{timeout:60000})
+    // A ready prefetch factory plus any busy Worker may still be foreground work.
+    // Prove that this exact future detail request reached the blocked route.
+    let blockedTimeout
+    await Promise.race([firstBlocked,new Promise((_,reject)=>{
+        blockedTimeout=setTimeout(()=>reject(new Error('Future detail route was not reached')),60000)
+    })]).finally(()=>clearTimeout(blockedTimeout))
     assert.ok(blocked>0)
     const stopped=await pending.evaluate(()=>window.__FLOW_FIELD_PROOF__.dispose())
     assert.equal(stopped.cleanupFailures.length,0)
