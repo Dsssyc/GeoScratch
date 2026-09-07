@@ -7,8 +7,8 @@ import { temporalVelocityWgslModule } from '../../examples/flowField/temporal-ve
 import { flowScreenProjectionWgsl } from '../../examples/flowField/flow-screen-projection.ts'
 
 const read = name => readFile(new URL(`../../examples/flowField/shaders/${name}.wgsl`, import.meta.url), 'utf8')
-const [wrapper, distance, activity, sdf, presentation, history] = await Promise.all([
-    'temporal-velocity', 'boundary-distance', 'boundary-activity', 'boundary-sdf', 'presentation', 'history',
+const [wrapper, distance, activity, sdf, presentation, history, support] = await Promise.all([
+    'temporal-velocity', 'boundary-distance', 'boundary-activity', 'boundary-sdf', 'presentation', 'history', 'presentation-support',
 ].map(read))
 const model = webMercatorVirtualRasterField({
     id: 'boundary-sdf-proof', addressSpaceId: 'boundary-sdf-proof-space', sourceRevision: 'v1',
@@ -23,7 +23,7 @@ const temporal = temporalVelocityWgslModule(model, model, { group: 1,
     sampleRegistration: 'pixel-center', activitySupport: 'nearest-texel-zero', wrapper })
 const uniformStruct = history.match(/struct FlowFieldHistoryUniform \{[\s\S]*?\n\};/)?.[0]
 assert.ok(uniformStruct, 'Use the actual history uniform ABI')
-const code = [temporal.code, flowScreenProjectionWgsl(model.addressCodec), uniformStruct, distance, activity, sdf].join('\n')
+const code = [temporal.code, flowScreenProjectionWgsl(model.addressCodec), uniformStruct, support, distance, activity, sdf].join('\n')
 const width = 128, height = 64, byteLength = width * height * 4
 const texelQuanta = model.addressCodec.worldQuanta / 512n
 const texelMeters = Number(texelQuanta) * model.addressCodec.quantumMeters
@@ -336,8 +336,8 @@ try {
         'A newly active source texel now has continuous coverage, not immediate full opacity')
     assert.ok(Math.abs(alpha(2, 73, 20) - rawAlpha(73, 20) * futureCoverage) <= 1,
         'Actual fragment output integrates current alpha .277 support')
-    for (let offset = 3; offset < byteLength; offset += 4) assert.equal(proof.outputs[3][1][offset], 0,
-        'Opposite endpoints cancel now; endpoint-union support must not survive')
+    assert.ok(alpha(3,88,20)>0,'Existing interior ink survives zero current velocity; particles still use actual velocity')
+    assert.equal(alpha(3,73,20),0,'A stored-zero owning footprint remains empty in both endpoint fields')
     for (let x = 56; x <= 71; x++) assert.equal(alpha(4, x, 20), rawAlpha(x, 20),
         'Missing neighbor across reversed atlas seam falls back to unchanged A')
     assert.ok(summaries[0].reducedPixels > 100, 'B must be a nontrivial boundary presentation')
@@ -389,21 +389,21 @@ try {
     for (const observed of proof.coverage[indexOf('zero-kill-exact-zero')]) assert.equal(observed[0], 0,
         'Kill zero still excludes exact zero velocity')
     const spatial = proof.coverage[indexOf('spatial-cancel-saturated-centers')]
-    assert.equal(spatial[7][0], 0, 'Saturated source-center q must not bypass point-level exact cancellation')
+    assert.equal(spatial[7][0], 1, 'A supported source interior retains finite ink through spatial cancellation')
     assert.equal(spatial[7][2], 0)
     assert.ok(spatial[8][2] > 0.001 && spatial[8][2] < 0.004)
     assert.equal(spatial[8][0], 1, 'Supported interior speed above kill is not dimmed merely for falling below 4k')
     const tiny = proof.coverage[indexOf('tiny-alpha-zero-owner-fast-path')][9]
     assert.equal(tiny[1], 1)
     assert.equal(tiny[2], 0, 'The actual sampler gates the zero next BR owner at both .5 registration ties')
-    assert.equal(tiny[0], 0, 'Float-rounded q=1 must not bypass the nearest-zero gate in the opaque fast path')
+    assert.equal(tiny[0], 1, 'The supported lower endpoint retains history at tiny alpha without changing actual zero velocity')
     const quantum = proof.coverage[indexOf('canonical-quantum-zero-owner')][10]
     assert.equal(quantum[4], 1, 'The actual wide-fixed fraction rounds to f32 one')
     assert.equal(quantum[5], 0.5, 'Rounded registration alone would incorrectly choose the next texel')
     assert.ok(quantum[6] === 0 && quantum[7] === 255, 'Integer owning corner preserves the original left-tile texel')
     assert.equal(quantum[1], 1)
     assert.equal(quantum[2], 0, 'The real sampler retains the canonical zero owner despite the rounded fraction')
-    assert.equal(quantum[0], 0, 'The presentation fast path agrees with that canonical zero owner')
+    assert.equal(quantum[0], 1, 'The supported lower endpoint retains history; upper zero ownership still governs actual motion')
     assert.deepEqual(proof.outputs[indexOf('shared-sample-before')][1], proof.outputs[indexOf('shared-sample-after')][1],
         'Shared-sample B pixels do not depend on the other time endpoint amplitude/direction')
     assert.deepEqual(proof.coverage[indexOf('shared-sample-before')], proof.coverage[indexOf('shared-sample-after')])
@@ -466,14 +466,25 @@ function coverageOracle(fixture, probe) {
             return top * (1 - point[1]) + bottom * point[1]
         })
     }
-    if (!endpointSupport(Math.hypot(...mixed(field(0), field(1))), kill)) return 0
+    let visibility=1
+    if (!endpointSupport(Math.hypot(...mixed(field(0), field(1))), kill)) {
+        const endpointCoverage=endpoint=>{
+            const bit=(px,py)=>Number(endpointSupport(Math.hypot(...storedVector(fixture.kind,endpoint,px,py)),kill))
+            const owner=bit(Math.floor(x),Math.floor(y))
+            const top=bit(baseX,baseY)*(1-point[0])+bit(baseX+1,baseY)*point[0]
+            const bottom=bit(baseX,baseY+1)*(1-point[0])+bit(baseX+1,baseY+1)*point[0]
+            return owner*(top*(1-point[1])+bottom*point[1])
+        }
+        visibility=endpointCoverage(0)*(1-progress)+endpointCoverage(1)*progress
+        if (visibility===0) return 0
+    }
     const weights = []
     for (let row = -1; row <= 2; row++) for (let col = -1; col <= 2; col++) {
         weights.push(supportWeightOracle(storedVector(fixture.kind, 0, baseX + col, baseY + row),
             storedVector(fixture.kind, 1, baseX + col, baseY + row), progress, kill))
     }
-    // Integrate protected endpoint-support weights. Current reliable zero or
-    // nonadvectable motion vetoes the result above; no global low-speed cap.
+    // The original SDF basis is unchanged. Only nonadvectable presentation uses
+    // independently reconstructed source support instead of a blanket veto.
     const thresholds = [...new Set([0, 1, ...weights])].sort((a, b) => a - b)
     let coverage = 0
     for (let index = 1; index < thresholds.length; index++) {
@@ -485,7 +496,7 @@ function coverageOracle(fixture, probe) {
         }
         coverage += (threshold - thresholds[index - 1]) * binaryCoverageOracle(point, masks, fixture.feather ?? 0.25)
     }
-    return coverage
+    return coverage*visibility
 }
 
 function binaryCoverageOracle(point, masks, feather) {

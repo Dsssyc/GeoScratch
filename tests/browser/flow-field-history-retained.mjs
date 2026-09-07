@@ -29,6 +29,7 @@ try {
         const {GPURuntime,layoutCodec} = await import(scratchUrl)
         const {WebMercatorQuad,tileMatrixCoverage,webMercatorVirtualRasterField} = await import(geoUrl)
         const {createFlowHistory} = await import('/flowField/flow-history.ts')
+        const {flowPixelCenterRegistrationWgslModule} = await import('/flowField/flow-pixel-center-registration.ts')
         const require = (condition,message) => { if (!condition) throw new Error(message) }
         const runtime = await GPURuntime.create({label:'Flow retained actual graph proof'})
         const owned = [], own = value => (owned.push(value),value)
@@ -50,27 +51,54 @@ try {
             const velocity = own(await runtime.createBuffer({size:16,usage:GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST}))
             const region = velocity.region({layout:velocityCodec.artifact})
             const upload = own(runtime.createUploadCommand({target:region,data:velocityBytes}))
+            const supportBytes = velocityCodec.pack({value:[0,0,0,0]})
+            const support = own(await runtime.createBuffer({size:16,usage:GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST}))
+            const supportRegion = support.region({layout:velocityCodec.artifact})
+            const supportUpload = own(runtime.createUploadCommand({target:supportRegion,data:supportBytes}))
             const temporalLayout = own(await runtime.createBindLayout({group:1,entries:[
                 {binding:0,name:'testVelocity',type:'uniform',visibility:['fragment'],minBindingSize:16},
+                {binding:1,name:'testSupport',type:'uniform',visibility:['fragment'],minBindingSize:16},
             ]}))
-            const temporalSet = own(await runtime.createBindSet(temporalLayout,{testVelocity:region}))
-            const prepared = {state:'ready',bindSet:temporalSet,resources:[velocity],requestedLevel:0,progress:0}
+            const temporalSet = own(await runtime.createBindSet(temporalLayout,{testVelocity:region,testSupport:supportRegion}))
+            const prepared = {state:'ready',bindSet:temporalSet,resources:[velocity,support],requestedLevel:0,progress:0}
+            const registrationModule=flowPixelCenterRegistrationWgslModule(model,{namespace:'FlowVelocityRegistration',
+                addressNamespace:'FlowVelocityAddress',currentSamplerNamespace:'FlowVelocityCurrent',nextSamplerNamespace:'FlowVelocityNext'})
+            const registrationEnd=registrationModule.code.indexOf('fn FlowVelocityRegistration_current_resolution(')
+            require(registrationEnd>0,'Use the production wide-fixed half-texel position adapter')
             // The stub keeps the real public address ABI and every production
             // shader compiles. B's reconstruction is disabled for this graph
             // ownership proof; the B mathematics has its own native tests.
-            const temporal = model.addressCodec.wgslModule({namespace:'FlowVelocityAddress'}) + `
+            const temporal = model.addressCodec.wgslModule({namespace:'FlowVelocityAddress'}) +
+                '\n'+registrationModule.code.slice(0,registrationEnd)+`
 struct FlowVelocityTemporal { progress:f32, activityKill:f32, }
 struct FlowVelocitySample { status:u32, velocity:vec2f, speed:f32, advectable:bool, resolved_level:u32, }
 struct FixtureTexel { status:u32, value:vec4f, resolved_level:u32, }
 @group(1) @binding(0) var<uniform> testVelocity:vec4f;
+@group(1) @binding(1) var<uniform> testSupport:vec4f;
 const FlowVelocity_nearest_zero_gate=false;
 const FlowVelocityCurrent_level_count=1u;
 const FlowVelocityCurrent_page_size=vec2u(256u);
 const FlowVelocityCurrent_matrix=array<u32,1>(0u);
 const FlowVelocityCurrent_minimum_texel=array<vec2u,1>(vec2u(0u));
 const FlowVelocityCurrent_maximum_texel=array<vec2u,1>(vec2u(255u));
-fn FlowVelocityCurrent_load_global(p:vec2i,l:u32)->FixtureTexel { return FixtureTexel(1u,testVelocity,l); }
-fn FlowVelocityNext_load_global(p:vec2i,l:u32)->FixtureTexel { return FixtureTexel(1u,testVelocity,l); }
+const FlowVelocityNext_minimum_texel=array<vec2u,1>(vec2u(0u));
+const FlowVelocityNext_maximum_texel=array<vec2u,1>(vec2u(255u));
+fn fixture_center(p:vec2i,l:u32,next:bool)->FixtureTexel {
+    let mode=u32(testSupport.x);
+    if (mode==0u) { return FixtureTexel(1u,vec4f(testVelocity.xy,0,0),l); }
+    var v=select(vec2f(1,0),vec2f(-1,0),next);
+    if (mode==9u && !next && p.x%2==0 && p.y%2==1) { v=vec2f(0); }
+    if ((mode==9u && next) || (mode==10u && !next)) {
+        v=vec2f(f32(p.x)-212.84394530223088,f32(p.y)-105.12276504995907);
+    }
+    return FixtureTexel(1u,vec4f(v,0,0),l);
+}
+fn FlowVelocityCurrent_load_global(p:vec2i,l:u32)->FixtureTexel {
+    return fixture_center(p,l,false);
+}
+fn FlowVelocityNext_load_global(p:vec2i,l:u32)->FixtureTexel {
+    return fixture_center(p,l,true);
+}
 fn FlowVelocity_source_contains(p:FlowVelocityAddressFixedPosition)->bool { return true; }
 fn FlowVelocity_sample(p:FlowVelocityAddressFixedPosition,l:u32,t:FlowVelocityTemporal)->FlowVelocitySample {
     let x=p.axes[0];
@@ -95,11 +123,14 @@ fn FlowVelocity_sample(p:FlowVelocityAddressFixedPosition,l:u32,t:FlowVelocityTe
             const view = shift => ({kind:'geo-view-snapshot',
                 clipFromRelativeWorld:[1,0,0,0,0,1,0,0,0,0,-1,0,0,0,0,1],
                 cameraHigh:[13_360_000,3_503_000,.5],cameraLow:[.125+shift,.25,0],referenceViewport:[width,height]})
-            async function submit({values=[1,0,1,0],seed=false,retained=false,shift=0,inspector=false,boundary='hard',feather=.25}={}) {
+            async function submit({values=[1,0,1,0],seed=false,retained=false,shift=0,inspector=false,boundary='hard',feather=.25,
+                commonInterior=false,coverageMode=commonInterior?1:0,progress=prepared.progress}={}) {
                 await new Promise(resolve=>requestAnimationFrame(resolve))
                 velocityCodec.write(velocityBytes,{value:values})
+                velocityCodec.write(supportBytes,{value:[coverageMode,0,0,0]})
+                prepared.progress=progress
                 const builder=runtime.createSubmission({validation:'throw'})
-                if (!retained) builder.upload(upload)
+                if (!retained) builder.upload(upload).upload(supportUpload)
                 const frame=retained ? history.presentRetained(builder,view(shift))
                     : history.encode(builder,view(shift),seed?[fresh]:[],true,inspector?undefined:prepared,boundary,feather)
                 const work=builder.submit()
@@ -196,14 +227,48 @@ fn FlowVelocity_sample(p:FlowVelocityAddressFixedPosition,l:u32,t:FlowVelocityTe
             const expired = await submit()
             require(energy(expired)===0,'Hidden raw still expires finitely and cannot resurrect forever')
             const facts=history.facts()
+            history.dispose()
+            // A second actual graph exercises v3 source-supported stationary ink.
+            // Current UV is exactly zero/non-advectable, but both endpoint
+            // footprints are reliable and moving in opposite directions.
+            prepared.progress=.5
+            history=await createFlowHistory({runtime,surface,size:surface.size,addressCodec:model.addressCodec,
+                temporal:{wgsl:temporal.replace('FlowVelocity_nearest_zero_gate=false;', 'FlowVelocity_nearest_zero_gate=true;'),layout:temporalLayout},
+                activityKill:.001,trailDecay:.9})
+            const interiorA=await submit({values:[0,0,1,0],seed:true,commonInterior:true})
+            require(energy(interiorA)>50_000,'A preserves visible ink in common interior at true current zero')
+            const interiorB=await submit({values:[0,0,1,0],boundary:'sdf',commonInterior:true})
+            require(energy(interiorB)>energy(interiorA)*.75,'B shares common-interior visibility instead of punching a zero-speed hole')
+            const interiorRetained=await submit({retained:true})
+            require(same(interiorB,interiorRetained),'Retained preserves the last common-interior B image')
+            require(interiorRetained.facts.sdfPresentationCount===interiorB.facts.sdfPresentationCount,
+                'Retained common-interior display does not count as another SDF application')
+            const interiorFailed=await submit({values:[0,0,4,0],boundary:'sdf',commonInterior:true})
+            require(energy(interiorFailed)===0,'Failed current sampling cannot borrow the common-interior exemption')
+            const bothDry=await submit({values:[0,0,1,0]})
+            require(energy(bothDry)===0,'Both endpoint footprints zero still hide v3 ink')
+            const interiorRecovered=await submit({values:[0,0,1,0],commonInterior:true})
+            require(energy(interiorRecovered)>20_000,'Common-interior visibility recovers surviving raw without a reset')
+            for(const boundary of ['hard','sdf']) {
+                const before=await submit({values:[0,0,1,0],seed:true,coverageMode:9,progress:1,boundary})
+                const after=await submit({values:[0,0,1,0],seed:true,coverageMode:10,progress:0,boundary})
+                require(same(before,after),`${boundary}: identical raw ink at a shared spatial-zero endpoint has identical visibility`)
+                require(!before.frame.cleared && !after.frame.cleared,`${boundary}: pair-join coverage does not reset history`)
+            }
+            prepared.progress=.5
+            for(let i=0;i<64;i++) await submit({values:[0,0,1,0],commonInterior:true})
+            const interiorExpired=await submit({values:[0,0,1,0],boundary:'sdf',commonInterior:true})
+            require(energy(interiorExpired)===0,'Common interior must not preserve expired ink or create immortal still trails')
             history.dispose();history=undefined
             // Verify the graph released its own textures/buffer but not the
-            // borrowed temporal buffer. All other graph objects dispose below.
+            // borrowed temporal buffers. All other graph objects dispose below.
             const graphResources=runtime.diagnostics.snapshot().resources
-            require(graphResources.length===1 && graphResources[0].id===velocity.id,
+            require(graphResources.length===2 && graphResources.every(value=>value.id===velocity.id || value.id===support.id),
                 `History leaked owned resources: ${JSON.stringify(graphResources)}`)
             const stats={submissions,initial:energy(initial),recovery:energy(recovery),half:halfEnergy,
-                resumed:energy(resumed),retainedABAExact:true,sdfCases,expired:energy(expired),facts}
+                resumed:energy(resumed),retainedABAExact:true,sdfCases,expired:energy(expired),facts,
+                commonInterior:{hard:energy(interiorA),sdf:energy(interiorB),recovered:energy(interiorRecovered),
+                    sharedEndpointABExact:true,expired:energy(interiorExpired)}}
             for(const resource of owned.reverse()) resource.dispose()
             owned.length=0
             const final=runtime.diagnostics.snapshot()

@@ -33,9 +33,8 @@ low opacity. Only the changing-support fringe (one endpoint supported, one not)
 uses temporal interpolation and cancellation fading. Sorted weights give an exact, deterministic
 coverage integral; this is **not** interpolation of two endpoint SDFs or a stateful
 wall-clock smoothing filter. Uniform support weight q produces coverage q; binary
-support preserves the spatial basis. The current sampler still vetoes reliable zero
-or non-advectable points, but there is no global low-speed opacity cap. Actual zero
-can therefore still stop particles and hide the current display. See
+support preserves the spatial basis. Current velocity still controls particle death;
+finite history visibility now uses the separate source-support rule below. See
 [ADR-113](../../docs/decisions/ADR-113-flow-persistent-interior-support.md), correcting
 the global opacity policy in [ADR-112](../../docs/decisions/ADR-112-flow-temporal-boundary-coverage.md).
 
@@ -49,10 +48,22 @@ Programmatic `sdfFeatherTexels` inputs default to 0.25 when omitted; non-finite 
 out-of-range values are rejected rather than silently changing the user's input.
 
 Both choices use exactly the same particles and finite, decaying raw trail history.
-Current velocity clips the **visible result**, not the stored raw trails: a moving
-zero/cancellation curve no longer erases a lasting comb-shaped scar that takes time
-to refill. Reliable zero/below-threshold flow is still hidden and its particles still
-die immediately. Old ink can reappear on recovery only while it has not decayed away.
+The **visible result** is separate from the stored raw trails: a moving cancellation
+curve neither erases a lasting scar nor automatically makes a supported interior
+transparent. Reliable zero/below-threshold particles still die immediately.
+For nonadvectable v3 samples only, A/B share a display coverage derived from the
+four registered source-center support bits at each time. The bits are bilinearly
+interpolated, gated by each endpoint's original integer owning texel, then mixed
+at the current model time. Two fully supported endpoint interiors give coverage 1;
+two unsupported owners give 0. Partial/one-sided support is weighted rather than
+using a pair-dependent Boolean exemption. Failed, unknown, legacy and outer-boundary
+cases retain conservative behavior. No history creates new particles or velocities.
+
+The support weights have consistent shared-time endpoints and ordinary cell joins.
+This does not promise all final pixels are continuous: owning-texel hard boundaries,
+LoD changes and crossing the motion threshold in partial support can still affect
+visibility. Source support remains inferred from U/V, not a physical wet/dry truth.
+See [ADR-115](../../docs/decisions/ADR-115-flow-slack-water-display-support.md).
 The two existing textures alternate roles: compose raw ink into one, then overwrite
 the consumed source with its clipped visible image. During unavailable time loading,
 only the last visible image is reprojected to the Surface; hidden raw ink stays hidden.
@@ -138,6 +149,7 @@ node tests/browser/flow-field-particle-reference.mjs
 node tests/browser/flow-field-history.mjs
 node tests/browser/flow-field-history-recovery.mjs
 node tests/browser/flow-field-history-retained.mjs
+node tests/browser/flow-field-slack-interior.mjs
 node tests/browser/flow-field-controls.mjs
 node tests/browser/flow-field-boundary-distance.mjs
 node tests/browser/flow-field-boundary-time.mjs

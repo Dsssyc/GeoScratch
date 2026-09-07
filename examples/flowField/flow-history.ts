@@ -23,6 +23,7 @@ import type {
 } from 'geoscratch/scratch'
 import historyShader from './shaders/history.wgsl?raw'
 import historySupportShader from './shaders/history-support.wgsl?raw'
+import presentationSupportShader from './shaders/presentation-support.wgsl?raw'
 import hardBoundaryShader from './shaders/hard-boundary.wgsl?raw'
 import presentationShader from './shaders/presentation.wgsl?raw'
 import boundaryDistanceShader from './shaders/boundary-distance.wgsl?raw'
@@ -278,7 +279,8 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
         const hardModule = own(await runtime.createShaderModule({
             label: 'Flow Field hard boundary presentation shader',
             sourceParts: [ { code: temporal.wgsl }, { code: screenProjection },
-                { code: codec.wgslAccessors() }, { code: historySupportShader }, { code: hardBoundaryShader } ],
+                { code: codec.wgslAccessors() }, { code: presentationSupportShader },
+                { code: historySupportShader }, { code: hardBoundaryShader } ],
         }))
         const presentationModule = own(await runtime.createShaderModule({
             label: 'Flow Field history presentation shader',
@@ -287,7 +289,8 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
         const sdfModule = own(await runtime.createShaderModule({
             label: 'Flow Field inward SDF presentation shader',
             sourceParts: [ { code: temporal.wgsl }, { code: screenProjection },
-                { code: codec.wgslAccessors() }, { code: boundaryDistanceShader }, { code: boundaryActivityShader },
+                { code: codec.wgslAccessors() }, { code: presentationSupportShader },
+                { code: boundaryDistanceShader }, { code: boundaryActivityShader },
                 { code: boundarySdfShader } ],
         }))
         const requirement: ProgramBufferLayoutRequirement = {

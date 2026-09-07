@@ -16,10 +16,9 @@ try {
             await page.route('**/flowField/shaders/hard-boundary.wgsl*', async route => {
                 const response = await route.fetch()
                 const body = await response.text()
-                const guard = 'if (!FlowHistory_supported(input.texcoords)) { return vec4f(0.0); }'
-                const first = 'let dimensions = vec2i(textureDimensions(historyTexture, 0));'
-                assert.ok(body.includes(guard) && body.includes(first))
-                await route.fulfill({ response, body: body.replace(guard, '').replace(first, `${guard} ${first}`) })
+                const guard = 'if (color.a == 0.0 || max(max(color.r, color.g), color.b) == 0.0) { return color; }'
+                assert.ok(body.includes(guard))
+                await route.fulfill({ response, body: body.replace(guard, '') })
             })
         }
         const name = variant === 'reference' ? 'flowLayer' : 'flowField'
@@ -28,6 +27,10 @@ try {
             ? Number(window.__FLOW_LAYER_PROOF__?.facts()?.observedFrames) >= 60
             : (window.__FLOW_FIELD_PROOF__?.facts()?.renderer.particles.encodedSteps ?? 0) >= 60,
         variant === 'reference', { timeout: 90000 })
+        if (variant !== 'reference') await page.waitForFunction(() => {
+            const f = window.__FLOW_FIELD_PROOF__.facts()
+            return f.lastFrame.presentationReady && f.workers.activeTaskCount === 0
+        }, undefined, { timeout: 60000 })
         const samples = await page.evaluate(async reference => {
             const samples = []
             for (let index = 0; index <= 8; index++) {

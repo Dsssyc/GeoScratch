@@ -1,5 +1,5 @@
 // Footprint support, not speed-to-opacity. Weak but legal motion is supported.
-// The current point's actual sample remains a separate authoritative veto.
+// Current motion and finite historical-ink visibility have separate authority.
 fn FlowBoundary_endpoint_support(speed: f32, kill: f32) -> f32 {
     return select(0.0, 1.0, speed > 0.0 && speed >= kill);
 }

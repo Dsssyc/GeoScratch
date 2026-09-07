@@ -21,6 +21,5 @@ fn fMain(input: FlowHardVertex) -> @location(0) vec4f {
     // Match B: no raster work for empty ink, and clip fresh segments as well as
     // old trails. The underlying history continues its bounded decay untouched.
     if (color.a == 0.0 || max(max(color.r, color.g), color.b) == 0.0) { return color; }
-    if (!FlowHistory_supported(input.texcoords)) { return vec4f(0.0); }
-    return color;
+    return vec4f(color.rgb, color.a * FlowHistory_coverage(input.texcoords));
 }

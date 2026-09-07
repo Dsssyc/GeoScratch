@@ -22,12 +22,7 @@ struct FlowBoundaryCenter {
 // Unknown reconstruction uses A's current visibility, not unfiltered raw ink.
 // Raw history can contain an already hidden zero/outside/failed region.
 fn FlowBoundary_hard_coverage(position: FlowVelocityAddressFixedPosition, level: u32) -> f32 {
-    if (!FlowVelocity_source_contains(position)) { return 0.0; }
-    let flow = FlowVelocity_sample(position, level,
-        FlowVelocityTemporal(boundaryUniform.progress, boundaryUniform.activityKill));
-    if (flow.status == 4u) { return 0.0; }
-    if (flow.status == 1u) { return select(0.0, 1.0, flow.advectable && flow.speed > 0.0); }
-    return 1.0;
+    return FlowPresentation_coverage(position, level, boundaryUniform.progress, boundaryUniform.activityKill);
 }
 
 // Interpolated support footprint with common endpoint support protected. This
@@ -90,10 +85,15 @@ fn FlowBoundary_coverage(position: FlowVelocityAddressFixedPosition) -> f32 {
         FlowVelocityTemporal(boundaryUniform.progress, boundaryUniform.activityKill));
     if (actual.status == 4u) { return 0.0; }
     if (actual.status != 1u) { return 1.0; }
-    if (!actual.advectable || actual.speed <= 0.0) { return 0.0; }
-    if (actual.resolved_level != level) { return 1.0; }
+    var visibility = 1.0;
+    if (!actual.advectable || actual.speed <= 0.0) {
+        visibility = FlowPresentation_stationary_coverage(position, actual.resolved_level,
+            boundaryUniform.progress, boundaryUniform.activityKill);
+    }
+    if (visibility <= 0.0) { return 0.0; }
+    if (actual.resolved_level != level) { return visibility; }
     // Uniform support has integral q. There is no global low-speed alpha cap.
-    if (minimum == maximum) { return minimum; }
+    if (minimum == maximum) { return minimum * visibility; }
     var centers: array<f32, 16>;
     for (var i = 0u; i < 16u; i++) { centers[i] = -2.0; }
     centers[5] = q.x; centers[6] = q.y; centers[10] = q.z; centers[9] = q.w;
@@ -112,13 +112,13 @@ fn FlowBoundary_coverage(position: FlowVelocityAddressFixedPosition) -> f32 {
                     vec2i(i32(index % 4u) - 1, i32(index / 4u) - 1), level).weight;
             }
             // Only a relevant unknown halo disables B; it never seeds a dry edge.
-            if (centers[index] < 0.0) { return 1.0; }
+            if (centers[index] < 0.0) { return visibility; }
         }
     }
     // Unqueried centers belong only to irrelevant far cells; their values cannot
     // affect this narrow band. No missing *queried* center reaches the integral.
     for (var i = 0u; i < 16u; i++) { centers[i] = max(centers[i], 0.0); }
-    return FlowBoundary_continuous_coverage(p, centers, boundaryUniform.presentationFeather);
+    return FlowBoundary_continuous_coverage(p, centers, boundaryUniform.presentationFeather) * visibility;
 }
 
 @fragment
