@@ -14,13 +14,13 @@ fn vMain(@builtin(vertex_index) index: u32) -> FlowBoundaryVertex {
 }
 
 struct FlowBoundaryCenter {
-    activity: f32,
+    weight: f32,
     current: vec2f,
     next: vec2f,
 };
 
-// Continuous current-time activity, including cancellation of endpoint vectors.
-// Only exact same-level resident values may define this display reconstruction.
+// Interpolated support footprint with common endpoint support protected. This
+// does not classify current motion; the original temporal sampler does that.
 fn FlowBoundary_center(global: vec2i, level: u32) -> FlowBoundaryCenter {
     let unknown = FlowBoundaryCenter(-1.0, vec2f(0.0), vec2f(0.0));
     if (any(global < vec2i(FlowVelocityCurrent_minimum_texel[level])) ||
@@ -29,7 +29,7 @@ fn FlowBoundary_center(global: vec2i, level: u32) -> FlowBoundaryCenter {
     let next = FlowVelocityNext_load_global(global, level);
     if (current.status != 1u || next.status != 1u ||
         current.resolved_level != level || next.resolved_level != level) { return unknown; }
-    return FlowBoundaryCenter(FlowBoundary_activity(current.value.xy, next.value.xy,
+    return FlowBoundaryCenter(FlowBoundary_support_weight(current.value.xy, next.value.xy,
         boundaryUniform.progress, boundaryUniform.activityKill), current.value.xy, next.value.xy);
 }
 
@@ -47,11 +47,12 @@ fn FlowBoundary_coverage(position: FlowVelocityAddressFixedPosition) -> f32 {
     let br = FlowBoundary_center(base + vec2i(1, 1), level);
     let bl = FlowBoundary_center(base + vec2i(0, 1), level);
     // Unknown halo/fallback is not dry. Fall back to the unchanged A display.
-    let q = vec4f(tl.activity, tr.activity, br.activity, bl.activity);
+    let q = vec4f(tl.weight, tr.weight, br.weight, bl.weight);
     let minimum = min(min(q.x, q.y), min(q.z, q.w));
     let maximum = max(max(q.x, q.y), max(q.z, q.w));
     if (minimum < 0.0) { return 1.0; }
-    if (minimum == 1.0) {
+    // Zero-k has no numerical margin: let the full sampler decide exact zero.
+    if (minimum == 1.0 && boundaryUniform.activityKill > 0.0) {
         // Check cancellation using already loaded, pixel-center-aligned texels.
         // Keep the nearest-zero gate even when q rounds to 1 at tiny alpha.
         var lower = mix(mix(tl.current, tr.current, p.x), mix(bl.current, br.current, p.x), p.y);
@@ -77,10 +78,9 @@ fn FlowBoundary_coverage(position: FlowVelocityAddressFixedPosition) -> f32 {
     let actual = FlowVelocity_sample(position, level,
         FlowVelocityTemporal(boundaryUniform.progress, boundaryUniform.activityKill));
     if (actual.status != 1u || actual.resolved_level != level) { return 1.0; }
-    let point_gain = FlowBoundary_speed_gain(actual.speed, boundaryUniform.activityKill);
-    if (point_gain == 0.0) { return 0.0; }
-    // Uniform central activity has integral q, independent of halo topology.
-    if (minimum == maximum) { return min(minimum, point_gain); }
+    if (!actual.advectable || actual.speed <= 0.0) { return 0.0; }
+    // Uniform support has integral q. There is no global low-speed alpha cap.
+    if (minimum == maximum) { return minimum; }
     var centers: array<f32, 16>;
     for (var i = 0u; i < 16u; i++) { centers[i] = -2.0; }
     centers[5] = q.x; centers[6] = q.y; centers[10] = q.z; centers[9] = q.w;
@@ -96,7 +96,7 @@ fn FlowBoundary_coverage(position: FlowVelocityAddressFixedPosition) -> f32 {
             let index = indices[corner];
             if (centers[index] == -2.0) {
                 centers[index] = FlowBoundary_center(base +
-                    vec2i(i32(index % 4u) - 1, i32(index / 4u) - 1), level).activity;
+                    vec2i(i32(index % 4u) - 1, i32(index / 4u) - 1), level).weight;
             }
             // Only a relevant unknown halo disables B; it never seeds a dry edge.
             if (centers[index] < 0.0) { return 1.0; }
@@ -105,10 +105,7 @@ fn FlowBoundary_coverage(position: FlowVelocityAddressFixedPosition) -> f32 {
     // Unqueried centers belong only to irrelevant far cells; their values cannot
     // affect this narrow band. No missing *queried* center reaches the integral.
     for (var i = 0u; i < 16u; i++) { centers[i] = max(centers[i], 0.0); }
-    let coverage = FlowBoundary_continuous_coverage(p, centers, boundaryUniform.presentationFeather);
-    // Cap rather than multiply: steady uniform low-speed q is not attenuated twice.
-    // Point-level cancellation fades before the unchanged hard-history kill.
-    return min(coverage, point_gain);
+    return FlowBoundary_continuous_coverage(p, centers, boundaryUniform.presentationFeather);
 }
 
 @fragment

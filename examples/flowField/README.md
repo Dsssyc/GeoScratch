@@ -20,21 +20,24 @@ gray for zero velocity, magenta for unavailable data, and red for invalid sampli
 Activity contour is an optional velocity threshold overlay and does not enter trails.
 
 In **Particles**, the **Boundary** selector compares **A · Hard texture** (default)
-with **B · SDF (inward)**. B derives continuous current-time activity from endpoint
+with **B · SDF (inward)**. B derives temporal support weights from endpoint
 and interpolated U/V, then combines the existing binary SDF coverages across those
 activity levels. Each basis searches neighboring cells for the nearest finite contour
 segment and applies an inward feather (default: 0.25 source texel). Convex pixel corners are
 chamfered; diagonal active cells are not connected across a dry gap. This is a local
 truncated SDF evaluated in shader registers, not an uploaded SDF texture or a JFA pass.
 
-Activity includes a low-speed display ramp from the unchanged kill threshold to four
-times that speed, plus a relative cancellation fade. Thus reversal in the middle of
-a time pair can fade before reliable zero kills particles, and recovering activity
-can reappear gradually. Sorted activity thresholds give an exact, deterministic
+Both-endpoint supported centers retain weight 1, even when their vectors reverse or
+the current speed is much smaller. Weak but valid interior motion is not mapped to
+low opacity. Only the changing-support fringe (one endpoint supported, one not)
+uses temporal interpolation and cancellation fading. Sorted weights give an exact, deterministic
 coverage integral; this is **not** interpolation of two endpoint SDFs or a stateful
-wall-clock smoothing filter. Uniform activity q produces coverage q; binary activity
-preserves the spatial basis. Actual point-speed gain caps the result without multiplying
-low-speed attenuation twice. See [ADR-112](../../docs/decisions/ADR-112-flow-temporal-boundary-coverage.md).
+wall-clock smoothing filter. Uniform support weight q produces coverage q; binary
+support preserves the spatial basis. The current sampler still vetoes reliable zero
+or non-advectable points, but there is no global low-speed opacity cap. Actual zero
+can therefore still stop/clear the flow according to A's original rules. See
+[ADR-113](../../docs/decisions/ADR-113-flow-persistent-interior-support.md), correcting
+the global opacity policy in [ADR-112](../../docs/decisions/ADR-112-flow-temporal-boundary-coverage.md).
 
 With B selected, **Feather** adjusts the inward fade width from **0.05 to 0.35 source
 texel**, in 0.01 UI steps. Smaller is sharper; larger makes a wider inward transition.
@@ -125,6 +128,7 @@ node tests/browser/flow-field-history.mjs
 node tests/browser/flow-field-controls.mjs
 node tests/browser/flow-field-boundary-distance.mjs
 node tests/browser/flow-field-boundary-time.mjs
+node tests/browser/flow-field-boundary-interior.mjs
 node tests/browser/flow-field-boundary-sdf.mjs
 node tests/browser/flow-field-boundary-ab.mjs
 node tests/browser/flow-field-normal-startup.mjs

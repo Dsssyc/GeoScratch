@@ -4,7 +4,9 @@ import { readFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { chromium } from 'playwright'
 
-// Isolate the real WGSL helpers from presentation, camera motion and frame rate.
+// Isolate support-coverage reconstruction from the final current-sample veto,
+// presentation, camera motion and frame rate. Actual zero stays a shader/particle
+// condition, not a reason to dim a persistent support footprint in advance.
 // Real-data cases use only two z10 spatial pages at five times, never the full COG.
 const base = process.env.FLOW_BOUNDARY_TIME_BASE ?? 'http://127.0.0.1:8788'
 const tolerance = 5e-5
@@ -19,9 +21,10 @@ function random() {
 function clamp(value,low=0,high=1) { return Math.max(low,Math.min(high,value)) }
 function smooth(value) { const t=clamp(value); return t*t*(3-2*t) }
 function speed(vector) { return Math.hypot(...vector) }
-function gain(value,kill) { return kill===0 ? Number(value>0) : smooth((value-kill)/(3*kill)) }
+function gain(value,kill) { return Number(value>0 && value>=kill) }
 function activity(current,next,alpha,kill) {
     const s0=speed(current),s1=speed(next)
+    if (gain(s0,kill)===gain(s1,kill)) return gain(s0,kill)
     if (alpha===0) return gain(s0,kill)
     if (alpha===1) return gain(s1,kill)
     const expected=(1-alpha)*Math.max(s0-kill,0)+alpha*Math.max(s1-kill,0)
@@ -184,7 +187,7 @@ if (process.argv.includes('--cpu-only')) {
 } else {
     const read=name=>readFile(new URL(`../../examples/flowField/shaders/${name}.wgsl`,import.meta.url),'utf8')
     const [activitySource,distanceSource]=await Promise.all([read('boundary-activity'),read('boundary-distance')])
-    assert.ok(activitySource.includes('fn FlowBoundary_activity('),'The activity helper must exist before native verification')
+    assert.ok(activitySource.includes('fn FlowBoundary_support_weight('),'The support helper must exist before native verification')
     assert.ok(distanceSource.includes('fn FlowBoundary_continuous_coverage('),'The continuous coverage helper must exist')
     const bytes=new Uint8Array(probes.length*352),view=new DataView(bytes.buffer)
     for (const [index,probe] of probes.entries()) {
@@ -207,7 +210,7 @@ fn test_boundary_time(@builtin(global_invocation_id) id:vec3u) {
     let probe=probes[id.x]; var q=probe.q; var supportBits:array<u32,16>;
     for(var i=0u;i<16u;i++) {
         if(probe.mode==1u) {
-            q[i]=FlowBoundary_activity(probe.current[i],probe.next[i],probe.alpha,probe.kill);
+            q[i]=FlowBoundary_support_weight(probe.current[i],probe.next[i],probe.alpha,probe.kill);
             let s=length(mix(probe.current[i],probe.next[i],probe.alpha));
             supportBits[i]=select(0u,1u,s>0.0 && s>=probe.kill);
         } else { supportBits[i]=select(0u,1u,q[i]>=0.5); }
@@ -218,8 +221,8 @@ fn test_boundary_time(@builtin(global_invocation_id) id:vec3u) {
     results[id.x].coverage=FlowBoundary_continuous_coverage(probe.p,q,probe.feather);
     results[id.x].binary=FlowBoundary_inner_coverage(FlowBoundary_neighborhood_distance(probe.p,masks),probe.feather);
     results[id.x].q=q;
-    results[id.x].gain0=FlowBoundary_speed_gain(length(probe.current[5]),probe.kill);
-    results[id.x].gain1=FlowBoundary_speed_gain(length(probe.next[5]),probe.kill);
+    results[id.x].gain0=FlowBoundary_endpoint_support(length(probe.current[5]),probe.kill);
+    results[id.x].gain1=FlowBoundary_endpoint_support(length(probe.next[5]),probe.kill);
 }`
     const server=createServer((_request,response)=>response.end('<!doctype html><title>Flow time-continuous boundary proof</title>'))
     await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve))
@@ -280,6 +283,9 @@ function validate(values,native) {
         for(let center=0;center<16;center++) {
             const error=Math.abs(result.q[center]-probe.expectedQ[center]);maximumActivityError=Math.max(maximumActivityError,error)
             assert.ok(error<tolerance,`${index} ${probe.label}: activity center ${center} differs from current-U/V oracle`)
+            if (probe.mode===1 && gain(speed(probe.current[center]),probe.kill) && gain(speed(probe.next[center]),probe.kill)) {
+                assert.equal(result.q[center],1,`${index}: persistent support is not a relative-speed opacity map`)
+            }
         }
         assert.ok(Math.abs(result.gain0-gain(speed(probe.current[5]),probe.kill))<tolerance)
         assert.ok(Math.abs(result.gain1-gain(speed(probe.next[5]),probe.kill))<tolerance)
@@ -318,7 +324,8 @@ function validate(values,native) {
         }
         if(sweep.name==='opposite-cancellation'||sweep.name==='zero-kill-reversal') {
             const middle=sweep.ids.find(index=>probes[index].alpha===0.5)
-            assert.ok(values[middle].coverage<tolerance,'Opposite velocity cancellation must not be replaced by endpoint-SDF interpolation')
+            assert.equal(values[middle].coverage,1,
+                'Persistent support stays intact; full-shader tests must independently veto actual zero velocity')
         }
         return {name:sweep.name,real:sweep.real,samples:sweep.ids.length,maximumNewJump,maximumOldJump}
     })

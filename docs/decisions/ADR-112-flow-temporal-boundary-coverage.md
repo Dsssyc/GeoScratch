@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted for the example-local B presentation. Extends ADR-111's spatially continuous
+Partially superseded by ADR-113: its global speed-opacity transfer and point-speed
+gain cap are replaced by protected endpoint support. The continuous coverage integral
+and existing ownership remain accepted. Extends ADR-111's spatially continuous
 binary SDF basis with continuous activity weights. A, particle motion/death, hard
 history cleanup, source bytes and temporal runtime budgets are unchanged.
 

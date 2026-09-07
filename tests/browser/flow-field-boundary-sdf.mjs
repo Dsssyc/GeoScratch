@@ -40,27 +40,35 @@ for (const col of [0, 1]) {
     if (col === 1) rightEntry = compact
 }
 const atlasCache = new Map()
+// Observed t23/t24 z10/416/856 texel (103,167) velocities, embedded in a
+// synthetic UNIFORM atlas. This tests their display semantics, not screenshot
+// geography or the spatial structure of the original source page.
+const representativeT23 = {
+    lower: [0.7833012938499451, -0.33850356936454773],
+    upper: [-0.620028018951416, 0.26816967129707336],
+    kill: 3.6185970390454907 * 0.0005,
+}
 function atlas(kind, endpoint) {
-    const varies = ['future', 'cancel', 'pair-before', 'pair-after', 'uniform-growth', 'tiny-alpha-zero-owner', 'quantum-zero-owner'].includes(kind)
+    const varies = ['future', 'cancel', 'pair-before', 'pair-after', 'uniform-growth', 'tiny-alpha-zero-owner', 'quantum-zero-owner', 'representative-t23-t24'].includes(kind)
     const key = `${kind}:${varies ? endpoint : 0}`
     if (atlasCache.has(key)) return atlasCache.get(key)
     const pixels = new Float32Array(512 * 256 * 2)
     for (let y = 0; y < 256; y++) for (let x = 0; x < 512; x++) {
-        const velocity = storedVelocity(kind, endpoint, x, y)
         const atlasX = (1 - Math.floor(x / 256)) * 256 + x % 256
-        pixels[(y * 512 + atlasX) * 2] = velocity
+        pixels.set(storedVector(kind, endpoint, x, y), (y * 512 + atlasX) * 2)
     }
     const result = [...pixels]
     atlasCache.set(key, result)
     return result
 }
 function storedVelocity(kind, endpoint, x, y) {
-    if (kind === 'uniform-slow') return 2.5
+    if (kind === 'uniform-slow') return 2
+    if (kind === 'uniform-at-kill') return 1
     if (kind === 'uniform-zero-kill') return 0.5
     if (kind === 'zero') return 0
     if (kind === 'uniform-growth') return endpoint === 0 ? 0 : 10
-    if (kind === 'pair-before') return endpoint === 0 ? 100 : 2.5
-    if (kind === 'pair-after') return endpoint === 0 ? 2.5 : -50
+    if (kind === 'pair-before') return endpoint === 0 ? 100 : 1.25
+    if (kind === 'pair-after') return endpoint === 0 ? 1.25 : -50
     if (kind === 'spatial-cancel') return x < 256 ? 2 : -2
     if (kind === 'tiny-alpha-zero-owner') {
         return endpoint === 0 ? (x < 256 ? 2 : -2) : (x === 256 && y === 65 ? 0 : 1e8)
@@ -74,6 +82,10 @@ function storedVelocity(kind, endpoint, x, y) {
     if (kind === 'future' && endpoint === 1 && x === 256) velocity = 2
     if (kind === 'cancel' && endpoint === 1) velocity = -velocity
     return velocity
+}
+function storedVector(kind, endpoint, x, y) {
+    if (kind === 'representative-t23-t24') return endpoint === 0 ? representativeT23.lower : representativeT23.upper
+    return [storedVelocity(kind, endpoint, x, y), 0]
 }
 const epsilon = 1 / 4096
 const coverageProbes = [
@@ -125,7 +137,7 @@ const cases = [
     { name: 'lazy-unknown-halo', kind: 'junction', alpha: 0.277, missing: true },
     { name: 'shared-edge-narrow-feather', kind: 'junction', alpha: 0.277, feather: 0.05 },
     { name: 'shared-edge-wide-feather', kind: 'junction', alpha: 0.277, feather: 0.35 },
-    { name: 'uniform-slow-no-double-fade', kind: 'uniform-slow', alpha: 0.277, kill: 1 },
+    { name: 'uniform-two-k-supported', kind: 'uniform-slow', alpha: 0.277, kill: 1 },
     { name: 'zero-kill-valid-moving', kind: 'uniform-zero-kill', alpha: 0.277, kill: 0 },
     { name: 'zero-kill-exact-zero', kind: 'zero', alpha: 0.277, kill: 0 },
     { name: 'spatial-cancel-saturated-centers', kind: 'spatial-cancel', alpha: 0.277, kill: 0.001 },
@@ -136,9 +148,11 @@ const cases = [
     { name: 'uniform-growth-half', kind: 'uniform-growth', alpha: 0.5, kill: 1 },
     { name: 'uniform-growth-three-quarter', kind: 'uniform-growth', alpha: 0.75, kill: 1 },
     { name: 'tiny-alpha-zero-owner-fast-path', kind: 'tiny-alpha-zero-owner', alpha: 1e-9, kill: 0 },
-    { name: 'pre-cancellation-fade', kind: 'cancel', alpha: 0.49 },
+    { name: 'pre-cancellation-supported', kind: 'cancel', alpha: 0.49 },
     { name: 'post-cancellation-reappearance', kind: 'cancel', alpha: 0.51 },
     { name: 'canonical-quantum-zero-owner', kind: 'quantum-zero-owner', alpha: 1e-9, kill: 0 },
+    { name: 'uniform-at-kill-supported', kind: 'uniform-at-kill', alpha: 0.277, kill: 1 },
+    { name: 'representative-t23-t24-uniform', kind: 'representative-t23-t24', alpha: 0.54772, kill: representativeT23.kill },
 ].map(fixture => {
     const bytes = new Uint8Array(352)
     const uniform = new DataView(bytes.buffer)
@@ -362,11 +376,14 @@ try {
     assert.ok(widthCoverage[0].coverage > widthCoverage[1].coverage &&
         widthCoverage[1].coverage > widthCoverage[2].coverage, 'Wider feather changes actual source-aligned display coverage')
     const indexOf = name => cases.findIndex(fixture => fixture.name === name)
-    const slow = indexOf('uniform-slow-no-double-fade')
-    for (const observed of proof.coverage[slow]) assert.equal(observed[0], 0.5,
-        'Uniform q=.5 must remain .5, not multiply by point gain into .25')
-    for (let offset = 3; offset < byteLength; offset += 4) assert.equal(proof.outputs[slow][1][offset], ink[offset] / 2,
-        'Real uniform slow-flow B fragment is half opaque')
+    const slow = indexOf('uniform-two-k-supported')
+    for (const observed of proof.coverage[slow]) assert.equal(observed[0], 1,
+        'Uniform persistent motion at 2k is supported, not a global low-opacity hole')
+    assert.deepEqual(proof.outputs[slow][1], expectedInk, 'Uniform 2k interior retains all original ink')
+    const atKill = indexOf('uniform-at-kill-supported')
+    for (const observed of proof.coverage[atKill]) assert.equal(observed[0], 1,
+        'The existing nonzero speed>=kill equality remains legal')
+    assert.deepEqual(proof.outputs[atKill][1], expectedInk)
     assert.deepEqual(proof.outputs[indexOf('zero-kill-valid-moving')][1], expectedInk,
         'Kill zero with valid motion must not call undefined smoothstep(0,0,...)')
     for (const observed of proof.coverage[indexOf('zero-kill-exact-zero')]) assert.equal(observed[0], 0,
@@ -374,8 +391,8 @@ try {
     const spatial = proof.coverage[indexOf('spatial-cancel-saturated-centers')]
     assert.equal(spatial[7][0], 0, 'Saturated source-center q must not bypass point-level exact cancellation')
     assert.equal(spatial[7][2], 0)
-    assert.ok(spatial[8][0] > 0 && spatial[8][0] < 1 && spatial[8][2] > 0.001 && spatial[8][2] < 0.004,
-        'Saturated source-center fast path must use the sampler for sub-four-kill point speed')
+    assert.ok(spatial[8][2] > 0.001 && spatial[8][2] < 0.004)
+    assert.equal(spatial[8][0], 1, 'Supported interior speed above kill is not dimmed merely for falling below 4k')
     const tiny = proof.coverage[indexOf('tiny-alpha-zero-owner-fast-path')][9]
     assert.equal(tiny[1], 1)
     assert.equal(tiny[2], 0, 'The actual sampler gates the zero next BR owner at both .5 registration ties')
@@ -390,25 +407,38 @@ try {
     assert.deepEqual(proof.outputs[indexOf('shared-sample-before')][1], proof.outputs[indexOf('shared-sample-after')][1],
         'Shared-sample B pixels do not depend on the other time endpoint amplitude/direction')
     assert.deepEqual(proof.coverage[indexOf('shared-sample-before')], proof.coverage[indexOf('shared-sample-after')])
+    assert.deepEqual(proof.outputs[indexOf('shared-sample-before')][1], expectedInk,
+        'A weak shared sample at 1.25k stays fully supported regardless of its other neighbor')
     const unknownLow = proof.coverage[indexOf('unknown-halo-no-point-cap')][6]
     assert.equal(unknownLow[1], 1, 'Unknown-halo low-speed test keeps the actual central footprint resident')
-    assert.ok(unknownLow[2] > 1 && unknownLow[2] < 4, 'Point gain would be fractional here')
-    assert.equal(unknownLow[0], 1, 'Unknown halo must fall back to A before applying a point-gain cap')
+    assert.ok(unknownLow[2] > 1 && unknownLow[2] < 4, 'Unknown-halo test retains legal low-speed motion')
+    assert.equal(unknownLow[0], 1, 'Unknown halo must still fall back to A without inferring dry support')
     const growth = ['uniform-growth-quarter', 'uniform-growth-half', 'uniform-growth-three-quarter'].map(name => {
         const index = indexOf(name), expected = cases[index].alpha
         for (const observed of proof.coverage[index]) assert.equal(observed[0], expected,
             `${name}: a whole-region birth must fade continuously rather than switch at q=.5`)
         return { progress: expected, coverage: proof.coverage[index][0][0] }
     })
-    const beforeCancellation = proof.coverage[indexOf('pre-cancellation-fade')]
+    const beforeCancellation = proof.coverage[indexOf('pre-cancellation-supported')]
     const afterCancellation = proof.coverage[indexOf('post-cancellation-reappearance')]
-    assert.ok(beforeCancellation.some(observed => observed[0] > 0 && observed[0] < 0.1),
-        'Actual B fades before the unchanged reliable-zero kill')
+    assert.deepEqual(proof.outputs[indexOf('pre-cancellation-supported')][1], proof.outputs[0][1],
+        'Two supported endpoints keep the original spatial boundary while current velocity remains legal')
+    assert.deepEqual(proof.outputs[indexOf('post-cancellation-reappearance')][1], proof.outputs[0][1])
     beforeCancellation.forEach((observed, index) => assert.ok(Math.abs(observed[0] - afterCancellation[index][0]) < 4e-5,
-        'Symmetric recovery after cancellation uses current vectors, not a retained endpoint SDF'))
+        'Symmetric recovery after real cancellation restores persistent support without a global opacity fade'))
+    const representativeIndex = indexOf('representative-t23-t24-uniform')
+    const representative = proof.coverage[representativeIndex]
+    for (const observed of representative) {
+        assert.equal(observed[0], 1, 'Representative opposed t23/t24 endpoints must not dim their supported interior')
+        assert.ok(observed[2] / representativeT23.kill > 8.7 && observed[2] / representativeT23.kill < 8.9,
+            'The synthetic atlas uses the observed still-legal roughly 8.8k vector mixture')
+    }
+    assert.deepEqual(proof.outputs[representativeIndex][1], expectedInk)
     console.log(JSON.stringify({ status: 'passed', cases: summaries, realVirtualRaster: true,
         reversedAtlasPages: 2, rawHistoryUnchanged: true, coverageProbeCount: cases.length * coverageProbes.length,
-        maximumCoverageError, widthCoverage, futureCoverage, uniformGrowth: growth, lazyUnknownHalo: { knownFar: knownFar[0], missingFar: missingFar[0],
+        maximumCoverageError, widthCoverage, futureCoverage, uniformGrowth: growth,
+        representativeSourceVelocitiesInUniformAtlas: { speed: representative[0][2], speedOverKill: representative[0][2] / representativeT23.kill, coverage: representative[0][0] },
+        lazyUnknownHalo: { knownFar: knownFar[0], missingFar: missingFar[0],
             nearFallback: proof.coverage[6][6][0] }, readbacks: proof.readbacks, errors: proof.errors }))
 } finally {
     await browser?.close()
@@ -423,36 +453,39 @@ function coverageOracle(fixture, probe) {
     // weight even while its integer owning texel remains on the original side.
     const point = [Math.fround(x - 0.5 - baseX), Math.fround(y - 0.5 - baseY)]
     const progress = Math.fround(fixture.alpha), kill = Math.fround(fixture.kill ?? 0.000001)
-    const mixed = (a, b) => a * (1 - progress) + b * progress
+    const mixed = (a, b) => a.map((value, channel) => value * (1 - progress) + b[channel] * progress)
     const field = endpoint => {
-        if (storedVelocity(fixture.kind, endpoint, Math.floor(x), Math.floor(y)) === 0) return 0
-        const top = storedVelocity(fixture.kind, endpoint, baseX, baseY) * (1 - point[0]) +
-            storedVelocity(fixture.kind, endpoint, baseX + 1, baseY) * point[0]
-        const bottom = storedVelocity(fixture.kind, endpoint, baseX, baseY + 1) * (1 - point[0]) +
-            storedVelocity(fixture.kind, endpoint, baseX + 1, baseY + 1) * point[0]
-        return top * (1 - point[1]) + bottom * point[1]
+        if (storedVector(fixture.kind, endpoint, Math.floor(x), Math.floor(y)).every(value => value === 0)) return [0, 0]
+        const tl = storedVector(fixture.kind, endpoint, baseX, baseY)
+        const tr = storedVector(fixture.kind, endpoint, baseX + 1, baseY)
+        const bl = storedVector(fixture.kind, endpoint, baseX, baseY + 1)
+        const br = storedVector(fixture.kind, endpoint, baseX + 1, baseY + 1)
+        return [0, 1].map(channel => {
+            const top = tl[channel] * (1 - point[0]) + tr[channel] * point[0]
+            const bottom = bl[channel] * (1 - point[0]) + br[channel] * point[0]
+            return top * (1 - point[1]) + bottom * point[1]
+        })
     }
-    const pointGain = speedGain(Math.abs(mixed(field(0), field(1))), kill)
-    if (pointGain === 0) return 0
-    const activity = []
+    if (!endpointSupport(Math.hypot(...mixed(field(0), field(1))), kill)) return 0
+    const weights = []
     for (let row = -1; row <= 2; row++) for (let col = -1; col <= 2; col++) {
-        activity.push(activityOracle(storedVelocity(fixture.kind, 0, baseX + col, baseY + row),
-            storedVelocity(fixture.kind, 1, baseX + col, baseY + row), progress, kill))
+        weights.push(supportWeightOracle(storedVector(fixture.kind, 0, baseX + col, baseY + row),
+            storedVector(fixture.kind, 1, baseX + col, baseY + row), progress, kill))
     }
-    // Integrate the independently reconstructed binary coverage over every
-    // constant-mask interval, then cap once by the current point's speed gain.
-    const thresholds = [...new Set([0, 1, ...activity])].sort((a, b) => a - b)
+    // Integrate protected endpoint-support weights. Current reliable zero or
+    // nonadvectable motion vetoes the result above; no global low-speed cap.
+    const thresholds = [...new Set([0, 1, ...weights])].sort((a, b) => a - b)
     let coverage = 0
     for (let index = 1; index < thresholds.length; index++) {
         const threshold = thresholds[index], masks = []
         for (let row = 0; row < 3; row++) for (let col = 0; col < 3; col++) {
             const origin = row * 4 + col
-            masks.push(Number(activity[origin] >= threshold) | Number(activity[origin + 1] >= threshold) << 1 |
-                Number(activity[origin + 5] >= threshold) << 2 | Number(activity[origin + 4] >= threshold) << 3)
+            masks.push(Number(weights[origin] >= threshold) | Number(weights[origin + 1] >= threshold) << 1 |
+                Number(weights[origin + 5] >= threshold) << 2 | Number(weights[origin + 4] >= threshold) << 3)
         }
         coverage += (threshold - thresholds[index - 1]) * binaryCoverageOracle(point, masks, fixture.feather ?? 0.25)
     }
-    return Math.min(coverage, pointGain)
+    return coverage
 }
 
 function binaryCoverageOracle(point, masks, feather) {
@@ -505,19 +538,20 @@ function smoothUnit(value) {
     return t * t * (3 - 2 * t)
 }
 
-function speedGain(speed, kill) {
-    if (speed <= kill || speed <= 0) return 0
-    if (kill <= 0) return 1
-    return smoothUnit((speed - kill) / (3 * kill))
+function endpointSupport(speed, kill) {
+    return Number(speed > 0 && speed >= kill)
 }
 
-function activityOracle(lower, upper, progress, kill) {
-    const s0 = Math.abs(lower), s1 = Math.abs(upper)
-    const a0 = speedGain(s0, kill), a1 = speedGain(s1, kill)
+function supportWeightOracle(lower, upper, progress, kill) {
+    const s0 = Math.hypot(...lower), s1 = Math.hypot(...upper)
+    const a0 = endpointSupport(s0, kill), a1 = endpointSupport(s1, kill)
     if (progress <= 0) return a0
     if (progress >= 1) return a1
+    if (a0 && a1) return 1
+    if (!a0 && !a1) return 0
     const expected = Math.max(s0 - kill, 0) * (1 - progress) + Math.max(s1 - kill, 0) * progress
     if (expected <= 0) return 0
-    const excess = Math.max(Math.abs(lower * (1 - progress) + upper * progress) - kill, 0)
+    const interpolated = lower.map((value, channel) => value * (1 - progress) + upper[channel] * progress)
+    const excess = Math.max(Math.hypot(...interpolated) - kill, 0)
     return Math.max(0, Math.min(1, (a0 * (1 - progress) + a1 * progress) * smoothUnit(excess / expected / 0.15)))
 }
