@@ -23,6 +23,7 @@ import type {
 } from 'geoscratch/scratch'
 import historyShader from './shaders/history.wgsl?raw'
 import historySupportShader from './shaders/history-support.wgsl?raw'
+import hardBoundaryShader from './shaders/hard-boundary.wgsl?raw'
 import presentationShader from './shaders/presentation.wgsl?raw'
 import boundaryDistanceShader from './shaders/boundary-distance.wgsl?raw'
 import boundaryActivityShader from './shaders/boundary-activity.wgsl?raw'
@@ -56,7 +57,7 @@ export type FlowHistoryFrame = Readonly<{
     historyValid: boolean
     cleared: boolean
     resizeGeneration: number
-    /** Encoded pipeline; unavailable per-pixel support can still use unchanged A ink. */
+    /** Boundary applied to visible ink; unavailable frames reuse the last visible result. */
     boundary: FlowFieldBoundaryMode
     /** Last encoded uniform; inactive for hard/retained presentation. */
     sdfFeatherTexels: number
@@ -70,7 +71,7 @@ export type FlowHistoryFacts = Readonly<{
     resizeGeneration: number
     hasPreviousView: boolean
     disposed: boolean
-    /** Most recently encoded pipeline, not a per-pixel coverage guarantee. */
+    /** Last applied boundary, retained across unavailable frames; not a per-pixel guarantee. */
     boundary: FlowFieldBoundaryMode
     /** Encoded B draws, not a native-completion counter. */
     sdfPresentationCount: number
@@ -88,7 +89,7 @@ export type FlowHistory = Readonly<{
         view: GeoViewSnapshot,
         content: readonly DrawCommand[] | undefined,
         accumulate: boolean | undefined,
-        prepared: FlowTemporalReadyBindingFrame,
+        prepared?: FlowTemporalReadyBindingFrame,
         boundary?: FlowFieldBoundaryMode,
         sdfFeatherTexels?: number
     ): FlowHistoryFrame
@@ -130,7 +131,6 @@ type HistoryViewFacts = Readonly<{
 type FlowHistoryDirection = Readonly<{
     label: string
     pass: RenderPassSpec
-    presentation: DrawCommand
     target: 'A' | 'B'
 }>
 
@@ -166,7 +166,7 @@ const NORMAL_BLEND: Readonly<GPUBlendState> = Object.freeze({
     },
 })
 
-/** Creates an example-owned, two-direction viewport trail history. */
+/** Owns finite raw trails and a separately clipped visible image in two alternating textures. */
 export async function createFlowHistory(options: FlowHistoryOptions): Promise<FlowHistory> {
     const runtime = options?.runtime
     const surface = options?.surface
@@ -273,15 +273,12 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
         }, { label: 'Flow Field history B presentation' }))
         const historyModule = own(await runtime.createShaderModule({
             label: 'Flow Field history shader',
-            sourceParts: [ { code: temporal.wgsl }, { code: screenProjection },
-                { code: historySupportShader }, { code: historyShader } ],
+            sourceParts: [ { code: historyShader } ],
         }))
-        const retainedModule = own(await runtime.createShaderModule({
-            label: 'Flow Field retained history shader',
-            sourceParts: [
-                { code: 'fn FlowHistory_supported(uv: vec2f) -> bool { return true; }' },
-                { code: historyShader },
-            ],
+        const hardModule = own(await runtime.createShaderModule({
+            label: 'Flow Field hard boundary presentation shader',
+            sourceParts: [ { code: temporal.wgsl }, { code: screenProjection },
+                { code: codec.wgslAccessors() }, { code: historySupportShader }, { code: hardBoundaryShader } ],
         }))
         const presentationModule = own(await runtime.createShaderModule({
             label: 'Flow Field history presentation shader',
@@ -306,10 +303,10 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
             fragment: { module: historyModule, entryPoint: 'fMain' },
             layoutRequirements: [ requirement ],
         }))
-        const retainedProgram = own(runtime.createProgram({
-            label: 'Flow Field retained history program',
-            vertex: { module: retainedModule, entryPoint: 'vMain' },
-            fragment: { module: retainedModule, entryPoint: 'fMain' },
+        const hardProgram = own(runtime.createProgram({
+            label: 'Flow Field hard boundary presentation program',
+            vertex: { module: hardModule, entryPoint: 'vMain' },
+            fragment: { module: hardModule, entryPoint: 'fMain' },
             layoutRequirements: [ requirement ],
         }))
         const presentationProgram = own(runtime.createProgram({
@@ -326,16 +323,16 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
         const historyPipeline = own(await runtime.createRenderPipeline({
             label: 'Flow Field history pipeline',
             program: historyProgram,
-            layout: { mode: 'explicit', bindLayouts: [ uniformLayout, temporal.layout, historyLayout ] },
+            layout: { mode: 'explicit', bindLayouts: [ uniformLayout, historyLayout ] },
             targets: [ { format: historyA.format } ],
             primitive: { topology: 'triangle-strip' },
             depthStencil: { format: 'depth32float', depthWriteEnabled: false, depthCompare: 'less' },
         }))
-        const retainedPipeline = own(await runtime.createRenderPipeline({
-            label: 'Flow Field retained history pipeline', program: retainedProgram,
-            layout: { mode: 'explicit', bindLayouts: [ uniformLayout, historyLayout ] },
-            targets: [{ format: historyA.format }], primitive: { topology: 'triangle-strip' },
-            depthStencil: { format: 'depth32float', depthWriteEnabled: false, depthCompare: 'less' },
+        const hardPipeline = own(await runtime.createRenderPipeline({
+            label: 'Flow Field hard boundary presentation pipeline', program: hardProgram,
+            layout: { mode: 'explicit', bindLayouts: [ uniformLayout, temporal.layout, historyLayout ] },
+            targets: [{ format: historyA.format }],
+            primitive: { topology: 'triangle-strip' },
         }))
         const presentationPipeline = own(await runtime.createRenderPipeline({
             label: 'Flow Field history presentation pipeline',
@@ -344,11 +341,17 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
             targets: [ { format: surface.format, blend: NORMAL_BLEND } ],
             primitive: { topology: 'triangle-strip' },
         }))
+        const retainedPipeline = own(await runtime.createRenderPipeline({
+            label: 'Flow Field retained visible presentation pipeline', program: historyProgram,
+            layout: { mode: 'explicit', bindLayouts: [ uniformLayout, historyLayout ] },
+            targets: [{ format: surface.format, blend: NORMAL_BLEND }],
+            primitive: { topology: 'triangle-strip' },
+        }))
         const sdfPipeline = own(await runtime.createRenderPipeline({
             label: 'Flow Field inward SDF presentation pipeline',
             program: sdfProgram,
             layout: { mode: 'explicit', bindLayouts: [ uniformLayout, temporal.layout, historyLayout ] },
-            targets: [ { format: surface.format, blend: NORMAL_BLEND } ],
+            targets: [ { format: historyA.format } ],
             primitive: { topology: 'triangle-strip' },
         }))
         const clearPass = own(runtime.createRenderPass({
@@ -377,6 +380,12 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
                 clear: [ 0, 0, 0, 0 ],
             } ],
         }))
+        const visiblePasses = [
+            own(runtime.createRenderPass({ label: 'Flow Field visible A',
+                color: [{ target: historyAView, load: 'clear', store: 'store', clear: [0,0,0,0] }] })),
+            own(runtime.createRenderPass({ label: 'Flow Field visible B',
+                color: [{ target: historyBView, load: 'clear', store: 'store', clear: [0,0,0,0] }] })),
+        ]
         const presentA = own(presentationCommand(
             runtime, presentationPipeline, presentationA, historyA,
             'Present Flow Field history A'
@@ -388,21 +397,25 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
         const directionBToA: FlowHistoryDirection = Object.freeze({
             label: 'Flow Field history B to A',
             pass: passBToA,
-            presentation: presentA,
             target: 'A',
         })
         const directionAToB: FlowHistoryDirection = Object.freeze({
             label: 'Flow Field history A to B',
             pass: passAToB,
-            presentation: presentB,
             target: 'B',
         })
         const directions = Object.freeze([ directionBToA, directionAToB ])
+        const historyCommands = [
+            own(composeCommand(runtime, historyPipeline, uniformSet, historyBToA,
+                uniformBuffer, historyB, undefined, 'Reproject Flow history B to A')),
+            own(composeCommand(runtime, historyPipeline, uniformSet, historyAToB,
+                uniformBuffer, historyA, undefined, 'Reproject Flow history A to B')),
+        ]
         const retainedCommands = [
-            own(composeCommand(runtime, retainedPipeline, uniformSet, historyBToA,
-                uniformBuffer, historyB, undefined, 'Reproject retained Flow history B to A')),
             own(composeCommand(runtime, retainedPipeline, uniformSet, historyAToB,
-                uniformBuffer, historyA, undefined, 'Reproject retained Flow history A to B')),
+                uniformBuffer, historyA, undefined, 'Reproject visible Flow A to Surface')),
+            own(composeCommand(runtime, retainedPipeline, uniformSet, historyBToA,
+                uniformBuffer, historyB, undefined, 'Reproject visible Flow B to Surface')),
         ]
         const historyBindSets = Object.freeze([
             uniformSet, historyBToA, historyAToB, presentationA, presentationB,
@@ -413,23 +426,26 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
             uniformUpload,
             bindLayouts: Object.freeze([ uniformLayout, historyLayout, presentationLayout ]),
             bindSets: historyBindSets,
-            shaderModules: Object.freeze([ historyModule, retainedModule, presentationModule, sdfModule ]),
-            programs: Object.freeze([ historyProgram, retainedProgram, presentationProgram, sdfProgram ]),
-            pipelines: Object.freeze([ historyPipeline, retainedPipeline, presentationPipeline, sdfPipeline ]),
-            passes: Object.freeze([ clearPass, passBToA, passAToB, presentationPass ]),
-            commands: Object.freeze([ presentA, presentB, ...retainedCommands ]),
+            shaderModules: Object.freeze([ historyModule, hardModule, presentationModule, sdfModule ]),
+            programs: Object.freeze([ historyProgram, hardProgram, presentationProgram, sdfProgram ]),
+            pipelines: Object.freeze([ historyPipeline, hardPipeline, presentationPipeline, sdfPipeline, retainedPipeline ]),
+            passes: Object.freeze([ clearPass, passBToA, passAToB, presentationPass, ...visiblePasses ]),
+            commands: Object.freeze([ presentA, presentB, ...historyCommands, ...retainedCommands ]),
         })
-        let composePair: Readonly<{
+        let presentationPair: Readonly<{
             bindSet: BindSet
+            boundary: FlowFieldBoundaryMode
             commands: readonly [DrawCommand, DrawCommand]
         }> | undefined
-        let sdfPair: typeof composePair
         let boundary: FlowFieldBoundaryMode = 'hard'
         let sdfPresentationCount = 0
         let sdfFeatherTexels: number = FLOW_FIELD_SDF_FEATHER.default
         let directionIndex = 0
         let resizeGeneration = 0
         let previousView: HistoryViewFacts | undefined
+        // After a ready particle frame, one existing texture holds raw ink and
+        // the other holds its clipped display. Only raw ink feeds the next step.
+        let retainedTextureIndex: number | undefined
         let clearPending = true
         let resizePending = false
         let disposed = false
@@ -448,6 +464,7 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
                 size = normalized
                 resizeGeneration++
                 previousView = undefined
+                retainedTextureIndex = undefined
                 clearPending = true
             } finally {
                 resizePending = false
@@ -475,17 +492,15 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
                 throw new TypeError('Flow Field history boundary must be hard or sdf')
             }
             const feather = flowFieldSdfFeatherTexels(requestedFeatherTexels)
-            // No temporal lease is retained for presentation. An unavailable frame
-            // reprojects unmodified A ink, rather than inventing a stale/dry SDF.
-            const sdf = requestedBoundary === 'sdf' && prepared !== undefined
-                ? prepareSdfPair(prepared)[directionIndex]! : undefined
-            if (sdf === undefined && sdfPair !== undefined) {
-                for (const command of sdfPair.commands) command.dispose()
-                sdfPair = undefined
+            // Temporal clipping owns visibility, never the next frame's raw ink.
+            const presentation = prepared === undefined ? undefined
+                : preparePresentationPair(prepared, requestedBoundary)[directionIndex]!
+            if (presentation === undefined && presentationPair !== undefined) {
+                for (const command of presentationPair.commands) command.dispose()
+                presentationPair = undefined
             }
             const screenView = flowScreenViewValues(view, options.addressCodec)
-            const compose = !accumulate ? undefined : prepared === undefined
-                ? retainedCommands[directionIndex]! : prepareComposePair(prepared)[directionIndex]!
+            const compose = accumulate ? historyCommands[directionIndex]! : undefined
             if (!accumulate) clearPending = true
             const currentView = historyViewFacts(view)
             const cameraChanged = previousView !== undefined && !sameView(previousView, currentView)
@@ -519,10 +534,17 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
                 clearPending = false
             }
             builder.render(direction.pass, compose === undefined ? [ ...content ] : [ compose, ...content ])
-            builder.render(presentationPass, [ sdf ?? direction.presentation ])
-            boundary = sdf === undefined ? 'hard' : 'sdf'
+            const rawIndex = direction.target === 'A' ? 0 : 1
+            retainedTextureIndex = presentation === undefined ? rawIndex : 1 - rawIndex
+            if (presentation !== undefined) {
+                // The old raw source is consumed. Reuse it for the visible image;
+                // the newly composed raw target remains intact for the next step.
+                builder.render(visiblePasses[retainedTextureIndex]!, [presentation])
+            }
+            builder.render(presentationPass, [retainedTextureIndex === 0 ? presentA : presentB])
+            boundary = prepared === undefined ? 'hard' : requestedBoundary
             sdfFeatherTexels = feather
-            if (sdf !== undefined) sdfPresentationCount++
+            if (boundary === 'sdf') sdfPresentationCount++
             previousView = currentView
             directionIndex = (directionIndex + 1) % directions.length
             return Object.freeze({
@@ -537,53 +559,35 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
             })
         }
 
-        function prepareSdfPair(prepared: FlowTemporalReadyBindingFrame): readonly [DrawCommand, DrawCommand] {
-            if (sdfPair?.bindSet === prepared.bindSet) return sdfPair.commands
+        function preparePresentationPair(
+            prepared: FlowTemporalReadyBindingFrame,
+            boundary: FlowFieldBoundaryMode
+        ): readonly [DrawCommand, DrawCommand] {
+            if (presentationPair?.bindSet === prepared.bindSet && presentationPair.boundary === boundary) {
+                return presentationPair.commands
+            }
+            const pipeline = boundary === 'sdf' ? sdfPipeline : hardPipeline
             // Presentation reads the newly composed target, opposite to history's source.
-            const presentA = composeCommand(runtime, sdfPipeline, uniformSet, historyAToB,
-                uniformBuffer, historyA, prepared, 'Present Flow Field inward SDF A')
+            const presentA = composeCommand(runtime, pipeline, uniformSet, historyAToB,
+                uniformBuffer, historyA, prepared, `Present Flow Field ${boundary} A`)
             let presentB: DrawCommand
             try {
-                presentB = composeCommand(runtime, sdfPipeline, uniformSet, historyBToA,
-                    uniformBuffer, historyB, prepared, 'Present Flow Field inward SDF B')
+                presentB = composeCommand(runtime, pipeline, uniformSet, historyBToA,
+                    uniformBuffer, historyB, prepared, `Present Flow Field ${boundary} B`)
             } catch (error) {
                 presentA.dispose()
                 throw error
             }
-            const previous = sdfPair
-            sdfPair = Object.freeze({
+            const previous = presentationPair
+            presentationPair = Object.freeze({
                 bindSet: prepared.bindSet,
+                boundary,
                 commands: Object.freeze([ presentA, presentB ]) as readonly [DrawCommand, DrawCommand],
-            })
-            for (const command of previous?.commands ?? []) command.dispose()
-            return sdfPair.commands
-        }
-
-        function prepareComposePair(prepared: FlowTemporalReadyBindingFrame): readonly [DrawCommand, DrawCommand] {
-            if (composePair?.bindSet === prepared.bindSet) return composePair.commands
-            const composeBToA = composeCommand(
-                runtime, historyPipeline, uniformSet, historyBToA, uniformBuffer, historyB,
-                prepared, 'Compose Flow Field history B to A'
-            )
-            let composeAToB: DrawCommand
-            try {
-                composeAToB = composeCommand(
-                    runtime, historyPipeline, uniformSet, historyAToB, uniformBuffer, historyA,
-                    prepared, 'Compose Flow Field history A to B'
-                )
-            } catch (error) {
-                composeBToA.dispose()
-                throw error
-            }
-            const previous = composePair
-            composePair = Object.freeze({
-                bindSet: prepared.bindSet,
-                commands: Object.freeze([ composeBToA, composeAToB ]) as readonly [DrawCommand, DrawCommand],
             })
             // The renderer admits one native frame at a time and holds the borrowed
             // temporal frame until submission settles. Only our commands retire here.
             for (const command of previous?.commands ?? []) command.dispose()
-            return composePair.commands
+            return presentationPair.commands
         }
 
         function facts(): FlowHistoryFacts {
@@ -605,10 +609,8 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
         function dispose(): void {
             if (disposed) return
             disposed = true
-            for (const command of composePair?.commands ?? []) command.dispose()
-            composePair = undefined
-            for (const command of sdfPair?.commands ?? []) command.dispose()
-            sdfPair = undefined
+            for (const command of presentationPair?.commands ?? []) command.dispose()
+            presentationPair = undefined
             for (const command of graph.commands) command.dispose()
             graph.uniformUpload.dispose()
             for (const pass of graph.passes) pass.dispose()
@@ -620,6 +622,7 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
             graph.uniformBuffer.dispose()
             for (const texture of graph.textures) texture.dispose()
             previousView = undefined
+            retainedTextureIndex = undefined
         }
 
         function assertActive(): void {
@@ -629,11 +632,39 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
         function reset(): void {
             assertActive()
             previousView = undefined
+            retainedTextureIndex = undefined
             clearPending = true
         }
 
         function presentRetained(builder: SubmissionBuilder, view: GeoViewSnapshot): FlowHistoryFrame {
-            return encode(builder, view, [], true)
+            assertActive()
+            if (resizePending) throw new Error('Flow Field history cannot encode during resize')
+            if (builder?.runtime !== runtime) {
+                throw new TypeError('Flow Field history requires a same-runtime SubmissionBuilder')
+            }
+            for (const command of presentationPair?.commands ?? []) command.dispose()
+            presentationPair = undefined
+            const currentView = historyViewFacts(view)
+            const cameraChanged = previousView !== undefined && !sameView(previousView, currentView)
+            const reprojecting = mode === 'reproject' && cameraChanged
+            const valid = previousView !== undefined && sameArray(previousView.viewport, currentView.viewport) &&
+                viewCenterDelta(previousView, currentView) <= maxReprojectCenterDeltaMeters
+            const screenView = flowScreenViewValues(view, options.addressCodec)
+            codec.write(uniformBytes, uniformValues(previousView, currentView, {
+                mode, trailDecay: 1, trailCutoff, historyValid: valid, historyReprojecting: reprojecting,
+                currentInverseMatrix: screenView.relativeWorldFromClip, activityKill, screenView,
+                prepared: undefined, presentationFeather: sdfFeatherTexels,
+            }))
+            builder.upload(uniformUpload)
+            const display = retainedTextureIndex === undefined || clearPending || (mode === 'clear' && cameraChanged)
+                ? undefined : retainedCommands[retainedTextureIndex]
+            builder.render(presentationPass, display === undefined ? [] : [display])
+            // No temporal lease, raw/display mutation, direction flip or change
+            // of reference camera. Every unavailable frame gathers the last
+            // actually visible image; hidden raw ink cannot reappear on loading.
+            return Object.freeze({ direction: directionIndex === 0 ? 'B-to-A' : 'A-to-B',
+                target: directionIndex === 0 ? 'A' : 'B', cameraChanged, historyValid: valid,
+                cleared: display === undefined, resizeGeneration, boundary, sdfFeatherTexels })
         }
 
         return Object.freeze({ resize, reset, encode, presentRetained, facts, dispose })

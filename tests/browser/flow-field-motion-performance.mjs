@@ -13,11 +13,11 @@ try {
         page.on('pageerror', error => errors.push(error.message))
         page.on('console', message => { if (message.type() === 'error') errors.push(message.text()) })
         if (variant === 'eager-support') {
-            await page.route('**/flowField/shaders/history.wgsl*', async route => {
+            await page.route('**/flowField/shaders/hard-boundary.wgsl*', async route => {
                 const response = await route.fetch()
                 const body = await response.text()
                 const guard = 'if (!FlowHistory_supported(input.texcoords)) { return vec4f(0.0); }'
-                const first = 'let dim = vec2f(textureDimensions(historyTexture, 0));'
+                const first = 'let dimensions = vec2i(textureDimensions(historyTexture, 0));'
                 assert.ok(body.includes(guard) && body.includes(first))
                 await route.fulfill({ response, body: body.replace(guard, '').replace(first, `${guard} ${first}`) })
             })

@@ -540,7 +540,7 @@ export async function createFlowFieldRenderer(
                 const historyFrame = presentationReady || particlesAdvancing ? history.encode(builder, view,
                     content,
                     framePresentation.view === 'particles' && framePresentation.trails,
-                    prepared,
+                    framePresentation.view === 'particles' ? prepared : undefined,
                     framePresentation.view === 'particles' ? framePresentation.boundary : 'hard',
                     framePresentation.sdfFeatherTexels
                 ) : history.presentRetained(builder, view)

@@ -6,6 +6,7 @@ const root = process.cwd()
 const sourcePath = path.join(root, 'examples', 'flowField', 'flow-history.ts')
 const historyPath = path.join(root, 'examples', 'flowField', 'shaders', 'history.wgsl')
 const presentationPath = path.join(root, 'examples', 'flowField', 'shaders', 'presentation.wgsl')
+const hardBoundaryPath = path.join(root, 'examples', 'flowField', 'shaders', 'hard-boundary.wgsl')
 
 function read(file) {
 
@@ -42,7 +43,7 @@ describe('Flow Field viewport history', () => {
         expect(source).to.include('historyValid = false')
     })
 
-    it('reverse gathers camera history without any support texture', () => {
+    it('reverse gathers and finitely decays raw history without temporal destruction', () => {
 
         const shader = read(historyPath)
         expect(shader).to.include('trailDecay: f32')
@@ -56,13 +57,33 @@ describe('Flow Field viewport history', () => {
         expect(shader).to.include('color = linearSampling(historyTexture, historyPixel, dim)')
         expect(shader).to.include('floor(255.0 * color * cleanupUniform.trailDecay) / 255.0')
         expect(shader).to.include('residual <= cleanupUniform.trailCutoff')
-        expect(shader).not.to.match(/mask|boundary|depth|wet|sdf/i)
+        expect(shader).not.to.include('FlowHistory_supported(')
+        expect(shader).not.to.include('FlowVelocity_sample(')
+        expect(shader).not.to.match(/@group\(1\)/)
         const support = read(path.join(root, 'examples/flowField/shaders/history-support.wgsl'))
         expect(support).to.include('FlowScreen_ground_position(')
         expect(support).to.include('FlowVelocity_sample(')
         expect(support).to.include('currentFlow.advectable && currentFlow.speed > 0.0')
         expect(shader).to.include('historyUv * dim - vec2f(0.5)')
         expect(shader).not.to.include('let nearWorld')
+    })
+
+    it('clips current hard visibility only in the final pass and skips empty ink sampling', () => {
+        const hard = read(hardBoundaryPath)
+        expect(hard).to.include('var<uniform> cleanupUniform: FlowFieldHistoryUniform')
+        expect(hard).to.include('@group(2) @binding(0) var historyTexture: texture_2d<f32>')
+        const load = hard.indexOf('textureLoad(historyTexture')
+        const empty = hard.indexOf('color.a == 0.0')
+        const gate = hard.indexOf('FlowHistory_supported(input.texcoords)')
+        expect(load).to.be.greaterThan(-1)
+        expect(empty).to.be.greaterThan(load)
+        expect(gate).to.be.greaterThan(empty)
+        expect(hard).not.to.include('trailDecay')
+        expect(hard).not.to.match(/textureStore|storage.*read_write/)
+        const source = read(sourcePath)
+        expect(source).to.include('sourceParts: [ { code: historyShader } ]')
+        expect(source).to.include('bindLayouts: [ uniformLayout, historyLayout ]')
+        expect(source).to.include('const compose = accumulate ? historyCommands[directionIndex]! : undefined')
     })
 
     it('resizes stable resources, reparses bindings, invalidates history, and clears both targets', () => {
@@ -82,10 +103,14 @@ describe('Flow Field viewport history', () => {
         const source = read(sourcePath)
         const upload = source.indexOf('builder.upload(uniformUpload)')
         const compose = source.indexOf('builder.render(direction.pass')
+        const clip = source.indexOf('builder.render(visiblePasses[retainedTextureIndex]!')
         const present = source.indexOf('builder.render(presentationPass')
         expect(upload).to.be.greaterThan(-1)
         expect(compose).to.be.greaterThan(upload)
-        expect(present).to.be.greaterThan(compose)
+        expect(clip).to.be.greaterThan(compose)
+        expect(present).to.be.greaterThan(clip)
+        expect(source).to.include('retainedTextureIndex = presentation === undefined ? rawIndex : 1 - rawIndex')
+        expect(source).to.include('retainedTextureIndex === 0 ? presentA : presentB')
         expect(source).to.include('[ compose, ...content ]')
         expect(source).to.match(/target: surface,\s+load: 'clear'/)
         expect(source).to.include('clear: [ 0, 0, 0, 0 ]')
@@ -98,13 +123,42 @@ describe('Flow Field viewport history', () => {
         expect(presentation).to.include('textureLoad(historyTexture')
     })
 
-    it('borrows each current temporal frame and retires only its owned composition commands', () => {
+    it('retains only the last clipped image without feedback, direction advance or reference-camera drift', () => {
+
+        const source = read(sourcePath)
+        const retained = source.slice(source.indexOf('function presentRetained('),
+            source.indexOf('return Object.freeze({ resize, reset, encode, presentRetained'))
+        expect(retained).to.include('for (const command of presentationPair?.commands ?? []) command.dispose()')
+        expect(retained).to.include('presentationPair = undefined')
+        expect(retained).to.include('trailDecay: 1')
+        expect(retained).to.include('prepared: undefined')
+        expect(retained).to.include('retainedTextureIndex === undefined || clearPending')
+        expect(retained).to.include('retainedCommands[retainedTextureIndex]')
+        expect(retained.match(/builder\.render\(/g)).to.have.length(1)
+        expect(retained).to.include('builder.render(presentationPass, display === undefined ? [] : [display])')
+        expect(retained).not.to.match(/(?:directionIndex|previousView|retainedTextureIndex)\s*=(?!=)/)
+        expect(retained).not.to.include('preparePresentationPair(')
+        for (const [begin, end] of [
+            ['async function resize(', 'function encode('],
+            ['function reset()', 'function presentRetained('],
+            ['function dispose()', 'function assertActive()'],
+        ]) {
+            const lifecycle = source.slice(source.indexOf(begin), source.indexOf(end))
+            expect(lifecycle).to.include('previousView = undefined')
+            expect(lifecycle).to.include('retainedTextureIndex = undefined')
+        }
+    })
+
+    it('borrows temporal frames only for presentation and retires its owned display commands', () => {
 
         const source = read(sourcePath)
         expect(source).to.include('prepared: FlowTemporalReadyBindingFrame')
         expect(source).to.include('uniformLayout, temporal.layout, historyLayout')
         expect(source).to.include('new Set(prepared?.resources ?? [])')
-        expect(source).to.include('composePair?.bindSet === prepared.bindSet')
+        expect(source).to.include('presentationPair?.bindSet === prepared.bindSet')
+        expect(source).to.include('presentationPair.boundary === boundary')
+        expect(source).to.include("boundary === 'sdf' ? sdfPipeline : hardPipeline")
+        expect(source).to.include('const historyCommands = [')
         expect(source).to.include('for (const command of previous?.commands ?? []) command.dispose()')
         expect(source).not.to.match(/prepared\.(?:bindSet\.dispose|release)\(/)
         expect(source).not.to.match(/temporal\.layout\.dispose\(/)

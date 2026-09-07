@@ -2,237 +2,250 @@ import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { readFile } from 'node:fs/promises'
 import { chromium } from 'playwright'
-import {
-    WebMercatorQuad, tileMatrixCoverage, webMercatorVirtualRasterField,
-} from 'geoscratch/geo'
+import { WebMercatorQuad, tileMatrixCoverage, webMercatorVirtualRasterField } from 'geoscratch/geo'
 import { flowScreenProjectionWgsl } from '../../examples/flowField/flow-screen-projection.ts'
 import { temporalVelocityWgslModule } from '../../examples/flowField/temporal-velocity-raster.ts'
 
 const model = webMercatorVirtualRasterField({
-    id: 'history-proof', addressSpaceId: 'history-proof-space', sourceRevision: 'v1',
-    coverage: tileMatrixCoverage({
-        tileMatrixSet: WebMercatorQuad,
-        limits: [ { matrixId: '0', minTileRow: 0, maxTileRow: 0, minTileCol: 0, maxTileCol: 0 } ],
-    }),
-    geographicBounds: [ -180, -85, 180, 85 ], coordinateBits: 52,
-    fieldKind: 'vector', channels: 2, sampleType: 'float32', gpuFormat: 'rg32float', interpolation: 'linear',
+    id:'history-proof',addressSpaceId:'history-proof-space',sourceRevision:'v1',
+    coverage:tileMatrixCoverage({tileMatrixSet:WebMercatorQuad,
+        limits:[{matrixId:'0',minTileRow:0,maxTileRow:0,minTileCol:0,maxTileCol:0}]}),
+    geographicBounds:[-180,-85,180,85],coordinateBits:52,
+    fieldKind:'vector',channels:2,sampleType:'float32',gpuFormat:'rg32float',interpolation:'linear',
 })
-const historyShader = await readFile(new URL('../../examples/flowField/shaders/history.wgsl', import.meta.url), 'utf8')
-const historySupportShader = await readFile(new URL('../../examples/flowField/shaders/history-support.wgsl', import.meta.url), 'utf8')
-const projectionShader = flowScreenProjectionWgsl(model.addressCodec)
-const temporal = temporalVelocityWgslModule(model, model, {
-    group: 1, currentPageTableBinding: 0, currentAtlasBinding: 1, nextPageTableBinding: 2, nextAtlasBinding: 3,
-    sampleRegistration: 'pixel-center',
-    wrapper: await readFile(new URL('../../examples/flowField/shaders/temporal-velocity.wgsl', import.meta.url), 'utf8'),
+const read = name => readFile(new URL(`../../examples/flowField/shaders/${name}.wgsl`,import.meta.url),'utf8')
+const [historyShader,supportShader,hardShader,wrapper] = await Promise.all([
+    'history','history-support','hard-boundary','temporal-velocity',
+].map(read))
+const projection = flowScreenProjectionWgsl(model.addressCodec)
+const uniformStruct = historyShader.match(/struct FlowFieldHistoryUniform \{[\s\S]*?\n\};/)?.[0]
+assert.ok(uniformStruct,'Read the actual shared uniform ABI')
+assert.ok(!historyShader.includes('FlowHistory_supported('),'Raw retention cannot destroy ink from current support')
+const temporal = temporalVelocityWgslModule(model,model,{
+    group:1,currentPageTableBinding:0,currentAtlasBinding:1,nextPageTableBinding:2,nextAtlasBinding:3,
+    sampleRegistration:'pixel-center',wrapper,
 })
-const camera = model.addressCodec.fromProjected([ 13_360_000.125, 3_503_000.25 ]).fixed.limbs
+const camera = model.addressCodec.fromProjected([13_360_000.125,3_503_000.25]).fixed.limbs
 const fixture = `
-struct FlowVelocityTemporal { progress: f32, activityKill: f32, }
-struct FlowVelocitySample { status: u32, velocity: vec2f, speed: f32, advectable: bool, }
-@group(1) @binding(0) var<uniform> testVelocity: vec4f;
-@group(1) @binding(1) var<storage, read_write> testSampleCalls: atomic<u32>;
-fn FlowVelocity_source_contains(position: FlowVelocityAddressFixedPosition) -> bool {
-    let x = position.axes[0];
-    return testVelocity.w < 1.5 && !(testVelocity.w > 0.5 &&
-        (x.high > ${camera[0].high}u || (x.high == ${camera[0].high}u && x.low >= ${camera[0].low}u)));
+struct FlowVelocityTemporal { progress:f32, activityKill:f32, }
+struct FlowVelocitySample { status:u32, velocity:vec2f, speed:f32, advectable:bool, }
+@group(1) @binding(0) var<uniform> testVelocity:vec4f;
+@group(1) @binding(1) var<storage,read_write> testSampleCalls:atomic<u32>;
+fn FlowVelocity_source_contains(position:FlowVelocityAddressFixedPosition)->bool {
+    let x=position.axes[0];
+    return testVelocity.w<1.5 && !(testVelocity.w>0.5 &&
+        (x.high>${camera[0].high}u || (x.high==${camera[0].high}u && x.low>=${camera[0].low}u)));
 }
-fn FlowVelocity_sample(position: FlowVelocityAddressFixedPosition, level: u32, temporal: FlowVelocityTemporal) -> FlowVelocitySample {
-    atomicAdd(&testSampleCalls, 1u);
-    let speed = length(testVelocity.xy);
-    let x = position.axes[0];
-    let outside = testVelocity.w > 0.5 &&
-        (x.high > ${camera[0].high}u || (x.high == ${camera[0].high}u && x.low >= ${camera[0].low}u));
-    return FlowVelocitySample(select(u32(testVelocity.z), 0u, outside), testVelocity.xy, speed, speed >= temporal.activityKill);
+fn FlowVelocity_sample(position:FlowVelocityAddressFixedPosition,level:u32,temporal:FlowVelocityTemporal)->FlowVelocitySample {
+    atomicAdd(&testSampleCalls,1u);
+    let speed=length(testVelocity.xy);let x=position.axes[0];
+    let outside=testVelocity.w>0.5 &&
+        (x.high>${camera[0].high}u || (x.high==${camera[0].high}u && x.low>=${camera[0].low}u));
+    return FlowVelocitySample(select(u32(testVelocity.z),0u,outside),testVelocity.xy,speed,speed>=temporal.activityKill);
 }`
-const testCode = model.addressCodec.wgslModule({ namespace: 'FlowVelocityAddress' }) + '\n' +
-    fixture + '\n' + projectionShader + '\n' + historySupportShader + '\n' + historyShader
-// Rebuild the previous eager order only in this proof. Equal output is required,
-// while the counter makes the original unnecessary temporal work observable.
-const supportGuard = '    if (!FlowHistory_supported(input.texcoords)) { return vec4f(0.0); }'
-assert.equal(historyShader.split(supportGuard).length, 2)
-const eagerHistoryShader = historyShader.replace(`${supportGuard}\n`, '')
-    .replace('fn fMain(input: VertexOutput) -> @location(0) vec4f {',
-        `fn fMain(input: VertexOutput) -> @location(0) vec4f {\n${supportGuard}`)
-const eagerCode = testCode.slice(0, -historyShader.length) + eagerHistoryShader
-const realCode = temporal.code + '\n' + projectionShader + '\n' + historySupportShader + '\n' + historyShader
-const server = createServer((_request, response) => {
-    response.setHeader('content-type', 'text/html')
-    response.end('<!doctype html><title>Flow history GPU proof</title>')
-})
-await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+const stub = model.addressCodec.wgslModule({namespace:'FlowVelocityAddress'})+'\n'+fixture+'\n'+projection+'\n'
+const testHard = stub+uniformStruct+'\n'+supportShader+'\n'+hardShader
+const realHard = temporal.code+'\n'+projection+'\n'+uniformStruct+'\n'+supportShader+'\n'+hardShader
+const emptyGuard = hardShader.match(/^\s*if \(color\.a == 0\.0[^\n]*\n/m)?.[0]
+assert.ok(emptyGuard,'The presentation skips sampling transparent or empty ink')
+const eagerHard = stub+uniformStruct+'\n'+supportShader+'\n'+hardShader.replace(emptyGuard,'\n')
+// Counterfactual only: reinsert the former destructive support check into a
+// separate raw-history pipeline to prove why a transient zero left a scar.
+const legacyRaw = stub+supportShader+'\n'+historyShader.replace('    return faded;',
+    '    if (!FlowHistory_supported(input.texcoords)) { return vec4f(0.0); }\n    return faded;')
+const fixtures = [
+    {name:'moving',velocity:[1,0,1,0]},
+    {name:'fallback-moving',velocity:[1,0,2,0]},
+    {name:'fallback-zero-unknown',velocity:[0,0,2,0]},
+    {name:'outside-source',velocity:[0,0,0,2],hidden:true},
+    {name:'zero-even-with-zero-threshold',velocity:[0,0,1,0],threshold:0,hidden:true},
+    {name:'unavailable',velocity:[1,0,0,0]},
+    {name:'no-data-unknown',velocity:[1,0,3,0]},
+    {name:'failed',velocity:[1,0,4,0],hidden:true},
+    {name:'below-threshold',velocity:[0.0001,0,1,0],hidden:true},
+    {name:'no-camera-drift',velocity:[1,0,1,0],reproject:true},
+    {name:'low-limb-camera-shift',velocity:[1,0,1,0],reproject:true,centerShift:0.25,calls:7},
+    {name:'empty-history',velocity:[1,0,1,0],pixels:Array(32).fill(0),calls:0},
+    {name:'faded-to-cutoff',velocity:[1,0,1,0],
+        pixels:Array.from({length:32},(_,index)=>index%4===3?255:2),calls:0},
+    {name:'above-cutoff',velocity:[1,0,1,0],
+        pixels:Array.from({length:32},(_,index)=>[3,0,0,255][index%4])},
+    {name:'transparent-colored-history',velocity:[1,0,1,0],
+        pixels:Array.from({length:32},(_,index)=>[180,50,5,0][index%4]),calls:0},
+    {name:'invalid-history-projection',velocity:[1,0,1,0],reproject:true,historyValid:false,calls:0},
+    {name:'invalid-current-ground',velocity:[1,0,1,0],groundInvalid:true,calls:0,eagerCalls:0,hidden:true},
+    {name:'reprojected-source-empty',velocity:[1,0,1,0],reproject:true,centerShift:0.25,
+        pixels:[16,255,128,255,...Array(28).fill(0)],calls:0},
+    {name:'reprojected-source-populated',velocity:[1,0,1,0],reproject:true,centerShift:0.25,
+        pixels:[...Array(4).fill(0),40,255,128,255,...Array(24).fill(0)],calls:1},
+    {name:'current-boundary-after-reprojection',velocity:[1,0,1,1],reproject:true,centerShift:0.25,calls:7},
+]
+const server = createServer((_request,response)=>response.end('<!doctype html><title>Flow raw retention and hard visibility proof</title>'))
+await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve))
 let browser
 try {
-    browser = await chromium.launch({ channel: 'chrome', headless: true, args: [ '--enable-unsafe-webgpu' ] })
+    browser = await chromium.launch({channel:'chrome',headless:true,args:['--enable-unsafe-webgpu']})
     const page = await browser.newPage()
     await page.goto(`http://127.0.0.1:${server.address().port}`)
-    const proof = await page.evaluate(async ({ testCode, eagerCode, realCode, camera }) => {
-        const adapter = await navigator.gpu.requestAdapter()
-        if (!adapter) throw new Error('WebGPU adapter unavailable')
-        const device = await adapter.requestDevice()
+    const proof = await page.evaluate(async ({historyShader,testHard,eagerHard,legacyRaw,realHard,camera,fixtures})=>{
+        const adapter=await navigator.gpu.requestAdapter()
+        if(!adapter)throw new Error('WebGPU adapter unavailable')
+        const device=await adapter.requestDevice(),owned=[],errors=[]
+        device.addEventListener('uncapturederror',event=>errors.push(event.error.message))
         device.pushErrorScope('validation')
-        const pipeline = async code => {
-            const module = device.createShaderModule({ code })
-            const errors = (await module.getCompilationInfo()).messages.filter(message => message.type === 'error')
-            if (errors.length) throw new Error(errors.map(message => message.message).join('\n'))
-            return await device.createRenderPipelineAsync({
-                layout: 'auto', vertex: { module, entryPoint: 'vMain' },
-                fragment: { module, entryPoint: 'fMain', targets: [ { format: 'rgba8unorm' } ] },
-                primitive: { topology: 'triangle-strip' },
-                depthStencil: { format: 'depth32float', depthWriteEnabled: false, depthCompare: 'less' },
-            })
-        }
-        await pipeline(realCode)
-        const testPipeline = await pipeline(testCode)
-        const eagerPipeline = await pipeline(eagerCode)
-        const buffer = (data, usage) => {
-            const target = device.createBuffer({ size: data.byteLength, usage: usage | GPUBufferUsage.COPY_DST })
-            device.queue.writeBuffer(target, 0, data)
-            return target
-        }
-        const size = { width: 8, height: 1 }
-        const historyPixels = new Uint8Array(8 * 4)
-        for (let x = 0; x < 8; x++) historyPixels.set([ 16 + x * 24, 255, 128, 255 ], x * 4)
-        const history = device.createTexture({ size, format: 'rgba8unorm', usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST })
-        device.queue.writeTexture({ texture: history }, historyPixels, { bytesPerRow: 32 }, size)
-        const output = device.createTexture({ size, format: 'rgba8unorm', usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC })
-        const depth = device.createTexture({ size, format: 'depth32float', usage: GPUTextureUsage.RENDER_ATTACHMENT })
-        const results = []
-        const fixtures = [
-            { name: 'moving', velocity: [ 1, 0, 1, 0 ] },
-            { name: 'fallback-moving', velocity: [ 1, 0, 2, 0 ] },
-            { name: 'fallback-zero-unknown', velocity: [ 0, 0, 2, 0 ] },
-            { name: 'outside-source', velocity: [ 0, 0, 0, 2 ] },
-            { name: 'zero-even-with-zero-threshold', velocity: [ 0, 0, 1, 0 ], threshold: 0 },
-            { name: 'unavailable', velocity: [ 1, 0, 0, 0 ] },
-            { name: 'missing', velocity: [ 1, 0, 3, 0 ] },
-            { name: 'invalid', velocity: [ 1, 0, 4, 0 ] },
-            { name: 'below-threshold', velocity: [ 0.0001, 0, 1, 0 ] },
-            { name: 'no-camera-drift', velocity: [ 1, 0, 1, 0 ], reproject: true },
-            { name: 'low-limb-camera-shift', velocity: [ 1, 0, 1, 0 ], reproject: true, centerShift: 0.25 },
-            { name: 'empty-history', velocity: [ 1, 0, 1, 0 ], pixels: Array(32).fill(0), sampleCalls: 0 },
-            { name: 'faded-to-cutoff', velocity: [ 1, 0, 1, 0 ],
-                pixels: Array.from({ length: 32 }, (_, index) => index % 4 === 3 ? 255 : 2), sampleCalls: 0 },
-            { name: 'above-cutoff', velocity: [ 1, 0, 1, 0 ],
-                pixels: Array.from({ length: 32 }, (_, index) => [ 3, 0, 0, 255 ][index % 4]), sampleCalls: 8 },
-            { name: 'invalid-history-projection', velocity: [ 1, 0, 1, 0 ],
-                reproject: true, historyValid: false, sampleCalls: 0 },
-            { name: 'reprojected-source-empty', velocity: [ 1, 0, 1, 0 ],
-                reproject: true, centerShift: 0.25,
-                pixels: [ 16, 255, 128, 255, ...Array(28).fill(0) ], sampleCalls: 0 },
-            { name: 'reprojected-source-populated', velocity: [ 1, 0, 1, 0 ],
-                reproject: true, centerShift: 0.25,
-                pixels: [ ...Array(4).fill(0), 40, 255, 128, 255, ...Array(24).fill(0) ], sampleCalls: 1 },
-            { name: 'current-boundary-after-reprojection', velocity: [ 1, 0, 1, 1 ],
-                reproject: true, centerShift: 0.25, sampleCalls: 7 },
-        ]
-        for (const fixture of fixtures.flatMap(value => [
-            { ...value, implementation: 'optimized', pipeline: testPipeline },
-            { ...value, implementation: 'eager-control', pipeline: eagerPipeline },
-        ])) {
-            const testPipeline = fixture.pipeline
-            const historySet = device.createBindGroup({ layout: testPipeline.getBindGroupLayout(2), entries: [ { binding: 0, resource: history.createView() } ] })
-            device.queue.writeTexture({ texture: history },
-                fixture.pixels === undefined ? historyPixels : new Uint8Array(fixture.pixels),
-                { bytesPerRow: 32 }, size)
-            const bytes = new ArrayBuffer(352)
-            const values = new DataView(bytes)
-            const f32 = (offset, value) => values.setFloat32(offset, value, true)
-            const vector = (offset, value) => value.forEach((component, index) => f32(offset + index * 4, component))
-            f32(0, 0.996)
-            f32(4, 1 / 255)
-            f32(8, 2)
-            f32(12, fixture.historyValid === false ? 0 : 1)
-            f32(16, fixture.reproject ? 1 : 0)
-            const identity = [ 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 ]
-            const previous = [ ...identity ]
-            previous[10] = 0
-            previous[14] = 0.5
-            vector(32, previous)
-            vector(96, identity)
-            const inverse = [ ...identity ]
-            inverse[10] = -1
-            vector(160, inverse)
-            vector(224, [ 13_360_000, 3_503_000, 0.5 ])
-            vector(240, [ 0.125, 0.25, 0 ])
-            vector(256, [ 13_360_000, 3_503_000, 0.5 ])
-            vector(272, [ 0.125 + (fixture.centerShift ?? 0), 0.25, 0 ])
-            vector(288, [ 8, 1 ])
-            vector(296, [ 8, 1 ])
-            camera.flatMap(axis => [ axis.low, axis.high ]).forEach((limb, index) => values.setUint32(304 + index * 4, limb, true))
-            vector(320, [ 0.5, 0 ])
-            f32(336, fixture.threshold ?? 0.001)
-            const uniform = buffer(bytes, GPUBufferUsage.UNIFORM)
-            const velocity = buffer(new Float32Array(fixture.velocity), GPUBufferUsage.UNIFORM)
-            const sampleCalls = buffer(new Uint32Array(1), GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC)
-            const read = device.createBuffer({ size: 256, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ })
-            const sampleCallsRead = device.createBuffer({ size: 4, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ })
-            const uniformSet = device.createBindGroup({ layout: testPipeline.getBindGroupLayout(0), entries: [ { binding: 0, resource: { buffer: uniform } } ] })
-            const velocitySet = device.createBindGroup({ layout: testPipeline.getBindGroupLayout(1), entries: [
-                { binding: 0, resource: { buffer: velocity } },
-                { binding: 1, resource: { buffer: sampleCalls } },
-            ] })
-            const encoder = device.createCommandEncoder()
-            const pass = encoder.beginRenderPass({
-                colorAttachments: [ { view: output.createView(), loadOp: 'clear', storeOp: 'store', clearValue: [ 0, 0, 0, 0 ] } ],
-                depthStencilAttachment: { view: depth.createView(), depthLoadOp: 'clear', depthStoreOp: 'store', depthClearValue: 1 },
-            })
-            pass.setPipeline(testPipeline)
-            pass.setBindGroup(0, uniformSet)
-            pass.setBindGroup(1, velocitySet)
-            pass.setBindGroup(2, historySet)
-            pass.draw(4)
-            pass.end()
-            encoder.copyTextureToBuffer({ texture: output }, { buffer: read, bytesPerRow: 256 }, size)
-            encoder.copyBufferToBuffer(sampleCalls, 0, sampleCallsRead, 0, 4)
-            device.queue.submit([ encoder.finish() ])
-            await Promise.all([ read.mapAsync(GPUMapMode.READ), sampleCallsRead.mapAsync(GPUMapMode.READ) ])
-            results.push({
-                name: fixture.name,
-                implementation: fixture.implementation,
-                pixels: Array.from(new Uint8Array(read.getMappedRange()).slice(0, 32)),
-                sampleCalls: new Uint32Array(sampleCallsRead.getMappedRange())[0],
-                expectedSampleCalls: fixture.sampleCalls ?? (fixture.centerShift === undefined ? 8 : 7),
-            })
-            read.unmap()
-            sampleCallsRead.unmap()
-            for (const resource of [ uniform, velocity, sampleCalls, read, sampleCallsRead ]) resource.destroy()
-        }
-        for (const resource of [ history, output, depth ]) resource.destroy()
-        const error = await device.popErrorScope()
-        device.destroy()
-        if (error) throw new Error(error.message)
-        return results
-    }, { testCode, eagerCode, realCode, camera })
-    const optimized = proof.filter(result => result.implementation === 'optimized')
-    const eager = proof.filter(result => result.implementation === 'eager-control')
-    const row = name => optimized.find(result => result.name === name).pixels
-    const expected = Array.from({ length: 32 }, (_, index) => Math.floor([ 16 + Math.floor(index / 4) * 24, 255, 128, 255 ][index % 4] * 0.996))
-    assert.deepEqual(row('moving'), expected)
-    assert.deepEqual(row('fallback-moving'), expected)
-    for (const name of ['unavailable', 'missing', 'fallback-zero-unknown']) {
-        assert.deepEqual(row(name), expected, `${name} must retain ink with finite decay`)
+        try {
+            const layout0=device.createBindGroupLayout({entries:[{binding:0,visibility:GPUShaderStage.FRAGMENT,buffer:{type:'uniform',minBindingSize:352}}]})
+            const layout1=device.createBindGroupLayout({entries:[
+                {binding:0,visibility:GPUShaderStage.FRAGMENT,buffer:{type:'uniform',minBindingSize:16}},
+                {binding:1,visibility:GPUShaderStage.FRAGMENT,buffer:{type:'storage',minBindingSize:4}},
+            ]})
+            const layout2=device.createBindGroupLayout({entries:[{binding:0,visibility:GPUShaderStage.FRAGMENT,texture:{sampleType:'float'}}]})
+            const layout=device.createPipelineLayout({bindGroupLayouts:[layout0,layout1,layout2]})
+            async function pipeline(code,depth=false,explicit=true) {
+                const module=device.createShaderModule({code})
+                const compilation=(await module.getCompilationInfo()).messages.filter(value=>value.type==='error')
+                if(compilation.length)throw new Error(compilation.map(value=>value.message).join('\n'))
+                return await device.createRenderPipelineAsync({layout:explicit?layout:'auto',
+                    vertex:{module,entryPoint:'vMain'},fragment:{module,entryPoint:'fMain',targets:[{format:'rgba8unorm'}]},
+                    primitive:{topology:'triangle-strip'},
+                    ...(depth?{depthStencil:{format:'depth32float',depthWriteEnabled:false,depthCompare:'less'}}:{}),
+                })
+            }
+            // Real source composition compiles separately from the instrumented
+            // fake sample values. Raw retention compiles with no Flow module.
+            await pipeline(realHard,false,false)
+            const rawPipeline=await pipeline(historyShader,true)
+            const hardPipeline=await pipeline(testHard)
+            const eagerPipeline=await pipeline(eagerHard)
+            const legacyPipeline=await pipeline(legacyRaw,true)
+            const freshPipeline=await pipeline(`
+@vertex fn vMain(@builtin(vertex_index) i:u32)->@builtin(position) vec4f {
+    let p=array<vec2f,4>(vec2f(-1,-1),vec2f(-1,1),vec2f(1,-1),vec2f(1,1));return vec4f(p[i],0,1);
+}
+@fragment fn fMain()->@location(0) vec4f {return vec4f(0.2,0.6,0.8,1);}`,false,false)
+            const buffer=(data,usage)=>{
+                const value=device.createBuffer({size:data.byteLength,usage:usage|GPUBufferUsage.COPY_DST})
+                device.queue.writeBuffer(value,0,data);owned.push(value);return value
+            }
+            const readBuffer=size=>{const value=device.createBuffer({size,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ});owned.push(value);return value}
+            const size={width:8,height:1}
+            const texture=(format='rgba8unorm')=>{
+                const value=device.createTexture({size,format,usage:format==='depth32float'?GPUTextureUsage.RENDER_ATTACHMENT:
+                    GPUTextureUsage.TEXTURE_BINDING|GPUTextureUsage.COPY_DST|GPUTextureUsage.COPY_SRC|GPUTextureUsage.RENDER_ATTACHMENT})
+                owned.push(value);return value
+            }
+            const history=texture(),rawA=texture(),rawB=texture(),visible=texture(),legacy=texture(),depth=texture('depth32float')
+            const initial=new Uint8Array(32)
+            for(let x=0;x<8;x++)initial.set([16+x*24,255,128,255],x*4)
+            const calls=buffer(new Uint32Array(1),GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_SRC)
+            function uniform(fixture={}) {
+                const bytes=new ArrayBuffer(352),view=new DataView(bytes)
+                const put=(offset,value)=>view.setFloat32(offset,value,true)
+                const vec=(offset,values)=>values.forEach((value,index)=>put(offset+index*4,value))
+                put(0,0.996);put(4,1/255);put(8,2);put(12,fixture.historyValid===false?0:1);put(16,fixture.reproject?1:0)
+                const identity=[1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1],previous=[...identity],inverse=[...identity]
+                previous[10]=0;previous[14]=0.5;inverse[10]=fixture.groundInvalid?1:-1
+                vec(32,previous);vec(96,identity);vec(160,inverse)
+                vec(224,[13_360_000,3_503_000,0.5]);vec(240,[0.125-(fixture.centerShift??0),0.25,0])
+                vec(256,[13_360_000,3_503_000,0.5]);vec(272,[0.125,0.25,0])
+                vec(288,[8,1]);vec(296,[8,1])
+                camera.flatMap(axis=>[axis.low,axis.high]).forEach((value,index)=>view.setUint32(304+index*4,value,true))
+                vec(320,[0.5,0]);put(336,fixture.threshold??0.001);put(340,0.25)
+                const resource=buffer(bytes,GPUBufferUsage.UNIFORM)
+                return device.createBindGroup({layout:layout0,entries:[{binding:0,resource:{buffer:resource}}]})
+            }
+            function velocity(values) {
+                const resource=buffer(new Float32Array(values),GPUBufferUsage.UNIFORM)
+                return device.createBindGroup({layout:layout1,entries:[{binding:0,resource:{buffer:resource}},{binding:1,resource:{buffer:calls}}]})
+            }
+            function draw(encoder,pipeline,input,target,config,source,withDepth=false) {
+                const pass=encoder.beginRenderPass({colorAttachments:[{view:target.createView(),loadOp:'clear',storeOp:'store',clearValue:[0,0,0,0]}],
+                    ...(withDepth?{depthStencilAttachment:{view:depth.createView(),depthLoadOp:'clear',depthStoreOp:'store',depthClearValue:1}}:{})})
+                pass.setPipeline(pipeline)
+                if(config)pass.setBindGroup(0,config)
+                if(source)pass.setBindGroup(1,source)
+                if(input)pass.setBindGroup(2,device.createBindGroup({layout:layout2,entries:[{binding:0,resource:input.createView()}]}))
+                pass.draw(4);pass.end()
+            }
+            const copy=(encoder,texture,read,index)=>encoder.copyTextureToBuffer({texture},{buffer:read,offset:index*256,bytesPerRow:256},size)
+            const results=[]
+            for(const fixture of fixtures) {
+                device.queue.writeTexture({texture:history},fixture.pixels?new Uint8Array(fixture.pixels):initial,{bytesPerRow:32},size)
+                const config=uniform(fixture),source=velocity(fixture.velocity),pixelsRead=readBuffer(3*256),countRead=readBuffer(12)
+                const encoder=device.createCommandEncoder();encoder.clearBuffer(calls)
+                draw(encoder,rawPipeline,history,rawA,config,source,true)
+                copy(encoder,rawA,pixelsRead,0);encoder.copyBufferToBuffer(calls,0,countRead,0,4)
+                draw(encoder,hardPipeline,rawA,visible,config,source)
+                copy(encoder,visible,pixelsRead,1);encoder.copyBufferToBuffer(calls,0,countRead,4,4)
+                encoder.clearBuffer(calls)
+                draw(encoder,eagerPipeline,rawA,visible,config,source)
+                copy(encoder,visible,pixelsRead,2);encoder.copyBufferToBuffer(calls,0,countRead,8,4)
+                device.queue.submit([encoder.finish()])
+                await Promise.all([pixelsRead.mapAsync(GPUMapMode.READ),countRead.mapAsync(GPUMapMode.READ)])
+                const bytes=new Uint8Array(pixelsRead.getMappedRange()),counts=new Uint32Array(countRead.getMappedRange())
+                results.push({name:fixture.name,raw:Array.from(bytes.slice(0,32)),hard:Array.from(bytes.slice(256,288)),
+                    eager:Array.from(bytes.slice(512,544)),rawCalls:counts[0],hardCalls:counts[1],eagerCalls:counts[2]})
+                pixelsRead.unmap();countRead.unmap()
+            }
+            // Real texture chain: current zero hides both old/fresh ink only at
+            // presentation. Recovery reads rawB, never the black visible target.
+            device.queue.writeTexture({texture:history},initial,{bytesPerRow:32},size)
+            const config=uniform(),zero=velocity([0,0,1,0]),moving=velocity([1,0,1,0])
+            const chainRead=readBuffer(9*256),encoder=device.createCommandEncoder()
+            draw(encoder,rawPipeline,history,rawA,config,zero,true);copy(encoder,rawA,chainRead,0)
+            draw(encoder,hardPipeline,rawA,visible,config,zero);copy(encoder,visible,chainRead,1)
+            draw(encoder,rawPipeline,rawA,rawB,config,zero,true)
+            draw(encoder,hardPipeline,rawB,visible,config,moving);copy(encoder,visible,chainRead,2)
+            draw(encoder,legacyPipeline,history,legacy,config,zero,true);copy(encoder,legacy,chainRead,3)
+            draw(encoder,hardPipeline,legacy,visible,config,moving);copy(encoder,visible,chainRead,4)
+            let source=rawB,target=rawA
+            for(let step=2;step<256;step++) {draw(encoder,rawPipeline,source,target,config,zero,true);[source,target]=[target,source]}
+            copy(encoder,source,chainRead,5)
+            draw(encoder,hardPipeline,source,visible,config,moving);copy(encoder,visible,chainRead,6)
+            draw(encoder,freshPipeline,undefined,rawA);copy(encoder,rawA,chainRead,7)
+            draw(encoder,hardPipeline,rawA,visible,config,zero);copy(encoder,visible,chainRead,8)
+            device.queue.submit([encoder.finish()]);await chainRead.mapAsync(GPUMapMode.READ)
+            const chainBytes=new Uint8Array(chainRead.getMappedRange())
+            const chain=Array.from({length:9},(_,index)=>Array.from(chainBytes.slice(index*256,index*256+32)))
+            chainRead.unmap();await device.queue.onSubmittedWorkDone()
+            const validation=await device.popErrorScope()
+            if(validation)throw new Error(validation.message)
+            if(errors.length)throw new Error(errors.join('\n'))
+            return {results,chain,errors}
+        } finally {owned.forEach(value=>value.destroy());device.destroy()}
+    },{historyShader,testHard,eagerHard,legacyRaw,realHard,camera,fixtures})
+    const initial=Array.from({length:32},(_,index)=>[16+Math.floor(index/4)*24,255,128,255][index%4])
+    const faded=decay(initial),row=name=>proof.results.find(value=>value.name===name)
+    for(const fixture of fixtures) {
+        const result=row(fixture.name)
+        let raw=decay(fixture.pixels??initial)
+        if(fixture.reproject && fixture.historyValid===false)raw=Array(32).fill(0)
+        else if(fixture.centerShift)raw=[...raw.slice(4),0,0,0,0]
+        assert.deepEqual(result.raw,raw,`${fixture.name}: support cannot alter raw retention`)
+        assert.equal(result.rawCalls,0,`${fixture.name}: raw retention must never sample velocity`)
+        const expected=fixture.hidden?Array(32).fill(0):fixture.name==='current-boundary-after-reprojection'
+            ?[...raw.slice(0,16),...Array(16).fill(0)]:raw
+        assert.deepEqual(result.hard,expected,`${fixture.name}: final current-space visibility`)
+        assert.deepEqual(result.eager,result.hard,`${fixture.name}: empty-ink optimization preserves visible output`)
+        assert.equal(result.hardCalls,fixture.calls??8,`${fixture.name}: only visible ink needs final velocity sampling`)
+        assert.equal(result.eagerCalls,fixture.eagerCalls??8,`${fixture.name}: eager counterfactual`)
     }
-    for (const name of [ 'zero-even-with-zero-threshold', 'outside-source', 'invalid', 'below-threshold' ]) {
-        assert.deepEqual(row(name), Array(32).fill(0), name)
-    }
-    assert.deepEqual(row('no-camera-drift'), expected)
-    assert.deepEqual(row('low-limb-camera-shift'), [ ...expected.slice(4), 0, 0, 0, 0 ])
-    for (const name of [ 'empty-history', 'faded-to-cutoff', 'invalid-history-projection', 'reprojected-source-empty' ]) {
-        assert.deepEqual(row(name), Array(32).fill(0), name)
-    }
-    assert.deepEqual(row('above-cutoff'), Array.from({ length: 32 }, (_, index) => [ 2, 0, 0, Math.floor(255 * 0.996) ][index % 4]))
-    assert.deepEqual(row('reprojected-source-populated'), [ ...expected.slice(4, 8), ...Array(28).fill(0) ])
-    assert.deepEqual(row('current-boundary-after-reprojection'), [ ...expected.slice(4, 20), ...Array(16).fill(0) ])
-    for (const result of optimized) {
-        assert.equal(result.sampleCalls, result.expectedSampleCalls, `${result.name} temporal sample count`)
-        const control = eager.find(value => value.name === result.name)
-        assert.deepEqual(result.pixels, control.pixels, `${result.name} must preserve eager-order output`)
-        assert.equal(control.sampleCalls, 8, `${result.name} eager-order control must sample every pixel`)
-    }
-    console.log(JSON.stringify({ status: 'passed', realTemporalPipeline: 'passed',
-        eagerControlSamplesPerCase: 8,
-        cases: optimized.map(({ name, sampleCalls }) => ({ name, sampleCalls })) }))
-} finally {
-    await browser?.close()
-    await new Promise(resolve => server.close(resolve))
+    assert.deepEqual(proof.chain[0],faded,'A current zero must leave the decayed raw texture intact')
+    assert.deepEqual(proof.chain[1],Array(32).fill(0),'A current zero must remain invisible')
+    assert.deepEqual(proof.chain[2],decay(faded),'Motion recovery restores the surviving raw ink')
+    assert.deepEqual(proof.chain[3],Array(32).fill(0),'Old destructive raw cleanup erases the same ink')
+    assert.deepEqual(proof.chain[4],Array(32).fill(0),'Old cleanup cannot recover after support returns')
+    assert.deepEqual(proof.chain[5],Array(32).fill(0),'Raw ink expires after a bounded number of ordinary decay steps')
+    assert.deepEqual(proof.chain[6],Array(32).fill(0),'Expired ink cannot reappear when support recovers')
+    assert.deepEqual(proof.chain[7],Array.from({length:32},(_,index)=>[51,153,204,255][index%4]),'Freshly composed segments remain in raw storage')
+    assert.deepEqual(proof.chain[8],Array(32).fill(0),'The final hard gate also clips fresh segments')
+    console.log(JSON.stringify({status:'passed',realTemporalPipeline:'compiled',rawPipeline:'standalone',
+        cases:proof.results.map(({name,rawCalls,hardCalls,eagerCalls})=>({name,rawCalls,hardCalls,eagerCalls})),
+        chain:{zeroHidden:true,recoveryRestored:true,legacyScarConfirmed:true,expirySteps:256,freshSegmentsClipped:true},errors:proof.errors}))
+} finally {await browser?.close();await new Promise(resolve=>server.close(resolve))}
+
+function decay(pixels) {
+    const result=pixels.map(value=>Math.floor(value*0.996))
+    for(let index=0;index<result.length;index+=4)if(Math.max(...result.slice(index,index+3))<=1)result.fill(0,index,index+4)
+    return result
 }

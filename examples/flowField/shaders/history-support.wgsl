@@ -1,3 +1,5 @@
+// Current hard presentation only. Never use this visibility decision to erase
+// retained ink; particle death and finite trail decay own different lifetimes.
 fn FlowHistory_supported(texcoords: vec2f) -> bool {
     let ground = FlowScreen_ground_position(texcoords, cleanupUniform.currentInverseMatrix,
         cleanupUniform.cameraX, cleanupUniform.cameraY, cleanupUniform.cameraZ);

@@ -147,9 +147,8 @@ fn fMain(input: VertexOutput) -> @location(0) vec4f {
     if (residual <= cleanupUniform.trailCutoff) {
         return vec4f(0.0);
     }
-    // Only visible retained ink needs current-flow validation. Sampling the
-    // temporal raster for every empty physical pixel can halve visual ticks.
-    // Keep the check in current screen space, after any history reprojection.
-    if (!FlowHistory_supported(input.texcoords)) { return vec4f(0.0); }
+    // Retention and current visibility are separate. A transient cancellation
+    // must not punch a lasting scar in otherwise finite, decaying trail ink.
+    // Both current presentations clip after composition, without feedback here.
     return faded;
 }

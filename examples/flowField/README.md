@@ -35,7 +35,7 @@ coverage integral; this is **not** interpolation of two endpoint SDFs or a state
 wall-clock smoothing filter. Uniform support weight q produces coverage q; binary
 support preserves the spatial basis. The current sampler still vetoes reliable zero
 or non-advectable points, but there is no global low-speed opacity cap. Actual zero
-can therefore still stop/clear the flow according to A's original rules. See
+can therefore still stop particles and hide the current display. See
 [ADR-113](../../docs/decisions/ADR-113-flow-persistent-interior-support.md), correcting
 the global opacity policy in [ADR-112](../../docs/decisions/ADR-112-flow-temporal-boundary-coverage.md).
 
@@ -48,8 +48,19 @@ A and inspector views disable the slider but retain its value for the next B vie
 Programmatic `sdfFeatherTexels` inputs default to 0.25 when omitted; non-finite or
 out-of-range values are rejected rather than silently changing the user's input.
 
-Both choices use exactly the same particles and raw hard-cleaned trail history.
-Switching A/B neither resets nor softens that history, changes velocity/death, nor
+Both choices use exactly the same particles and finite, decaying raw trail history.
+Current velocity clips the **visible result**, not the stored raw trails: a moving
+zero/cancellation curve no longer erases a lasting comb-shaped scar that takes time
+to refill. Reliable zero/below-threshold flow is still hidden and its particles still
+die immediately. Old ink can reappear on recovery only while it has not decayed away.
+The two existing textures alternate roles: compose raw ink into one, then overwrite
+the consumed source with its clipped visible image. During unavailable time loading,
+only the last visible image is reprojected to the Surface; hidden raw ink stays hidden.
+No texture or source channel is added. There is one additional inexpensive display
+copy pass; A and B each evaluate support only in presentation. See
+[ADR-114](../../docs/decisions/ADR-114-flow-trail-retention-and-visibility.md).
+
+Switching A/B neither resets nor softens raw history, changes velocity/death, nor
 adds source requests. B cannot extend color into empty hard footprints, round every
 concave step, restore missing narrow channels, or increase the z10 source precision.
 It is deliberately an **inner-edge display comparison**, not reconstructed true banks.
@@ -125,6 +136,8 @@ Focused native proofs:
 node tests/browser/flow-screen-projection.mjs
 node tests/browser/flow-field-particle-reference.mjs
 node tests/browser/flow-field-history.mjs
+node tests/browser/flow-field-history-recovery.mjs
+node tests/browser/flow-field-history-retained.mjs
 node tests/browser/flow-field-controls.mjs
 node tests/browser/flow-field-boundary-distance.mjs
 node tests/browser/flow-field-boundary-time.mjs
@@ -147,10 +160,11 @@ node tests/browser/scratch-flow-field.mjs
 ```
 
 Run the motion benchmark alone: it compares high-DPR visual step frequency against
-frozen Flow Layer and an isolated eager-support counterfactual. Empty or fully faded
-history skips temporal-raster support sampling (see
-[ADR-102](../../docs/decisions/ADR-102-flow-history-visible-support.md)); visible
-history still checks the current flow before presentation.
+frozen Flow Layer and an isolated eager-presentation-support counterfactual. Empty
+ink skips temporal-raster sampling in the final presentation; raw history never
+samples velocity. This preserves the visible-ink optimization from
+[ADR-102](../../docs/decisions/ADR-102-flow-history-visible-support.md) after moving
+the visibility check out of destructive trail accumulation.
 
 With Vite and the tile service already running,
 `node tests/browser/flow-field-reference-appearance.mjs` saves both examples at

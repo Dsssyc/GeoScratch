@@ -19,6 +19,17 @@ struct FlowBoundaryCenter {
     next: vec2f,
 };
 
+// Unknown reconstruction uses A's current visibility, not unfiltered raw ink.
+// Raw history can contain an already hidden zero/outside/failed region.
+fn FlowBoundary_hard_coverage(position: FlowVelocityAddressFixedPosition, level: u32) -> f32 {
+    if (!FlowVelocity_source_contains(position)) { return 0.0; }
+    let flow = FlowVelocity_sample(position, level,
+        FlowVelocityTemporal(boundaryUniform.progress, boundaryUniform.activityKill));
+    if (flow.status == 4u) { return 0.0; }
+    if (flow.status == 1u) { return select(0.0, 1.0, flow.advectable && flow.speed > 0.0); }
+    return 1.0;
+}
+
 // Interpolated support footprint with common endpoint support protected. This
 // does not classify current motion; the original temporal sampler does that.
 fn FlowBoundary_center(global: vec2i, level: u32) -> FlowBoundaryCenter {
@@ -37,7 +48,7 @@ fn FlowBoundary_coverage(position: FlowVelocityAddressFixedPosition) -> f32 {
     let level = boundaryUniform.requestedLevel;
     // B is specifically the v3 pixel-center/nearest-zero footprint experiment.
     if (!FlowVelocity_nearest_zero_gate || level >= FlowVelocityCurrent_level_count ||
-        !FlowVelocity_source_contains(position)) { return 1.0; }
+        !FlowVelocity_source_contains(position)) { return FlowBoundary_hard_coverage(position, level); }
     let address = FlowVelocityAddress_address(position, FlowVelocityCurrent_matrix[level]);
     let offset = address.sub_texel - vec2f(0.5);
     let base = vec2i(address.tile * FlowVelocityCurrent_page_size + address.texel) + vec2i(floor(offset));
@@ -50,7 +61,7 @@ fn FlowBoundary_coverage(position: FlowVelocityAddressFixedPosition) -> f32 {
     let q = vec4f(tl.weight, tr.weight, br.weight, bl.weight);
     let minimum = min(min(q.x, q.y), min(q.z, q.w));
     let maximum = max(max(q.x, q.y), max(q.z, q.w));
-    if (minimum < 0.0) { return 1.0; }
+    if (minimum < 0.0) { return FlowBoundary_hard_coverage(position, level); }
     // Zero-k has no numerical margin: let the full sampler decide exact zero.
     if (minimum == 1.0 && boundaryUniform.activityKill > 0.0) {
         // Check cancellation using already loaded, pixel-center-aligned texels.
@@ -77,8 +88,10 @@ fn FlowBoundary_coverage(position: FlowVelocityAddressFixedPosition) -> f32 {
     // A sparse LoD halo must not create a finer artificial boundary over fallback ink.
     let actual = FlowVelocity_sample(position, level,
         FlowVelocityTemporal(boundaryUniform.progress, boundaryUniform.activityKill));
-    if (actual.status != 1u || actual.resolved_level != level) { return 1.0; }
+    if (actual.status == 4u) { return 0.0; }
+    if (actual.status != 1u) { return 1.0; }
     if (!actual.advectable || actual.speed <= 0.0) { return 0.0; }
+    if (actual.resolved_level != level) { return 1.0; }
     // Uniform support has integral q. There is no global low-speed alpha cap.
     if (minimum == maximum) { return minimum; }
     var centers: array<f32, 16>;
@@ -117,7 +130,7 @@ fn fMain(input: FlowBoundaryVertex) -> @location(0) vec4f {
     if (color.a == 0.0 || max(max(color.r, color.g), color.b) == 0.0) { return color; }
     let ground = FlowScreen_ground_position(input.texcoords, boundaryUniform.currentInverseMatrix,
         boundaryUniform.cameraX, boundaryUniform.cameraY, boundaryUniform.cameraZ);
-    if (ground.valid == 0u) { return color; }
-    // Apply coverage once, only to Surface alpha; never feed it into raw history.
+    if (ground.valid == 0u) { return vec4f(0.0); }
+    // Apply coverage once to visible-image alpha; never feed it into raw history.
     return vec4f(color.rgb, color.a * FlowBoundary_coverage(ground.position));
 }
