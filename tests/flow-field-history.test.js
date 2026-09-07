@@ -69,7 +69,7 @@ describe('Flow Field viewport history', () => {
         expect(shader).not.to.include('let nearWorld')
     })
 
-    it('shares A/B presentation support without changing the actual particle sampler', () => {
+    it('keeps A support for B fallback without a second known-boundary mask or particle changes', () => {
 
         const support = read(presentationSupportPath)
         const sdf = read(path.join(root, 'examples/flowField/shaders/boundary-sdf.wgsl'))
@@ -82,7 +82,12 @@ describe('Flow Field viewport history', () => {
         expect(support).to.include('FlowVelocityCurrent_load_global(')
         expect(support).to.include('FlowVelocityNext_load_global(')
         expect(support).to.include('FlowVelocity_sample(')
-        expect(sdf).to.include('FlowPresentation_stationary_coverage(')
+        expect(sdf).not.to.include('FlowPresentation_stationary_coverage(')
+        expect(sdf).not.to.include('* visibility')
+        expect(sdf).to.include('return FlowBoundary_continuous_coverage(p, activity, feather)')
+        expect(sdf).to.include('FlowVelocityCurrent_resolution_global(global, level)')
+        expect(sdf).to.include('FlowVelocityNext_edge_blend_weight(registered, level)')
+        expect(sdf).to.include('if (!FlowBoundary_exact_residency(position, level))')
         expect(sdf).to.include('FlowPresentation_coverage(')
         expect(velocity).not.to.include('FlowPresentation_')
         expect(velocity).to.include('let velocity = mix(current_velocity, next_velocity, temporal.progress)')

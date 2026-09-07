@@ -21,11 +21,15 @@ Activity contour is an optional velocity threshold overlay and does not enter tr
 
 In **Particles**, the **Boundary** selector compares **A · Hard texture** (default)
 with **B · SDF (inward)**. B derives temporal support weights from endpoint
-and interpolated U/V, then combines the existing binary SDF coverages across those
-activity levels. Each basis searches neighboring cells for the nearest finite contour
-segment and applies an inward feather (default: 0.25 source texel). Convex pixel corners are
-chamfered; diagonal active cells are not connected across a dry gap. This is a local
-truncated SDF evaluated in shader registers, not an uploaded SDF texture or a JFA pass.
+and interpolated U/V, then integrates binary SDF coverages across those activity
+levels. Each supported sample occupies its **original texel square**. Inside the
+wet union, distance is measured to the nearest unsupported square, including its
+corners, and an inward feather is applied (default: 0.25 source texel). The distance
+and support now use the same boundary: a center-point diamond is not subsequently
+cut by a different square mask. Diagonal wet texels do not gain a bridge across a
+dry gap. This is a truncated wet-side SDF evaluated in shader registers, not an
+uploaded SDF texture or a JFA pass. See
+[ADR-116](../../docs/decisions/ADR-116-flow-owner-footprint-sdf.md).
 
 Both-endpoint supported centers retain weight 1, even when their vectors reverse or
 the current speed is much smaller. Weak but valid interior motion is not mapped to
@@ -51,17 +55,22 @@ Both choices use exactly the same particles and finite, decaying raw trail histo
 The **visible result** is separate from the stored raw trails: a moving cancellation
 curve neither erases a lasting scar nor automatically makes a supported interior
 transparent. Reliable zero/below-threshold particles still die immediately.
-For nonadvectable v3 samples only, A/B share a display coverage derived from the
+For nonadvectable v3 samples only, A derives a display coverage from the
 four registered source-center support bits at each time. The bits are bilinearly
 interpolated, gated by each endpoint's original integer owning texel, then mixed
 at the current model time. Two fully supported endpoint interiors give coverage 1;
 two unsupported owners give 0. Partial/one-sided support is weighted rather than
 using a pair-dependent Boolean exemption. Failed, unknown, legacy and outer-boundary
-cases retain conservative behavior. No history creates new particles or velocities.
+cases retain conservative behavior. B uses A for unavailable/legacy reconstruction,
+but its known-resident square-union SDF is the sole display support rule: no second
+stationary coverage or current-speed mask is multiplied afterward. Common supported
+interiors still retain finite ink during reversals; two unsupported endpoint owners
+still cannot be painted. Partial stationary coverage differs intentionally from the
+older center-SDF-times-A product. No history creates new particles or velocities.
 
-The support weights have consistent shared-time endpoints and ordinary cell joins.
-This does not promise all final pixels are continuous: owning-texel hard boundaries,
-LoD changes and crossing the motion threshold in partial support can still affect
+Known-resident B coverage has consistent shared-time endpoints and owner-square
+edges/corners. This does not promise all rendered pixels are continuous: A's hard
+boundaries, LoD/readiness/source-extent changes and missing raw ink can still affect
 visibility. Source support remains inferred from U/V, not a physical wet/dry truth.
 See [ADR-115](../../docs/decisions/ADR-115-flow-slack-water-display-support.md).
 The two existing textures alternate roles: compose raw ink into one, then overwrite
@@ -72,16 +81,19 @@ copy pass; A and B each evaluate support only in presentation. See
 [ADR-114](../../docs/decisions/ADR-114-flow-trail-retention-and-visibility.md).
 
 Switching A/B neither resets nor softens raw history, changes velocity/death, nor
-adds source requests. B cannot extend color into empty hard footprints, round every
-concave step, restore missing narrow channels, or increase the z10 source precision.
+adds source requests. B cannot extend color into zero-support owner footprints,
+make every raster contour curved, restore missing narrow channels, or increase z10 precision.
 It is deliberately an **inner-edge display comparison**, not reconstructed true banks.
 The distance uses source texels, so DPR/pitch do not redefine its width. At minification
 this is not a replacement for screen-space antialiasing.
 
-Four initial logical center loads per endpoint cross tiles through the existing
-Virtual Raster sampler. Near mixed boundaries, additional nearby cells contribute
-the true nearest contour distance within a 0.35-texel band, with at most nine loaded
-source centers per endpoint. Unrelated distant halos are not sampled. Relevant
+After checking the actual sampler's common level and readiness through its public
+metadata/transition operations, B reads the owning
+sample and only neighboring squares within the feather width. A 3x3 neighborhood
+is sufficient; with width below .5, at most four samples per endpoint are needed
+for this geometry, in addition to metadata checks; fallback can invoke the full
+velocity sampler. Unrelated distant
+neighbors are not sampled. Relevant
 unknown/missing halo, fallback or an unavailable temporal capture
 uses the unmodified A display, not a fabricated dry contour. Current alpha is evaluated
 each time: opposite endpoint velocities can cancel, and a zero endpoint can activate.
@@ -155,6 +167,7 @@ node tests/browser/flow-field-boundary-distance.mjs
 node tests/browser/flow-field-boundary-time.mjs
 node tests/browser/flow-field-boundary-interior.mjs
 node tests/browser/flow-field-boundary-sdf.mjs
+node tests/browser/flow-field-boundary-readiness.mjs
 node tests/browser/flow-field-boundary-ab.mjs
 node tests/browser/flow-field-normal-startup.mjs
 node tests/browser/flow-field-temporal-status.mjs

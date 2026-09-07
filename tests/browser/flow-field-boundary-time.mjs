@@ -4,14 +4,14 @@ import { readFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { chromium } from 'playwright'
 
-// Isolate support-coverage reconstruction from the final current-sample veto,
-// presentation, camera motion and frame rate. Actual zero stays a shader/particle
-// condition, not a reason to dim a persistent support footprint in advance.
+// Isolate owner-square support coverage from presentation, camera and frame rate.
+// The shared source owner is index 4 of a row-major 3x3 neighborhood. No extra
+// center-lattice support multiplier is applied to this already owner-gated basis.
 // Real-data cases use only two z10 spatial pages at five times, never the full COG.
 const base = process.env.FLOW_BOUNDARY_TIME_BASE ?? 'http://127.0.0.1:8788'
 const tolerance = 5e-5
 const widths = [0.05,0.25,0.35]
-const probes = [], sharedEdges = [], exchanges = [], joins = [], sweeps = []
+const probes = [], sharedEdges = [], sharedCorners = [], exchanges = [], joins = [], sweeps = []
 const f32 = Math.fround
 let seed = 0x703191ab
 function random() {
@@ -32,55 +32,20 @@ function activity(current,next,alpha,kill) {
     const actual=speed(current.map((value,index)=>value*(1-alpha)+next[index]*alpha))
     return ((1-alpha)*gain(s0,kill)+alpha*gain(s1,kill))*smooth(Math.max(actual-kill,0)/expected/0.15)
 }
-const corners=[[0,0],[1,0],[1,1],[0,1]]
-const midpoint=(a,b)=>a.map((value,index)=>(value+b[index])/2)
-const edgeCenters=corners.map((point,index)=>midpoint(point,corners[(index+1)%4]))
-function contour(mask) {
-    const bits=corners.map((_,index)=>Boolean(mask&(1<<index)))
-    const crossed=bits.flatMap((value,index)=>value!==bits[(index+1)%4]?[index]:[])
-    if (crossed.length===2) return [[edgeCenters[crossed[0]],edgeCenters[crossed[1]]]]
-    if (crossed.length===4) return bits.flatMap((value,index)=>value?
-        [[edgeCenters[(index+3)%4],edgeCenters[index]]]:[])
-    return []
-}
-function polygons(mask) {
-    if (mask===0) return []
-    if (mask===5 || mask===10) return corners.flatMap((point,index)=>mask&(1<<index)?
-        [[point,edgeCenters[index],edgeCenters[(index+3)%4]]]:[])
-    const polygon=[]
-    for (let index=0;index<4;index++) {
-        if (mask&(1<<index)) polygon.push(corners[index])
-        if (Boolean(mask&(1<<index))!==Boolean(mask&(1<<((index+1)%4)))) polygon.push(edgeCenters[index])
-    }
-    return [polygon]
-}
-const segments=Array.from({length:16},(_,mask)=>contour(mask))
-const regions=Array.from({length:16},(_,mask)=>polygons(mask))
-function inside(point,polygon) {
-    return polygon.every((a,index)=>{
-        const b=polygon[(index+1)%polygon.length]
-        return (b[0]-a[0])*(point[1]-a[1])-(b[1]-a[1])*(point[0]-a[0])>=-1e-12
-    })
-}
 function segmentDistance(point,a,b) {
     const dx=b[0]-a[0],dy=b[1]-a[1]
     const t=clamp(((point[0]-a[0])*dx+(point[1]-a[1])*dy)/(dx*dx+dy*dy))
     return Math.hypot(point[0]-a[0]-t*dx,point[1]-a[1]-t*dy)
 }
-function masksFrom(bits) {
-    return Array.from({length:9},(_,index)=>{
-        const origin=index%3+Math.floor(index/3)*4
-        return Number(bits[origin])|Number(bits[origin+1])<<1|
-            Number(bits[origin+5])<<2|Number(bits[origin+4])<<3
-    })
-}
 function binaryCoverage(point,bits,feather) {
-    const masks=masksFrom(bits)
-    if (!regions[masks[4]].some(polygon=>inside(point,polygon))) return 0
+    if (!bits[4]) return 0
     let nearest=0.35
     for (let index=0;index<9;index++) {
-        const local=[point[0]-(index%3-1),point[1]-(Math.floor(index/3)-1)]
-        for (const [a,b] of segments[masks[index]]) nearest=Math.min(nearest,segmentDistance(local,a,b))
+        if(bits[index])continue
+        const x=index%3-1,y=Math.floor(index/3)-1
+        if(point[0]>=x&&point[0]<=x+1&&point[1]>=y&&point[1]<=y+1)return 0
+        const corners=[[x,y],[x+1,y],[x+1,y+1],[x,y+1]]
+        for(let edge=0;edge<4;edge++)nearest=Math.min(nearest,segmentDistance(point,corners[edge],corners[(edge+1)%4]))
     }
     return smooth(nearest/clamp(feather,0.05,0.35))
 }
@@ -97,7 +62,7 @@ function integralCoverage(point,q,feather) {
     return coverage
 }
 function add(input) {
-    const current=(input.current??Array.from({length:16},()=>[0,0])).map(v=>v.map(f32))
+    const current=(input.current??Array.from({length:9},()=>[0,0])).map(v=>v.map(f32))
     const next=(input.next??current).map(v=>v.map(f32))
     const probe={p:(input.p??[0.125,0.125]).map(f32),feather:f32(input.feather??0.25),
         alpha:f32(input.alpha??0),kill:f32(input.kill??0.01),mode:input.q===undefined?1:0,
@@ -113,38 +78,46 @@ function add(input) {
     return probes.length-1
 }
 function patch(values,width,x=0,y=0) {
-    return Array.from({length:16},(_,index)=>values[(Math.floor(index/4)+y)*width+index%4+x])
+    return Array.from({length:9},(_,index)=>values[(Math.floor(index/3)+y)*width+index%3+x])
 }
 for (const feather of widths) {
     for (const q of [0,0.001,0.123,0.5,0.999,1]) for (const p of [[0,0],[0.25,0.4],[0.5,0.5],[1,0.75]]) {
-        add({q:Array(16).fill(q),p,feather,label:'uniform'})
-        const varying=Array.from({length:16},random)
-        for (const index of [5,6,9,10]) varying[index]=q
-        add({q:varying,p,feather,label:'uniform-central'})
+        add({q:Array(9).fill(q),p,feather,label:'uniform'})
+        const varying=Array.from({length:9},random)
+        varying[4]=0
+        add({q:varying,p,feather,label:'owner-dry'})
     }
-    for (let mask=0;mask<16;mask++) for (let outer=0;outer<4;outer++) {
-        const q=Array.from({length:16},()=>Number(random()>.5))
-        ;[5,6,10,9].forEach((index,bit)=>{q[index]=Number(Boolean(mask&(1<<bit)))})
+    for (let mask=0;mask<512;mask++) {
+        const q=Array.from({length:9},(_,index)=>Number(Boolean(mask&(1<<index))))
         for (const p of [[0,0],[0.125,0.5],[0.5,0.5],[0.875,0.25]]) add({q,p,feather,label:'binary'})
     }
-    for (let index=0;index<128;index++) add({q:Array.from({length:16},random),
+    for (let index=0;index<128;index++) add({q:Array.from({length:9},random),
         p:[random(),random()],feather,label:'random'})
 }
 for (let index=0;index<128;index++) {
-    const q=Array.from({length:16},random),center=0.1+random()*0.8,epsilon=1e-5
-    q[5]=center-epsilon;q[6]=center+epsilon
-    const swapped=[...q];[swapped[5],swapped[6]]=[swapped[6],swapped[5]]
+    const q=Array.from({length:9},random),center=0.1+random()*0.8,epsilon=1e-5
+    q[4]=center-epsilon;q[5]=center+epsilon
+    const swapped=[...q];[swapped[4],swapped[5]]=[swapped[5],swapped[4]]
     exchanges.push([add({q,label:'order-before'}),add({q:swapped,label:'order-after'})])
 }
 for (const orientation of ['vertical','horizontal']) for (let index=0;index<96;index++) {
-    const width=orientation==='vertical'?5:4,values=Array.from({length:20},random)
+    const width=orientation==='vertical'?4:3,values=Array.from({length:12},random)
     const a=patch(values,width),b=patch(values,width,orientation==='vertical'?1:0,orientation==='horizontal'?1:0)
     for (const phase of [0.125,0.5,0.875]) for (const feather of widths) {
         sharedEdges.push([add({q:a,p:orientation==='vertical'?[1,phase]:[phase,1],feather,label:'shared-a'}),
             add({q:b,p:orientation==='vertical'?[0,phase]:[phase,0],feather,label:'shared-b'})])
     }
 }
-const uniform=vector=>Array.from({length:16},()=>vector)
+for(let index=0;index<96;index++) {
+    const values=Array.from({length:16},random)
+    for(const feather of widths)sharedCorners.push([
+        add({q:patch(values,4),p:[1,1],feather,label:'shared-corner'}),
+        add({q:patch(values,4,1),p:[0,1],feather,label:'shared-corner'}),
+        add({q:patch(values,4,0,1),p:[1,0],feather,label:'shared-corner'}),
+        add({q:patch(values,4,1,1),p:[0,0],feather,label:'shared-corner'}),
+    ])
+}
+const uniform=vector=>Array.from({length:9},()=>vector)
 function addSweep(name,current,next,kill=0.01,options={}) {
     const alphas=new Set(Array.from({length:1001},(_,index)=>index/1000))
     if (options.denseCenter!==undefined) for (let index=-500;index<=500;index++) {
@@ -160,19 +133,23 @@ function addSweep(name,current,next,kill=0.01,options={}) {
 }
 addSweep('dry-to-wet',uniform([0,0]),uniform([1,0]),0.01,{expectedMonotone:'up'})
 addSweep('wet-to-dry',uniform([1,0]),uniform([0,0]),0.01,{expectedMonotone:'down'})
+const onlyOwner=Array.from({length:9},(_,index)=>index===4?[1,0]:[0,0])
+addSweep('single-owner-growth',uniform([0,0]),onlyOwner,.01,{p:[.5,.5],expectedMonotone:'up'})
+addSweep('single-owner-growth-feather',uniform([0,0]),onlyOwner,.01,
+    {p:[.125,.125],expectedMonotone:'up',expectLargeOldJump:false})
 addSweep('opposite-cancellation',uniform([1,0]),uniform([-1,0]),0.01,{denseCenter:0.5})
 addSweep('unequal-reversal',uniform([0.2,0]),uniform([-1,0]),0.01,{denseCenter:1/6})
 addSweep('weak-positive-kill-crossing',uniform([0.005,0]),uniform([0.03,0]))
-const diagonalA=Array.from({length:16},(_,index)=>(index%4+Math.floor(index/4))%2?[0,0]:[0.5,0])
+const diagonalA=Array.from({length:9},(_,index)=>(index%3+Math.floor(index/3))%2?[0,0]:[0.5,0])
 const diagonalB=diagonalA.map(v=>v[0]===0?[0.8,0]:[0,0])
 addSweep('saddle-swap',diagonalA,diagonalB,0.01,{p:[0.5,0.5]})
 addSweep('zero-kill-growth',uniform([0,0]),uniform([1,0]),0,{expectedMonotone:'up'})
 addSweep('zero-kill-reversal',uniform([1,0]),uniform([-1,0]),0,{denseCenter:0.5})
 addSweep('zero-kill-all-dry',uniform([0,0]),uniform([0,0]),0,{expectLargeOldJump:false})
 for (let index=0;index<32;index++) {
-    const current=Array.from({length:16},()=>[random()*2-1,random()*2-1])
-    const shared=Array.from({length:16},()=>{const value=random();return value<.25?[0,0]:value<.5?[.02,0]:[.1+value,0]})
-    const next=Array.from({length:16},()=>[random()*0.2-0.1,random()*0.2-0.1])
+    const current=Array.from({length:9},()=>[random()*2-1,random()*2-1])
+    const shared=Array.from({length:9},()=>{const value=random();return value<.25?[0,0]:value<.5?[.02,0]:[.1+value,0]})
+    const next=Array.from({length:9},()=>[random()*0.2-0.1,random()*0.2-0.1])
     const left=add({current,next:shared,alpha:1,label:'pair-join-left'})
     const right=add({current:shared,next,alpha:0,label:'pair-join-right'})
     const before=add({current,next:shared,alpha:1-1e-6,label:'pair-join-before'})
@@ -181,7 +158,7 @@ for (let index=0;index<32;index++) {
 }
 const realData=process.argv.includes('--synthetic-only')?undefined:await addRealSweeps()
 const cpuSummary=validate(probes.map(probe=>({coverage:probe.expected,binary:probe.old,q:probe.expectedQ,
-    gain0:gain(speed(probe.current[5]),probe.kill),gain1:gain(speed(probe.next[5]),probe.kill)})),false)
+    gain0:gain(speed(probe.current[4]),probe.kill),gain1:gain(speed(probe.next[4]),probe.kill)})),false)
 if (process.argv.includes('--cpu-only')) {
     console.log(JSON.stringify({status:'cpu-oracle-passed',probes:probes.length,realData,...cpuSummary}))
 } else {
@@ -189,40 +166,37 @@ if (process.argv.includes('--cpu-only')) {
     const [activitySource,distanceSource]=await Promise.all([read('boundary-activity'),read('boundary-distance')])
     assert.ok(activitySource.includes('fn FlowBoundary_support_weight('),'The support helper must exist before native verification')
     assert.ok(distanceSource.includes('fn FlowBoundary_continuous_coverage('),'The continuous coverage helper must exist')
-    const bytes=new Uint8Array(probes.length*352),view=new DataView(bytes.buffer)
+    const bytes=new Uint8Array(probes.length*216),view=new DataView(bytes.buffer)
     for (const [index,probe] of probes.entries()) {
-        const offset=index*352
+        const offset=index*216
         ;[...probe.p,probe.feather,probe.alpha,probe.kill].forEach((value,word)=>view.setFloat32(offset+word*4,value,true))
         view.setUint32(offset+20,probe.mode,true)
         probe.current.flat().forEach((value,word)=>view.setFloat32(offset+32+word*4,value,true))
-        probe.next.flat().forEach((value,word)=>view.setFloat32(offset+160+word*4,value,true))
-        probe.q?.forEach((value,word)=>view.setFloat32(offset+288+word*4,value,true))
+        probe.next.flat().forEach((value,word)=>view.setFloat32(offset+104+word*4,value,true))
+        probe.q?.forEach((value,word)=>view.setFloat32(offset+176+word*4,value,true))
     }
     const code=activitySource+'\n'+distanceSource+`
 struct Probe { p:vec2f, feather:f32, alpha:f32, kill:f32, mode:u32, pad:vec2u,
-    current:array<vec2f,16>, next:array<vec2f,16>, q:array<f32,16>, }
-struct Result { coverage:f32, binary:f32, q:array<f32,16>, gain0:f32, gain1:f32, }
+    current:array<vec2f,9>, next:array<vec2f,9>, q:array<f32,9>, }
+struct Result { coverage:f32, binary:f32, q:array<f32,9>, gain0:f32, gain1:f32, }
 @group(0) @binding(0) var<storage,read> probes:array<Probe>;
 @group(0) @binding(1) var<storage,read_write> results:array<Result>;
 @compute @workgroup_size(64)
 fn test_boundary_time(@builtin(global_invocation_id) id:vec3u) {
     if (id.x>=arrayLength(&probes)) { return; }
-    let probe=probes[id.x]; var q=probe.q; var supportBits:array<u32,16>;
-    for(var i=0u;i<16u;i++) {
+    let probe=probes[id.x]; var q=probe.q; var supportBits:array<f32,9>;
+    for(var i=0u;i<9u;i++) {
         if(probe.mode==1u) {
             q[i]=FlowBoundary_support_weight(probe.current[i],probe.next[i],probe.alpha,probe.kill);
             let s=length(mix(probe.current[i],probe.next[i],probe.alpha));
-            supportBits[i]=select(0u,1u,s>0.0 && s>=probe.kill);
-        } else { supportBits[i]=select(0u,1u,q[i]>=0.5); }
+            supportBits[i]=select(0.0,1.0,s>0.0 && s>=probe.kill);
+        } else { supportBits[i]=select(0.0,1.0,q[i]>=0.5); }
     }
-    var masks:array<u32,9>;
-    for(var i=0u;i<9u;i++) { let o=i%3u+(i/3u)*4u;
-        masks[i]=supportBits[o]|(supportBits[o+1u]<<1u)|(supportBits[o+5u]<<2u)|(supportBits[o+4u]<<3u); }
     results[id.x].coverage=FlowBoundary_continuous_coverage(probe.p,q,probe.feather);
-    results[id.x].binary=FlowBoundary_inner_coverage(FlowBoundary_neighborhood_distance(probe.p,masks),probe.feather);
+    results[id.x].binary=FlowBoundary_continuous_coverage(probe.p,supportBits,probe.feather);
     results[id.x].q=q;
-    results[id.x].gain0=FlowBoundary_endpoint_support(length(probe.current[5]),probe.kill);
-    results[id.x].gain1=FlowBoundary_endpoint_support(length(probe.next[5]),probe.kill);
+    results[id.x].gain0=FlowBoundary_endpoint_support(length(probe.current[4]),probe.kill);
+    results[id.x].gain1=FlowBoundary_endpoint_support(length(probe.next[4]),probe.kill);
 }`
     const server=createServer((_request,response)=>response.end('<!doctype html><title>Flow time-continuous boundary proof</title>'))
     await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve))
@@ -245,14 +219,14 @@ fn test_boundary_time(@builtin(global_invocation_id) id:vec3u) {
                 const input=Uint8Array.from(atob(base64),value=>value.charCodeAt(0))
                 const make=(size,usage)=>{const value=device.createBuffer({size,usage});owned.push(value);return value}
                 const source=make(input.length,GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_DST)
-                const output=make(count*80,GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_SRC)
-                const readback=make(count*80,GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ)
+                const output=make(count*52,GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_SRC)
+                const readback=make(count*52,GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ)
                 device.queue.writeBuffer(source,0,input)
                 const bindings=device.createBindGroup({layout:pipeline.getBindGroupLayout(0),entries:[
                     {binding:0,resource:{buffer:source}},{binding:1,resource:{buffer:output}}]})
                 const encoder=device.createCommandEncoder(),pass=encoder.beginComputePass()
                 pass.setPipeline(pipeline);pass.setBindGroup(0,bindings);pass.dispatchWorkgroups(Math.ceil(count/64));pass.end()
-                encoder.copyBufferToBuffer(output,0,readback,0,count*80)
+                encoder.copyBufferToBuffer(output,0,readback,0,count*52)
                 device.queue.submit([encoder.finish()])
                 await readback.mapAsync(GPUMapMode.READ)
                 const values=Array.from(new Float32Array(readback.getMappedRange()))
@@ -264,8 +238,8 @@ fn test_boundary_time(@builtin(global_invocation_id) id:vec3u) {
                 return {values,errors,readbacks:1}
             } finally { for(const value of owned)value.destroy();device.destroy() }
         },{code,base64:Buffer.from(bytes).toString('base64'),count:probes.length})
-        const values=probes.map((_,index)=>{const row=observed.values.slice(index*20,index*20+20)
-            return {coverage:row[0],binary:row[1],q:row.slice(2,18),gain0:row[18],gain1:row[19]}})
+        const values=probes.map((_,index)=>{const row=observed.values.slice(index*13,index*13+13)
+            return {coverage:row[0],binary:row[1],q:row.slice(2,11),gain0:row[11],gain1:row[12]}})
         const summary=validate(values,true)
         console.log(JSON.stringify({status:'passed',probes:probes.length,realData,...summary,
             errors:observed.errors,readbacks:observed.readbacks,
@@ -278,19 +252,21 @@ function validate(values,native) {
     for (const [index,probe] of probes.entries()) {
         const result=values[index]
         assert.ok([result.coverage,...result.q,result.gain0,result.gain1].every(value=>Number.isFinite(value)&&value>=-1e-6&&value<=1.000001),`${index} ${probe.label}: finite normalized outputs`)
+        assert.ok(result.coverage<=result.q[4]+tolerance,`${index}: coverage cannot exceed its owning source activity`)
         maximumCoverageError=Math.max(maximumCoverageError,Math.abs(result.coverage-probe.expected))
         assert.ok(Math.abs(result.coverage-probe.expected)<tolerance,`${index} ${probe.label}: coverage ${result.coverage} != oracle ${probe.expected}`)
-        for(let center=0;center<16;center++) {
+        for(let center=0;center<9;center++) {
             const error=Math.abs(result.q[center]-probe.expectedQ[center]);maximumActivityError=Math.max(maximumActivityError,error)
             assert.ok(error<tolerance,`${index} ${probe.label}: activity center ${center} differs from current-U/V oracle`)
             if (probe.mode===1 && gain(speed(probe.current[center]),probe.kill) && gain(speed(probe.next[center]),probe.kill)) {
                 assert.equal(result.q[center],1,`${index}: persistent support is not a relative-speed opacity map`)
             }
         }
-        assert.ok(Math.abs(result.gain0-gain(speed(probe.current[5]),probe.kill))<tolerance)
-        assert.ok(Math.abs(result.gain1-gain(speed(probe.next[5]),probe.kill))<tolerance)
-        if (probe.label==='binary') assert.ok(Math.abs(result.coverage-result.binary)<tolerance,'Binary activity exactly retains the old B basis')
-        if (probe.label==='uniform'||probe.label==='uniform-central') assert.ok(Math.abs(result.coverage-probe.q[5])<tolerance,'Uniform central activity integrates to its own value')
+        assert.ok(Math.abs(result.gain0-gain(speed(probe.current[4]),probe.kill))<tolerance)
+        assert.ok(Math.abs(result.gain1-gain(speed(probe.next[4]),probe.kill))<tolerance)
+        if (probe.label==='binary') assert.ok(Math.abs(result.coverage-result.binary)<tolerance,'Binary activity reproduces the owner-square basis')
+        if (probe.label==='uniform') assert.ok(Math.abs(result.coverage-probe.q[4])<tolerance,'Uniform activity integrates to its own value')
+        if (probe.label==='owner-dry') assert.equal(result.coverage,0,'Unsupported owners cannot receive neighboring coverage')
     }
     for (const [a,b] of exchanges) {
         const bound=probes[a].expectedQ.reduce((sum,value,index)=>sum+Math.abs(value-probes[b].expectedQ[index]),0)
@@ -299,6 +275,10 @@ function validate(values,native) {
     for (const [a,b] of sharedEdges) {
         const jump=Math.abs(values[a].coverage-values[b].coverage);maximumSharedEdgeJump=Math.max(maximumSharedEdgeJump,jump)
         assert.ok(jump<2*tolerance,'Integrated binary contours must agree on a shared cell edge')
+    }
+    for(const group of sharedCorners)for(const index of group.slice(1)) {
+        assert.ok(Math.abs(values[group[0]].coverage-values[index].coverage)<2*tolerance,
+            'Continuous threshold integrals agree at a four-owner shared corner')
     }
     for (const {left,right,before,after} of joins) {
         assert.ok(Math.abs(values[left].coverage-values[right].coverage)<tolerance,'The shared sample must join exactly across different time pairs')
@@ -325,12 +305,13 @@ function validate(values,native) {
         if(sweep.name==='opposite-cancellation'||sweep.name==='zero-kill-reversal') {
             const middle=sweep.ids.find(index=>probes[index].alpha===0.5)
             assert.equal(values[middle].coverage,1,
-                'Persistent support stays intact; full-shader tests must independently veto actual zero velocity')
+                'Persistent source support stays intact through vector reversal')
         }
         return {name:sweep.name,real:sweep.real,samples:sweep.ids.length,maximumNewJump,maximumOldJump}
     })
     return {native,maximumCoverageError,maximumActivityError,maximumSharedEdgeJump,
-        sortExchanges:exchanges.length,sharedEdgePairs:sharedEdges.length,timePairJoins:joins.length,sweeps:sweepResults}
+        sortExchanges:exchanges.length,sharedEdgePairs:sharedEdges.length,sharedCorners:sharedCorners.length,
+        timePairJoins:joins.length,sweeps:sweepResults}
 }
 
 async function addRealSweeps() {
@@ -365,17 +346,19 @@ async function addRealSweeps() {
             if(qualifies){chosen={row,col,s0,s1,minimumAlpha,minimumSpeed};break}
         }
         assert.ok(chosen,`A ${kind} fixture exists in the bounded source pages for t${time}`)
-        const at=field=>Array.from({length:16},(_,index)=>{
-            const offset=((chosen.row-1+Math.floor(index/4))*width+chosen.col-1+index%4)*2
+        const at=field=>Array.from({length:9},(_,index)=>{
+            const offset=((chosen.row-1+Math.floor(index/3))*width+chosen.col-1+index%3)*2
             return [field[offset],field[offset+1]]
         })
-        const current=at(a),next=at(b),d=current[5].map((v,i)=>next[5][i]-v)
-        const qa=d[0]*d[0]+d[1]*d[1],qb=2*(current[5][0]*d[0]+current[5][1]*d[1]),qc=chosen.s0**2-kill**2
+        const current=at(a),next=at(b),d=current[4].map((v,i)=>next[4][i]-v)
+        const qa=d[0]*d[0]+d[1]*d[1],qb=2*(current[4][0]*d[0]+current[4][1]*d[1]),qc=chosen.s0**2-kill**2
         const discriminant=qb*qb-4*qa*qc
         const roots=qa&&discriminant>0?[-1,1].map(sign=>(-qb+sign*Math.sqrt(discriminant))/(2*qa)).filter(v=>v>0&&v<1):[]
         const name=`real-t${time}-t${time+1}-${kind}`
-        addSweep(name,current,next,kill,{p:[0,0],breakpoints:roots,denseCenter:kind==='opposed'?chosen.minimumAlpha:undefined,real:true})
-        addSweep(`${name}-fractional`,current,next,kill,{p:[0.125,0.125],breakpoints:roots,real:true})
+        addSweep(name,current,next,kill,{p:[.5,.5],breakpoints:roots,denseCenter:kind==='opposed'?chosen.minimumAlpha:undefined,real:true})
+        // Near a square edge the binary maximum may be attenuated by geometry;
+        // use the universal integral/Lipschitz oracle, not a guaranteed >.5 jump.
+        addSweep(`${name}-fractional`,current,next,kill,{p:[0.125,0.125],breakpoints:roots,real:true,expectLargeOldJump:false})
         choices.push({name,...chosen,globalTexel:[856*256+chosen.col,416*256+chosen.row],thresholdRoots:roots})
     }
     return {contentVersion:manifest.contentVersion,maximumSpeed:manifest.maximumSpeed,kill,

@@ -77,6 +77,7 @@ struct FixtureTexel { status:u32, value:vec4f, resolved_level:u32, }
 @group(1) @binding(1) var<uniform> testSupport:vec4f;
 const FlowVelocity_nearest_zero_gate=false;
 const FlowVelocityCurrent_level_count=1u;
+const FlowVelocityNext_level_count=1u;
 const FlowVelocityCurrent_page_size=vec2u(256u);
 const FlowVelocityCurrent_matrix=array<u32,1>(0u);
 const FlowVelocityCurrent_minimum_texel=array<vec2u,1>(vec2u(0u));
@@ -99,6 +100,10 @@ fn FlowVelocityCurrent_load_global(p:vec2i,l:u32)->FixtureTexel {
 fn FlowVelocityNext_load_global(p:vec2i,l:u32)->FixtureTexel {
     return fixture_center(p,l,true);
 }
+fn FlowVelocityCurrent_resolution_global(p:vec2i,l:u32)->vec2u { return vec2u(u32(testVelocity.z),l); }
+fn FlowVelocityNext_resolution_global(p:vec2i,l:u32)->vec2u { return vec2u(u32(testVelocity.z),l); }
+fn FlowVelocityCurrent_edge_blend_weight(p:FlowVelocityAddressFixedPosition,l:u32)->f32 { return 1.0; }
+fn FlowVelocityNext_edge_blend_weight(p:FlowVelocityAddressFixedPosition,l:u32)->f32 { return 1.0; }
 fn FlowVelocity_source_contains(p:FlowVelocityAddressFixedPosition)->bool { return true; }
 fn FlowVelocity_sample(p:FlowVelocityAddressFixedPosition,l:u32,t:FlowVelocityTemporal)->FlowVelocitySample {
     let x=p.axes[0];

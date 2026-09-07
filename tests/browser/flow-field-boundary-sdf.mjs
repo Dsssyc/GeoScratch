@@ -95,12 +95,19 @@ const coverageProbes = [
     { name: 'physical-page-left', x: 256 - epsilon, y: 64.875 },
     { name: 'physical-page-right', x: 256 + epsilon, y: 64.875 },
     { name: 'far-unknown-halo', x: 255.125, y: 64.5625 },
-    { name: 'near-unknown-halo', x: 255.25, y: 64.5625 },
+    { name: 'near-unknown-halo', x: 255.8, y: 64.875 },
     { name: 'spatial-cancel-zero', x: 256, y: 64.875 },
     { name: 'spatial-cancel-partial', x: 256 + 1 / 2048, y: 64.875 },
     { name: 'nearest-tie-both-axes', x: 256, y: 65 },
     { name: 'last-canonical-quantum-before-tile', x: 256 - 1 / Number(texelQuanta), y: 65,
         quanta: [256n * texelQuanta - 1n, 65n * texelQuanta] },
+    { name: 'dry-corner-inside', x: 254.999, y: 65.001 },
+    { name: 'dry-corner-outside', x: 255.001, y: 65.001 },
+    { name: 'dry-corner-diagonal', x: 255.001, y: 64.999 },
+    { name: 'dry-side-inside', x: 254.999, y: 65.1 },
+    { name: 'dry-side-outside', x: 255.001, y: 65.1 },
+    { name: 'dry-corner-arc-a', x: 255.07, y: 64.76 },
+    { name: 'dry-corner-arc-b', x: 255.24, y: 64.93 },
 ]
 const probePositions = coverageProbes.flatMap(probe => (probe.quanta
     ? model.addressCodec.fromWorldQuanta(probe.quanta) : position(probe.x, probe.y)).fixed.limbs
@@ -153,6 +160,7 @@ const cases = [
     { name: 'canonical-quantum-zero-owner', kind: 'quantum-zero-owner', alpha: 1e-9, kill: 0 },
     { name: 'uniform-at-kill-supported', kind: 'uniform-at-kill', alpha: 0.277, kill: 1 },
     { name: 'representative-t23-t24-uniform', kind: 'representative-t23-t24', alpha: 0.54772, kill: representativeT23.kill },
+    { name: 'owner-hole-wide', kind: 'same', alpha: 0.95294, feather: 0.35 },
 ].map(fixture => {
     const bytes = new Uint8Array(352)
     const uniform = new DataView(bytes.buffer)
@@ -351,7 +359,7 @@ try {
             assert.equal(status, 1, `${fixture.name}/${probe.name}: real same-level VT sample`)
             assert.equal(resolved, 0)
             assert.ok(Math.abs(coverage - expected) < 4e-5,
-                `${fixture.name}/${probe.name}: coverage ${coverage} != independent finite-segment oracle ${expected}`)
+                `${fixture.name}/${probe.name}: coverage ${coverage} != independent square-union oracle ${expected}`)
         }
     }
     for (const index of [5, 7, 8]) {
@@ -368,7 +376,7 @@ try {
     assert.ok(Math.abs(missingFar[0] - coverageOracle(cases[5], coverageProbes[5])) < 4e-5,
         'An unrelated missing cell beyond the .35 band must not replace B with A')
     assert.ok(proof.coverage[5][6][0] < 1, 'Known nearby halo produces a nontrivial distance')
-    assert.equal(proof.coverage[6][6][1], 1, 'Near-halo test isolates a missing neighbor, not the sampled footprint')
+    assert.ok(proof.coverage[6][6][1]!==1, 'A relevant square across the page edge also belongs to the actual sampled footprint')
     assert.equal(proof.coverage[6][6][0], 1, 'Relevant unknown halo falls back to unmodified A')
     const widthCoverage = [7, 5, 8].map(index => ({ width: cases[index].feather ?? 0.25,
         coverage: proof.coverage[index][3][0] }))
@@ -410,8 +418,7 @@ try {
     assert.deepEqual(proof.outputs[indexOf('shared-sample-before')][1], expectedInk,
         'A weak shared sample at 1.25k stays fully supported regardless of its other neighbor')
     const unknownLow = proof.coverage[indexOf('unknown-halo-no-point-cap')][6]
-    assert.equal(unknownLow[1], 1, 'Unknown-halo low-speed test keeps the actual central footprint resident')
-    assert.ok(unknownLow[2] > 1 && unknownLow[2] < 4, 'Unknown-halo test retains legal low-speed motion')
+    assert.ok(unknownLow[1]!==1, 'Unknown neighbor makes the actual common-level sample unavailable')
     assert.equal(unknownLow[0], 1, 'Unknown halo must still fall back to A without inferring dry support')
     const growth = ['uniform-growth-quarter', 'uniform-growth-half', 'uniform-growth-three-quarter'].map(name => {
         const index = indexOf(name), expected = cases[index].alpha
@@ -434,9 +441,18 @@ try {
             'The synthetic atlas uses the observed still-legal roughly 8.8k vector mixture')
     }
     assert.deepEqual(proof.outputs[representativeIndex][1], expectedInk)
+    const hole=proof.coverage[indexOf('owner-hole-wide')]
+    assert.equal(hole[11][0],0,'The complete dry owner square remains empty')
+    assert.ok(hole[12][0]>0 && hole[12][0]<.0001,'Corner outside must approach zero, not jump from 0 to 1')
+    assert.ok(hole[13][0]>0 && hole[13][0]<.0001,'Diagonal corner uses distance to the actual square vertex')
+    assert.equal(hole[14][0],0)
+    assert.ok(hole[15][0]>0 && hole[15][0]<.0001,'Dry side must not retain the former 0-to-.906 jump')
+    assert.ok(Math.abs(hole[16][0]-hole[17][0])<1e-5,'Equal-radius samples around a dry corner have equal coverage')
+    assert.ok(Math.abs(hole[16][0]-smoothUnit(.25/.35))<1e-5)
     console.log(JSON.stringify({ status: 'passed', cases: summaries, realVirtualRaster: true,
         reversedAtlasPages: 2, rawHistoryUnchanged: true, coverageProbeCount: cases.length * coverageProbes.length,
         maximumCoverageError, widthCoverage, futureCoverage, uniformGrowth: growth,
+        dryCorner:hole.slice(11).map((sample,index)=>({name:coverageProbes[11+index].name,coverage:sample[0],status:sample[1]})),
         representativeSourceVelocitiesInUniformAtlas: { speed: representative[0][2], speedOverKill: representative[0][2] / representativeT23.kill, coverage: representative[0][0] },
         lazyUnknownHalo: { knownFar: knownFar[0], missingFar: missingFar[0],
             nearFallback: proof.coverage[6][6][0] }, readbacks: proof.readbacks, errors: proof.errors }))
@@ -446,102 +462,38 @@ try {
 }
 
 function coverageOracle(fixture, probe) {
-    const { x, y } = probe
-    const baseX = Math.floor(x - 0.5), baseY = Math.floor(y - 0.5)
-    // Registered sub-texel weights are f32 in the public shader. In particular,
-    // a position one canonical quantum below a tile can round to the exact half
-    // weight even while its integer owning texel remains on the original side.
-    const point = [Math.fround(x - 0.5 - baseX), Math.fround(y - 0.5 - baseY)]
-    const progress = Math.fround(fixture.alpha), kill = Math.fround(fixture.kill ?? 0.000001)
-    const mixed = (a, b) => a.map((value, channel) => value * (1 - progress) + b[channel] * progress)
-    const field = endpoint => {
-        if (storedVector(fixture.kind, endpoint, Math.floor(x), Math.floor(y)).every(value => value === 0)) return [0, 0]
-        const tl = storedVector(fixture.kind, endpoint, baseX, baseY)
-        const tr = storedVector(fixture.kind, endpoint, baseX + 1, baseY)
-        const bl = storedVector(fixture.kind, endpoint, baseX, baseY + 1)
-        const br = storedVector(fixture.kind, endpoint, baseX + 1, baseY + 1)
-        return [0, 1].map(channel => {
-            const top = tl[channel] * (1 - point[0]) + tr[channel] * point[0]
-            const bottom = bl[channel] * (1 - point[0]) + br[channel] * point[0]
-            return top * (1 - point[1]) + bottom * point[1]
-        })
+    const { x, y } = probe, ownerX=Math.floor(x), ownerY=Math.floor(y)
+    const point=[Math.fround(x-ownerX),Math.fround(y-ownerY)]
+    const progress=Math.fround(fixture.alpha), kill=Math.fround(fixture.kill??0.000001)
+    const weights=[]
+    for(let row=-1;row<=1;row++) for(let col=-1;col<=1;col++) {
+        weights.push(supportWeightOracle(storedVector(fixture.kind,0,ownerX+col,ownerY+row),
+            storedVector(fixture.kind,1,ownerX+col,ownerY+row),progress,kill))
     }
-    let visibility=1
-    if (!endpointSupport(Math.hypot(...mixed(field(0), field(1))), kill)) {
-        const endpointCoverage=endpoint=>{
-            const bit=(px,py)=>Number(endpointSupport(Math.hypot(...storedVector(fixture.kind,endpoint,px,py)),kill))
-            const owner=bit(Math.floor(x),Math.floor(y))
-            const top=bit(baseX,baseY)*(1-point[0])+bit(baseX+1,baseY)*point[0]
-            const bottom=bit(baseX,baseY+1)*(1-point[0])+bit(baseX+1,baseY+1)*point[0]
-            return owner*(top*(1-point[1])+bottom*point[1])
-        }
-        visibility=endpointCoverage(0)*(1-progress)+endpointCoverage(1)*progress
-        if (visibility===0) return 0
+    // Independent integration over the full threshold partition. Each active
+    // sample occupies its original square; no second current-velocity gate.
+    const thresholds=[...new Set([0,1,...weights])].sort((a,b)=>a-b)
+    let coverage=0
+    for(let index=1;index<thresholds.length;index++) {
+        const threshold=(thresholds[index]+thresholds[index-1])/2
+        coverage+=(thresholds[index]-thresholds[index-1])*
+            binaryCoverageOracle(point,weights.map(q=>q>=threshold),fixture.feather??0.25)
     }
-    const weights = []
-    for (let row = -1; row <= 2; row++) for (let col = -1; col <= 2; col++) {
-        weights.push(supportWeightOracle(storedVector(fixture.kind, 0, baseX + col, baseY + row),
-            storedVector(fixture.kind, 1, baseX + col, baseY + row), progress, kill))
-    }
-    // The original SDF basis is unchanged. Only nonadvectable presentation uses
-    // independently reconstructed source support instead of a blanket veto.
-    const thresholds = [...new Set([0, 1, ...weights])].sort((a, b) => a - b)
-    let coverage = 0
-    for (let index = 1; index < thresholds.length; index++) {
-        const threshold = thresholds[index], masks = []
-        for (let row = 0; row < 3; row++) for (let col = 0; col < 3; col++) {
-            const origin = row * 4 + col
-            masks.push(Number(weights[origin] >= threshold) | Number(weights[origin + 1] >= threshold) << 1 |
-                Number(weights[origin + 5] >= threshold) << 2 | Number(weights[origin + 4] >= threshold) << 3)
-        }
-        coverage += (threshold - thresholds[index - 1]) * binaryCoverageOracle(point, masks, fixture.feather ?? 0.25)
-    }
-    return coverage*visibility
+    return coverage
 }
 
-function binaryCoverageOracle(point, masks, feather) {
-    const geometry = mask => {
-        const corners = [[0, 0], [1, 0], [1, 1], [0, 1]]
-        const edges = [[0.5, 0], [1, 0.5], [0.5, 1], [0, 0.5]]
-        const active = corners.map((_corner, index) => (mask & (1 << index)) !== 0)
-        const crossing = edges.flatMap((edge, index) => active[index] !== active[(index + 1) % 4] ? [edge] : [])
-        if (!crossing.length) return { segments: [], polygons: mask === 15 ? [corners] : [] }
-        if (crossing.length === 4) return {
-            segments: active.flatMap((inside, index) => inside ? [[edges[(index + 3) % 4], edges[index]]] : []),
-            polygons: active.flatMap((inside, index) => inside ? [[corners[index], edges[index], edges[(index + 3) % 4]]] : []),
-        }
-        const polygon = []
-        for (let index = 0; index < 4; index++) {
-            if (active[index]) polygon.push(corners[index])
-            if (active[index] !== active[(index + 1) % 4]) polygon.push(edges[index])
-        }
-        return { segments: [crossing], polygons: [polygon] }
+function binaryCoverageOracle(point, wet, feather) {
+    if(!wet[4]) return 0
+    let distance=Infinity
+    for(let index=0;index<9;index++) {
+        if(wet[index]) continue
+        const left=index%3-1,top=Math.floor(index/3)-1
+        // Nearest point in a closed rectangle, independent of the WGSL helper.
+        const nearest=[Math.max(left,Math.min(left+1,point[0])),
+            Math.max(top,Math.min(top+1,point[1]))]
+        distance=Math.min(distance,Math.hypot(point[0]-nearest[0],point[1]-nearest[1]))
     }
-    let distance = 0.35
-    for (const [index, mask] of masks.entries()) {
-        for (const [a, b] of geometry(mask).segments) {
-            const p = [point[0] - (index % 3 - 1), point[1] - (Math.floor(index / 3) - 1)]
-            const dx = b[0] - a[0], dy = b[1] - a[1]
-            const t = Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / (dx * dx + dy * dy)))
-            distance = Math.min(distance, Math.hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy))
-        }
-    }
-    const inside = geometry(masks[4]).polygons.some(polygon => {
-        let crossing = 0
-        for (let index = 0; index < polygon.length; index++) {
-            const a = polygon[index], b = polygon[(index + 1) % polygon.length]
-            const cross = (point[0] - a[0]) * (b[1] - a[1]) - (point[1] - a[1]) * (b[0] - a[0])
-            if (Math.abs(cross) < 1e-12 && point[0] >= Math.min(a[0], b[0]) && point[0] <= Math.max(a[0], b[0]) &&
-                point[1] >= Math.min(a[1], b[1]) && point[1] <= Math.max(a[1], b[1])) return true
-            if ((a[1] > point[1]) !== (b[1] > point[1]) &&
-                point[0] < a[0] + (point[1] - a[1]) * (b[0] - a[0]) / (b[1] - a[1])) crossing++
-        }
-        return crossing % 2 === 1
-    })
-    if (!inside) return 0
-    const width = Math.max(0.05, Math.min(0.35, feather))
-    const t = Math.max(0, Math.min(1, distance / width))
-    return t * t * (3 - 2 * t)
+    return smoothUnit(distance/Math.max(.05,Math.min(.35,feather)))
 }
 
 function smoothUnit(value) {
