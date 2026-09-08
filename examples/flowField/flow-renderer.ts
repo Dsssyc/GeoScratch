@@ -12,6 +12,7 @@ import {
 } from 'geoscratch/geo'
 import type {
     GPURuntime,
+    SubmissionBuilder,
     SubmittedWork,
     Surface,
     SurfaceSize,
@@ -39,6 +40,7 @@ import {
 } from './flow-history.ts'
 import type {
     FlowHistory,
+    FlowHistoryContent,
     FlowHistoryFrame,
 } from './flow-history.ts'
 import {
@@ -529,31 +531,44 @@ export async function createFlowFieldRenderer(
                     prepared
                 )
                 let refilledParticleView = false
-                if (particlesAdvancing) {
-                    if (presentationReady) {
-                        if (populatedParticleView === undefined) {
-                            populatedParticleView = view
-                        } else if (!sameParticleView(populatedParticleView, view)) {
-                            // Only a complete view consumes the reveal baseline.
-                            // Partial work must not repeatedly reseed the same region.
-                            particles.refillView(populatedParticleView)
-                            populatedParticleView = view
-                            refilledParticleView = true
-                        }
-                    }
-                    particles.encode(builder, particleSpawn.bindings, prepared, view,
-                        framePresentation.boundary === 'sdf-center-linear' || framePresentation.boundary === 'sdf-center-smooth',
-                        visualTime.referenceSteps,visualTime.wholeSteps)
+                const encodeContour = (contentBuilder: SubmissionBuilder): void => {
+                    if (presentationReady && framePresentation.contour) contour.encode(contentBuilder, candidates, demandFrame.candidateCells.length, {
+                        generation: supportSnapshot.generation,
+                        currentSnapshotEpoch: supportSnapshot.currentSnapshotEpoch,
+                        nextSnapshotEpoch: supportSnapshot.nextSnapshotEpoch,
+                        progress: supportSnapshot.progress,
+                        activityKill: supportSnapshot.activityKill,
+                    }, prepared)
                 }
-                if (presentationReady && framePresentation.contour) contour.encode(builder, candidates, demandFrame.candidateCells.length, {
-                    generation: supportSnapshot.generation,
-                    currentSnapshotEpoch: supportSnapshot.currentSnapshotEpoch,
-                    nextSnapshotEpoch: supportSnapshot.nextSnapshotEpoch,
-                    progress: supportSnapshot.progress,
-                    activityKill: supportSnapshot.activityKill,
-                }, prepared)
-                const content = framePresentation.view === 'particles' ? (particlesAdvancing ? [particleRender.draw] : [])
-                    : presentationReady ? [inspector.encode(builder, view, prepared, framePresentation)] : []
+                let content: FlowHistoryContent
+                if (framePresentation.view === 'particles') {
+                    // History uploads its uniforms before this synchronous work,
+                    // so stable frames place all hot uploads before simulation.
+                    content = contentBuilder => {
+                        if (particlesAdvancing) {
+                            if (presentationReady) {
+                                if (populatedParticleView === undefined) {
+                                    populatedParticleView = view
+                                } else if (!sameParticleView(populatedParticleView, view)) {
+                                    // Only a complete view consumes the reveal baseline.
+                                    // Partial work must not repeatedly reseed the same region.
+                                    particles.refillView(populatedParticleView)
+                                    populatedParticleView = view
+                                    refilledParticleView = true
+                                }
+                            }
+                            particles.encode(contentBuilder, particleSpawn.bindings, prepared, view,
+                                framePresentation.boundary === 'sdf-center-linear' || framePresentation.boundary === 'sdf-center-smooth',
+                                visualTime.referenceSteps,visualTime.wholeSteps)
+                        }
+                        encodeContour(contentBuilder)
+                        // Zero visual time never replays the last particle segment.
+                        return particlesAdvancing ? [particleRender.draw] : []
+                    }
+                } else {
+                    encodeContour(builder)
+                    content = presentationReady ? [inspector.encode(builder, view, prepared, framePresentation)] : []
+                }
                 const historyFrame = presentationReady || particlesAdvancing ? history.encode(builder, view,
                     content,
                     framePresentation.view === 'particles' && (framePresentation.trails || visualTime.referenceSteps === 0),

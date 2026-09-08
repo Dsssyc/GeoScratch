@@ -44,6 +44,9 @@ import type { FlowCenterCache, FlowCenterCacheFacts, FlowCenterCacheInput } from
 
 export type FlowHistoryMode = 'off' | 'clear' | 'reproject'
 
+/** Synchronously appends content preparation to the same live builder, then returns its draws. */
+export type FlowHistoryContent = readonly DrawCommand[] | ((builder: SubmissionBuilder) => readonly DrawCommand[])
+
 export type FlowHistoryOptions = Readonly<{
     runtime: GPURuntime
     surface: Surface
@@ -81,7 +84,7 @@ export type FlowHistoryFacts = Readonly<{
     disposed: boolean
     /** Last applied boundary, retained across unavailable frames; not a per-pixel guarantee. */
     boundary: FlowFieldBoundaryMode
-    /** Encoded B draws, not a native-completion counter. */
+    /** Encoded non-hard boundary draws, not a native-completion counter. */
     sdfPresentationCount: number
     sdfExtraTextureBytes: 0
     centerCache: FlowCenterCacheFacts | undefined
@@ -96,10 +99,15 @@ export type FlowHistory = Readonly<{
     presentRetained(builder: SubmissionBuilder, view: GeoViewSnapshot): FlowHistoryFrame
     /** Commits a derived cache only after its actual GPU build succeeds. */
     observe(submitted: SubmittedWork): Promise<void>
+    /**
+     * Uploads history uniforms before resolving optional synchronous content.
+     * Producers must not submit, reenter history, or return a Promise. On failure,
+     * abandon the builder: producer-owned side effects are not rolled back.
+     */
     encode(
         builder: SubmissionBuilder,
         view: GeoViewSnapshot,
-        content: readonly DrawCommand[] | undefined,
+        content: FlowHistoryContent | undefined,
         accumulate: boolean | undefined,
         prepared?: FlowTemporalReadyBindingFrame,
         boundary?: FlowFieldBoundaryMode,
@@ -494,6 +502,7 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
         let clearPending = true
         let resizePending = false
         let disposed = false
+        let producingContent = false
 
         async function resize(nextSize: SurfaceSize): Promise<void> {
             assertActive()
@@ -519,7 +528,7 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
         function encode(
             builder: SubmissionBuilder,
             view: GeoViewSnapshot,
-            content: readonly DrawCommand[] = [],
+            content: FlowHistoryContent = [],
             accumulate = true,
             prepared?: FlowTemporalReadyBindingFrame,
             requestedBoundary: FlowFieldBoundaryMode = 'hard',
@@ -532,6 +541,10 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
             if (builder?.runtime !== runtime) {
                 throw new TypeError('Flow Field history requires a same-runtime SubmissionBuilder')
             }
+            if (builder.isSubmitted) throw new Error('Flow Field history requires a live SubmissionBuilder')
+            if (typeof content !== 'function' && !Array.isArray(content)) {
+                throw new TypeError('Flow Field history content must be draw commands or a synchronous producer')
+            }
             if (prepared !== undefined && (prepared.state !== 'ready' || prepared.bindSet.runtime !== runtime)) {
                 throw new TypeError('Flow Field history requires the current same-runtime temporal frame')
             }
@@ -542,22 +555,11 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
             if (!Number.isSafeInteger(requestedDecaySteps) || requestedDecaySteps < 0 || requestedDecaySteps > 3) {
                 throw new RangeError('Flow history decay requires zero to three reference ticks')
             }
-            if (prepared && (requestedBoundary === 'sdf-center-linear' || requestedBoundary === 'sdf-center-smooth')) {
-                centerCache?.encode(builder,prepared,centerCacheInput)
-            }
-            // Temporal clipping owns visibility, never the next frame's raw ink.
-            const presentation = prepared === undefined ? undefined
-                : preparePresentationPair(prepared, requestedBoundary)[directionIndex]!
-            if (presentation === undefined && presentationPair !== undefined) {
-                for (const command of presentationPair.commands) command.dispose()
-                presentationPair = undefined
-            }
             const screenView = flowScreenViewValues(view, options.addressCodec)
             const compose = accumulate ? historyCommands[directionIndex]! : undefined
-            if (!accumulate) clearPending = true
             const currentView = historyViewFacts(view)
             const cameraChanged = previousView !== undefined && !sameView(previousView, currentView)
-            if (mode === 'clear' && cameraChanged) clearPending = true
+            const cleared = clearPending || !accumulate || (mode === 'clear' && cameraChanged)
             const centerDelta = previousView === undefined
                 ? Infinity
                 : viewCenterDelta(previousView, currentView)
@@ -582,12 +584,41 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
             }))
             const direction = directions[directionIndex]!
             builder.upload(uniformUpload)
-            const cleared = clearPending
-            if (clearPending) {
+            // Resolve content before any history state or cache producer advances.
+            // The callback owns its work; failure requires discarding this builder.
+            let draws: readonly DrawCommand[]
+            producingContent = true
+            try {
+                const produced: unknown = typeof content === 'function' ? content(builder) : content
+                if (!Array.isArray(produced)) {
+                    // Reject asynchronous content now, but observe its rejection
+                    // so this contract error cannot create an unhandled second one.
+                    if (produced !== null && (typeof produced === 'object' || typeof produced === 'function') &&
+                        typeof (produced as PromiseLike<unknown>).then === 'function') {
+                        void Promise.resolve(produced as PromiseLike<unknown>).catch(() => {})
+                    }
+                    throw new TypeError('Flow Field history content producer must synchronously return draw commands')
+                }
+                draws = [ ...produced ]
+                if (builder.isSubmitted) throw new Error('Flow Field history content must not submit its builder')
+            } finally {
+                producingContent = false
+            }
+            if (prepared && (requestedBoundary === 'sdf-center-linear' || requestedBoundary === 'sdf-center-smooth')) {
+                centerCache?.encode(builder,prepared,centerCacheInput)
+            }
+            // Temporal clipping owns visibility, never the next frame's raw ink.
+            const presentation = prepared === undefined ? undefined
+                : preparePresentationPair(prepared, requestedBoundary)[directionIndex]!
+            if (presentation === undefined && presentationPair !== undefined) {
+                for (const command of presentationPair.commands) command.dispose()
+                presentationPair = undefined
+            }
+            if (cleared) {
                 builder.render(clearPass, [])
                 clearPending = false
             }
-            builder.render(direction.pass, compose === undefined ? [ ...content ] : [ compose, ...content ])
+            builder.render(direction.pass, compose === undefined ? [ ...draws ] : [ compose, ...draws ])
             const rawIndex = direction.target === 'A' ? 0 : 1
             retainedTextureIndex = presentation === undefined ? rawIndex : 1 - rawIndex
             if (presentation !== undefined) {
@@ -667,6 +698,7 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
         }
 
         function dispose(): void {
+            assertNotProducing()
             if (disposed) return
             disposed = true
             for (const command of presentationPair?.commands ?? []) command.dispose()
@@ -687,7 +719,12 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
         }
 
         function assertActive(): void {
+            assertNotProducing()
             if (disposed) throw new Error('Flow Field history is disposed')
+        }
+
+        function assertNotProducing(): void {
+            if (producingContent) throw new Error('Flow Field history content producer cannot reenter history')
         }
 
         function reset(): void {
@@ -731,7 +768,10 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
         }
 
         return Object.freeze({ resize, reset, encode, presentRetained, facts, dispose,
-            observe: (submitted: SubmittedWork) => centerCache?.observe(submitted) ?? Promise.resolve() })
+            observe: (submitted: SubmittedWork) => {
+                assertNotProducing()
+                return centerCache?.observe(submitted) ?? Promise.resolve()
+            } })
     } catch (error) {
         const failures: unknown[] = [ error ]
         for (const resource of construction.reverse()) {

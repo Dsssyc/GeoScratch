@@ -144,7 +144,7 @@ describe('Flow Field viewport history', () => {
         expect(present).to.be.greaterThan(clip)
         expect(source).to.include('retainedTextureIndex = presentation === undefined ? rawIndex : 1 - rawIndex')
         expect(source).to.include('retainedTextureIndex === 0 ? presentA : presentB')
-        expect(source).to.include('[ compose, ...content ]')
+        expect(source).to.include('[ compose, ...draws ]')
         expect(source).to.match(/target: surface,\s+load: 'clear'/)
         expect(source).to.include('clear: [ 0, 0, 0, 0 ]')
         expect(source).to.include("import type { GeoViewSnapshot, WebMercatorQuadAddressCodec } from 'geoscratch/geo'")

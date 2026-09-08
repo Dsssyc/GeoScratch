@@ -33,6 +33,9 @@ try {
         const require = (condition,message) => { if (!condition) throw new Error(message) }
         const runtime = await GPURuntime.create({label:'Flow retained actual graph proof'})
         const owned = [], own = value => (owned.push(value),value)
+        const nativeSubmit = GPUQueue.prototype.submit
+        let nativeSubmissions = 0
+        GPUQueue.prototype.submit = function (buffers) { nativeSubmissions++;return nativeSubmit.call(this,buffers) }
         let history
         try {
             const canvas = document.querySelector('#proof')
@@ -264,6 +267,113 @@ fn FlowVelocity_sample(p:FlowVelocityAddressFixedPosition,l:u32,t:FlowVelocityTe
             for(let i=0;i<64;i++) await submit({values:[0,0,1,0],commonInterior:true})
             const interiorExpired=await submit({values:[0,0,1,0],boundary:'sdf',commonInterior:true})
             require(energy(interiorExpired)===0,'Common interior must not preserve expired ink or create immortal still trails')
+            // Compare an actual upload -> compute -> current-at-step draw through
+            // the array route and the synchronous producer, using the same graph.
+            const producerOwned=[], ownProducer=value=>(producerOwned.push(value),value)
+            const generatedInk=ownProducer(await runtime.createBuffer({size:16,usage:GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_DST}))
+            const initializeInk=ownProducer(runtime.createUploadCommand({target:generatedInk.region(),data:new Float32Array(4)}))
+            const computeLayout=ownProducer(await runtime.createBindLayout({group:0,entries:[
+                {binding:0,name:'inputValue',type:'uniform',visibility:['compute'],minBindingSize:16},
+                {binding:1,name:'outputValue',type:'storage',visibility:['compute'],minBindingSize:16},
+            ]}))
+            const computeSet=ownProducer(await runtime.createBindSet(computeLayout,{inputValue:region,outputValue:generatedInk.region()}))
+            const computeModule=ownProducer(await runtime.createShaderModule({sourceParts:[{code:`
+@group(0) @binding(0) var<uniform> inputValue:vec4f;
+@group(0) @binding(1) var<storage,read_write> outputValue:vec4f;
+@compute @workgroup_size(1) fn main() { outputValue=vec4f(inputValue.x,0.6,0.8,1); }
+`}]}))
+            const computeProgram=ownProducer(runtime.createProgram({compute:{module:computeModule,entryPoint:'main'}}))
+            const computePipeline=ownProducer(await runtime.createComputePipeline({program:computeProgram,
+                layout:{mode:'explicit',bindLayouts:[computeLayout]}}))
+            const computePass=ownProducer(runtime.createComputePass({label:'Content producer compute'}))
+            const compute=ownProducer(runtime.createDispatchCommand({pipeline:computePipeline,bindSets:[{set:computeSet}],
+                count:{workgroups:[1]},resources:{read:[velocity,generatedInk].map(resource=>({resource,contentEpoch:'current-at-step'})),
+                    write:[generatedInk]},whenMissing:'throw'}))
+            const inkLayout=ownProducer(await runtime.createBindLayout({group:0,entries:[
+                {binding:0,name:'outputValue',type:'read-storage',visibility:['fragment'],minBindingSize:16},
+            ]}))
+            const inkSet=ownProducer(await runtime.createBindSet(inkLayout,{outputValue:generatedInk.region()}))
+            const inkModule=ownProducer(await runtime.createShaderModule({sourceParts:[{code:`
+@group(0) @binding(0) var<storage,read> outputValue:vec4f;
+@vertex fn vs(@builtin(vertex_index) i:u32)->@builtin(position) vec4f {
+    let p=array<vec2f,4>(vec2f(-1,-1),vec2f(-1,1),vec2f(1,-1),vec2f(1,1));return vec4f(p[i],0,1);
+}
+@fragment fn fs()->@location(0) vec4f { return outputValue; }
+`}]}))
+            const inkProgram=ownProducer(runtime.createProgram({vertex:{module:inkModule,entryPoint:'vs'},fragment:{module:inkModule,entryPoint:'fs'}}))
+            const inkPipeline=ownProducer(await runtime.createRenderPipeline({program:inkProgram,layout:{mode:'explicit',bindLayouts:[inkLayout]},
+                targets:[{format:'rgba8unorm'}],primitive:{topology:'triangle-strip'},
+                depthStencil:{format:'depth32float',depthWriteEnabled:false,depthCompare:'less'}}))
+            const inkDraw=ownProducer(runtime.createDrawCommand({pipeline:inkPipeline,bindSets:[{set:inkSet}],count:{vertexCount:4},
+                resources:{read:[{resource:generatedInk,contentEpoch:'current-at-step'}],write:[]},whenMissing:'throw'}))
+            async function producerFrame(deferred,boundary,value) {
+                history.reset()
+                await new Promise(resolve=>requestAnimationFrame(resolve))
+                velocityCodec.write(velocityBytes,{value:[value,0,1,0]})
+                velocityCodec.write(supportBytes,{value:[0,0,0,0]})
+                const builder=runtime.createSubmission({validation:'throw'})
+                let calls=0
+                const produce=sameBuilder=>{
+                    calls++
+                    require(sameBuilder===builder,'Content receives the exact caller builder')
+                    if (deferred) require(builder.steps.length===1 && builder.steps[0].kind==='upload',
+                        'History upload must precede content preparation; no history pass may precede it')
+                    sameBuilder.upload(upload).upload(supportUpload).upload(initializeInk).compute(computePass,[compute])
+                    return [inkDraw]
+                }
+                history.encode(builder,view(0),deferred?produce:produce(builder),true,prepared,boundary,.25)
+                require(calls===1,'A content producer is invoked exactly once')
+                const before=nativeSubmissions,work=builder.submit()
+                const copy=document.createElement('canvas');copy.width=width;copy.height=height
+                const context=copy.getContext('2d');context.drawImage(canvas,0,0)
+                const pixels=Array.from(context.getImageData(0,0,width,height).data)
+                const [outcome]=await Promise.all([work.nativeOutcome,work.done])
+                require(outcome.status==='observed-succeeded','Actual producer graph must succeed')
+                submissions++
+                return {pixels,nativeSubmissions:nativeSubmissions-before}
+            }
+            const producerCases=[]
+            for (const boundary of ['hard','sdf','sdf-center-linear','sdf-center-smooth']) {
+                for (const value of [.2,.6]) {
+                    const array=await producerFrame(false,boundary,value)
+                    const deferred=await producerFrame(true,boundary,value)
+                    require(same(array,deferred),`${boundary}: upload scheduling must preserve every Surface byte`)
+                    require(deferred.pixels[0]===Math.round(value*255),
+                        `${boundary}/${value}: draw must read this frame's computed value, got ${deferred.pixels[0]}`)
+                    require(array.nativeSubmissions===2 && deferred.nativeSubmissions===1,
+                        `${boundary}: equivalent work must consolidate native submits 2 -> 1`)
+                    producerCases.push({boundary,value,arrayNative:array.nativeSubmissions,producerNative:deferred.nativeSubmissions,exact:true})
+                }
+            }
+            const beforeFailures=JSON.stringify(history.facts())
+            const expectProducerFailure=(callback,pattern)=>{
+                const builder=runtime.createSubmission({validation:'throw'})
+                let caught
+                try { history.encode(builder,view(.25),callback,false,prepared,'sdf-center-linear') } catch(error) { caught=error }
+                require(caught && pattern.test(caught.message),'Reject producer contract violations synchronously')
+                require(JSON.stringify(history.facts())===beforeFailures,'Failed content cannot advance history state')
+            }
+            expectProducerFailure(()=>{throw new Error('fixture producer failure')},/fixture producer failure/)
+            for (const value of [undefined,null,{},Promise.resolve([])]) {
+                expectProducerFailure(()=>value,/synchronously return/)
+            }
+            expectProducerFailure(()=>Promise.reject(new Error('invalid async producer')),/synchronously return/)
+            expectProducerFailure(()=>history.resize({width:16,height:8}),/synchronously return/)
+            for (const operation of [()=>history.reset(),()=>history.dispose(),
+                ()=>history.presentRetained(runtime.createSubmission(),view(0))]) {
+                expectProducerFailure(()=>{operation();return []},/cannot reenter/)
+            }
+            let premature
+            expectProducerFailure(builder=>{premature=builder.submit();return []},/must not submit/)
+            await Promise.all([premature.nativeOutcome,premature.done])
+            // Failed builders are abandoned, not submitted/retried. Retained
+            // presentation remains unchanged, and a new valid producer can resume.
+            const retainedAfterFailure=await submit({retained:true})
+            const retainedAgain=await submit({retained:true})
+            require(same(retainedAfterFailure,retainedAgain),'Producer failure cannot advance or decay retained ink')
+            const recoveredProducer=await producerFrame(true,'hard',.2)
+            require(recoveredProducer.pixels[0]===51,'Producer guard is released after all failure paths')
+            for (const resource of producerOwned.reverse()) resource.dispose()
             history.dispose();history=undefined
             // Verify the graph released its own textures/buffer but not the
             // borrowed temporal buffers. All other graph objects dispose below.
@@ -273,7 +383,8 @@ fn FlowVelocity_sample(p:FlowVelocityAddressFixedPosition,l:u32,t:FlowVelocityTe
             const stats={submissions,initial:energy(initial),recovery:energy(recovery),half:halfEnergy,
                 resumed:energy(resumed),retainedABAExact:true,sdfCases,expired:energy(expired),facts,
                 commonInterior:{hard:energy(interiorA),sdf:energy(interiorB),recovered:energy(interiorRecovered),
-                    sharedEndpointABExact:true,expired:energy(interiorExpired)}}
+                    sharedEndpointABExact:true,expired:energy(interiorExpired)},
+                contentProducer:{cases:producerCases,failuresPreserveHistory:true,retainedExact:true}}
             for(const resource of owned.reverse()) resource.dispose()
             owned.length=0
             const final=runtime.diagnostics.snapshot()
@@ -282,6 +393,7 @@ fn FlowVelocity_sample(p:FlowVelocityAddressFixedPosition,l:u32,t:FlowVelocityTe
             runtime.dispose()
             return {...stats,cleanup:{resources:final.resources.length,pending:final.pendingOperations.length,runtimeDisposed:runtime.isDisposed}}
         } finally {
+            GPUQueue.prototype.submit=nativeSubmit
             history?.dispose()
             for(const resource of owned.reverse()) resource.dispose()
             runtime.dispose()

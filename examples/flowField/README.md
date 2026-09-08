@@ -80,6 +80,15 @@ encoded spatial batches, while `latestSettledFrameEpoch` identifies the last rea
 GPU spatial result. See [ADR-120](../../docs/decisions/ADR-120-flow-spatial-decision-reuse.md)
 and the [per-phase benchmark record](../../docs/review/flow-pipeline-optimization-benchmarks.md).
 
+History can accept a synchronous content producer in place of its existing draw
+array. It uploads history uniforms first, then lets the caller append particle
+and optional contour preparation before cache/history rendering. The common
+steady path can therefore keep all hot uploads ahead of compute. This does not
+change Scratch queue semantics or the frame-in-flight budget. Producers must not
+submit, reenter history or return asynchronous work; a failed builder must be
+abandoned through the caller's existing lifetime cleanup. See
+[ADR-124](../../docs/decisions/ADR-124-flow-content-upload-order.md).
+
 ## A/B: original source-footprint boundary
 
 In **Particles**, the **Boundary** selector compares **A · Hard texture** (default)
@@ -322,6 +331,7 @@ node tests/browser/flow-field-history-time.mjs
 node tests/browser/flow-field-visual-time.mjs
 node tests/browser/flow-field-slack-interior.mjs
 node tests/browser/flow-field-controls.mjs
+node tests/browser/flow-field-contour-order.mjs
 node tests/browser/flow-field-boundary-distance.mjs
 node tests/browser/flow-field-boundary-time.mjs
 node tests/browser/flow-field-boundary-interior.mjs

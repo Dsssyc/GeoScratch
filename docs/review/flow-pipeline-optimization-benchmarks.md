@@ -249,3 +249,83 @@ node tests/browser/flow-field-center-cache-coherence.mjs
 node tests/browser/flow-field-center-cache.mjs
 npx mocha tests/flow-field-center-cache-context.test.js tests/flow-field-center-cache-plan.test.js
 ```
+
+## Phase 4B: Upload And Content Ordering
+
+Decision: [ADR-124](../decisions/ADR-124-flow-content-upload-order.md).
+Clean baseline `c1423d5` encoded 648 native submissions for 324 animation updates,
+exactly two per update, with no spatial or center-cache rebuild during the window.
+This run measured only 46.28 updates/s and simulation/display intervals of
+7.85/3.70 ms, substantially above earlier unchanged-shader observations. Therefore
+those absolute times are not treated as a stable control or used to claim a
+percentage speedup. The primary structural gate is native submissions per actual
+update, with numerical/interaction regressions checked separately.
+
+After moving history uniforms before synchronous content preparation, the same
+steady scene encoded 322 native submissions for 322 animation updates: exactly
+one per update. Spatial/cache build counts remained one and worker count zero.
+The run reported 45.99 updates/s, simulation mean 6.841 ms and continuous display
+span mean 3.617 ms. This establishes the submission reduction, not a material
+whole-frame speedup: the observed update rate did not improve in this run. Adjacent
+pass intervals still overlap and must not be summed.
+
+The native history graph exercised 186 submissions and retained its original
+golden values. Eight cases (A/B/C/D boundaries at two current-frame values) compared
+the array path's two native submissions with the producer path's one submission;
+all Surface bytes were identical. Current values, not stale previous values,
+reached drawing. Throwing, asynchronous, non-array, submitted-builder and reentrant
+content preserved history facts; retained presentation remained exact. Native
+errors, live resources and pending operations ended at zero. The focused Node
+ownership/history/renderer gate passed 22 tests.
+
+Final type checks, production build and 1,686 Node tests passed (two existing
+pending). All five camera-continuity witnesses had zero frozen rendered frames,
+particle resets and history clears, including wheel-driven time handoff. The
+visual clock maintained 59.94/59.92 reference ticks per second under native and
+30 Hz admission; paused C-D-C screenshots remained exact. All four boundary modes
+passed the real z14 camera/resize/time-handoff proof. Cache coherence again rejected
+both clobber cases and all 1,254,931 packed-record comparisons remained exact.
+
+The added real contour-order smoke test passed particle playback/pause and paused
+Status/Speed inspectors with 122,880 visible contour candidates and matching
+temporal pair/endpoint epochs. Overflow observation completed with each frame.
+Paused controls left particle steps/reference time unchanged; contour on/off/on
+contributed visible GPU pixels and restored the exact frozen screenshot. Cleanup
+ended with zero pending observations and no errors. This closes the previous
+control-panel-only contour coverage gap.
+
+## Final Reference Comparison
+
+After the accepted changes, the same harness ran Layer / Field C / Field C / Layer
+in separate sequential pages. No baseline-example production source was changed.
+
+| Metric | Layer first | Field C first | Field C second | Layer second |
+|---|---:|---:|---:|---:|
+| Updates/s | 60.14 | 58.57 | 45.00 | 59.99 |
+| Particle simulation mean ms | 0.477 | 6.514 | 7.795 | 0.515 |
+| Layer field-construction mean ms | 0.873 | not applicable | not applicable | 0.981 |
+| Field continuous display span mean ms | not measured | 3.593 | 3.914 | not measured |
+| Native submissions in window | 420 | 410 | 315 | 420 |
+
+Field used one native submission per actual animation update in both windows,
+with no spatial/cache rebuilds and no active workers at either measurement edge.
+The first Layer observed-frame delta was 421 while 420 queue submissions occurred
+inside the measurement window: its completion counter can straddle the window
+boundary. Do not infer an additional frame's submission from that difference.
+
+This final comparison does **not** establish parity with frozen Flow Layer.
+Particle simulation remains the largest measured Field compute pass: direct tiled
+temporal queries and particle policies do substantially more work than sampling
+Layer's prebuilt screen field. The two Field windows also differ materially in
+cadence. Preserve these observations rather than replacing them with the faster
+earlier runs. No system GPU-utilization reduction, universal FPS gain or sum of
+the phase-local savings is claimed. MRT remains an unadopted measured experiment.
+
+```sh
+FLOW_GPU_BENCH_VARIANTS=layer,field-C,field-C,layer node tests/browser/flow-field-gpu-benchmark.mjs
+node tests/browser/flow-field-history-retained.mjs
+node tests/browser/flow-field-camera-continuity.mjs
+node tests/browser/flow-field-visual-time.mjs
+node tests/browser/flow-field-center-ab.mjs
+node tests/browser/flow-field-contour-order.mjs
+```
