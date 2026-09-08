@@ -69,4 +69,66 @@ npm test -- --reporter dot
 npm run build
 ```
 
+## Phase 2: Loaded Footprint Reuse
+
+Decision: [ADR-121](../decisions/ADR-121-flow-loaded-footprint-reuse.md).
+Fresh pre-change baseline: `8e38f5f` (clean tracked tree).
+
+| Steady scene fact | Before | After |
+|---|---:|---:|
+| Updates/s | 59.852 | 59.995 |
+| Particle simulation mean ms | 6.523 | 4.347 |
+| Particle simulation p50 ms | 6.527 | 4.290 |
+| Native submissions/frame | 2 | 2 |
+| Spatial build count during window | 1 to 1 | 1 to 1 |
+
+The approximately 33% reduction is for this simulation pass, not the entire app.
+Other full-screen timings varied and are not attributed as savings to this phase.
+
+The native sampler oracle shares the real generated three-level Geo samplers and
+compares the old registration preflight path with the new loaded-footprint path.
+47 fixtures, 282 cases and 6,204 compared samples had zero observed difference in
+velocity/speed, status, resolved level and advectability. Cases include independent
+endpoint status changes, repeated common-level fallback, transitions, page/source
+edges, canonical-quantum offsets, owner-zero and temporal cancellation. The test
+retains a bounded floating-point tolerance rather than claiming all devices must
+produce bit-identical floating-point arithmetic.
+
+Logical helper counts for one C/D temporal query:
+
+| Scene | Previous resolution + load calls | New resolution + load calls | UV loads before / after |
+|---|---:|---:|---:|
+| Fine | 16 + 8 | 0 + 8 | 8 / 8 |
+| Mixed fallback | 28 + 12 | 0 + 16 | 12 / 16 |
+| Edge transition | 32 + 12 | 4 + 16 | 12 / 16 |
+
+The additional UV reads in fallback are explicit and subsequently discarded when
+the footprint moves to a coarser registered level. They do not replace readiness
+checks. Counts use invocation-private diagnostics, separately from timing shaders.
+
+A counter-free 32,768-query ABBA microbenchmark (four warm-up and 24 timed passes
+per scene) measured mean milliseconds on the root verification run: fine 0.3442
+to 0.1816, mixed fallback 0.2446 to 0.1323, transition 0.1760 to 0.1127. Mixed
+fallback p50 was 0.1625 to 0.0989, illustrating why a short timing mean should not
+be treated as a device-independent constant. These controlled kernels establish that
+extra discarded loads did not outweigh parsing savings in these cases; they are
+not an end-to-end performance ratio.
+
+Additional gates:
+
+Type checks, production build and all 1,667 Node tests passed (two existing
+pending). The native zero-footprint proof passed 178 samples per variant; raw
+history/retained-visible regression tests also passed. No uncaptured GPU errors.
+The real z14 A/B/C/D inspection proof passed (approximately 60 updates/s for all
+four tested views), including paused state preservation, camera/resize, time-pair
+handoff and cleanup. The 30/60 Hz visual-time and paused image checks passed.
+
+```sh
+npx mocha tests/flow-field-pixel-center-registration.test.js tests/flow-field-temporal-raster.test.js
+node tests/browser/flow-field-sampler-reuse.mjs --benchmark
+node tests/browser/flow-field-zero-footprint.mjs
+node tests/browser/flow-field-history.mjs
+node tests/browser/flow-field-history-retained.mjs
+```
+
 Later phases append their fresh before/after evidence here only after verification.

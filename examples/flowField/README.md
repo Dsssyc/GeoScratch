@@ -202,6 +202,13 @@ no boundary sliding or immortal stationary particle. C/D have identical particle
 sampling, so their comparison isolates the distance reconstruction kernel. A/B,
 inspection values, and activity contours keep their original sampler policy.
 
+The pixel-center adapter uses each endpoint's four loaded Geo Samples for both
+readiness/level arbitration and bilinear interpolation, avoiding repeated
+resolution-only queries. Geo still owns every logical texel/atlas access. The
+adapter's existing no-payload-NoData restriction, status precedence, common-level
+re-registration and edge transitions remain unchanged. See
+[ADR-121](../../docs/decisions/ADR-121-flow-loaded-footprint-reuse.md).
+
 The common-level/readiness proof and half-texel registration remain shared with
 the existing sampler. Each cached pair-page has **257×257 packed u32 records**,
 including the shared next row/column. One record encodes both endpoint distances,

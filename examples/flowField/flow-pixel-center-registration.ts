@@ -27,7 +27,7 @@ export type FlowPixelCenterRegistrationWgslOptions = Readonly<{
 const WGSL_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/
 const U32_MASK = 0xffff_ffffn
 
-/** Generates an exact wide-fixed half-texel registration adapter for each actual raster level. */
+/** Generates exact half-texel registration and reuses each no-NoData footprint load for readiness and interpolation. */
 export function flowPixelCenterRegistrationWgslModule(
     model: WebMercatorVirtualRasterField,
     options: FlowPixelCenterRegistrationWgslOptions
@@ -110,10 +110,6 @@ fn ${positionFunction}(
     return registered;
 }
 
-${resolutionPreflightWgsl(namespace, 'current', currentSamplerNamespace, addressNamespace)}
-
-${resolutionPreflightWgsl(namespace, 'next', nextSamplerNamespace, addressNamespace)}
-
 ${registeredSamplerWgsl(
         namespace,
         'current',
@@ -150,56 +146,39 @@ function registeredSamplerWgsl(
     position: ${addressNamespace}FixedPosition,
     level: u32,
 ) -> ${samplerNamespace}Sample {
-    let resolution = ${namespace}_${slot}_resolution(position, level);
-    if (resolution.x == 4u) { return ${samplerNamespace}_failed(level); }
-    if (resolution.x == 0u) { return ${samplerNamespace}_missing(level); }
-    if (resolution.x == 3u) {
-        return ${samplerNamespace}Sample(vec4f(0.0), 3u, level, level);
-    }
-    if (resolution.y < level || resolution.y >= ${samplerNamespace}_level_count) {
+    let address = ${addressNamespace}_address(position, ${samplerNamespace}_matrix[level]);
+    let base = vec2i(address.tile * ${samplerNamespace}_page_size + address.texel);
+    // The factory forbids a payload NoData sentinel. These loaded samples carry
+    // the same metadata statuses as resolution_global, plus reusable values.
+    let tl = ${samplerNamespace}_load_global(base, level);
+    let tr = ${samplerNamespace}_load_global(base + vec2i(1, 0), level);
+    let bl = ${samplerNamespace}_load_global(base + vec2i(0, 1), level);
+    let br = ${samplerNamespace}_load_global(base + vec2i(1, 1), level);
+    if (tl.status == 4u || tr.status == 4u || bl.status == 4u || br.status == 4u) {
         return ${samplerNamespace}_failed(level);
     }
-    if (resolution.y > level) {
-        return ${samplerNamespace}Sample(vec4f(0.0), 2u, level, resolution.y);
+    if (tl.status == 0u || tr.status == 0u || bl.status == 0u || br.status == 0u) {
+        return ${samplerNamespace}_missing(level);
+    }
+    if (tl.status == 3u || tr.status == 3u || bl.status == 3u || br.status == 3u) {
+        return ${samplerNamespace}Sample(vec4f(0.0), 3u, level, level);
+    }
+    let resolved_level = max(max(tl.resolved_level, tr.resolved_level), max(bl.resolved_level, br.resolved_level));
+    if (resolved_level < level || resolved_level >= ${samplerNamespace}_level_count) {
+        return ${samplerNamespace}_failed(level);
+    }
+    if (resolved_level > level) {
+        return ${samplerNamespace}Sample(vec4f(0.0), 2u, level, resolved_level);
     }
     if (level + 1u < ${samplerNamespace}_level_count &&
         ${samplerNamespace}_edge_blend_weight(position, level) < 1.0f) {
         return ${samplerNamespace}Sample(vec4f(0.0), 2u, level, level + 1u);
     }
-    return ${samplerNamespace}_sample_level(position, level);
-}`
-}
-
-function resolutionPreflightWgsl(
-    namespace: string,
-    slot: 'current' | 'next',
-    samplerNamespace: string,
-    addressNamespace: string
-): string {
-
-    return `fn ${namespace}_${slot}_resolution(
-    position: ${addressNamespace}FixedPosition,
-    level: u32,
-) -> vec2u {
-    let address = ${addressNamespace}_address(position, ${samplerNamespace}_matrix[level]);
-    let base = vec2i(address.tile * ${samplerNamespace}_page_size + address.texel);
-    let tl = ${samplerNamespace}_resolution_global(base, level);
-    let tr = ${samplerNamespace}_resolution_global(base + vec2i(1, 0), level);
-    let bl = ${samplerNamespace}_resolution_global(base + vec2i(0, 1), level);
-    let br = ${samplerNamespace}_resolution_global(base + vec2i(1, 1), level);
-    if (tl.x == 4u || tr.x == 4u || bl.x == 4u || br.x == 4u) {
-        return vec2u(4u, level);
-    }
-    if (tl.x == 0u || tr.x == 0u || bl.x == 0u || br.x == 0u) {
-        return vec2u(0u, level);
-    }
-    if (tl.x == 3u || tr.x == 3u || bl.x == 3u || br.x == 3u) {
-        return vec2u(3u, level);
-    }
-    return vec2u(
-        max(max(tl.x, tr.x), max(bl.x, br.x)),
-        max(max(tl.y, tr.y), max(bl.y, br.y)),
-    );
+    // Fallback is a signal to the temporal owner: it must re-register the
+    // original canonical position at the new shared level, not this position.
+    let value = mix(mix(tl.value, tr.value, address.sub_texel.x),
+        mix(bl.value, br.value, address.sub_texel.x), address.sub_texel.y);
+    return ${samplerNamespace}Sample(value, max(max(tl.status, tr.status), max(bl.status, br.status)), level, level);
 }`
 }
 

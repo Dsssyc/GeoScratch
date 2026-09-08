@@ -119,14 +119,13 @@ describe('Flow Field temporal velocity WGSL', () => {
         expect(module.sampleRegistration).to.equal('pixel-center')
         expect(module.code).to.include('const FlowVelocityRegistration_half_texel')
         expect(module.code).to.include('FlowVelocityAddressFixed_subtract_axis(value, delta)')
-        expect(module.code).to.include('fn FlowVelocityRegistration_current_resolution(')
-        expect(module.code).to.include('fn FlowVelocityRegistration_next_resolution(')
+        expect(module.code).to.not.include('fn FlowVelocityRegistration_current_resolution(')
+        expect(module.code).to.not.include('fn FlowVelocityRegistration_next_resolution(')
         expect(module.code).to.include(
             'FlowVelocityCurrent_edge_blend_weight(position, level) < 1.0f'
         )
-        expect(module.code).to.include(
-            'return FlowVelocityCurrent_sample_level(position, level);'
-        )
+        expect(module.code).to.include('let tl = FlowVelocityCurrent_load_global(base, level);')
+        expect(module.code).to.not.include('return FlowVelocityCurrent_sample_level(position, level);')
         expect(module.code).to.not.include(
             'FlowVelocityAddress_advance_i32(position, vec2i(-half_texel))'
         )

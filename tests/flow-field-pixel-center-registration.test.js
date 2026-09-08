@@ -41,12 +41,12 @@ describe('Flow Field pixel-center registration', () => {
         expect(module.code).to.include(
             'registered.axes[1] = ProofRegistration_subtract_clamped(position.axes[1], half_texel)'
         )
-        expect(module.code).to.include('fn ProofRegistration_current_resolution(')
-        expect(module.code).to.include('fn ProofRegistration_next_resolution(')
-        expect(module.code).to.include('ProofCurrent_resolution_global(base, level)')
-        expect(module.code).to.include('ProofNext_resolution_global(base, level)')
+        expect(module.code).to.not.include('fn ProofRegistration_current_resolution(')
+        expect(module.code).to.not.include('fn ProofRegistration_next_resolution(')
+        expect(module.code).to.include('ProofCurrent_load_global(base, level)')
+        expect(module.code).to.include('ProofNext_load_global(base, level)')
         expect(module.code).to.include('ProofCurrent_edge_blend_weight(position, level) < 1.0f')
-        expect(module.code).to.include('return ProofCurrent_sample_level(position, level)')
+        expect(module.code).to.not.include('ProofCurrent_sample_level(position, level)')
         expect(module.code).to.not.include('ProofCurrent_sample_compute(position, level)')
         expect(module.code.indexOf('if (ProofRegistration_axis_less(value, delta))'))
             .to.be.lessThan(module.code.indexOf(
@@ -108,37 +108,37 @@ describe('Flow Field pixel-center registration', () => {
         }
     })
 
-    it('preflights the complete page-seam footprint before fallback or sampling', () => {
+    it('reuses four complete samples while preserving status, fallback and transition priority', () => {
 
         const module = flowPixelCenterRegistrationWgslModule(
             velocityModel([ '8', '9' ], 40),
             registrationOptions('SeamAddress', 'SeamRegistration')
         )
-        const resolution = module.code.slice(
-            module.code.indexOf('fn SeamRegistration_current_resolution('),
-            module.code.indexOf('fn SeamRegistration_next_resolution(')
-        )
-        expect(resolution).to.include('ProofCurrent_resolution_global(base, level)')
-        expect(resolution).to.include(
-            'ProofCurrent_resolution_global(base + vec2i(1, 0), level)'
-        )
-        expect(resolution).to.include(
-            'ProofCurrent_resolution_global(base + vec2i(0, 1), level)'
-        )
-        expect(resolution).to.include(
-            'ProofCurrent_resolution_global(base + vec2i(1, 1), level)'
-        )
         const sampler = module.code.slice(
             module.code.indexOf('fn SeamRegistration_sample_current('),
             module.code.indexOf('fn SeamRegistration_sample_next(')
         )
-        expect(sampler.indexOf('if (resolution.y > level)'))
-            .to.be.lessThan(sampler.indexOf('ProofCurrent_sample_level(position, level)'))
+        for (const texel of ['base', 'base + vec2i(1, 0)', 'base + vec2i(0, 1)', 'base + vec2i(1, 1)']) {
+            expect(sampler).to.include(`ProofCurrent_load_global(${texel}, level)`)
+        }
+        expect(sampler.match(/ProofCurrent_load_global\(/g)).to.have.length(4)
+        expect(module.code.match(/(?:ProofCurrent|ProofNext)_load_global\(/g)).to.have.length(8)
+        expect(module.code).to.not.match(/(?:ProofCurrent|ProofNext)_(?:resolution_global|sample_level|sample_compute)\(/)
+        expect(module.code).to.not.match(/(?:page_table|textureLoad|_atlas)/)
+        const order = ['let br = ProofCurrent_load_global(', 'tl.status == 4u', 'tl.status == 0u',
+            'tl.status == 3u', 'if (resolved_level < level', 'if (resolved_level > level)',
+            'ProofCurrent_edge_blend_weight(position, level)', 'let value = mix(']
+        for (let index = 1; index < order.length; index++) {
+            expect(sampler.indexOf(order[index - 1]), order[index - 1]).to.be.at.least(0)
+            expect(sampler.indexOf(order[index - 1]), `${order[index - 1]} before ${order[index]}`)
+                .to.be.lessThan(sampler.indexOf(order[index]))
+        }
         expect(sampler).to.include(
             'return ProofCurrentSample(vec4f(0.0), 2u, level, level + 1u)'
         )
-        expect(sampler.indexOf('ProofCurrent_edge_blend_weight(position, level)'))
-            .to.be.lessThan(sampler.indexOf('ProofCurrent_sample_level(position, level)'))
+        expect(sampler).to.include('mix(mix(tl.value, tr.value, address.sub_texel.x),')
+        expect(sampler).to.include('mix(bl.value, br.value, address.sub_texel.x), address.sub_texel.y)')
+        expect(sampler).to.include('max(max(tl.status, tr.status), max(bl.status, br.status)), level, level)')
     })
 
     it('requires one more coordinate bit than integer-texel addressing', () => {

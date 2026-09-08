@@ -63,7 +63,7 @@ try {
             const prepared = {state:'ready',bindSet:temporalSet,resources:[velocity,support],requestedLevel:0,progress:0}
             const registrationModule=flowPixelCenterRegistrationWgslModule(model,{namespace:'FlowVelocityRegistration',
                 addressNamespace:'FlowVelocityAddress',currentSamplerNamespace:'FlowVelocityCurrent',nextSamplerNamespace:'FlowVelocityNext'})
-            const registrationEnd=registrationModule.code.indexOf('fn FlowVelocityRegistration_current_resolution(')
+            const registrationEnd=registrationModule.code.indexOf('fn FlowVelocityRegistration_sample_current(')
             require(registrationEnd>0,'Use the production wide-fixed half-texel position adapter')
             // The stub keeps the real public address ABI and every production
             // shader compiles. B's reconstruction is disabled for this graph

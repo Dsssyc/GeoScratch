@@ -28,7 +28,7 @@ const temporal = temporalVelocityWgslModule(model,model,{
 // Reuse the actual generated wide-fixed position adapter, without its unrelated
 // texture sampler wrappers. The stub below controls texel values explicitly.
 const registrationStart=temporal.code.indexOf('const FlowVelocityRegistration_half_texel')
-const registrationEnd=temporal.code.indexOf('fn FlowVelocityRegistration_current_resolution(')
+const registrationEnd=temporal.code.indexOf('fn FlowVelocityRegistration_sample_current(')
 assert.ok(registrationStart>=0 && registrationEnd>registrationStart)
 const registration=temporal.code.slice(registrationStart,registrationEnd)
 const camera = model.addressCodec.fromProjected([13_360_000.125,3_503_000.25]).fixed.limbs
