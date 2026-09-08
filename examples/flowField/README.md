@@ -115,9 +115,10 @@ disabled Boundary control retains the selection for the next Particles view. See
 distance samples at source centers. Each time endpoint classifies existing U/V
 samples with the existing nonzero/activity-kill rule. At each center, distance is
 positive inside support and negative outside, measured to the nearest opposite
-unit-square footprint and truncated at 1.5 source texels. These values are rebuilt
-in shader registers from the existing U/V pages; there is no new boundary tile,
-SDF texture, compute pass, CPU raster, or backend change.
+unit-square footprint and truncated at 1.5 source texels. A bounded local GPU
+buffer now caches these endpoint samples from the existing U/V pages. There is no
+new network boundary tile, CPU raster/decode, GPU readback, or backend change.
+The direct register-only reconstruction remains the cache-miss path and reference.
 
 C uses ordinary bilinear reconstruction. D replaces each fractional coordinate f
 with `f*f*(3-2*f)` before the same four-value mix. Unlike B's exact square boundary,
@@ -143,15 +144,37 @@ no boundary sliding or immortal stationary particle. C/D have identical particle
 sampling, so their comparison isolates the distance reconstruction kernel. A/B,
 inspection values, and activity contours keep their original sampler policy.
 
-The common-level/readiness proof and half-texel registration are shared with the
-existing sampler. Four centers per endpoint cost eight U/V texel loads in common
-supported or unsupported interiors. Near a spatial or temporal support transition,
-the union of their 3x3 neighborhoods is one 4x4 footprint: at most 32 U/V texel
-loads, plus the residency metadata checks. A required out-of-source, missing,
-failed or coarse neighbor falls back to A, never an invented dry sample. This
-comparison adds shader work and two stable display pipelines, but no new page
-requests or rendering passes. See
-[ADR-117](../../docs/decisions/ADR-117-flow-center-sdf-reconstruction.md).
+The common-level/readiness proof and half-texel registration remain shared with
+the existing sampler. Each cached pair-page has **257×257 packed u32 records**,
+including the shared next row/column. One record encodes both endpoint distances,
+signs and uncertainty. A cached display query reads four records; it still checks
+current requested-level readiness and retains A for required unknown source data.
+A cache miss, an omitted page, or an incompatible cache uses the original direct
+C/D reconstruction. That direct path costs eight U/V loads in common supported or
+unsupported interiors, or up to 32 for the full 4x4 neighborhood, plus metadata
+checks. Cache absence is not source absence and never creates a dry contour.
+
+The cache is owned and disposed by history. It uses at most **48 pair-pages**:
+the records occupy **12,681,408 bytes (12.094 MiB)** at capacity, plus a four-byte
+lookup entry per source page-table entry, up to 768 bytes of jobs, and 16 bytes of
+configuration. This is additional local GPU storage, not a zero-resource change.
+The page planner validates all input identities, selects the requested level,
+sorts/deduplicates by source table index and keeps the first capacity pages. Other
+pages retain lookup zero and use direct reconstruction; source demand is unchanged.
+
+The entire selected page set rebuilds when either endpoint runtime, current
+publication snapshot epoch, requested level/page set, or source resource
+allocation version changes. This is conservative whole-set invalidation, not a
+per-page content optimization. Alpha, C/D choice, Feather, and the camera itself
+are not cache keys; camera-induced selected-page changes still rebuild. The build
+runs after the source publication uploads and before dependent presentation in
+the same submission. Only an observed successful submission containing the build
+can publish its reusable nonempty key. Failed or abandoned builds cannot be reused.
+No extra network requests or render passes are added; a local compute pass runs
+only when rebuilding. See [ADR-117](../../docs/decisions/ADR-117-flow-center-sdf-reconstruction.md)
+for the unchanged shape model and
+[ADR-118](../../docs/decisions/ADR-118-flow-source-center-distance-cache.md), which
+supersedes only ADR-117's direct-execution/cache-cost decision.
 
 ## Source data and streaming
 
@@ -221,6 +244,7 @@ node tests/browser/flow-field-boundary-sdf.mjs
 node tests/browser/flow-field-boundary-readiness.mjs
 node tests/browser/flow-field-boundary-ab.mjs
 node tests/browser/flow-field-center-distance.mjs
+node tests/browser/flow-field-center-cache.mjs
 node tests/browser/flow-field-center-sdf.mjs
 node tests/browser/flow-field-center-ab.mjs
 node tests/browser/flow-field-normal-startup.mjs

@@ -107,6 +107,7 @@ import type {
 } from './velocity-source.ts'
 import { FLOW_FIELD_PRESENTATION, flowFieldPresentation } from './flow-presentation.ts'
 import type { FlowFieldPresentation } from './flow-presentation.ts'
+import { FLOW_CENTER_CACHE_MAX_PAGES } from './flow-center-cache-plan.ts'
 import { createFlowScreenInspector } from './flow-screen-inspector.ts'
 import { flowPairViewReady, flowRuntimeViewReady } from './flow-pair-presentation.ts'
 
@@ -318,6 +319,7 @@ export async function createFlowFieldRenderer(
             temporal: temporalBindings,
             addressCodec: model.addressCodec,
             activityKill: thresholds.kill,
+            centerCache: {addressSpace:model.addressSpace,capacity:Math.min(FLOW_CENTER_CACHE_MAX_PAGES,maximumCandidatePages)},
         }))
         const inspector = own(await createFlowScreenInspector({
             runtime, temporal: temporalBindings, model,
@@ -543,7 +545,12 @@ export async function createFlowFieldRenderer(
                     framePresentation.view === 'particles' && framePresentation.trails,
                     framePresentation.view === 'particles' ? prepared : undefined,
                     framePresentation.view === 'particles' ? framePresentation.boundary : 'hard',
-                    framePresentation.sdfFeatherTexels
+                    framePresentation.sdfFeatherTexels,
+                    {
+                        pages: demandFrame.candidatePages,
+                        lowerSnapshot: publications.find(value=>value.runtime===prepared.temporal.lower.runtime)!.publication.publication.snapshot,
+                        upperSnapshot: publications.find(value=>value.runtime===prepared.temporal.upper.runtime)!.publication.publication.snapshot,
+                    }
                 ) : history.presentRetained(builder, view)
                 if (presentationReady && framePresentation.contour) builder.render(overlayPass, [contour.draw])
                 const submitted = builder.submit()
@@ -556,7 +563,7 @@ export async function createFlowFieldRenderer(
                     reconciliations,
                     viewDemand,
                     presentationReady && framePresentation.contour ? contour : undefined,
-                    Promise.resolve().then(() => spawn.observe(spawnFrame, submitted))
+                    Promise.all([Promise.resolve().then(() => spawn.observe(spawnFrame, submitted)),history.observe(submitted)]).then(()=>undefined)
                 )
                 let observation: Promise<unknown>
                 observation = observing.then(() => {

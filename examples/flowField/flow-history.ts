@@ -3,6 +3,7 @@ import {
     layoutCodec,
 } from 'geoscratch/scratch'
 import type { GeoViewSnapshot, WebMercatorQuadAddressCodec } from 'geoscratch/geo'
+import type { VirtualRasterAddressSpace } from 'geoscratch/geo'
 import type {
     BindLayout,
     BindSet,
@@ -16,6 +17,7 @@ import type {
     RenderPipeline,
     ShaderModule,
     SubmissionBuilder,
+    SubmittedWork,
     Surface,
     SurfaceSize,
     TextureResource,
@@ -36,6 +38,8 @@ import { FLOW_FIELD_SDF_FEATHER, flowFieldSdfFeatherTexels } from './flow-presen
 import { flowScreenProjectionWgsl, flowScreenViewValues } from './flow-screen-projection.ts'
 import type { FlowScreenViewValues } from './flow-screen-projection.ts'
 import type { FlowTemporalReadyBindingFrame } from './flow-temporal-bindings.ts'
+import { createFlowCenterCache } from './flow-center-cache.ts'
+import type { FlowCenterCache, FlowCenterCacheFacts, FlowCenterCacheInput } from './flow-center-cache.ts'
 
 
 export type FlowHistoryMode = 'off' | 'clear' | 'reproject'
@@ -51,6 +55,7 @@ export type FlowHistoryOptions = Readonly<{
     trailDecay?: number
     trailCutoff?: number
     maxReprojectCenterDeltaMeters?: number
+    centerCache?: Readonly<{ addressSpace: VirtualRasterAddressSpace, capacity: number }>
 }>
 
 export type FlowHistoryFrame = Readonly<{
@@ -79,6 +84,7 @@ export type FlowHistoryFacts = Readonly<{
     /** Encoded B draws, not a native-completion counter. */
     sdfPresentationCount: number
     sdfExtraTextureBytes: 0
+    centerCache: FlowCenterCacheFacts | undefined
     /** Last encoded uniform, not the application's retained selection. */
     sdfFeatherTexels: number
 }>
@@ -87,6 +93,8 @@ export type FlowHistory = Readonly<{
     resize(size: SurfaceSize): Promise<void>
     reset(): void
     presentRetained(builder: SubmissionBuilder, view: GeoViewSnapshot): FlowHistoryFrame
+    /** Commits a derived cache only after its actual GPU build succeeds. */
+    observe(submitted: SubmittedWork): Promise<void>
     encode(
         builder: SubmissionBuilder,
         view: GeoViewSnapshot,
@@ -94,7 +102,8 @@ export type FlowHistory = Readonly<{
         accumulate: boolean | undefined,
         prepared?: FlowTemporalReadyBindingFrame,
         boundary?: FlowFieldBoundaryMode,
-        sdfFeatherTexels?: number
+        sdfFeatherTexels?: number,
+        centerCacheInput?: FlowCenterCacheInput
     ): FlowHistoryFrame
     facts(): FlowHistoryFacts
     dispose(): void
@@ -209,6 +218,9 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
         return resource
     }
     try {
+        const centerCache = options.centerCache === undefined ? undefined : own(await createFlowCenterCache({
+            runtime,temporal,activityKill,...options.centerCache,
+        }))
         const uniformBytes = codec.pack(initialUniforms)
         const uniformBuffer = own(await runtime.createBuffer({
             label: 'Flow Field history uniform',
@@ -300,7 +312,10 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
             sourceParts: [{ code: temporal.wgsl }, { code: screenProjection },
                 { code: codec.wgslAccessors() }, { code: presentationSupportShader },
                 { code: boundaryDistanceShader }, { code: boundaryActivityShader },
-                { code: boundarySdfShader }, { code: centerDistanceShader }, { code: centerBoundaryShader }],
+                { code: boundarySdfShader }, { code: centerDistanceShader },
+                { code: centerCache ? centerBoundaryShader.replace('FlowCenter_coverage(ground.position)',
+                    'FlowCenterCached_coverage(ground.position)') : centerBoundaryShader },
+                ...(centerCache ? [{code:centerCache.wgsl}] : [])],
         }))
         const requirement: ProgramBufferLayoutRequirement = {
             group: 0,
@@ -375,7 +390,8 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
         const centerPipelines: RenderPipeline[] = []
         for (const program of centerPrograms) centerPipelines.push(own(await runtime.createRenderPipeline({
             label: 'Flow Field center SDF presentation pipeline', program,
-            layout: { mode: 'explicit', bindLayouts: [uniformLayout, temporal.layout, historyLayout] },
+            layout: { mode: 'explicit', bindLayouts: [uniformLayout, temporal.layout, historyLayout,
+                ...(centerCache ? [centerCache.layout] : [])] },
             targets: [{ format: historyA.format }],
             primitive: { topology: 'triangle-strip' },
         })))
@@ -503,7 +519,8 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
             accumulate = true,
             prepared?: FlowTemporalReadyBindingFrame,
             requestedBoundary: FlowFieldBoundaryMode = 'hard',
-            requestedFeatherTexels: number = FLOW_FIELD_SDF_FEATHER.default
+            requestedFeatherTexels: number = FLOW_FIELD_SDF_FEATHER.default,
+            centerCacheInput?: FlowCenterCacheInput
         ): FlowHistoryFrame {
             assertActive()
             if (resizePending) throw new Error('Flow Field history cannot encode during resize')
@@ -517,6 +534,9 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
                 throw new TypeError('Flow Field history boundary must be hard, sdf, sdf-center-linear or sdf-center-smooth')
             }
             const feather = flowFieldSdfFeatherTexels(requestedFeatherTexels)
+            if (prepared && (requestedBoundary === 'sdf-center-linear' || requestedBoundary === 'sdf-center-smooth')) {
+                centerCache?.encode(builder,prepared,centerCacheInput)
+            }
             // Temporal clipping owns visibility, never the next frame's raw ink.
             const presentation = prepared === undefined ? undefined
                 : preparePresentationPair(prepared, requestedBoundary)[directionIndex]!
@@ -594,13 +614,14 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
             const pipeline = boundary === 'sdf-center-linear' ? centerPipelines[0]!
                 : boundary === 'sdf-center-smooth' ? centerPipelines[1]!
                 : boundary === 'sdf' ? sdfPipeline : hardPipeline
+            const cache = boundary === 'sdf-center-linear' || boundary === 'sdf-center-smooth' ? centerCache : undefined
             // Presentation reads the newly composed target, opposite to history's source.
             const presentA = composeCommand(runtime, pipeline, uniformSet, historyAToB,
-                uniformBuffer, historyA, prepared, `Present Flow Field ${boundary} A`)
+                uniformBuffer, historyA, prepared, `Present Flow Field ${boundary} A`, cache)
             let presentB: DrawCommand
             try {
                 presentB = composeCommand(runtime, pipeline, uniformSet, historyBToA,
-                    uniformBuffer, historyB, prepared, `Present Flow Field ${boundary} B`)
+                    uniformBuffer, historyB, prepared, `Present Flow Field ${boundary} B`, cache)
             } catch (error) {
                 presentA.dispose()
                 throw error
@@ -630,6 +651,7 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
                 sdfPresentationCount,
                 sdfExtraTextureBytes: 0,
                 sdfFeatherTexels,
+                centerCache: centerCache?.facts(),
             })
         }
 
@@ -648,6 +670,7 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
             for (const bindLayout of graph.bindLayouts) bindLayout.dispose()
             graph.uniformBuffer.dispose()
             for (const texture of graph.textures) texture.dispose()
+            centerCache?.dispose()
             previousView = undefined
             retainedTextureIndex = undefined
         }
@@ -694,7 +717,8 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
                 cleared: display === undefined, resizeGeneration, boundary, sdfFeatherTexels })
         }
 
-        return Object.freeze({ resize, reset, encode, presentRetained, facts, dispose })
+        return Object.freeze({ resize, reset, encode, presentRetained, facts, dispose,
+            observe: (submitted: SubmittedWork) => centerCache?.observe(submitted) ?? Promise.resolve() })
     } catch (error) {
         const failures: unknown[] = [ error ]
         for (const resource of construction.reverse()) {
@@ -757,12 +781,14 @@ function composeCommand(
     uniformBuffer: BufferResource,
     source: TextureResource,
     prepared: FlowTemporalReadyBindingFrame | undefined,
-    label: string
+    label: string,
+    centerCache?: FlowCenterCache
 ): DrawCommand {
     return runtime.createDrawCommand({
         label,
         pipeline,
-        bindSets: [ { set: uniformSet }, ...(prepared ? [{set: prepared.bindSet}] : []), { set: historySet } ],
+        bindSets: [ { set: uniformSet }, ...(prepared ? [{set: prepared.bindSet}] : []), { set: historySet },
+            ...(centerCache ? [{set:centerCache.bindSet}] : []) ],
         count: { vertexCount: 4 },
         resources: {
             read: [
@@ -771,6 +797,7 @@ function composeCommand(
                 ...Array.from(new Set(prepared?.resources ?? []), resource => ({
                     resource, contentEpoch: 'current-at-step' as const,
                 })),
+                ...(centerCache?.resources ?? []).map(resource=>({resource,contentEpoch:'current-at-step' as const})),
             ],
             write: [],
         },

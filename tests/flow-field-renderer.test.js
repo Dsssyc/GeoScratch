@@ -40,6 +40,7 @@ describe('Flow Field renderer composition', () => {
         expect(history).to.be.greaterThan(contour)
         expect(submit).to.be.greaterThan(history)
         expect(source.match(/packFlowCandidateCells\(/g)).to.have.length(1)
+        expect(source).to.include('capacity:Math.min(FLOW_CENTER_CACHE_MAX_PAGES,maximumCandidatePages)')
         expect(source).to.include("framePresentation.boundary === 'sdf-center-linear' || framePresentation.boundary === 'sdf-center-smooth'")
     })
 
