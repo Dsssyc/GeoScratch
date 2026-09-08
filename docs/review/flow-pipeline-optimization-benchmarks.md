@@ -196,3 +196,56 @@ pass intervals, and no longer publishes a misleading sum of pass durations.
 The final mainline decoder-only state passed type checks, production build and
 1,667 Node tests (two existing pending). The MRT-only files were removed from
 mainline after verifying their exact saved blobs in experimental commit `5b2b063`.
+
+## Phase 4A: Center-Cache Endpoint Reuse
+
+Decision: [ADR-123](../decisions/ADR-123-flow-center-endpoint-reuse.md).
+Baseline: `2f3f65f`. With C at zoom 9, controlled seeks to 1.277, 2.277 and 1.277
+produced three cache builds of 30 pages each, mean 7.469 ms, median 6.422 ms,
+maximum observed 10.204 ms. Builds advanced from one to four; the spatial build
+count stayed one. These three samples are a transition witness, not a stable
+percentile distribution. The 429/466/784 ms seek-settle intervals also include
+source loading and 16 animation frames and are not interpreted as cache time.
+
+Use `FLOW_GPU_BENCH_TRANSITIONS=1 FLOW_GPU_BENCH_VARIANTS=field-C node tests/browser/flow-field-gpu-benchmark.mjs`
+for this witness. It samples all transition encoders within the same bounded
+record/query limits. Clear-only passes can produce unwritten/invalid timestamps
+on the tested backend; the tool reports them under `invalidTimestampPasses` rather
+than publishing a negative duration or silently treating their work as zero.
+
+The same three real transitions after endpoint reuse selected `[2,0]`, `[2,0]`,
+then `[0,1]` (old upper to new lower, then old lower to new upper on reverse).
+Each still produced a complete target cache, but only one endpoint was rebuilt.
+Including initialization, rebuilt lanes ended at five instead of eight; three
+lanes were copied. Valid native cache-build timings had mean 3.841 ms, median
+3.417 ms and maximum 6.156 ms. This small transition sample supports the expected
+reduction but is not a general percentile or universal speedup claim.
+
+The Node lifecycle/planner gate passed 21 cases. A partial build pins its input
+record epoch so encode-to-submit clobbers cannot be hidden by a later successful
+producer epoch. The real-page run also validated those dependencies against real
+Scratch receipts, not only orchestration fixtures.
+
+The root native verification compared 1,254,931 full packed records against the
+frozen/full builders with zero differences. A reused endpoint performed zero U/V
+source loads; both-copy swaps and aliases performed none for either endpoint.
+Counter-free ABBA microbenchmarks (12 samples per variant) measured mean ms:
+lower-only update 0.3577 to 0.1576, forward pair 0.1775 to 0.1041, both-copy swap
+0.2182 to 0.0121, both-fresh control 0.1632 to 0.1629. Median values and individual
+invalid timestamp counts remain in the runner output; these short microbenchmarks
+are not whole-frame speedup claims.
+
+Real Scratch validation rejected both same-builder preceding writes and external
+encode-to-submit clobbers with `SCRATCH_SUBMISSION_STALE_READ` before issuing the
+copying build. The equivalent fresh-only preceding write remained legal.
+
+The final type checks, production build and 1,679 Node tests passed (two existing
+pending). Owned cache buffer bytes remain unchanged; endpoint selectors occupy
+previously reserved job words, not another network or texture payload.
+
+```sh
+node tests/browser/flow-field-center-cache-reuse.mjs --benchmark
+node tests/browser/flow-field-center-cache-coherence.mjs
+node tests/browser/flow-field-center-cache.mjs
+npx mocha tests/flow-field-center-cache-context.test.js tests/flow-field-center-cache-plan.test.js
+```

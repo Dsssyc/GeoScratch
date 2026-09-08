@@ -7,11 +7,12 @@ import { execFileSync } from 'node:child_process'
 const head = execFileSync('git',['rev-parse','--short','HEAD'],{encoding:'utf8'}).trim()
 const modified = execFileSync('git',['diff','--name-only','HEAD'],{encoding:'utf8'}).trim().split('\n').filter(Boolean)
 const dpr = Number(process.env.FLOW_GPU_BENCH_DPR ?? 2)
+const transitions = process.env.FLOW_GPU_BENCH_TRANSITIONS === '1'
 assert.ok(Number.isFinite(dpr) && dpr >= 1 && dpr <= 3, 'DPR must be within [1, 3]')
 const browser = await chromium.launch({channel:'chrome',headless:true,args:['--enable-unsafe-webgpu']})
 
 function installAudit() {
-    const audit = window.__gpuAudit = { enabled:false, records:[], errors:[], submissions:0, sampled:0, support:[], encoders:0, pending:new Set() }
+    const audit = window.__gpuAudit = { enabled:false, sampleAll:false, records:[], invalidTimestamps:[], errors:[], submissions:0, sampled:0, support:[], encoders:0, pending:new Set() }
     const request = GPUAdapter.prototype.requestDevice
     GPUAdapter.prototype.requestDevice = async function(descriptor={}) {
         const features = [...(descriptor.requiredFeatures ?? [])]
@@ -29,7 +30,7 @@ function installAudit() {
             audit.encoders++
             // Pseudorandom admission avoids aliasing a fixed number of encoders/frame.
             sequence ^= sequence << 13; sequence ^= sequence >>> 17; sequence ^= sequence << 5
-            if ((sequence >>> 0) % 7 !== 0 || audit.records.length >= 2048 || audit.pending.size >= 8) return encoder
+            if ((!audit.sampleAll && (sequence >>> 0) % 7 !== 0) || audit.records.length >= 2048 || audit.pending.size >= 8) return encoder
             const querySet=device.createQuerySet({type:'timestamp',count:128})
             const resolved=device.createBuffer({size:1024,usage:GPUBufferUsage.QUERY_RESOLVE|GPUBufferUsage.COPY_SRC})
             const read=device.createBuffer({size:1024,usage:GPUBufferUsage.MAP_READ|GPUBufferUsage.COPY_DST})
@@ -78,13 +79,19 @@ function installAudit() {
                 audit.sampled++
                 const mapping=r.read.mapAsync(GPUMapMode.READ).then(()=>{
                     const times=new BigUint64Array(r.read.getMappedRange())
-                    const measured=r.passes.map((p,i)=>({...p,ms:Number(times[i*2+1]-times[i*2])/1e6}))
+                    const valid=i=>times[i*2]>0n&&times[i*2+1]>=times[i*2]
+                    const measured=r.passes.flatMap((p,i)=>{
+                        if(!valid(i)){audit.invalidTimestamps.push(p.label);return []}
+                        return [{...p,ms:Number(times[i*2+1]-times[i*2])/1e6}]
+                    })
                     const visible=r.passes.findIndex(p=>p.label.startsWith('Flow Field visible '))
                     const present=r.passes.findIndex(p=>p.label==='Flow Field history presentation')
                     // Pass intervals may overlap on tile-based GPUs. Measure the
                     // contiguous display interval instead of adding pass durations.
-                    const displayMs=visible<0?undefined:Number(times[(present<0?visible:present)*2+1]-times[visible*2])/1e6
-                    const overlapCount=r.passes.reduce((n,_p,i)=>n+Number(i>0&&times[i*2]<times[(i-1)*2+1]),0)
+                    const final=present<0?visible:present
+                    const displayMs=visible<0||!valid(visible)||!valid(final)||times[final*2+1]<times[visible*2]
+                        ?undefined:Number(times[final*2+1]-times[visible*2])/1e6
+                    const overlapCount=r.passes.reduce((n,_p,i)=>n+Number(i>0&&valid(i)&&valid(i-1)&&times[i*2]<times[(i-1)*2+1]),0)
                     audit.records.push({passes:measured,displayMs,overlapCount})
                     r.read.unmap();destroy()
                 }).catch(error=>{audit.errors.push(String(error));destroy()}).finally(()=>audit.pending.delete(mapping))
@@ -129,27 +136,44 @@ try {
             },variant)
             await page.waitForFunction(before=>{const f=window.__FLOW_FIELD_PROOF__.facts();return f.lastFrame.presentationReady&&f.workers.activeTaskCount===0&&f.renderer.particles.encodedSteps>before+150},before,{timeout:90000})
         }
-        const result=await page.evaluate(async reference=>{
+        const result=await page.evaluate(async ({reference,transitions})=>{
             const facts=()=>{const f=reference?window.__FLOW_LAYER_PROOF__.facts():window.__FLOW_FIELD_PROOF__.facts();return reference?{frames:f.observedFrames}:{frames:f.renderer.particles.encodedSteps,reference:f.renderer.particles.simulatedReferenceSteps,cache:f.renderer.history.centerCache,ready:f.lastFrame.presentationReady,workers:f.workers.activeTaskCount,viewDemand:f.renderer.viewDemand}}
             const before=facts(),start=performance.now();window.__gpuAudit.enabled=true
-            await new Promise(resolve=>setTimeout(resolve,7000))
+            const transitionRecords=[]
+            if(transitions&&!reference) {
+                window.__gpuAudit.sampleAll=true
+                for(const time of [1.277,2.277,1.277]) {
+                    const started=performance.now(),prior=facts()
+                    window.__FLOW_FIELD_PROOF__.seek(time)
+                    for(;;) {
+                        await new Promise(resolve=>requestAnimationFrame(resolve))
+                        const f=window.__FLOW_FIELD_PROOF__.facts()
+                        if(document.body.dataset.status==='error')throw new Error('Transition page failed')
+                        if(f.lastFrame.presentationReady&&f.lastFrame.temporal?.lowerSampleKey===`t${String(Math.floor(time)).padStart(2,'0')}`&&
+                            f.workers.activeTaskCount===0&&f.renderer.particles.encodedSteps>prior.frames+15)break
+                        if(performance.now()-started>45000)throw new Error('Transition did not settle')
+                    }
+                    transitionRecords.push({time,elapsedMs:performance.now()-started,before:prior,after:facts()})
+                }
+            } else await new Promise(resolve=>setTimeout(resolve,7000))
             window.__gpuAudit.enabled=false;const end=performance.now(),after=facts()
             await Promise.all([...window.__gpuAudit.pending])
             const audit=window.__gpuAudit,groups={}
             for(const r of audit.records)for(const p of r.passes){const name=(p.label+' | '+p.pipelines.join(' + ')).replace(/ \[scratch:[^\]]+\]/g,'');(groups[name]??=[]).push(p)}
             const stats=values=>{const a=[...values].sort((a,b)=>a-b);return {mean:a.reduce((s,x)=>s+x,0)/a.length,p50:a[Math.floor(a.length*.5)],p95:a[Math.floor(a.length*.95)],n:a.length}}
             return {fps:(after.frames-before.frames)*1000/(end-start),before,after,support:audit.support,errors:audit.errors,
-                encoders:audit.encoders,submissions:audit.submissions,sampledEncoderCount:audit.records.length,
+                encoders:audit.encoders,submissions:audit.submissions,sampledEncoderCount:audit.records.length,transitionRecords,
                 overlappingPassPairs:audit.records.reduce((n,r)=>n+r.overlapCount,0),
+                invalidTimestampPasses:Object.fromEntries([...new Set(audit.invalidTimestamps)].map(label=>[label,audit.invalidTimestamps.filter(value=>value===label).length])),
                 displaySpanMs:reference?undefined:stats(audit.records.filter(r=>r.displayMs!==undefined).map(r=>r.displayMs)),
                 groups:Object.entries(groups).map(([name,list])=>({name,...stats(list.map(p=>p.ms)),commands:list[0].commands}))}
-        },reference)
+        },{reference,transitions})
         assert.deepEqual(result.errors,[])
         assert.deepEqual(errors,[])
         assert.ok(result.support.length>0&&result.support.every(Boolean),'Native timestamp-query is required')
         assert.ok(result.sampledEncoderCount >= 20, 'Collect enough native timing samples')
         if(!reference)assert.ok(result.before.ready&&result.after.ready&&result.before.workers===0&&result.after.workers===0,'Measure resident steady state')
-        console.log(JSON.stringify({head,modified,variant,zoom:9,dpr,...result,pageErrors:errors}))
+        console.log(JSON.stringify({head,modified,variant,zoom:9,dpr,transitions,...result,pageErrors:errors}))
         const cleanup=await page.evaluate(reference=>reference?window.__FLOW_LAYER_PROOF__.dispose():window.__FLOW_FIELD_PROOF__.dispose(),reference)
         if(!reference){assert.deepEqual(cleanup.cleanupFailures,[]);assert.equal(cleanup.pendingObservationsAfter,0)}
         await page.close()

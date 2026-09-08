@@ -17,6 +17,11 @@ export type FlowCenterCacheFacts = Readonly<{
     pageCount: number
     buildCount: number
     reuseCount: number
+    /** Endpoint lanes rebuilt/copied by encoded build batches, not whole-key cache hits. */
+    rebuiltEndpointCount: number
+    reusedEndpointCount: number
+    /** Each lane is 0=fresh, 1=previous lower, 2=previous upper. */
+    lastReuseSelectors: readonly [number, number]
     pending: boolean
     disposed: boolean
 }>
@@ -89,10 +94,29 @@ export async function createFlowCenterCache(options: Readonly<{
             layout:{mode:'explicit',bindLayouts:[configLayout,temporal.layout,outputLayout]}}))
         const pass = own(runtime.createComputePass({label:'Build Flow center distances'}))
         const resources = Object.freeze([config,lookup,records])
-        type Context = { lower: object, upper: object, signature: string }
-        let committed: Context | undefined
-        let pending: { context: Context, commandId?: string, builder: SubmissionBuilder, observing?: Promise<void> } | undefined
+        type Endpoint = { runtime: object, snapshotEpoch: number | undefined, allocations: string }
+        type Context = { planKey: string, lower: Endpoint, upper: Endpoint }
+        type Version = { resource: BufferResource, contentEpoch: number, allocationVersion: number }
+        let committed: { context: Context, versions: readonly Version[] } | undefined
+        let pending: { context: Context, commandId?: string, initializationId?: string, builder: SubmissionBuilder,
+            observing?: Promise<void>, submittedId?: string } | undefined
         let disposed = false, initialized = false, pageCount = 0, buildCount = 0, reuseCount = 0
+        let rebuiltEndpointCount = 0, reusedEndpointCount = 0
+        let lastReuseSelectors: readonly [number, number] = Object.freeze([0,0] as const)
+
+        function versionsMatch(versions: readonly Version[]) {
+            return versions.every(value => value.resource.contentEpoch === value.contentEpoch &&
+                value.resource.allocationVersion === value.allocationVersion)
+        }
+
+        function version(resource: BufferResource): Version {
+            return {resource,contentEpoch:resource.contentEpoch,allocationVersion:resource.allocationVersion}
+        }
+
+        function sameEndpoint(left: Endpoint, right: Endpoint) {
+            return left.runtime === right.runtime && left.snapshotEpoch === right.snapshotEpoch &&
+                left.allocations === right.allocations
+        }
 
         function encode(builder: SubmissionBuilder, prepared: FlowTemporalReadyBindingFrame, input?: FlowCenterCacheInput) {
             if (disposed || pending !== undefined || builder.runtime !== runtime || builder.isSubmitted || prepared.bindSet.runtime !== runtime) {
@@ -104,13 +128,30 @@ export async function createFlowCenterCache(options: Readonly<{
             }
             const plan = flowCenterCachePlan(lower.addressSpace,capacity,input?.pages ?? [],prepared.requestedLevel)
             if (plan.lookup.length !== lookupBytes.length) throw new Error('Flow center cache source coverage changed')
-            const signature = `${input?.lowerSnapshot.epoch}:${input?.upperSnapshot.epoch}:${plan.key}:` +
-                prepared.resources.map(resource => `${resource.id}@${resource.allocationVersion}`).join(',')
-            const context = {lower,upper,signature}
-            if (committed?.lower === lower && committed.upper === upper && committed.signature === signature) {
+            const allocations = (offset: number) => prepared.resources.slice(offset,offset+2)
+                .map(resource => `${resource.id}@${resource.allocationVersion}`).join(',')
+            const context: Context = {planKey:plan.key,
+                lower:{runtime:lower,snapshotEpoch:input?.lowerSnapshot.epoch,allocations:allocations(0)},
+                upper:{runtime:upper,snapshotEpoch:input?.upperSnapshot.epoch,allocations:allocations(2)}}
+            const confirmed = committed !== undefined && versionsMatch(committed.versions) ? committed : undefined
+            const previous = confirmed?.context
+            const samePlan = previous?.planKey === context.planKey
+            if (samePlan && sameEndpoint(previous!.lower,context.lower) && sameEndpoint(previous!.upper,context.upper)) {
                 reuseCount++
                 return
             }
+            const reuseLane = (endpoint: Endpoint, preferred: 0 | 1): number => {
+                if (!samePlan || endpoint.snapshotEpoch === undefined) return 0
+                const old = [previous!.lower,previous!.upper]
+                if (sameEndpoint(old[preferred]!,endpoint)) return preferred+1
+                const other = 1-preferred
+                return sameEndpoint(old[other]!,endpoint) ? other+1 : 0
+            }
+            const selectors: readonly [number,number] = Object.freeze([
+                reuseLane(context.lower,0),reuseLane(context.upper,1),
+            ] as const)
+            const copiedRecordEpoch = selectors.some(value=>value!==0)
+                ? confirmed!.versions.find(value=>value.resource===records)!.contentEpoch : undefined
             // Failed or abandoned builds can never leave a reusable CPU label.
             committed = undefined
             pageCount = plan.pageCount
@@ -120,50 +161,89 @@ export async function createFlowCenterCache(options: Readonly<{
             view.setUint32(8,lookupBytes.length,true)
             view.setFloat32(12,kill,true)
             jobsBytes.set(plan.jobs)
+            const reuseFlags = selectors[0] | (selectors[1] << 2)
+            for (let slot=0;slot<pageCount;slot++) jobsBytes[slot*4+3] = reuseFlags
             lookupBytes.set(plan.lookup)
-            if (!initialized) { builder.clear(initialize); initialized=true }
-            builder.upload(configUpload).upload(lookupUpload)
-            command?.dispose()
-            command = undefined
-            if (pageCount > 0) {
-                builder.upload(jobsUpload)
-                command = runtime.createDispatchCommand({label:'Build source-center distance cache',pipeline,
-                    bindSets:[{set:configSet},{set:prepared.bindSet},{set:outputSet}],
-                    count:{workgroups:[33,33,pageCount]},
-                    resources:{read:[config,jobs,records,...new Set(prepared.resources)].map(resource=>({resource,contentEpoch:'current-at-step' as const})),
-                        write:[records]},whenMissing:'throw'})
-                builder.compute(pass,[command])
-                buildCount++
+            try {
+                const initializationId = initialized ? undefined : initialize.id
+                if (!initialized) { builder.clear(initialize); initialized=true }
+                builder.upload(configUpload).upload(lookupUpload)
+                command?.dispose()
+                command = undefined
+                if (pageCount > 0) {
+                    builder.upload(jobsUpload)
+                    command = runtime.createDispatchCommand({label:'Build source-center distance cache',pipeline,
+                        bindSets:[{set:configSet},{set:prepared.bindSet},{set:outputSet}],
+                        count:{workgroups:[33,33,pageCount]},
+                        resources:{read:[config,jobs,records,...new Set(prepared.resources)].map(resource=>({resource,
+                            // A copied byte depends on this exact previous producer,
+                            // including writes inserted between encode and submit.
+                            contentEpoch:resource===records && copiedRecordEpoch!==undefined ? copiedRecordEpoch : 'current-at-step' as const})),
+                            write:[records]},whenMissing:'throw'})
+                    builder.compute(pass,[command])
+                    buildCount++
+                    rebuiltEndpointCount += selectors.filter(value=>value===0).length
+                    reusedEndpointCount += selectors.filter(value=>value!==0).length
+                }
+                lastReuseSelectors = selectors
+                pending = {context,commandId:command?.id,initializationId,builder}
+            } catch(error) {
+                initialized=false
+                throw error
             }
-            pending = {context,commandId:command?.id,builder}
         }
 
         function observe(submitted: SubmittedWork): Promise<void> {
             const active = pending
             if (!active) return Promise.resolve()
-            if (active.observing) return active.observing
+            if (active.observing) return active.submittedId===submitted?.id ? active.observing
+                : Promise.reject(new Error('Flow center cache build was observed with another submission'))
+            if (submitted?.runtime !== runtime || !active.builder.isSubmitted) {
+                return Promise.reject(new Error('Flow center cache observation requires its encoded build'))
+            }
             const submittedUploads = new Set(submitted.resourceAccesses.filter(access=>access.stepKind==='upload').map(access=>access.commandId))
-            if (submitted.runtime !== runtime || !active.builder.isSubmitted || active.commandId &&
-                !submitted.executionOutcomes.some(outcome=>outcome.outcomeKind==='command' && outcome.executedCommandId===active.commandId) ||
+            if (active.commandId &&
+                !submitted.executionOutcomes.some(outcome=>outcome.outcomeKind==='command' && outcome.status==='executed' && outcome.executedCommandId===active.commandId) ||
                 !submittedUploads.has(configUpload.id) || !submittedUploads.has(lookupUpload.id) ||
                 active.commandId && !submittedUploads.has(jobsUpload.id)) {
                 return Promise.reject(new Error('Flow center cache observation requires its encoded build'))
             }
+            const versions = resources.map(version)
+            const expected = [[config,configUpload.id],[lookup,lookupUpload.id],
+                ...(active.commandId ? [[jobs,jobsUpload.id],[records,active.commandId]] :
+                    active.initializationId ? [[records,active.initializationId]] : [])] as [BufferResource,string][]
+            const produced = expected.map(([resource,commandId]) => ({...version(resource),commandId}))
+            if (produced.some(value=>!submitted.producerEpochs.some(epoch=>epoch.resourceId===value.resource.id &&
+                epoch.contentEpoch===value.contentEpoch && epoch.allocationVersion===value.allocationVersion &&
+                epoch.producedBy.commandId===value.commandId))) {
+                return Promise.reject(new Error('Flow center cache observation lost its produced resource versions'))
+            }
+            active.submittedId=submitted.id
             active.observing = Promise.all([submitted.done,submitted.nativeOutcome]).then(([,outcome])=>{
                 if (outcome.status !== 'observed-succeeded') throw new Error('Flow center cache build was not observed successful')
-                if (!disposed) committed = active.context
+                if (disposed) return
+                if (!versionsMatch(versions) || !versionsMatch(produced)) {
+                    throw new Error('Flow center cache resources changed before build observation')
+                }
+                committed = {context:active.context,versions}
+            }).catch(error=>{
+                committed=undefined
+                initialized=false
+                throw error
             }).finally(()=>{if(pending===active)pending=undefined})
             return active.observing
         }
 
         function facts(): FlowCenterCacheFacts {
             return Object.freeze({capacity,bufferBytes:records.size+jobsBytes.byteLength+lookupBytes.byteLength+16,
-                pageCount,buildCount,reuseCount,pending:pending!==undefined,disposed})
+                pageCount,buildCount,reuseCount,rebuiltEndpointCount,reusedEndpointCount,lastReuseSelectors,
+                pending:pending!==undefined,disposed})
         }
         function dispose() {
             if (disposed) return
             disposed=true
             committed=undefined
+            pending=undefined
             command?.dispose()
             for(const value of owned.reverse())value.dispose()
         }

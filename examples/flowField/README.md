@@ -236,10 +236,13 @@ The page planner validates all input identities, selects the requested level,
 sorts/deduplicates by source table index and keeps the first capacity pages. Other
 pages retain lookup zero and use direct reconstruction; source demand is unchanged.
 
-The entire selected page set rebuilds when either endpoint runtime, current
-publication snapshot epoch, requested level/page set, or source resource
-allocation version changes. This is conservative whole-set invalidation, not a
-per-page content optimization. Alpha, C/D choice, Feather, and the camera itself
+The selected page set is invalidated when endpoint runtime/publication, requested
+level/page set, or source allocation facts change. If the page plan is unchanged,
+an endpoint matching the last successful build can keep its packed byte, including
+when the old upper endpoint becomes the new lower. Only changed endpoints read U/V
+again. Owned cache content/allocation versions must also match before reuse.
+This is conservative per-endpoint whole-set invalidation, not per-page/halo
+dependency tracking. Alpha, C/D choice, Feather, and the camera itself
 are not cache keys; camera-induced selected-page changes still rebuild. The build
 runs after the source publication uploads and before dependent presentation in
 the same submission. Only an observed successful submission containing the build
@@ -249,6 +252,11 @@ only when rebuilding. See [ADR-117](../../docs/decisions/ADR-117-flow-center-sdf
 for the unchanged shape model and
 [ADR-118](../../docs/decisions/ADR-118-flow-source-center-distance-cache.md), which
 supersedes only ADR-117's direct-execution/cache-cost decision.
+Endpoint reuse uses the existing build-job padding, with no extra texture or
+network data; see [ADR-123](../../docs/decisions/ADR-123-flow-center-endpoint-reuse.md).
+`rebuiltEndpointCount/reusedEndpointCount` count lanes in encoded build batches;
+`lastReuseSelectors` identifies fresh/previous-lower/previous-upper lanes. They are
+not counts of fragment cache hits or successful native completions.
 
 ## Source data and streaming
 
