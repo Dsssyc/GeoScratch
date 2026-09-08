@@ -64,6 +64,22 @@ while paused can leave the particle view empty. There is no hidden warm-up;
 resume playback to generate new particle ink. Pausing itself does not clear the
 existing trails. See [ADR-119](../../docs/decisions/ADR-119-flow-reference-visual-time.md).
 
+## Spatial work and performance
+
+The example reuses its last successfully observed cover/demand decision while the
+view identity, camera facts and logical reference viewport are unchanged. Normal
+time interpolation, temporal-runtime changes and residency publications continue
+without rebuilding the same spatial decision. Current demands still carry current
+frame/residency provenance and belong to the current time slice's address space.
+The cached GPU feedback retains its original producing view and receipt.
+
+Camera, FOV or reference-viewport changes rebuild; staged, failed or disposed work
+is never reusable. This does not change the Geo cover algorithm or its quality,
+overflow and adjacency rules. `renderer.viewDemand.buildCount/reuseCount` count
+encoded spatial batches, while `latestSettledFrameEpoch` identifies the last real
+GPU spatial result. See [ADR-120](../../docs/decisions/ADR-120-flow-spatial-decision-reuse.md)
+and the [per-phase benchmark record](../../docs/review/flow-pipeline-optimization-benchmarks.md).
+
 ## A/B: original source-footprint boundary
 
 In **Particles**, the **Boundary** selector compares **A · Hard texture** (default)
