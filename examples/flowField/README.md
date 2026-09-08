@@ -139,9 +139,14 @@ See [ADR-115](../../docs/decisions/ADR-115-flow-slack-water-display-support.md).
 The two existing textures alternate roles: compose raw ink into one, then overwrite
 the consumed source with its clipped visible image. During unavailable time loading,
 only the last visible image is reprojected to the Surface; hidden raw ink stays hidden.
-No texture or source channel is added. There is one additional inexpensive display
-copy pass; A and B each evaluate support only in presentation. See
+No texture or source channel is added. A separate display copy preserves nearest
+scaling when Surface and history sizes differ. A and B each evaluate support only
+in presentation. See
 [ADR-114](../../docs/decisions/ADR-114-flow-trail-retention-and-visibility.md).
+An MRT experiment passed device-local quantization tests but did not establish a
+stable improvement in the complete display interval, so it is not enabled. Its
+preserved experimental branch and corrected timing evidence are recorded in
+[ADR-122](../../docs/decisions/ADR-122-flow-paired-visible-presentation.md).
 
 Switching A/B neither resets nor softens raw history, changes velocity/death, nor
 adds source requests. B cannot extend color into zero-support owner footprints,
@@ -216,6 +221,8 @@ signs and uncertainty. A cached display query reads four records. At the matchin
 publication epochs their owner-known flags already prove exact source-center
 residency, avoiding eight repeated resolution lookups. The sampler's cross-level
 edge-transition checks remain, and required unknown source data still uses A.
+Shared-sign interiors return before distance decoding; mixed boundaries reuse the
+same four packed records and the original sqrt arithmetic without further reads.
 A cache miss, an omitted page, or an incompatible cache uses the original direct
 C/D reconstruction. That direct path costs eight U/V loads in common supported or
 unsupported interiors, or up to 32 for the full 4x4 neighborhood, plus metadata

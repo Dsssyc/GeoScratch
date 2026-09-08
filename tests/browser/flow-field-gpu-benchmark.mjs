@@ -79,7 +79,13 @@ function installAudit() {
                 const mapping=r.read.mapAsync(GPUMapMode.READ).then(()=>{
                     const times=new BigUint64Array(r.read.getMappedRange())
                     const measured=r.passes.map((p,i)=>({...p,ms:Number(times[i*2+1]-times[i*2])/1e6}))
-                    audit.records.push({passes:measured,sumMs:measured.reduce((s,p)=>s+p.ms,0)})
+                    const visible=r.passes.findIndex(p=>p.label.startsWith('Flow Field visible '))
+                    const present=r.passes.findIndex(p=>p.label==='Flow Field history presentation')
+                    // Pass intervals may overlap on tile-based GPUs. Measure the
+                    // contiguous display interval instead of adding pass durations.
+                    const displayMs=visible<0?undefined:Number(times[(present<0?visible:present)*2+1]-times[visible*2])/1e6
+                    const overlapCount=r.passes.reduce((n,_p,i)=>n+Number(i>0&&times[i*2]<times[(i-1)*2+1]),0)
+                    audit.records.push({passes:measured,displayMs,overlapCount})
                     r.read.unmap();destroy()
                 }).catch(error=>{audit.errors.push(String(error));destroy()}).finally(()=>audit.pending.delete(mapping))
                 audit.pending.add(mapping)
@@ -92,13 +98,18 @@ function installAudit() {
 
 try {
     for(const variant of (process.env.FLOW_GPU_BENCH_VARIANTS??'layer,field-C').split(',')) {
-        assert.ok(['layer','field-C','field-A'].includes(variant),'Unknown benchmark variant')
+        assert.ok(['layer','field-C','field-A','field-C-original'].includes(variant),'Unknown benchmark variant')
         const reference=variant==='layer'
         const page=await browser.newPage({viewport:{width:1512,height:861},deviceScaleFactor:dpr})
         const errors=[]
         page.on('pageerror',e=>errors.push(e.message))
         page.on('console',m=>{if(m.type()==='error')errors.push(m.text())})
         await page.addInitScript(installAudit)
+        if(variant==='field-C-original') {
+            const original=execFileSync('git',['show','9b3a4e1:examples/flowField/shaders/center-cache-sample.wgsl'],{encoding:'utf8'})
+            await page.route('**/flowField/shaders/center-cache-sample.wgsl*',route=>
+                route.fulfill({status:200,contentType:'text/javascript',body:`export default ${JSON.stringify(original)};`}))
+        }
         if(reference)await page.route('**/flowLayer/flow-layer.ts*',async route=>{
             const response=await route.fetch(),body=await response.text()
             assert.ok(body.includes('advanceFieldState(graph, state);'))
@@ -114,7 +125,7 @@ try {
             const before=await page.evaluate(variant=>{
                 const p=window.__FLOW_FIELD_PROOF__,n=p.facts().renderer.particles.encodedSteps
                 p.seek(.277);p.setPresentation({view:'particles',sample:'interpolated',trails:true,contour:false,
-                    boundary:variant==='field-A'?'hard':'sdf-center-linear',sdfFeatherTexels:.25});return n
+                    boundary:variant.startsWith('field-A')?'hard':'sdf-center-linear',sdfFeatherTexels:.25});return n
             },variant)
             await page.waitForFunction(before=>{const f=window.__FLOW_FIELD_PROOF__.facts();return f.lastFrame.presentationReady&&f.workers.activeTaskCount===0&&f.renderer.particles.encodedSteps>before+150},before,{timeout:90000})
         }
@@ -128,12 +139,15 @@ try {
             for(const r of audit.records)for(const p of r.passes){const name=(p.label+' | '+p.pipelines.join(' + ')).replace(/ \[scratch:[^\]]+\]/g,'');(groups[name]??=[]).push(p)}
             const stats=values=>{const a=[...values].sort((a,b)=>a-b);return {mean:a.reduce((s,x)=>s+x,0)/a.length,p50:a[Math.floor(a.length*.5)],p95:a[Math.floor(a.length*.95)],n:a.length}}
             return {fps:(after.frames-before.frames)*1000/(end-start),before,after,support:audit.support,errors:audit.errors,
-                encoders:audit.encoders,submissions:audit.submissions,sampledEncoderMs:stats(audit.records.map(r=>r.sumMs)),groups:Object.entries(groups).map(([name,list])=>({name,...stats(list.map(p=>p.ms)),commands:list[0].commands}))}
+                encoders:audit.encoders,submissions:audit.submissions,sampledEncoderCount:audit.records.length,
+                overlappingPassPairs:audit.records.reduce((n,r)=>n+r.overlapCount,0),
+                displaySpanMs:reference?undefined:stats(audit.records.filter(r=>r.displayMs!==undefined).map(r=>r.displayMs)),
+                groups:Object.entries(groups).map(([name,list])=>({name,...stats(list.map(p=>p.ms)),commands:list[0].commands}))}
         },reference)
         assert.deepEqual(result.errors,[])
         assert.deepEqual(errors,[])
         assert.ok(result.support.length>0&&result.support.every(Boolean),'Native timestamp-query is required')
-        assert.ok(result.sampledEncoderMs.n >= 20, 'Collect enough native timing samples')
+        assert.ok(result.sampledEncoderCount >= 20, 'Collect enough native timing samples')
         if(!reference)assert.ok(result.before.ready&&result.after.ready&&result.before.workers===0&&result.after.workers===0,'Measure resident steady state')
         console.log(JSON.stringify({head,modified,variant,zoom:9,dpr,...result,pageErrors:errors}))
         const cleanup=await page.evaluate(reference=>reference?window.__FLOW_LAYER_PROOF__.dispose():window.__FLOW_FIELD_PROOF__.dispose(),reference)

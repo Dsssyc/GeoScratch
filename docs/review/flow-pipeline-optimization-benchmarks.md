@@ -24,8 +24,9 @@ The benchmark samples native encoders with a bounded deterministic pseudorandom
 selector. A fixed interval divisible by encoders/frame would alias one stage;
 the earlier diagnostic's stride of seven avoided its four-encoder baseline alias.
 Record native submissions, phase build/reuse facts and per-pass distributions.
-Do not call the mean sampled encoder duration a frame cost, add phase savings as
-if independent, or interpret these timings as system utilization/power. Queries
+Do not call the mean sampled encoder duration a frame cost, add render-pass
+durations (which can overlap), add phase savings as if independent, or interpret
+these timings as system utilization/power. Queries
 and concurrent desktop activity perturb timing; the real basemap/compositor is
 outside the measured WebGPU passes. Raw logical load counts are not DRAM traffic.
 
@@ -132,3 +133,66 @@ node tests/browser/flow-field-history-retained.mjs
 ```
 
 Later phases append their fresh before/after evidence here only after verification.
+
+## Phase 3: Presentation Work
+
+Decision: [ADR-122](../decisions/ADR-122-flow-paired-visible-presentation.md).
+Fresh baseline: `9b3a4e1` (clean tracked tree). The C visible A/B pass means were
+2.074/2.139 ms, Surface copy 1.771 ms, particle simulation 4.331 ms, and two native
+submissions per frame.
+
+Isolating only delayed center-distance decoding produced visible A/B means
+1.944/1.922 ms, with Surface copy still 1.770 ms and simulation 4.316 ms. This is a
+small local effect, not the main expected saving from pairing presentation. The
+108,490 native coverage probes remained identical.
+
+Before adopting paired output, the 595,200-sample quantization preflight showed
+pack/unpack-alpha exact for visible and Surface on all three tested formats.
+Unquantized/round controls failed equivalence, validating the need for the explicit
+intermediate quantization. Do not infer cross-device format equivalence or final
+Canvas-compositor equivalence from that render-target proof.
+
+| Steady C display work | Before | Paired output |
+|---|---:|---:|
+| Visible A/B mean ms | 2.074 / 2.139 | 2.389 / 2.458, including Surface |
+| Separate Surface copy mean ms | 1.771 | not encoded |
+| Sum of individual pass means (not an interval) | about 3.87 | about 2.43 |
+| Particle simulation mean ms | 4.331 | 4.256 |
+| Native submissions/frame | 2 | 2 |
+| Updates/s | 59.997 | 59.989 |
+
+The initial 37% interpretation of the sum above is withdrawn. Individual render
+passes overlap; this sum is not display-work elapsed time. The corrected contiguous
+visible-begin to Surface-end ABBA means were 2.308 / 2.320 / 2.230 / 2.306 ms for
+separate / MRT / MRT / separate. No stable material improvement was established,
+so MRT is not adopted. The complete tested experiment is committed separately on
+`socu/flow-mrt-evaluated-9b3a4e1`; mainline retains delayed SDF decoding and the
+measurement correction. Native ownership regression exercised 186 submissions:
+the original history golden values and retained A-B-A image remained unchanged;
+all four boundary modes selected scaled-copy for mismatched extents and MRT after
+matching resize. Changing only Surface size correctly switched pipeline families
+without changing the prepared temporal binding. Resource and pending counts ended
+at zero.
+
+Type checks, production build and 1,669 Node tests passed (two existing pending).
+The root reran the production quantization helper proof: all three formats had
+zero differing visible or Surface bytes. Source-cache coverage again matched the
+direct oracle across 108,490 probes. The shared-runtime size warning remains.
+
+The MRT-only helper and extended graph tests are available on experimental commit
+`5b2b063`, not mainline. Mainline verification continues to use
+`flow-field-center-cache.mjs`, `flow-field-history-retained.mjs`, the existing
+history tests, and the GPU benchmark. `FLOW_GPU_BENCH_VARIANTS=field-C-original,field-C`
+compares the original center decoder from `9b3a4e1` with delayed decoding in
+isolated pages, using the continuous `displaySpanMs` metric.
+
+After removing MRT, a decoder-only ABBA rerun reported original display spans
+3.962/2.061 ms and delayed-decoder spans 3.110/2.837 ms. The unchanged particle
+control simultaneously varied from 7.113 to 4.902 ms, so this run is not used to
+assign a net decoder speedup. The retained change avoids unnecessary interior
+distance arithmetic and preserves numerical results; no stable end-to-end
+percentage is claimed. The benchmark also directly observed overlapping adjacent
+pass intervals, and no longer publishes a misleading sum of pass durations.
+The final mainline decoder-only state passed type checks, production build and
+1,667 Node tests (two existing pending). The MRT-only files were removed from
+mainline after verifying their exact saved blobs in experimental commit `5b2b063`.
