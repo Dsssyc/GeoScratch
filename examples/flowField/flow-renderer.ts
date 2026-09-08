@@ -526,7 +526,8 @@ export async function createFlowFieldRenderer(
                             refilledParticleView = true
                         }
                     }
-                    particles.encode(builder, particleSpawn.bindings, prepared, view)
+                    particles.encode(builder, particleSpawn.bindings, prepared, view,
+                        framePresentation.boundary === 'sdf-center-linear' || framePresentation.boundary === 'sdf-center-smooth')
                 }
                 if (presentationReady && framePresentation.contour) contour.encode(builder, candidates, demandFrame.candidateCells.length, {
                     generation: supportSnapshot.generation,

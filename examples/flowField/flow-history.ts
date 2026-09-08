@@ -29,6 +29,8 @@ import presentationShader from './shaders/presentation.wgsl?raw'
 import boundaryDistanceShader from './shaders/boundary-distance.wgsl?raw'
 import boundaryActivityShader from './shaders/boundary-activity.wgsl?raw'
 import boundarySdfShader from './shaders/boundary-sdf.wgsl?raw'
+import centerDistanceShader from './shaders/boundary-center-distance.wgsl?raw'
+import centerBoundaryShader from './shaders/boundary-center.wgsl?raw'
 import type { FlowFieldBoundaryMode } from './flow-presentation.ts'
 import { FLOW_FIELD_SDF_FEATHER, flowFieldSdfFeatherTexels } from './flow-presentation.ts'
 import { flowScreenProjectionWgsl, flowScreenViewValues } from './flow-screen-projection.ts'
@@ -293,6 +295,13 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
                 { code: boundaryDistanceShader }, { code: boundaryActivityShader },
                 { code: boundarySdfShader } ],
         }))
+        const centerModule = own(await runtime.createShaderModule({
+            label: 'Flow Field center SDF presentation shader',
+            sourceParts: [{ code: temporal.wgsl }, { code: screenProjection },
+                { code: codec.wgslAccessors() }, { code: presentationSupportShader },
+                { code: boundaryDistanceShader }, { code: boundaryActivityShader },
+                { code: boundarySdfShader }, { code: centerDistanceShader }, { code: centerBoundaryShader }],
+        }))
         const requirement: ProgramBufferLayoutRequirement = {
             group: 0,
             binding: 0,
@@ -323,6 +332,12 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
             fragment: { module: sdfModule, entryPoint: 'fMain' },
             layoutRequirements: [ requirement ],
         }))
+        const centerPrograms = [false, true].map(smooth => own(runtime.createProgram({
+            label: `Flow Field center SDF ${smooth ? 'smooth' : 'linear'} program`,
+            vertex: { module: centerModule, entryPoint: 'vMain' },
+            fragment: { module: centerModule, entryPoint: 'fCenter', constants: { FLOW_CENTER_SMOOTH: smooth ? 1 : 0 } },
+            layoutRequirements: [requirement],
+        })))
         const historyPipeline = own(await runtime.createRenderPipeline({
             label: 'Flow Field history pipeline',
             program: historyProgram,
@@ -357,6 +372,13 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
             targets: [ { format: historyA.format } ],
             primitive: { topology: 'triangle-strip' },
         }))
+        const centerPipelines: RenderPipeline[] = []
+        for (const program of centerPrograms) centerPipelines.push(own(await runtime.createRenderPipeline({
+            label: 'Flow Field center SDF presentation pipeline', program,
+            layout: { mode: 'explicit', bindLayouts: [uniformLayout, temporal.layout, historyLayout] },
+            targets: [{ format: historyA.format }],
+            primitive: { topology: 'triangle-strip' },
+        })))
         const clearPass = own(runtime.createRenderPass({
             label: 'Flow Field history clear',
             color: [
@@ -429,9 +451,9 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
             uniformUpload,
             bindLayouts: Object.freeze([ uniformLayout, historyLayout, presentationLayout ]),
             bindSets: historyBindSets,
-            shaderModules: Object.freeze([ historyModule, hardModule, presentationModule, sdfModule ]),
-            programs: Object.freeze([ historyProgram, hardProgram, presentationProgram, sdfProgram ]),
-            pipelines: Object.freeze([ historyPipeline, hardPipeline, presentationPipeline, sdfPipeline, retainedPipeline ]),
+            shaderModules: Object.freeze([ historyModule, hardModule, presentationModule, sdfModule, centerModule ]),
+            programs: Object.freeze([ historyProgram, hardProgram, presentationProgram, sdfProgram, ...centerPrograms ]),
+            pipelines: Object.freeze([ historyPipeline, hardPipeline, presentationPipeline, sdfPipeline, retainedPipeline, ...centerPipelines ]),
             passes: Object.freeze([ clearPass, passBToA, passAToB, presentationPass, ...visiblePasses ]),
             commands: Object.freeze([ presentA, presentB, ...historyCommands, ...retainedCommands ]),
         })
@@ -491,8 +513,8 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
             if (prepared !== undefined && (prepared.state !== 'ready' || prepared.bindSet.runtime !== runtime)) {
                 throw new TypeError('Flow Field history requires the current same-runtime temporal frame')
             }
-            if (requestedBoundary !== 'hard' && requestedBoundary !== 'sdf') {
-                throw new TypeError('Flow Field history boundary must be hard or sdf')
+            if (!['hard', 'sdf', 'sdf-center-linear', 'sdf-center-smooth'].includes(requestedBoundary)) {
+                throw new TypeError('Flow Field history boundary must be hard, sdf, sdf-center-linear or sdf-center-smooth')
             }
             const feather = flowFieldSdfFeatherTexels(requestedFeatherTexels)
             // Temporal clipping owns visibility, never the next frame's raw ink.
@@ -547,7 +569,7 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
             builder.render(presentationPass, [retainedTextureIndex === 0 ? presentA : presentB])
             boundary = prepared === undefined ? 'hard' : requestedBoundary
             sdfFeatherTexels = feather
-            if (boundary === 'sdf') sdfPresentationCount++
+            if (boundary !== 'hard') sdfPresentationCount++
             previousView = currentView
             directionIndex = (directionIndex + 1) % directions.length
             return Object.freeze({
@@ -569,7 +591,9 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
             if (presentationPair?.bindSet === prepared.bindSet && presentationPair.boundary === boundary) {
                 return presentationPair.commands
             }
-            const pipeline = boundary === 'sdf' ? sdfPipeline : hardPipeline
+            const pipeline = boundary === 'sdf-center-linear' ? centerPipelines[0]!
+                : boundary === 'sdf-center-smooth' ? centerPipelines[1]!
+                : boundary === 'sdf' ? sdfPipeline : hardPipeline
             // Presentation reads the newly composed target, opposite to history's source.
             const presentA = composeCommand(runtime, pipeline, uniformSet, historyAToB,
                 uniformBuffer, historyA, prepared, `Present Flow Field ${boundary} A`)

@@ -17,15 +17,17 @@ describe('Flow Field presentation choices', () => {
         expect(input).to.not.have.property('sdfFeatherTexels')
     })
 
-    it('preserves a selected SDF boundary and unrelated inspection choices', () => {
-        for (const view of ['particles','speed','direction','u','v','status']) {
-            const input = {...FLOW_FIELD_PRESENTATION,view,sample:'upper',trails:false,contour:true,boundary:'sdf'}
-            expect(flowFieldPresentation(input)).to.deep.equal(input)
+    it('preserves each selected boundary and unrelated inspection choices', () => {
+        for (const boundary of ['hard','sdf','sdf-center-linear','sdf-center-smooth']) {
+            for (const view of ['particles','speed','direction','u','v','status']) {
+                const input = {...FLOW_FIELD_PRESENTATION,view,sample:'upper',trails:false,contour:true,boundary}
+                expect(flowFieldPresentation(input)).to.deep.equal(input)
+            }
         }
     })
 
     it('rejects explicitly invalid boundary choices without treating null as omission', () => {
-        for (const boundary of [null,'smooth','',0,true,{},[]]) {
+        for (const boundary of [null,'smooth','sdf-center','sdf-center-cubic','',0,true,{},[]]) {
             expect(() => flowFieldPresentation({...FLOW_FIELD_PRESENTATION,boundary})).to.throw(TypeError)
         }
     })

@@ -12,7 +12,7 @@ describe('Flow Field boundary controls (Node DOM fixture)', () => {
         expect(boundary.value).to.equal('hard')
         expect(boundary.disabled).to.equal(false)
         expect(boundary.options.map(value => value.textContent)).to.deep.equal([
-            'A · Hard texture', 'B · SDF (inward)',
+            'A · Hard texture', 'B · SDF (inward)', 'C · Center SDF (linear)', 'D · Center SDF (smooth)',
         ])
         expect(fixture.find('sample').disabled).to.equal(true)
         expect(fixture.find('trails').disabled).to.equal(false)
@@ -38,7 +38,7 @@ describe('Flow Field boundary controls (Node DOM fixture)', () => {
             expect(fixture.find('boundary').value).to.equal('sdf')
             expect(fixture.find('feather').disabled).to.equal(true)
             expect(fixture.find('legend').textContent).to.include('Unfiltered diagnostics')
-            expect(fixture.find('legend').textContent).to.include('boundary A/B inactive')
+            expect(fixture.find('legend').textContent).to.include('boundary A/B/C/D inactive')
             expect(fixture.find('sample').disabled).to.equal(false)
             expect(fixture.find('trails').disabled).to.equal(true)
         }
@@ -51,6 +51,34 @@ describe('Flow Field boundary controls (Node DOM fixture)', () => {
         expect(fixture.snapshot.presentation.trails).to.equal(true)
         expect(fixture.snapshot.presentation.contour).to.equal(false)
         expect(fixture.find('legend').textContent).to.include('Inner-edge display only')
+        fixture.controls.dispose()
+    })
+
+    it('selects C and D independently, enables feather, and retains each reconstruction through diagnostics', () => {
+        const fixture = controlsFixture()
+        fixture.controls.update(fixture.snapshot)
+        for (const [boundary, hint] of [['sdf-center-linear','C: Linear'],['sdf-center-smooth','D: Smooth']]) {
+            fixture.change('boundary', boundary)
+            expect(fixture.events.at(-1)).to.deep.equal({...FLOW_FIELD_PRESENTATION,boundary})
+            expect(fixture.find('boundary').value).to.equal(boundary)
+            expect(fixture.find('feather').disabled).to.equal(false)
+            expect(fixture.find('legend').textContent).to.include(hint)
+            expect(fixture.find('legend').textContent).to.include('may move the boundary')
+            expect(fixture.find('legend').textContent).to.include('Feather controls display AA')
+            for (const view of ['speed','direction','u','v','status']) {
+                fixture.change('view', view)
+                expect(fixture.find('boundary').disabled).to.equal(true)
+                expect(fixture.find('feather').disabled).to.equal(true)
+                expect(fixture.find('boundary').value).to.equal(boundary)
+                expect(fixture.find('legend').textContent).to.include('boundary A/B/C/D inactive')
+            }
+            fixture.change('view', 'particles')
+            expect(fixture.find('feather').disabled).to.equal(false)
+            expect(fixture.find('legend').textContent).to.include(hint)
+        }
+        fixture.change('boundary', 'hard')
+        expect(fixture.find('feather').disabled).to.equal(true)
+        expect(fixture.find('legend').textContent).to.include('A: Hard texture boundary')
         fixture.controls.dispose()
     })
 
@@ -95,12 +123,15 @@ describe('Flow Field boundary controls (Node DOM fixture)', () => {
         }
         feather.valueAsNumber = 0.35
         feather.dispatchEvent(new Event('input'))
-        for (const [control,value] of [['boundary','hard'],['boundary','sdf'],['view','status'],['view','particles']]) {
+        for (const [control,value] of [
+            ['boundary','hard'],['boundary','sdf'],['boundary','sdf-center-linear'],
+            ['boundary','sdf-center-smooth'],['view','status'],['view','particles'],
+        ]) {
             fixture.change(control,value)
             expect(feather.valueAsNumber).to.equal(0.35)
             expect(fixture.events.at(-1).sdfFeatherTexels).to.equal(0.35)
             expect(feather.disabled).to.equal(fixture.snapshot.presentation.view!=='particles' ||
-                fixture.snapshot.presentation.boundary!=='sdf')
+                fixture.snapshot.presentation.boundary==='hard')
         }
         expect(fixture.snapshot.presentation.sample).to.equal('interpolated')
         expect(fixture.snapshot.presentation.trails).to.equal(true)
@@ -111,12 +142,15 @@ describe('Flow Field boundary controls (Node DOM fixture)', () => {
         expect(fixture.events.length).to.equal(eventCount)
     })
 
-    it('preserves a non-step caller width through unrelated A/B and view changes', () => {
+    it('preserves a non-step caller width through unrelated A/B/C/D and view changes', () => {
         const fixture = controlsFixture()
         fixture.snapshot.presentation = {...FLOW_FIELD_PRESENTATION,boundary:'sdf',sdfFeatherTexels:0.123}
         fixture.controls.update(fixture.snapshot)
         const feather = fixture.find('feather')
-        for (const [control,value] of [['boundary','hard'],['boundary','sdf'],['view','status'],['view','particles']]) {
+        for (const [control,value] of [
+            ['boundary','hard'],['boundary','sdf'],['boundary','sdf-center-linear'],
+            ['boundary','sdf-center-smooth'],['view','status'],['view','particles'],
+        ]) {
             // Native range inputs snap their displayed value to the declared
             // step. That DOM normalization is not a user feather edit.
             feather.valueAsNumber = 0.12

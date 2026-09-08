@@ -19,6 +19,11 @@ sampler. Status colors are green for resident moving data, amber for fallback,
 gray for zero velocity, magenta for unavailable data, and red for invalid sampling.
 Activity contour is an optional velocity threshold overlay and does not enter trails.
 
+The Boundary selector offers four explicit comparisons. A remains the default;
+C/D are opt-in center-field reconstructions, described after the existing A/B rules.
+
+## A/B: original source-footprint boundary
+
 In **Particles**, the **Boundary** selector compares **A · Hard texture** (default)
 with **B · SDF (inward)**. B derives temporal support weights from endpoint
 and interpolated U/V, then integrates binary SDF coverages across those activity
@@ -104,6 +109,52 @@ disabled Boundary control retains the selection for the next Particles view. See
 [ADR-110](../../docs/decisions/ADR-110-flow-boundary-sdf-comparison.md) and the
 [continuity correction](../../docs/decisions/ADR-111-flow-continuous-boundary-distance.md).
 
+## C/D: source-center distance reconstruction
+
+**C · Center SDF (linear)** and **D · Center SDF (smooth)** use the same four signed
+distance samples at source centers. Each time endpoint classifies existing U/V
+samples with the existing nonzero/activity-kill rule. At each center, distance is
+positive inside support and negative outside, measured to the nearest opposite
+unit-square footprint and truncated at 1.5 source texels. These values are rebuilt
+in shader registers from the existing U/V pages; there is no new boundary tile,
+SDF texture, compute pass, CPU raster, or backend change.
+
+C uses ordinary bilinear reconstruction. D replaces each fractional coordinate f
+with `f*f*(3-2*f)` before the same four-value mix. Unlike B's exact square boundary,
+these reconstructed zero contours may cross the original owning-texel footprints.
+There is no second original-owner hard mask. The smooth kernel changes the shape,
+not just the opacity, but is not a more accurate distance metric: a straight
+crossing at 0.25 can move to approximately 0.32635. Neither option restores lost
+source detail or guarantees narrow-channel/island topology.
+
+The two endpoint center distances are mixed at model time before spatial
+reconstruction. This is a continuous visual shape morph, not a hydrodynamic
+wet/dry model; a zero U/V center is not proof of physical dryness. Nonzero endpoint
+vectors cancelling between times do not erase the supported interior's finite ink.
+Feather remains **0.05–0.35 source texel** and applies
+`smoothstep(-feather, feather, distance)` around the reconstructed zero contour.
+It is display antialiasing width, not contour smoothing strength, and is still not
+screen-pixel antialiasing at minification.
+
+C and D also use ordinary registered center-interpolated U/V for particle motion,
+without the A/B rule that extends a zero center over its entire owning square.
+Actual zero/below-threshold interpolated motion still kills the particle; there is
+no boundary sliding or immortal stationary particle. C/D have identical particle
+sampling, so their comparison isolates the distance reconstruction kernel. A/B,
+inspection values, and activity contours keep their original sampler policy.
+
+The common-level/readiness proof and half-texel registration are shared with the
+existing sampler. Four centers per endpoint cost eight U/V texel loads in common
+supported or unsupported interiors. Near a spatial or temporal support transition,
+the union of their 3x3 neighborhoods is one 4x4 footprint: at most 32 U/V texel
+loads, plus the residency metadata checks. A required out-of-source, missing,
+failed or coarse neighbor falls back to A, never an invented dry sample. This
+comparison adds shader work and two stable display pipelines, but no new page
+requests or rendering passes. See
+[ADR-117](../../docs/decisions/ADR-117-flow-center-sdf-reconstruction.md).
+
+## Source data and streaming
+
 New v3 COGs store ordinary triangle-linear center velocities without neighborhood
 erosion. Their zero-absorbing 2x2 overviews also omit the extra 3x3 erosion. The
 manifest explicitly requests `nearest-texel-zero` activity: each zero texel's whole
@@ -169,6 +220,9 @@ node tests/browser/flow-field-boundary-interior.mjs
 node tests/browser/flow-field-boundary-sdf.mjs
 node tests/browser/flow-field-boundary-readiness.mjs
 node tests/browser/flow-field-boundary-ab.mjs
+node tests/browser/flow-field-center-distance.mjs
+node tests/browser/flow-field-center-sdf.mjs
+node tests/browser/flow-field-center-ab.mjs
 node tests/browser/flow-field-normal-startup.mjs
 node tests/browser/flow-field-temporal-status.mjs
 node tests/browser/flow-field-zero-footprint.mjs

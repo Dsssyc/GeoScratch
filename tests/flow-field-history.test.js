@@ -69,7 +69,7 @@ describe('Flow Field viewport history', () => {
         expect(shader).not.to.include('let nearWorld')
     })
 
-    it('keeps A support for B fallback without a second known-boundary mask or particle changes', () => {
+    it('keeps A support for B fallback without a second known-boundary mask', () => {
 
         const support = read(presentationSupportPath)
         const sdf = read(path.join(root, 'examples/flowField/shaders/boundary-sdf.wgsl'))
@@ -94,7 +94,8 @@ describe('Flow Field viewport history', () => {
         expect(velocity).to.include('let advectable = speed > 0.0 && speed >= temporal.activityKill')
         const source = read(sourcePath)
         expect(source).to.include("import presentationSupportShader from './shaders/presentation-support.wgsl?raw'")
-        expect(source.match(/\{ code: presentationSupportShader \}/g)).to.have.length(2)
+        expect(source.match(/\{ code: presentationSupportShader \}/g)).to.have.length(3)
+        expect(velocity).to.include('return FlowVelocity_sample_support(position, requested_level, temporal, FlowVelocity_nearest_zero_gate)')
     })
 
     it('clips current hard visibility only in the final pass and skips empty ink sampling', () => {

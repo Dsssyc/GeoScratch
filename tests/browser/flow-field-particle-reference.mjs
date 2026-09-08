@@ -51,6 +51,9 @@ fn FlowSpawnIndex_select(seed: u32) -> FlowSpawnIndexSelection {
     position.axes[1] = FlowVelocityAddressFixedAxis(test_spawn_position.z, test_spawn_position.w);
     return FlowSpawnIndexSelection(position, 0u, u32(test_velocity.w));
 }
+fn FlowVelocity_sample_centers(position: FlowVelocityAddressFixedPosition, level: u32, temporal: FlowVelocityTemporal) -> FlowVelocitySample {
+    return FlowVelocity_sample(position, level, temporal);
+}
 fn FlowSpawnIndex_select_refill(seed: u32) -> FlowSpawnIndexSelection {
     return FlowSpawnIndex_select(seed);
 }
@@ -71,6 +74,9 @@ const cases = [
     { name: 'highlatitude-east-north', latitude: 80, velocity: [ 1, 1 ] },
     { name: 'zero-velocity-dies', latitude: 45, velocity: [ 0, 0 ], dead: true },
     { name: 'zero-velocity-zero-threshold-dies', latitude: 45, velocity: [ 0, 0 ], kill: 0, dead: true },
+    { name: 'center-zero-velocity-dies', latitude: 45, velocity: [ 0, 0 ], centers: true, dead: true },
+    { name: 'center-zero-velocity-zero-threshold-dies', latitude: 45, velocity: [ 0, 0 ], centers: true, kill: 0, dead: true },
+    { name: 'center-low-velocity-dies', latitude: 45, velocity: [ 0.0001, 0 ], centers: true, dead: true },
     { name: 'unavailable-in-source-holds', latitude: 45, velocity: [ 1, 1 ], status: 0, pending: true },
     { name: 'missing-in-source-holds', latitude: 45, velocity: [ 1, 1 ], status: 3, pending: true },
     { name: 'missing-does-not-consume-stagnation', latitude: 45, velocity: [ 1, 1 ],
@@ -155,6 +161,7 @@ try {
             config.setFloat32(44, 50, true)
             config.setFloat32(48, 4, true)
             config.setUint32(56, fixture.refill ? 1 : 0, true)
+            config.setUint32(60, fixture.centers ? 1 : 0, true)
             if (fixture.viewRadius !== undefined) {
                 config.setUint32(52, 1, true)
                 config.setFloat32(64, 1 / fixture.viewRadius, true)

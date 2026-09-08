@@ -26,7 +26,7 @@ describe('Flow Field renderer composition', () => {
         const demand = source.indexOf('const demandFrame = demand.encode(builder, view, prepared.temporal)')
         const pack = source.indexOf('packedCandidates = packFlowCandidateCells(')
         const spawn = source.indexOf('spawn.encode(')
-        const particles = source.indexOf('particles.encode(builder, particleSpawn.bindings, prepared, view)')
+        const particles = source.indexOf('particles.encode(builder, particleSpawn.bindings, prepared, view,')
         const contour = source.indexOf('contour.encode(builder, candidates')
         const history = source.indexOf('history.encode(builder, view')
         const submit = source.indexOf('const submitted = builder.submit()', publish)
@@ -40,6 +40,7 @@ describe('Flow Field renderer composition', () => {
         expect(history).to.be.greaterThan(contour)
         expect(submit).to.be.greaterThan(history)
         expect(source.match(/packFlowCandidateCells\(/g)).to.have.length(1)
+        expect(source).to.include("framePresentation.boundary === 'sdf-center-linear' || framePresentation.boundary === 'sdf-center-smooth'")
     })
 
     it('keeps time selection external and releases its frame capture after all observers', () => {

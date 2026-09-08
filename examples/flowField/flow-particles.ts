@@ -87,6 +87,8 @@ export type FlowParticleFacts = Readonly<{
     resetCount: number
     /** Encoded reveal-index passes, not a CPU-observed count of replaced GPU particles. */
     viewRefillCount: number
+    /** Last encoded choice; true removes the whole-texel zero extrapolation only. */
+    centerSamples: boolean
 }>
 
 export type FlowParticles = Readonly<{
@@ -105,7 +107,8 @@ export type FlowParticles = Readonly<{
         builder: SubmissionBuilder,
         spawn: FlowParticleSpawnBindings,
         temporal: FlowParticleTemporalFrame,
-        view?: GeoViewSnapshot
+        view?: GeoViewSnapshot,
+        centerSamples?: boolean
     ): void
     /** Defers canonical state clearing to the next encoded simulation tick. */
     reset(): void
@@ -378,12 +381,14 @@ export async function createFlowParticles(
         let resetCount = 0
         let viewRefillPending: GeoViewSnapshot | undefined
         let viewRefillCount = 0
+        let centerSamples = false
 
         function encode(
             builder: SubmissionBuilder,
             spawn: FlowParticleSpawnBindings,
             temporal: FlowParticleTemporalFrame,
-            view?: GeoViewSnapshot
+            view?: GeoViewSnapshot,
+            useCenterSamples = false
         ): void {
 
             assertActive()
@@ -397,7 +402,8 @@ export async function createFlowParticles(
                 temporal,
                 encodedSteps + 1,
                 view,
-                refill
+                refill,
+                useCenterSamples
             )
             if (lastSimulation === undefined || lastTemporalSet !== temporal.bindSet ||
                 lastSpawnSet !== spawn.bindSet) {
@@ -464,6 +470,7 @@ export async function createFlowParticles(
             viewRefillPending = undefined
             if (refill !== undefined) viewRefillCount++
             encodedSteps++
+            centerSamples = useCenterSamples
         }
 
         function reset(): void {
@@ -502,6 +509,7 @@ export async function createFlowParticles(
                 resetPending,
                 resetCount,
                 viewRefillCount,
+                centerSamples,
             })
         }
 
@@ -552,7 +560,8 @@ function writeParticleConfig(
     temporal: FlowParticleTemporalFrame,
     frameSeed: number,
     frameView?: GeoViewSnapshot,
-    refillView?: GeoViewSnapshot
+    refillView?: GeoViewSnapshot,
+    centerSamples = false
 ): void {
 
     bytes.fill(0)
@@ -571,6 +580,7 @@ function writeParticleConfig(
     view.setFloat32(44, FLOW_PARTICLE_LEGACY_DISPLACEMENT_SCALE, true)
     view.setFloat32(48, options.maximumSpeed ?? 1, true)
     view.setUint32(56, refillView === undefined ? 0 : 1, true)
+    view.setUint32(60, centerSamples ? 1 : 0, true)
     if (frameView !== undefined) {
         const camera = flowRenderViewValues(frameView, options.addressCodec)
         view.setUint32(52, 1, true)

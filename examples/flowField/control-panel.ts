@@ -83,7 +83,7 @@ export function mountFlowFieldControls(options: FlowFieldControlOptions): FlowFi
         sample.disabled ||= currentPresentation.view === 'particles'
         trails.disabled ||= currentPresentation.view !== 'particles'
         boundary.disabled ||= currentPresentation.view !== 'particles'
-        feather.disabled ||= currentPresentation.view !== 'particles' || currentPresentation.boundary !== 'sdf'
+        feather.disabled ||= currentPresentation.view !== 'particles' || currentPresentation.boundary === 'hard'
     }
 
     function setStatus(nextState: FlowFieldControlSnapshot['state'], error?: unknown): void {
@@ -239,12 +239,18 @@ function formatTime(value: number, unit: string): string {
 }
 
 function presentationLegend(value: FlowFieldPresentation, unit = 'm/s'): string {
-    if (value.view === 'particles') return value.boundary === 'sdf'
-        ? 'Particles follow the interpolated velocity. B: Inner-edge display only; no extra source detail.'
-        : 'Particles follow the interpolated velocity. A: Hard texture boundary.'
+    if (value.view === 'particles') {
+        const boundary = {
+            hard: 'A: Hard texture boundary.',
+            sdf: 'B: Inner-edge display only; no extra source detail.',
+            'sdf-center-linear': 'C: Linear center-field reconstruction may move the boundary. Feather controls display AA; no extra source detail.',
+            'sdf-center-smooth': 'D: Smooth center-field reconstruction may move the boundary. Feather controls display AA; no extra source detail.',
+        }[value.boundary]
+        return `Particles follow the interpolated velocity. ${boundary}`
+    }
     const field = ({ speed: `Speed (${unit})`, direction: 'Flow direction', u: `U · eastward (${unit})`, v: `V · northward (${unit})`, status: 'Velocity sampling status' })[value.view]
     const sampled = value.sample === 'delta' ? `${field} · upper − lower` : `${field} · ${value.sample} sample`
-    return `${sampled}. Unfiltered diagnostics; boundary A/B inactive.`
+    return `${sampled}. Unfiltered diagnostics; boundary A/B/C/D inactive.`
 }
 
 const NUMBER_FORMAT = new Intl.NumberFormat('en', { maximumFractionDigits: 3 })
@@ -266,6 +272,8 @@ const CONTROL_MARKUP = `
             <label class="flow-field">Boundary <select data-flow-control="boundary">
                 <option value="hard">A · Hard texture</option>
                 <option value="sdf">B · SDF (inward)</option>
+                <option value="sdf-center-linear">C · Center SDF (linear)</option>
+                <option value="sdf-center-smooth">D · Center SDF (smooth)</option>
             </select></label>
             <label class="flow-field">Feather <span class="flow-feather">
                 <input type="range" data-flow-control="feather" aria-label="SDF feather width"

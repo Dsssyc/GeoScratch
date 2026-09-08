@@ -29,7 +29,7 @@ struct FlowParticleConfig {
     maximum_speed: f32,
     view_enabled: u32,
     refill_view: u32,
-    reserved_3: u32,
+    center_samples: u32,
     clip_from_relative_world: mat4x4f,
     camera_x: vec2u,
     camera_y: vec2u,
@@ -63,6 +63,13 @@ fn FlowParticles_random(value: u32) -> u32 {
 
 fn FlowParticles_temporal() -> FlowVelocityTemporal {
     return FlowVelocityTemporal(flowParticleConfig.progress, flowParticleConfig.activity_kill);
+}
+
+fn FlowParticles_sample(position: FlowVelocityAddressFixedPosition, level: u32, temporal: FlowVelocityTemporal) -> FlowVelocitySample {
+    if (flowParticleConfig.center_samples != 0u) {
+        return FlowVelocity_sample_centers(position, level, temporal);
+    }
+    return FlowVelocity_sample(position, level, temporal);
 }
 
 fn FlowParticles_available(sample: FlowVelocitySample) -> bool {
@@ -184,7 +191,7 @@ fn FlowParticles_rebirth(particle: ptr<function, FlowParticle>, refill: bool) ->
         FlowParticles_dormant(particle);
         return false;
     }
-    let sample = FlowVelocity_sample(
+    let sample = FlowParticles_sample(
         selection.position,
         selection.requested_level,
         FlowParticles_temporal(),
@@ -215,7 +222,7 @@ fn FlowParticles_simulate(@builtin(global_invocation_id) global_id: vec3u) {
     }
 
     var retire = particle.lifecycle_state != FLOW_PARTICLE_ACTIVE;
-    var sample = FlowVelocity_sample(
+    var sample = FlowParticles_sample(
         particle.current,
         flowParticleConfig.requested_level,
         FlowParticles_temporal(),
@@ -264,7 +271,7 @@ fn FlowParticles_simulate(@builtin(global_invocation_id) global_id: vec3u) {
             }
             candidate = advanced.position;
             displacement_meters += delta_meters;
-            sample = FlowVelocity_sample(
+            sample = FlowParticles_sample(
                 candidate,
                 flowParticleConfig.requested_level,
                 FlowParticles_temporal(),

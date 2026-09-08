@@ -22,6 +22,25 @@ fn FlowVelocity_sample(
     requested_level: u32,
     temporal: FlowVelocityTemporal,
 ) -> FlowVelocitySample {
+    return FlowVelocity_sample_support(position, requested_level, temporal, FlowVelocity_nearest_zero_gate);
+}
+
+// Center-field display experiments remove only the whole-owner zero veto.
+// Registration, bilinear U/V, common-level fallback and speed death stay shared.
+fn FlowVelocity_sample_centers(
+    position: FlowVelocityAddressFixedPosition,
+    requested_level: u32,
+    temporal: FlowVelocityTemporal,
+) -> FlowVelocitySample {
+    return FlowVelocity_sample_support(position, requested_level, temporal, false);
+}
+
+fn FlowVelocity_sample_support(
+    position: FlowVelocityAddressFixedPosition,
+    requested_level: u32,
+    temporal: FlowVelocityTemporal,
+    zero_owner: bool,
+) -> FlowVelocitySample {
     if (requested_level >= FlowVelocityCurrent_level_count) {
         return FlowVelocitySample(4u, vec2f(0.0), 0.0f, false, requested_level);
     }
@@ -52,7 +71,7 @@ fn FlowVelocity_sample(
         if (current.resolved_level == common_level && next.resolved_level == common_level) {
             var current_velocity = current.value.xy;
             var next_velocity = next.value.xy;
-            if (FlowVelocity_nearest_zero_gate) {
+            if (zero_owner) {
                 // These nearest texels belong to the already-resolved common
                 // footprint. Zero support occupies a whole texel, not just its center.
                 let current_center = FlowVelocityCurrent_load_position(position, common_level);

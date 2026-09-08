@@ -3,7 +3,7 @@ import type { FlowTemporalFrameSnapshot } from './flow-frame-provenance.ts'
 
 export type FlowFieldViewMode = 'particles' | 'speed' | 'direction' | 'u' | 'v' | 'status'
 export type FlowFieldSampleView = 'interpolated' | 'lower' | 'upper' | 'delta'
-export type FlowFieldBoundaryMode = 'hard' | 'sdf'
+export type FlowFieldBoundaryMode = 'hard' | 'sdf' | 'sdf-center-linear' | 'sdf-center-smooth'
 
 /** Source-texel feather bounds shared by UI validation and history presentation. */
 export const FLOW_FIELD_SDF_FEATHER = Object.freeze({ minimum: 0.05, maximum: 0.35, default: 0.25 })
@@ -56,7 +56,7 @@ export function flowFieldPresentation(value: FlowFieldPresentationInput): FlowFi
     if (!['particles', 'speed', 'direction', 'u', 'v', 'status'].includes(value?.view) ||
         !['interpolated', 'lower', 'upper', 'delta'].includes(value?.sample) ||
         typeof value.trails !== 'boolean' || typeof value.contour !== 'boolean' ||
-        !['hard', 'sdf'].includes(boundary)) {
+        !['hard', 'sdf', 'sdf-center-linear', 'sdf-center-smooth'].includes(boundary)) {
         throw new TypeError('Flow Field presentation is invalid')
     }
     return Object.freeze({ ...value, boundary, sdfFeatherTexels })
