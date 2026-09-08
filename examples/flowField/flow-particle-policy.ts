@@ -62,28 +62,42 @@ export function classifyFlowParticle(input: Readonly<{
         !positiveInteger(input.maximumStagnantSteps)) {
         throw new TypeError('Flow particle classification requires finite support and lifecycle facts')
     }
-    return input.available && input.speed >= input.activityKill &&
+    return input.available && input.speed > 0 && input.speed >= input.activityKill &&
         input.ageSteps < input.maximumAgeSteps &&
         input.stagnantSteps < input.maximumStagnantSteps
         ? 'alive'
         : 'retire'
 }
 
-/** Counts consecutive sub-threshold displacement steps with saturation. */
+/** Counts whole reference ticks below the per-reference-step displacement threshold. */
 export function nextStagnantSteps(input: Readonly<{
     previous: number
     displacementMeters: number
     minimumDisplacementMeters: number
+    referenceSteps?: number
+    elapsedSteps?: number
 }>): number {
 
+    const referenceSteps = input?.referenceSteps === undefined ? 1 : input.referenceSteps
+    const elapsedSteps = input?.elapsedSteps === undefined ? 1 : input.elapsedSteps
     if (!nonNegativeInteger(input?.previous) ||
         !nonNegativeFinite(input?.displacementMeters) ||
         !Number.isFinite(input?.minimumDisplacementMeters) ||
-        input.minimumDisplacementMeters <= 0) {
+        input.minimumDisplacementMeters <= 0 || !Number.isFinite(referenceSteps) ||
+        referenceSteps <= 0 || referenceSteps > 3 || !nonNegativeInteger(elapsedSteps) || elapsedSteps > 3) {
         throw new TypeError('Flow stagnation requires a count and non-negative metric displacement')
     }
-    if (input.displacementMeters >= input.minimumDisplacementMeters) return 0
-    return Math.min(Number.MAX_SAFE_INTEGER, input.previous + 1)
+    if (input.displacementMeters >= input.minimumDisplacementMeters * referenceSteps) return 0
+    return Math.min(Number.MAX_SAFE_INTEGER, input.previous + elapsedSteps)
+}
+
+/** Converts a per-60-Hz-tick retirement probability to bounded elapsed reference time. */
+export function flowParticleDropProbability(probability: number, referenceSteps = 1): number {
+    if (!Number.isFinite(probability) || probability < 0 || probability > 1 ||
+        !Number.isFinite(referenceSteps) || referenceSteps <= 0 || referenceSteps > 3) {
+        throw new RangeError('Flow particle drop probability requires [0, 1] probability and (0, 3] reference time')
+    }
+    return referenceSteps === 1 ? probability : 1 - Math.pow(1 - probability, referenceSteps)
 }
 
 /** Creates a replacement state whose segment has zero length in the rebirth frame. */

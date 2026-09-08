@@ -35,6 +35,8 @@ fn FlowVelocity_sample(position: FlowVelocityAddressFixedPosition, level: u32,
     temporal: FlowVelocityTemporal) -> FlowVelocitySample {
     return FlowVelocitySample(vec2f(1.0, 0.0), 1.0, 1u, true);
 }
+fn FlowVelocity_sample_centers(position: FlowVelocityAddressFixedPosition, level: u32,
+    temporal: FlowVelocityTemporal) -> FlowVelocitySample { return FlowVelocity_sample(position,level,temporal); }
 `, prepared.module.wgsl, particleShader, `
 @compute @workgroup_size(1)
 fn test_reveal_quota() {
@@ -77,6 +79,8 @@ const cases = [
     config.setUint32(52, 1, true)
     config.setUint32(56, 1, true)
     config.setFloat32(152, codec.quantumMeters, true)
+    config.setFloat32(160, 1, true)
+    config.setFloat32(164, 1, true)
     for (const [camera, matrixOffset, positionOffset, heightOffset, height] of [
         [fixture.current, 64, 128, 144, [150.25, 0.125]],
         [fixture.previous, 176, 240, 256, [800.5, 0.0625]],

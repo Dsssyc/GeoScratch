@@ -85,6 +85,7 @@ export type FlowHistoryFacts = Readonly<{
     sdfPresentationCount: number
     sdfExtraTextureBytes: 0
     centerCache: FlowCenterCacheFacts | undefined
+    decaySteps: number
     /** Last encoded uniform, not the application's retained selection. */
     sdfFeatherTexels: number
 }>
@@ -103,7 +104,8 @@ export type FlowHistory = Readonly<{
         prepared?: FlowTemporalReadyBindingFrame,
         boundary?: FlowFieldBoundaryMode,
         sdfFeatherTexels?: number,
-        centerCacheInput?: FlowCenterCacheInput
+        centerCacheInput?: FlowCenterCacheInput,
+        decaySteps?: number
     ): FlowHistoryFrame
     facts(): FlowHistoryFacts
     dispose(): void
@@ -131,6 +133,7 @@ type HistoryUniformValues = {
     progress: number
     activityKill: number
     presentationFeather: number
+    decaySteps: number
 }
 
 type HistoryViewFacts = Readonly<{
@@ -481,6 +484,7 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
         let boundary: FlowFieldBoundaryMode = 'hard'
         let sdfPresentationCount = 0
         let sdfFeatherTexels: number = FLOW_FIELD_SDF_FEATHER.default
+        let decaySteps = 1
         let directionIndex = 0
         let resizeGeneration = 0
         let previousView: HistoryViewFacts | undefined
@@ -520,7 +524,8 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
             prepared?: FlowTemporalReadyBindingFrame,
             requestedBoundary: FlowFieldBoundaryMode = 'hard',
             requestedFeatherTexels: number = FLOW_FIELD_SDF_FEATHER.default,
-            centerCacheInput?: FlowCenterCacheInput
+            centerCacheInput?: FlowCenterCacheInput,
+            requestedDecaySteps = 1
         ): FlowHistoryFrame {
             assertActive()
             if (resizePending) throw new Error('Flow Field history cannot encode during resize')
@@ -534,6 +539,9 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
                 throw new TypeError('Flow Field history boundary must be hard, sdf, sdf-center-linear or sdf-center-smooth')
             }
             const feather = flowFieldSdfFeatherTexels(requestedFeatherTexels)
+            if (!Number.isSafeInteger(requestedDecaySteps) || requestedDecaySteps < 0 || requestedDecaySteps > 3) {
+                throw new RangeError('Flow history decay requires zero to three reference ticks')
+            }
             if (prepared && (requestedBoundary === 'sdf-center-linear' || requestedBoundary === 'sdf-center-smooth')) {
                 centerCache?.encode(builder,prepared,centerCacheInput)
             }
@@ -570,6 +578,7 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
                 screenView,
                 prepared,
                 presentationFeather: feather,
+                decaySteps: requestedDecaySteps,
             }))
             const direction = directions[directionIndex]!
             builder.upload(uniformUpload)
@@ -589,6 +598,7 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
             builder.render(presentationPass, [retainedTextureIndex === 0 ? presentA : presentB])
             boundary = prepared === undefined ? 'hard' : requestedBoundary
             sdfFeatherTexels = feather
+            decaySteps = requestedDecaySteps
             if (boundary !== 'hard') sdfPresentationCount++
             previousView = currentView
             directionIndex = (directionIndex + 1) % directions.length
@@ -652,6 +662,7 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
                 sdfExtraTextureBytes: 0,
                 sdfFeatherTexels,
                 centerCache: centerCache?.facts(),
+                decaySteps,
             })
         }
 
@@ -704,10 +715,12 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
                 mode, trailDecay: 1, trailCutoff, historyValid: valid, historyReprojecting: reprojecting,
                 currentInverseMatrix: screenView.relativeWorldFromClip, activityKill, screenView,
                 prepared: undefined, presentationFeather: sdfFeatherTexels,
+                decaySteps: 0,
             }))
             builder.upload(uniformUpload)
             const display = retainedTextureIndex === undefined || clearPending || (mode === 'clear' && cameraChanged)
                 ? undefined : retainedCommands[retainedTextureIndex]
+            decaySteps = 0
             builder.render(presentationPass, display === undefined ? [] : [display])
             // No temporal lease, raw/display mutation, direction flip or change
             // of reference camera. Every unavailable frame gathers the last
@@ -754,6 +767,7 @@ function historyUniformCodec(): LayoutCodec {
         { name: 'progress', type: 'f32' },
         { name: 'activityKill', type: 'f32' },
         { name: 'presentationFeather', type: 'f32' },
+        { name: 'decaySteps', type: 'u32' },
     ]
     return layoutCodec({ name: 'FlowFieldHistoryUniform', fields }, { usage: [ 'uniform' ] })
 }
@@ -859,6 +873,7 @@ function uniformValues(
         screenView?: FlowScreenViewValues
         prepared?: FlowTemporalReadyBindingFrame
         presentationFeather?: number
+        decaySteps?: number
     }>
 ): HistoryUniformValues {
     const currentView = current ?? {
@@ -890,6 +905,7 @@ function uniformValues(
         progress: options.prepared?.progress ?? 0,
         activityKill: options.activityKill,
         presentationFeather: options.presentationFeather ?? FLOW_FIELD_SDF_FEATHER.default,
+        decaySteps: options.decaySteps ?? 1,
     }
 }
 

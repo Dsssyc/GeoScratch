@@ -129,7 +129,8 @@ try {
             delete window.__FLOW_BOUNDARY_AB_MONITOR__
             return result
         })
-        assert.ok(measurement.steps > 0,`${label}: the action must admit at least one particle step`)
+        assert.ok(measurement.observedFrames > 0,`${label}: the action must admit a presentation frame`)
+        if (pausedClock) assert.equal(measurement.steps,0,`${label}: paused presentation must not advance particles`)
         assert.deepEqual(measurement.clearedFrames,[],`${label}: must not clear history`)
         assert.equal(measurement.resetCounts.length,1,`${label}: must not reset particles`)
         if (pausedClock) assert.equal(measurement.modelTimes.length,1,`${label}: model time remains paused`)
@@ -154,8 +155,8 @@ try {
         await control('play-pause').click()
         await page.waitForFunction(before => {
             const f = window.__FLOW_FIELD_PROOF__.facts()
-            return !f.timeline.playing && f.renderer.particles.encodedSteps>before.steps &&
-                f.frames.observedFrameCount>before.observed
+            return !f.timeline.playing && f.frames.observedFrameCount>before.observed &&
+                f.lastFrame.visualTime?.referenceSteps===0 && f.lastFrame.temporal?.presentedModelTime===f.timeline.modelTime
         },beforePause)
     },{pausedClock:false})
     const paused = await facts()
@@ -169,7 +170,7 @@ try {
     })
     const b = await screenshot('b-sdf')
     assert.equal(b.after.playing,false)
-    assert.ok(b.after.steps>a.after.steps,'The paused B toggle admits a particle step; it does not imply autonomous animation')
+    assert.equal(b.after.steps,a.after.steps,'The paused B toggle only recuts existing ink')
     assert.ok(b.after.sdfPresentationCount>a.after.sdfPresentationCount)
     assert.equal(b.after.sdfExtraTextureBytes,0)
     assert.equal(await control('feather').isDisabled(),false)
@@ -216,7 +217,7 @@ try {
     }
 
     // FPS evidence comes only from playing, stationary-camera intervals. The
-    // paused toggles above deliberately test admission, not continuous cadence.
+    // paused toggles above deliberately test presentation admission without simulation.
     await control('rate').selectOption('0.001')
     await control('play-pause').click()
     await page.waitForFunction(() => window.__FLOW_FIELD_PROOF__.facts().timeline.playing)
@@ -344,20 +345,19 @@ try {
     for (const viewport of [{width:1280,height:800},{width:1440,height:900}]) {
         const before = await facts()
         await page.setViewportSize(viewport)
-        await page.waitForFunction(({generation,steps,width,height}) => {
+        await page.waitForFunction(({generation,width,height}) => {
             const f = window.__FLOW_FIELD_PROOF__.facts()
             return f.renderer.history.resizeGeneration>generation &&
                 f.renderer.history.size.width===width && f.renderer.history.size.height===height &&
-                f.renderer.history.boundary==='sdf' && f.lastFrame.presentationReady &&
-                f.renderer.particles.encodedSteps>steps
-        },{generation:before.resizeGeneration,steps:before.steps,
+                f.renderer.history.boundary==='sdf' && f.lastFrame.presentationReady
+        },{generation:before.resizeGeneration,
             width:Math.round(viewport.width*deviceScaleFactor),height:Math.round(viewport.height*deviceScaleFactor)},
         {timeout:60000})
         await page.waitForTimeout(200)
         const after = await facts()
         assert.equal(after.boundary,'sdf')
         assert.ok(after.sdfPresentationCount>before.sdfPresentationCount)
-        assert.ok(after.steps>before.steps)
+        assert.equal(after.steps,before.steps,'Paused resize does not simulate particles')
         assert.equal(after.modelTime,before.modelTime)
         assert.equal(after.sdfExtraTextureBytes,0)
         resizes.push({viewport,before,after})

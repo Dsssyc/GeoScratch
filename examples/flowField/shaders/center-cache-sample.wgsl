@@ -23,9 +23,13 @@ fn FlowCenterCached_coverage(position: FlowVelocityAddressFixedPosition) -> f32 
     if (encodedSlot == 0u || encodedSlot > flowCenterCacheConfig.pageCount) { return FlowCenter_coverage(position); }
     let base = (encodedSlot - 1u) * 66049u + address.texel.y * 257u + address.texel.x;
     if (base + 258u >= arrayLength(&flowCenterCacheRecords)) { return FlowCenter_coverage(position); }
-    // A cached shape never overrules the current velocity sampler's common-level
-    // and fine/coarse transition readiness. Cache misses are not source misses.
-    if (!FlowBoundary_exact_residency(position, level)) { return FlowBoundary_hard_coverage(position, level); }
+    // Owner-known records already prove all four source texels are exact at the
+    // cache's current publication epochs. Keep the sampler's spatial transition
+    // checks, but do not repeat its eight resolution lookups at every fragment.
+    if (level + 1u < FlowVelocityCurrent_level_count &&
+        FlowVelocityCurrent_edge_blend_weight(registered, level) < 1.0) { return FlowBoundary_hard_coverage(position, level); }
+    if (level + 1u < FlowVelocityNext_level_count &&
+        FlowVelocityNext_edge_blend_weight(registered, level) < 1.0) { return FlowBoundary_hard_coverage(position, level); }
     var lower: vec4f;
     var upper: vec4f;
     var minimum = vec2u(1u);

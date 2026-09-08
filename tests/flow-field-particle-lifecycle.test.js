@@ -2,7 +2,7 @@ import { expect } from 'chai'
 import fs from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { WebMercatorQuad, WebMercatorQuadAddressCodec, tileMatrixCoverage } from 'geoscratch/geo'
+import { WebMercatorQuad, WebMercatorQuadAddressCodec, tileMatrixCoverage, virtualRasterAddressSpace } from 'geoscratch/geo'
 
 const moduleUrl = pathToFileURL(path.join(
     process.cwd(),
@@ -53,8 +53,39 @@ describe('Flow Field particle lifecycle policy', () => {
         expect(classifyFlowParticle(base)).to.equal('alive')
         expect(classifyFlowParticle({ ...base, available: false })).to.equal('retire')
         expect(classifyFlowParticle({ ...base, speed: 0.099 })).to.equal('retire')
+        expect(classifyFlowParticle({ ...base, speed: 0, activityKill: 0 })).to.equal('retire')
         expect(classifyFlowParticle({ ...base, ageSteps: 100 })).to.equal('retire')
         expect(classifyFlowParticle({ ...base, stagnantSteps: 20 })).to.equal('retire')
+    })
+
+    it('normalizes stagnant duration and retirement hazard to 60 Hz reference time', async() => {
+        const { nextStagnantSteps, flowParticleDropProbability } = await import(moduleUrl)
+        for (const hz of [30,60,120]) {
+            let stagnant = 0, surviving = 1
+            const referenceSteps = 60 / hz
+            for (let index = 0; index < hz; index++) {
+                const elapsedSteps = Math.floor((index + 1) * referenceSteps) - Math.floor(index * referenceSteps)
+                stagnant = nextStagnantSteps({previous:stagnant,displacementMeters:.1 * referenceSteps,
+                    minimumDisplacementMeters:.25,referenceSteps,elapsedSteps})
+                surviving *= 1 - flowParticleDropProbability(.004,referenceSteps)
+                expect(nextStagnantSteps({previous:10,displacementMeters:.3 * referenceSteps,
+                    minimumDisplacementMeters:.25,referenceSteps,elapsedSteps})).to.equal(0)
+            }
+            expect(stagnant).to.equal(60)
+            expect(surviving).to.be.closeTo(Math.pow(.996,60),1e-12)
+        }
+        expect(flowParticleDropProbability(.00325,1)).to.equal(.00325)
+        expect(flowParticleDropProbability(0,.5)).to.equal(0)
+        expect(flowParticleDropProbability(1,2)).to.equal(1)
+        for (const referenceSteps of [null,0,-1,4,Infinity,NaN,'1']) {
+            expect(() => flowParticleDropProbability(.004,referenceSteps)).to.throw(RangeError)
+            expect(() => nextStagnantSteps({previous:1,displacementMeters:0,
+                minimumDisplacementMeters:.25,referenceSteps})).to.throw(TypeError)
+        }
+        for (const elapsedSteps of [null,-1,.5,4,Infinity,NaN,'1']) {
+            expect(() => nextStagnantSteps({previous:1,displacementMeters:0,
+                minimumDisplacementMeters:.25,elapsedSteps})).to.throw(TypeError)
+        }
     })
 
     it('uses displacement hysteresis without creating an immortal near-zero state', async() => {
@@ -129,7 +160,9 @@ describe('Flow Field particle lifecycle policy', () => {
         expect(simulation.match(/FlowParticles_sample\(/g).length).to.be.greaterThan(2)
         expect(simulation).to.include('FlowVelocity_sample_centers(position, level, temporal)')
         expect(simulation).to.include('flowParticleConfig.legacy_displacement_scale')
-        expect(simulation).to.include('f32(flowParticleConfig.substeps)')
+        expect(simulation).to.include('f32(steps)')
+        expect(simulation).to.include('FlowParticles_predicted_substeps(')
+        expect(simulation).to.include('flowParticleConfig.visual_time.z')
         expect(simulation).to.include('(*particle).current = selection.position;')
         expect(simulation).to.include('(*particle).previous = selection.position;')
         expect(simulation).to.include(
@@ -155,10 +188,14 @@ describe('Flow Field particle lifecycle policy', () => {
         const spawnResource = fakeResource('spawn')
         const temporalSet = Object.freeze({ layout: temporalLayout })
         const spawnSet = Object.freeze({ layout: spawnLayout })
+        const coverage = tileMatrixCoverage({tileMatrixSet:WebMercatorQuad,limits:[2,5,9].map(matrixId => ({
+            matrixId:String(matrixId),minTileCol:0,maxTileCol:0,minTileRow:0,maxTileRow:0,
+        }))})
+        const addressSpace = virtualRasterAddressSpace({id:'particle-source-cell',coverage})
         const particles = await createFlowParticles({
             runtime,
             maximumCount: 1024,
-            addressCodec: particleAddressCodec(),
+            addressCodec: new WebMercatorQuadAddressCodec({coordinateBits:52,coverage}),
             maximumSpeed: 4,
             simulationShader: read(
                 'examples',
@@ -196,6 +233,7 @@ describe('Flow Field particle lifecycle policy', () => {
         const builder = fakeBuilder(events)
         const temporalFrame = Object.freeze({
             state: 'ready',
+            temporal:{lower:{runtime:{addressSpace}}},
             requestedRevision: 7,
             pairGeneration: 3,
             bindSet: temporalSet,
@@ -243,6 +281,10 @@ describe('Flow Field particle lifecycle policy', () => {
         expect(config.getUint32(52, true)).to.equal(0)
         expect(config.getUint32(56, true)).to.equal(0)
         expect(config.getUint32(60, true)).to.equal(0)
+        expect(config.getFloat32(160, true)).to.equal(1)
+        expect(config.getFloat32(164, true)).to.equal(1)
+        expect(config.getFloat32(168, true)).to.equal(Math.fround(WebMercatorQuad.matrix('2').cellSize))
+        expect(particles.facts().simulatedReferenceSteps).to.equal(1)
         expect(particles.facts().viewRefillCount).to.equal(0)
         expect(read('examples', 'flowField', 'flow-particles.ts'))
             .to.not.include('options.temporal.frame()')
@@ -301,6 +343,41 @@ describe('Flow Field particle lifecycle policy', () => {
             expect(config.getUint32(56, true)).to.equal(0)
             expect(particles.facts().viewRefillCount).to.equal(1)
         }
+
+        const referenceBeforeTiming = particles.facts().simulatedReferenceSteps
+        for (const [referenceSteps,elapsedSteps] of [[.5,0],[.5,1],[1,1],[2,2],[3,3]]) {
+            particles.encode(builder,spawn,temporalFrame,undefined,true,referenceSteps,elapsedSteps)
+            expect(config.getFloat32(36,true)).to.equal(.5 * referenceSteps)
+            expect(config.getUint32(8,true)).to.equal(2)
+            expect(config.getUint32(60,true)).to.equal(1)
+            expect(config.getFloat32(160,true)).to.equal(referenceSteps)
+            expect(config.getFloat32(164,true)).to.equal(elapsedSteps)
+            expect(config.getFloat32(168,true)).to.equal(Math.fround(WebMercatorQuad.matrix('2').cellSize))
+        }
+        expect(particles.facts().simulatedReferenceSteps).to.equal(referenceBeforeTiming + 7)
+        const encoded = particles.facts().encodedSteps
+        const bytesBeforeInvalid = [...new Uint8Array(config.buffer)]
+        for (const referenceSteps of [0,-1,3.1,Infinity,NaN,null,'1']) {
+            expect(() => particles.encode(builder,spawn,temporalFrame,undefined,false,referenceSteps,1)).to.throw(RangeError)
+        }
+        for (const elapsedSteps of [-1,.5,4,Infinity,NaN,null,'1']) {
+            expect(() => particles.encode(builder,spawn,temporalFrame,undefined,false,1,elapsedSteps)).to.throw(RangeError)
+        }
+        expect(particles.facts().encodedSteps).to.equal(encoded)
+        expect([...new Uint8Array(config.buffer)]).to.deep.equal(bytesBeforeInvalid)
+        particles.encode(builder,spawn,temporalFrame)
+        expect(config.getFloat32(36,true)).to.equal(.5)
+        expect(config.getUint32(60,true)).to.equal(0)
+        expect(config.getFloat32(160,true)).to.equal(1)
+        expect(config.getFloat32(164,true)).to.equal(1)
+        for (const [requestedLevel,matrixId] of [[0,'9'],[1,'5'],[2,'2']]) {
+            particles.encode(builder,spawn,{...temporalFrame,requestedLevel},undefined,true,2,2)
+            expect(config.getFloat32(168,true)).to.equal(Math.fround(WebMercatorQuad.matrix(matrixId).cellSize))
+            expect(config.getUint32(8,true)).to.equal(2,'Base substeps are not ceil(reference time)')
+        }
+        const beforeInvalidLevel = [...new Uint8Array(config.buffer)]
+        expect(() => particles.encode(builder,spawn,{...temporalFrame,requestedLevel:3})).to.throw()
+        expect([...new Uint8Array(config.buffer)]).to.deep.equal(beforeInvalidLevel)
 
         particles.dispose()
         particles.dispose()

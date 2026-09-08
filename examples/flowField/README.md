@@ -22,6 +22,48 @@ Activity contour is an optional velocity threshold overlay and does not enter tr
 The Boundary selector offers four explicit comparisons. A remains the default;
 C/D are opt-in center-field reconstructions, described after the existing A/B rules.
 
+## Visual time and paused inspection
+
+Particle motion and trail decay use a **60 Hz visual reference**, separately from
+the timeline's model-time **Rate**. One admitted frame supplies one monotonic
+wall-time value to the visual clock and all its consumers. An accepted interval
+contributes `s = 60 × min(elapsedSeconds, 0.05)` reference steps. Thus 30/60/120 Hz
+updates normally advance by 2/1/0.5 reference steps, not one displacement per
+submission. Rate and playback direction continue to select model data; they do
+not multiply the inherited visual displacement scale of 50. No speed/time control
+parameter is added.
+
+Particle displacement scales by s and the per-reference-tick retirement probability
+p becomes `1 - (1-p)^s`; s=1 retains the original probability exactly. Predicted
+substeps follow movement distance relative to the requested source texel, not
+`ceil(s)`, which would turn tiny clock jitter into extra U/V sampling for every
+particle. The configured base count is retained and the prediction is capped at
+16; this is finite integration sampling, not continuous boundary collision.
+Age and stagnation retain their u32 fields and
+the 56-byte record: the clock distributes whole reference ticks with a shared
+fractional remainder. Their phase uncertainty is at most one reference tick.
+Stagnation compares displacement per reference step, so 120 Hz half steps do not
+turn normal slow motion into a stationary particle. Actual zero/below-threshold
+velocity still causes immediate death during simulation.
+
+Trail decay is **not** an exponential replacement for the old byte-quantized
+formula. The existing history pass applies `floor(255*color*0.996)/255` zero through
+three times according to the whole-tick count, then applies the original cutoff.
+At 120 Hz this normally alternates zero/one decay operation; at 30 Hz it runs two.
+The textures and render-pass count are unchanged. A zero-tick copy does not decay
+or apply the cutoff. Both particle time and history ticks discard any interval
+beyond the 50 ms accepted cap; intervals over 250 ms reanchor with zero advancement.
+There is no accumulated catch-up debt after a long pause, seek/reset, or temporal
+suspension. The first admitted frame after resuming also only reanchors.
+
+Paused camera/Boundary/Feather changes reproject or reclip existing history without
+simulating particles or drawing the old line segment again. Controls therefore do
+not add a hidden simulation step or brighten repeated segments. **Explicit resets
+still clear history:** seeking, changing View/Sample, or toggling Particle trails
+while paused can leave the particle view empty. There is no hidden warm-up;
+resume playback to generate new particle ink. Pausing itself does not clear the
+existing trails. See [ADR-119](../../docs/decisions/ADR-119-flow-reference-visual-time.md).
+
 ## A/B: original source-footprint boundary
 
 In **Particles**, the **Boundary** selector compares **A · Hard texture** (default)
@@ -147,8 +189,10 @@ inspection values, and activity contours keep their original sampler policy.
 The common-level/readiness proof and half-texel registration remain shared with
 the existing sampler. Each cached pair-page has **257×257 packed u32 records**,
 including the shared next row/column. One record encodes both endpoint distances,
-signs and uncertainty. A cached display query reads four records; it still checks
-current requested-level readiness and retains A for required unknown source data.
+signs and uncertainty. A cached display query reads four records. At the matching
+publication epochs their owner-known flags already prove exact source-center
+residency, avoiding eight repeated resolution lookups. The sampler's cross-level
+edge-transition checks remain, and required unknown source data still uses A.
 A cache miss, an omitted page, or an incompatible cache uses the original direct
 C/D reconstruction. That direct path costs eight U/V loads in common supported or
 unsupported interiors, or up to 32 for the full 4x4 neighborhood, plus metadata
@@ -193,9 +237,9 @@ future support or opposing endpoint vectors cannot create a stationary zombie.
 No candidate-capacity, texture or backend-channel increase is required; see
 [ADR-108](../../docs/decisions/ADR-108-flow-subcell-spawn-support.md).
 
-During camera/LoD changes, available flow continues to animate using the current
+While playing through camera/LoD changes, available flow continues to animate using the current
 temporal capture. Missing data suspends only affected particles without redrawing
-their previous segment; waiting still consumes their finite lifetime. Missing or
+their previous segment; this active visual time still consumes their finite lifetime. Missing or
 conservative coarse-zero support does not immediately erase trails: those pixels
 follow the map and decay normally. Reliable resident zero and source exclusion still
 retire particles and clear unsupported ink.
@@ -205,7 +249,8 @@ presented time remain visible until feedback and requested pages agree. Inspecto
 views retain their complete image, and the optional contour is hidden during this
 wait. A pending explicit seek/loop reset or a loading temporal runtime still uses
 the retained-image path; the reset must happen before drawing the new particle pool.
-Residency completion resumes automatically even with model playback paused.
+Residency completion updates readiness automatically even with model playback
+paused; it does not advance paused particle simulation.
 Fallback is always reported relative to the original sampling request, including
 when a coarser page contains zero velocity. Changing the inspection mode explicitly
 invalidates the old image rather than relabeling it.
@@ -235,6 +280,8 @@ node tests/browser/flow-field-particle-reference.mjs
 node tests/browser/flow-field-history.mjs
 node tests/browser/flow-field-history-recovery.mjs
 node tests/browser/flow-field-history-retained.mjs
+node tests/browser/flow-field-history-time.mjs
+node tests/browser/flow-field-visual-time.mjs
 node tests/browser/flow-field-slack-interior.mjs
 node tests/browser/flow-field-controls.mjs
 node tests/browser/flow-field-boundary-distance.mjs
@@ -262,8 +309,11 @@ node tests/browser/flow-field-prefetch-failure.mjs
 node tests/browser/scratch-flow-field.mjs
 ```
 
-Run the motion benchmark alone: it compares high-DPR visual step frequency against
-frozen Flow Layer and an isolated eager-presentation-support counterfactual. Empty
+Run the motion benchmark alone: it compares high-DPR submission frequency against
+frozen Flow Layer and an isolated eager-presentation-support counterfactual. Also
+inspect accepted `visualTime` and encoded `simulatedReferenceSteps`: submissions
+are no longer equivalent to one particle reference step. These are timing/encoding
+facts, not GPU position readbacks. Empty
 ink skips temporal-raster sampling in the final presentation; raw history never
 samples velocity. This preserves the visible-ink optimization from
 [ADR-102](../../docs/decisions/ADR-102-flow-history-visible-support.md) after moving

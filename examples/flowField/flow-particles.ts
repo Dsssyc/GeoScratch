@@ -89,6 +89,8 @@ export type FlowParticleFacts = Readonly<{
     viewRefillCount: number
     /** Last encoded choice; true removes the whole-texel zero extrapolation only. */
     centerSamples: boolean
+    /** Sum of reference time in encoded simulation calls, not a GPU-position observation. */
+    simulatedReferenceSteps: number
 }>
 
 export type FlowParticles = Readonly<{
@@ -103,12 +105,15 @@ export type FlowParticles = Readonly<{
         clearCounters: ClearBufferCommand
         readonly simulation?: DispatchCommand
     }>
+    /** Encodes a positive bounded reference-time step; elapsedSteps ages the unchanged u32 records. */
     encode(
         builder: SubmissionBuilder,
         spawn: FlowParticleSpawnBindings,
         temporal: FlowParticleTemporalFrame,
         view?: GeoViewSnapshot,
-        centerSamples?: boolean
+        centerSamples?: boolean,
+        referenceSteps?: number,
+        elapsedSteps?: number
     ): void
     /** Defers canonical state clearing to the next encoded simulation tick. */
     reset(): void
@@ -382,18 +387,25 @@ export async function createFlowParticles(
         let viewRefillPending: GeoViewSnapshot | undefined
         let viewRefillCount = 0
         let centerSamples = false
+        let simulatedReferenceSteps = 0
 
         function encode(
             builder: SubmissionBuilder,
             spawn: FlowParticleSpawnBindings,
             temporal: FlowParticleTemporalFrame,
             view?: GeoViewSnapshot,
-            useCenterSamples = false
+            useCenterSamples = false,
+            referenceSteps = 1,
+            elapsedSteps = 1
         ): void {
 
             assertActive()
             validateFrame(temporal, options.temporal.layout, 'temporal')
             validateSpawn(spawn, options.spawn.layout)
+            if (typeof referenceSteps !== 'number' || !positiveFinite(Math.fround(referenceSteps)) || referenceSteps > 3 ||
+                !Number.isSafeInteger(elapsedSteps) || elapsedSteps < 0 || elapsedSteps > 3) {
+                throw new RangeError('Flow particle visual time requires referenceSteps in (0, 3] and elapsedSteps in [0, 3]')
+            }
             const refill = initialized && !resetPending ? viewRefillPending : undefined
             writeParticleConfig(
                 configBytes,
@@ -403,7 +415,9 @@ export async function createFlowParticles(
                 encodedSteps + 1,
                 view,
                 refill,
-                useCenterSamples
+                useCenterSamples,
+                referenceSteps,
+                elapsedSteps
             )
             if (lastSimulation === undefined || lastTemporalSet !== temporal.bindSet ||
                 lastSpawnSet !== spawn.bindSet) {
@@ -471,6 +485,7 @@ export async function createFlowParticles(
             if (refill !== undefined) viewRefillCount++
             encodedSteps++
             centerSamples = useCenterSamples
+            simulatedReferenceSteps += referenceSteps
         }
 
         function reset(): void {
@@ -510,6 +525,7 @@ export async function createFlowParticles(
                 resetCount,
                 viewRefillCount,
                 centerSamples,
+                simulatedReferenceSteps,
             })
         }
 
@@ -561,9 +577,16 @@ function writeParticleConfig(
     frameSeed: number,
     frameView?: GeoViewSnapshot,
     refillView?: GeoViewSnapshot,
-    centerSamples = false
+    centerSamples = false,
+    referenceSteps = 1,
+    elapsedSteps = 1
 ): void {
 
+    const matrixId = temporal.temporal.lower.runtime.addressSpace.matrixId(temporal.requestedLevel)
+    const sourceCellSize = Math.fround(options.addressCodec.coverage.tileMatrixSet.matrix(matrixId).cellSize)
+    if (!positiveFinite(sourceCellSize)) {
+        throw new RangeError('Flow particle source cell size must be positive finite projected meters')
+    }
     bytes.fill(0)
     const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
     view.setUint32(0, maximumCount, true)
@@ -575,12 +598,15 @@ function writeParticleConfig(
     view.setFloat32(24, temporal.progress, true)
     view.setFloat32(28, options.activitySpawn, true)
     view.setFloat32(32, options.activityKill, true)
-    view.setFloat32(36, options.timeStep, true)
+    view.setFloat32(36, options.timeStep * referenceSteps, true)
     view.setFloat32(40, options.minimumDisplacementMeters, true)
     view.setFloat32(44, FLOW_PARTICLE_LEGACY_DISPLACEMENT_SCALE, true)
     view.setFloat32(48, options.maximumSpeed ?? 1, true)
     view.setUint32(56, refillView === undefined ? 0 : 1, true)
     view.setUint32(60, centerSamples ? 1 : 0, true)
+    view.setFloat32(160, referenceSteps, true)
+    view.setFloat32(164, elapsedSteps, true)
+    view.setFloat32(168, sourceCellSize, true)
     if (frameView !== undefined) {
         const camera = flowRenderViewValues(frameView, options.addressCodec)
         view.setUint32(52, 1, true)

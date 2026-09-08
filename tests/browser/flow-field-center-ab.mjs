@@ -19,7 +19,7 @@ try {
             'center: [120.95947265625,31.764953615111956]')})
     })
     await page.goto(`${base}/flowField/?proof=1&rate=0.000000001&zoom=14`)
-    await page.waitForFunction(() => document.body.dataset.status==='error' ||
+    await page.waitForFunction(() => document.body.dataset.status==='error' || document.body.dataset.status==='ready' &&
         window.__FLOW_FIELD_PROOF__?.facts()?.lastFrame.presentationReady,undefined,{timeout:90000})
     assert.equal(await page.locator('body').getAttribute('data-status'),'ready',JSON.stringify(errors))
     const start = await page.evaluate(() => {
@@ -34,7 +34,7 @@ try {
     const control = name => page.locator(`[data-flow-control="${name}"]`)
     const facts = () => page.evaluate(() => {
         const f=window.__FLOW_FIELD_PROOF__.facts()
-        return {time:f.lastFrame.temporal.presentedModelTime,steps:f.renderer.particles.encodedSteps,
+        return {time:f.lastFrame.temporal.presentedModelTime,steps:f.renderer.particles.encodedSteps,frame:f.renderer.frameCount,
             resets:f.renderer.particles.resetCount,centers:f.renderer.particles.centerSamples,
             boundary:f.renderer.history.boundary,ready:f.lastFrame.presentationReady,
             extraBytes:f.renderer.history.sdfExtraTextureBytes,cleared:f.lastFrame.history?.cleared,
@@ -45,7 +45,7 @@ try {
         await page.waitForFunction(mode => {
             const f=window.__FLOW_FIELD_PROOF__.facts()
             return f.lastFrame.presentationReady && f.renderer.history.boundary===mode &&
-                f.renderer.particles.centerSamples===mode.startsWith('sdf-center-')
+                (!f.timeline.playing || f.renderer.particles.centerSamples===mode.startsWith('sdf-center-'))
         },mode,{timeout:30000})
     }
     for (const mode of ['hard','sdf','sdf-center-linear','sdf-center-smooth']) {
@@ -60,7 +60,8 @@ try {
     await page.evaluate(() => window.__FLOW_FIELD_PROOF__.pause())
     await page.waitForFunction(() => {
         const f=window.__FLOW_FIELD_PROOF__.facts()
-        return !f.timeline.playing && f.frames.observedFrameCount>=f.frames.submittedFrameCount
+        return !f.timeline.playing && f.frames.observedFrameCount>=f.frames.submittedFrameCount &&
+            f.lastFrame.visualTime?.referenceSteps===0 && f.lastFrame.temporal?.presentedModelTime===f.timeline.modelTime
     })
     const paused=await facts()
     for (const mode of ['hard','sdf','sdf-center-linear','sdf-center-smooth','sdf-center-linear','hard']) {
@@ -69,6 +70,7 @@ try {
         assert.equal(snapshot.resets,paused.resets,'Mode controls preserve canonical particle slots')
         assert.equal(snapshot.camera,paused.camera)
         assert.equal(snapshot.time,paused.time)
+        assert.equal(snapshot.steps,paused.steps,'Paused controls do not simulate or re-inject the previous particle segment')
         assert.equal(snapshot.extraBytes,0)
         assert.equal(snapshot.cleared,false)
         const path=`${output}/${shots.length}-${mode}.png`
@@ -90,7 +92,7 @@ try {
     await page.mouse.wheel(0,-250)
     await page.waitForFunction(before => {
         const f=window.__FLOW_FIELD_PROOF__.facts()
-        return f.lastFrame.presentationReady && f.renderer.particles.encodedSteps>before.steps &&
+        return f.lastFrame.presentationReady && f.renderer.frameCount>before.frame &&
             JSON.stringify(f.lastFrame.view.clipFromRelativeWorld)!==before.camera
     },beforeMove,{timeout:60000})
     await page.setViewportSize({width:900,height:650})

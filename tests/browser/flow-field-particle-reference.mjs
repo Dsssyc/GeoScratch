@@ -30,13 +30,17 @@ struct FlowSpawnIndexSelection {
 @group(1) @binding(3) var<uniform> test_boundary: vec4u;
 fn FlowTest_after_boundary(position: FlowVelocityAddressFixedPosition) -> bool {
     let x = position.axes[0];
-    return x.high > test_boundary.y || (x.high == test_boundary.y && x.low >= test_boundary.x);
+    let after = x.high > test_boundary.y || (x.high == test_boundary.y && x.low >= test_boundary.x);
+    let bounded = test_boundary.z != 0u || test_boundary.w != 0u;
+    let before_end = x.high < test_boundary.w || (x.high == test_boundary.w && x.low < test_boundary.z);
+    return after && (!bounded || before_end);
 }
 fn FlowVelocity_source_contains(position: FlowVelocityAddressFixedPosition) -> bool {
     return test_field_state.x != 0u &&
         !((test_field_state.z & 2u) != 0u && FlowTest_after_boundary(position));
 }
 fn FlowVelocity_sample(position: FlowVelocityAddressFixedPosition, level: u32, temporal: FlowVelocityTemporal) -> FlowVelocitySample {
+    atomicAdd(&flowParticleCounters.reserved_count, 1u);
     let after = (test_field_state.z & 1u) != 0u && FlowTest_after_boundary(position);
     let velocity = select(test_velocity.xy, vec2f(0.0), after && (test_field_state.z & 4u) != 0u);
     let speed = length(velocity);
@@ -66,7 +70,56 @@ fn FlowSpawnIndex_record_visible(index: u32, revealed: bool) {}
 fn FlowSpawnIndex_refill_quota(particle_count: u32) -> u32 { return particle_count / 4u; }
 `
 const shader = addressCodec.wgslModule({ namespace: 'FlowVelocityAddress' }) + '\n' +
-    flowScreenProjectionWgsl(addressCodec) + '\n' + fixtureShader + '\n' + particleShader
+    flowScreenProjectionWgsl(addressCodec) + '\n' + fixtureShader + '\n' + particleShader + `
+@group(0) @binding(3) var<storage,read_write> test_probability: vec4f;
+@compute @workgroup_size(1)
+fn FlowTest_probability() {
+    let reference = clamp(0.003 + 0.001 * 4.0 / flowParticleConfig.maximum_speed, 0.0, 1.0);
+    test_probability = vec4f(FlowParticles_drop_probability(4.0), reference, flowParticleConfig.visual_time.x, 0.0);
+}
+@compute @workgroup_size(1)
+fn FlowTest_prediction() {
+    test_probability = vec4f(f32(FlowParticles_predicted_substeps(flowParticleConfig.camera_z)),
+        flowParticleConfig.camera_z, flowParticleConfig.visual_time.z);
+}
+`
+const random = input => {
+    let value = input || 0x9e3779b9
+    value = (value ^ (value << 13)) >>> 0
+    value = (value ^ (value >>> 17)) >>> 0
+    return (value ^ (value << 5)) >>> 0
+}
+// Choose deterministic, well-separated no-drop slots for displacement/lifetime
+// measurements; probability correctness is tested separately with the real helper.
+let cadenceSeed = 1
+while (![30,60,120].every(hz => {
+    let state = cadenceSeed
+    for (let index = 0; index < hz; index++) {
+        state = random(state ^ (index + 1))
+        if ((state >>> 8) / 16777216 < 1 - Math.pow(1 - .004,60 / hz) + .001) return false
+    }
+    return true
+})) cadenceSeed++
+const cadenceCases = [30,60,120].flatMap(hz => [
+    {kind:'moving',velocity:[2,0]},
+    {kind:'stagnant',velocity:[.004,0]},
+    {kind:'not-stagnant',velocity:[.006,0]},
+    {kind:'pending',velocity:[1,0],status:3,stagnant:5},
+    {kind:'zero',velocity:[0,0]},
+].map(value => ({
+    ...value,name:`cadence-${value.kind}-${hz}`,cadence:true,hz,latitude:45,
+    minimumDisplacement:.25,maximumStagnant:3600,initialRandom:cadenceSeed,
+    steps:Array.from({length:value.kind === 'zero' ? 1 : hz},(_,index) => ({
+        referenceSteps:60 / hz,
+        elapsedSteps:Math.floor((index + 1) * 60 / hz) - Math.floor(index * 60 / hz),
+        seed:index + 1,
+    })),
+})))
+const projectedScale45 = 6378137 / 6371000 / Math.cos(Math.PI / 4)
+const predictionCases = [.99,1.01,2.2].map(cells => ({
+    name:`source-step-${cells}`,latitude:45,velocity:[cells * 100 / 50 / projectedScale45,0],
+    sourceCellSize:100,expectedSamples:Math.ceil(cells) + 1,
+}))
 const cases = [
     { name: 'equator-east-wide-step', latitude: 0, velocity: [ 2, 0 ] },
     { name: 'midlatitude-north-wide-step', latitude: 45, velocity: [ 0, 2 ] },
@@ -107,16 +160,29 @@ const cases = [
     { name: 'natural-rebirth-without-view-refill', latitude: 45, velocity: [ 1, 0 ], count: 4096, rebirth: true },
     { name: 'bounded-quarter-view-refill', latitude: 45, velocity: [ 1, 0 ], count: 4096, rebirth: true, refill: true },
     { name: 'next-camera-refill-cohort', latitude: 45, velocity: [ 1, 0 ], count: 4096, rebirth: true, refill: true, seed: 2 },
+    ...cadenceCases,
+    ...predictionCases,
+    {name:'source-step-preserves-base',latitude:45,velocity:[.2,0],sourceCellSize:100,substeps:4,expectedSamples:5},
+    {name:'source-step-parent-fallback',latitude:45,velocity:[2.2 * 100 / 50 / projectedScale45,0],
+        sourceCellSize:100,status:2,expectedSamples:4},
+    {name:'source-step-mid-dry',latitude:45,velocity:[2,0],sourceCellSize:50,
+        boundaryOffsetMeters:30,boundaryEndMeters:70,advanceStatus:1,advanceZero:true,dead:true,expectedSamples:2},
+    {name:'source-step-mid-unknown',latitude:45,velocity:[2,0],sourceCellSize:50,
+        boundaryOffsetMeters:30,boundaryEndMeters:70,advanceStatus:3,pending:true,expectedSamples:2},
+    {name:'source-step-cap-sixteen',latitude:45,velocity:[2,0],sourceCellSize:1,expectedSamples:17},
 ].map(entry => {
     const origin = addressCodec.fromLonLat([ 120, entry.latitude ]).fixed.limbs
         .flatMap(axis => [ axis.low, axis.high ])
     const boundary = BigInt(origin[0]) + (BigInt(origin[1]) << 32n) +
         BigInt(Math.round((entry.boundaryOffsetMeters ?? 60) / addressCodec.quantumMeters))
+    const boundaryEnd = entry.boundaryEndMeters === undefined ? 0n :
+        BigInt(origin[0]) + (BigInt(origin[1]) << 32n) + BigInt(Math.round(entry.boundaryEndMeters / addressCodec.quantumMeters))
     return {
         ...entry, origin,
         previous: (entry.pending || entry.resumed || entry.expires)
             ? [ origin[0] - 1, ...origin.slice(1) ] : origin,
-        boundary: [ Number(boundary & 0xffffffffn), Number(boundary >> 32n), 0, 0 ],
+        boundary: [Number(boundary & 0xffffffffn),Number(boundary >> 32n),
+            Number(boundaryEnd & 0xffffffffn),Number(boundaryEnd >> 32n)],
         spawnPosition: addressCodec.fromLonLat([ 121, entry.latitude ]).fixed.limbs
             .flatMap(axis => [ axis.low, axis.high ]),
     }
@@ -131,7 +197,7 @@ try {
     browser = await chromium.launch({ channel: 'chrome', headless: true, args: [ '--enable-unsafe-webgpu' ] })
     const page = await browser.newPage()
     await page.goto(`http://127.0.0.1:${server.address().port}`)
-    const proof = await page.evaluate(async ({ shader, renderShader, cases, quantum }) => {
+    const proof = await page.evaluate(async ({ shader, renderShader, cases, quantum, defaultCellSize }) => {
         const adapter = await navigator.gpu.requestAdapter()
         if (adapter === null) throw new Error('WebGPU adapter unavailable')
         const device = await adapter.requestDevice()
@@ -152,16 +218,19 @@ try {
             config.setUint32(0, count, true)
             config.setUint32(8, fixture.substeps ?? 1, true)
             config.setUint32(12, fixture.maximumAge ?? 3600, true)
-            config.setUint32(16, 20, true)
+            config.setUint32(16, fixture.maximumStagnant ?? 20, true)
             config.setUint32(20, fixture.seed ?? 1, true)
             config.setFloat32(28, 0.002, true)
             config.setFloat32(32, fixture.kill ?? 0.001, true)
             config.setFloat32(36, 1, true)
-            config.setFloat32(40, 0.01, true)
+            config.setFloat32(40, fixture.minimumDisplacement ?? 0.01, true)
             config.setFloat32(44, 50, true)
             config.setFloat32(48, 4, true)
             config.setUint32(56, fixture.refill ? 1 : 0, true)
             config.setUint32(60, fixture.centers ? 1 : 0, true)
+            config.setFloat32(160, 1, true)
+            config.setFloat32(164, 1, true)
+            config.setFloat32(168, fixture.sourceCellSize ?? defaultCellSize, true)
             if (fixture.viewRadius !== undefined) {
                 config.setUint32(52, 1, true)
                 config.setFloat32(64, 1 / fixture.viewRadius, true)
@@ -182,7 +251,7 @@ try {
                 if (fixture.pending || fixture.resumed || fixture.expires) {
                     record.setFloat32(index * 56 + 32, 1, true)
                 }
-                record.setUint32(index * 56 + 48, count > 1 ? (index + 1) * 7919 : 0x12345678, true)
+                record.setUint32(index * 56 + 48, count > 1 ? (index + 1) * 7919 : fixture.initialRandom ?? 0x12345678, true)
                 record.setUint32(index * 56 + 40, fixture.age ?? 0, true)
                 record.setUint32(index * 56 + 44, fixture.stagnant ?? 0, true)
                 record.setUint32(index * 56 + 52, fixture.initialState ?? 1, true)
@@ -221,8 +290,17 @@ try {
             const output = device.createBuffer({ size: records.byteLength + 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ })
             const steps = []
             let observed
-            for (const [stepIndex, step] of (fixture.steps ?? [ {} ]).entries()) {
-                if (stepIndex > 0) output.unmap()
+            let mapped = false
+            const requestedSteps = fixture.steps ?? [{}]
+            for (const [stepIndex, step] of requestedSteps.entries()) {
+                if (mapped) { output.unmap(); mapped = false }
+                const referenceSteps = step.referenceSteps ?? 1
+                config.setFloat32(36, referenceSteps, true)
+                config.setUint32(8, fixture.substeps ?? 1, true)
+                config.setUint32(20, step.seed ?? fixture.seed ?? 1, true)
+                config.setFloat32(160, referenceSteps, true)
+                config.setFloat32(164, step.elapsedSteps ?? 1, true)
+                device.queue.writeBuffer(configBuffer,0,configBytes)
                 device.queue.writeBuffer(velocity, 0, new Float32Array([
                     ...fixture.velocity, step.status ?? fixture.status ?? 1,
                     fixture.rebirth || fixture.spawnAvailable ? 1 : 0,
@@ -235,10 +313,17 @@ try {
                 pass.setBindGroup(1, sampleGroup)
                 pass.dispatchWorkgroups(Math.ceil(count / 256))
                 pass.end()
+                // Cadence cases need only their final state, not hundreds of
+                // synchronous readbacks that would dominate the test's runtime.
+                if (fixture.cadence && stepIndex + 1 < requestedSteps.length) {
+                    device.queue.submit([encoder.finish()])
+                    continue
+                }
                 encoder.copyBufferToBuffer(particles, 0, output, 0, records.byteLength)
                 encoder.copyBufferToBuffer(counters, 0, output, records.byteLength, 16)
                 device.queue.submit([ encoder.finish() ])
                 await output.mapAsync(GPUMapMode.READ)
+                mapped = true
                 observed = new DataView(output.getMappedRange())
                 const snapshot = observed
                 steps.push({
@@ -249,6 +334,7 @@ try {
                     stagnant: snapshot.getUint32(44, true),
                     state: snapshot.getUint32(52, true),
                     counters: [ 0, 1, 2 ].map(index => snapshot.getUint32(records.byteLength + index * 4, true)),
+                    samples: snapshot.getUint32(records.byteLength + 12,true),
                 })
             }
             const axis = offset => BigInt(observed.getUint32(offset, true)) +
@@ -298,6 +384,7 @@ try {
                     -Number(axis(8) - originalAxis(2)) * quantum ],
                 state: observed.getUint32(52, true),
                 counters: [ 0, 1, 2 ].map(index => observed.getUint32(records.byteLength + index * 4, true)),
+                samples: observed.getUint32(records.byteLength + 12,true),
                 steps,
                 ...(refill === undefined ? {} : { refill }),
             })
@@ -305,6 +392,65 @@ try {
             for (const resource of [ configBuffer, particles, counters, velocity, spawnPosition,
                 fieldState, boundary, output ]) resource.destroy()
         }
+        const probabilityPipeline = await device.createComputePipelineAsync({
+            layout:'auto',compute:{module,entryPoint:'FlowTest_probability'},
+        })
+        const probabilityConfig = device.createBuffer({size:272,usage:GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST})
+        const probabilityOutput = device.createBuffer({size:16,usage:GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC})
+        const probabilityReadback = device.createBuffer({size:16,usage:GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST})
+        const probabilityGroup = device.createBindGroup({layout:probabilityPipeline.getBindGroupLayout(0),entries:[
+            {binding:0,resource:{buffer:probabilityConfig}},{binding:3,resource:{buffer:probabilityOutput}},
+        ]})
+        const probabilities = []
+        for (const referenceSteps of [.5,1,2,3]) {
+            const bytes = new ArrayBuffer(272), config = new DataView(bytes)
+            config.setFloat32(48,4,true)
+            config.setFloat32(160,referenceSteps,true)
+            device.queue.writeBuffer(probabilityConfig,0,bytes)
+            const encoder = device.createCommandEncoder(), pass = encoder.beginComputePass()
+            pass.setPipeline(probabilityPipeline)
+            pass.setBindGroup(0,probabilityGroup)
+            pass.dispatchWorkgroups(1)
+            pass.end()
+            encoder.copyBufferToBuffer(probabilityOutput,0,probabilityReadback,0,16)
+            device.queue.submit([encoder.finish()])
+            await probabilityReadback.mapAsync(GPUMapMode.READ)
+            const values = new Float32Array(probabilityReadback.getMappedRange())
+            probabilities.push({referenceSteps,probability:values[0],reference:values[1]})
+            probabilityReadback.unmap()
+        }
+        const predictionPipeline = await device.createComputePipelineAsync({
+            layout:'auto',compute:{module,entryPoint:'FlowTest_prediction'},
+        })
+        const predictionGroup = device.createBindGroup({layout:predictionPipeline.getBindGroupLayout(0),entries:[
+            {binding:0,resource:{buffer:probabilityConfig}},{binding:3,resource:{buffer:probabilityOutput}},
+        ]})
+        const predictions = []
+        const predictionProbes = [.99,1.01,2.2].flatMap(cells => [0,Math.PI / 4,Math.PI / 2].map(angle => ({
+            displacement:[Math.cos(angle)*cells*100,Math.sin(angle)*cells*100],base:1,expected:Math.ceil(cells),
+        })))
+        predictionProbes.push({displacement:[20,0],base:4,expected:4},
+            {displacement:[1601,0],base:1,expected:16},{displacement:[1e30,1e30],base:1,expected:16})
+        for (const probe of predictionProbes) {
+            const bytes = new ArrayBuffer(272), config = new DataView(bytes)
+            config.setUint32(8,probe.base,true)
+            config.setFloat32(144,probe.displacement[0],true)
+            config.setFloat32(148,probe.displacement[1],true)
+            config.setFloat32(168,100,true)
+            device.queue.writeBuffer(probabilityConfig,0,bytes)
+            const encoder = device.createCommandEncoder(), pass = encoder.beginComputePass()
+            pass.setPipeline(predictionPipeline)
+            pass.setBindGroup(0,predictionGroup)
+            pass.dispatchWorkgroups(1)
+            pass.end()
+            encoder.copyBufferToBuffer(probabilityOutput,0,probabilityReadback,0,16)
+            device.queue.submit([encoder.finish()])
+            await probabilityReadback.mapAsync(GPUMapMode.READ)
+            const actual = new Float32Array(probabilityReadback.getMappedRange())[0]
+            predictions.push({...probe,actual})
+            probabilityReadback.unmap()
+        }
+        for (const resource of [probabilityConfig,probabilityOutput,probabilityReadback]) resource.destroy()
         const renderModule = device.createShaderModule({
             code: `const FLOW_PARTICLE_MAXIMUM_SPEED = 4.0f;\n${renderShader}`,
         })
@@ -385,8 +531,8 @@ try {
         const validation = await device.popErrorScope()
         if (validation !== null) throw new Error(validation.message)
         device.destroy()
-        return { results, colors }
-    }, { shader, renderShader, cases, quantum: addressCodec.quantumMeters })
+        return { results, colors, probabilities, predictions }
+    }, { shader, renderShader, cases, quantum: addressCodec.quantumMeters,defaultCellSize:WebMercatorQuad.matrix('0').cellSize })
     const cohorts = proof.results.filter(result => result.refill?.forcedReborn > 0)
     const cohortSlots = offset => new Set(Array.from({length:4096}, (_v,index) => index)
         .filter(index => (index + offset) % 4096 < 1024))
@@ -396,6 +542,30 @@ try {
         'Consecutive camera refills must not immediately retire the same newborn cohort')
     for (const [ index, result ] of proof.results.entries()) {
         const fixture = cases[index]
+        if (fixture.expectedSamples !== undefined) assert.equal(result.samples,fixture.expectedSamples,fixture.name)
+        if (fixture.cadence) {
+            const state = result.steps.at(-1)
+            if (fixture.kind === 'zero') {
+                assert.equal(state.state,0,`${fixture.name}: zero velocity dies even before a whole age tick`)
+                assert.deepEqual(state.counters,[0,1,1],fixture.name)
+            } else {
+                assert.equal(state.state,1,fixture.name)
+                assert.equal(state.age,60,`${fixture.name}: one second is sixty integer reference-age ticks`)
+                assert.equal(state.stagnant,fixture.kind === 'stagnant' ? 60 : fixture.kind === 'pending' ? 5 : 0,fixture.name)
+                assert.deepEqual(state.counters,[1,0,0],fixture.name)
+                const scale = 6378137 / 6371000 / Math.cos(fixture.latitude * Math.PI / 180)
+                fixture.velocity.forEach((velocity,axis) => {
+                    const expected = fixture.kind === 'pending' ? 0 : velocity * 50 * 60 * scale
+                    assert.ok(Math.abs(result.displacement[axis] - expected) < .01,
+                        `${fixture.name} axis ${axis}: expected ${expected}, got ${result.displacement[axis]}`)
+                })
+                if (fixture.kind === 'pending') {
+                    assert.deepEqual(state.previous,state.current,'Unknown data never draws a bridge')
+                    assert.deepEqual(state.velocity,[0,0],'Unknown lifetime advances without fictitious velocity')
+                }
+            }
+            continue
+        }
         if (fixture.pending || fixture.resumed || fixture.expires) {
             const held = result.steps[0]
             assert.equal(held.state, 1, `${fixture.name}: pending slot remains active`)
@@ -448,6 +618,21 @@ try {
                     `${fixture.name} axis ${axis}: expected ${expected}, got ${result.displacement[axis]}`)
             })
         }
+    }
+    for (const {referenceSteps,probability,reference} of proof.probabilities) {
+        if (referenceSteps === 1) assert.equal(probability,reference,'60 Hz keeps the original probability exactly')
+        const expected = 1 - Math.pow(1 - reference,referenceSteps)
+        assert.ok(Math.abs(probability - expected) < 2e-7,'GPU drop hazard follows elapsed reference time')
+        // An n-frame survival product has error at most n times the per-frame
+        // probability error. GPU pow has finite precision (not exact JS math).
+        assert.ok(Math.abs(Math.pow(1 - probability,60 / referenceSteps) - Math.pow(1 - reference,60)) < 60 / referenceSteps * 2e-7,
+            `30/60/120 Hz one-second drop survival: steps=${referenceSteps}, probability=${probability}, reference=${reference}, ` +
+            `difference=${Math.pow(1 - probability,60 / referenceSteps) - Math.pow(1 - reference,60)}`)
+    }
+    for (const prediction of proof.predictions) {
+        assert.equal(prediction.actual,prediction.expected,
+            `Source-texel predictor ${JSON.stringify(prediction.displacement)} base ${prediction.base}`)
+        assert.ok(Number.isFinite(prediction.actual)&&prediction.actual>=1&&prediction.actual<=16)
     }
     const ramp = [ 0x3288bd, 0x66c2a5, 0xabdda4, 0xe6f598, 0xfee08b, 0xfdae61, 0xf46d43, 0xd53e4f ]
     for (const { speed, color } of proof.colors) {

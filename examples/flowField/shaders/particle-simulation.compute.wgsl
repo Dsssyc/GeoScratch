@@ -35,7 +35,7 @@ struct FlowParticleConfig {
     camera_y: vec2u,
     camera_z: vec2f,
     meters_per_quantum: f32,
-    reserved_view: vec3f,
+    visual_time: vec3f,
     previous_clip_from_relative_world: mat4x4f,
     previous_camera_x: vec2u,
     previous_camera_y: vec2u,
@@ -87,7 +87,15 @@ fn FlowParticles_unknown(position: FlowVelocityAddressFixedPosition, sample: Flo
 }
 
 fn FlowParticles_increment_saturated(value: u32) -> u32 {
-    return min(value, 0xfffffffeu) + 1u;
+    let elapsed = u32(flowParticleConfig.visual_time.y);
+    return min(value, 0xffffffffu - elapsed) + elapsed;
+}
+
+fn FlowParticles_drop_probability(speed: f32) -> f32 {
+    let reference = clamp(0.003 + 0.001 * speed / flowParticleConfig.maximum_speed, 0.0, 1.0);
+    // Preserve the reference 60 Hz probability bit-for-bit.
+    if (flowParticleConfig.visual_time.x == 1.0) { return reference; }
+    return 1.0 - pow(1.0 - reference, flowParticleConfig.visual_time.x);
 }
 
 fn FlowParticles_hold(particle: ptr<function, FlowParticle>) {
@@ -155,19 +163,22 @@ fn FlowParticles_build_refill_index(@builtin(global_invocation_id) id: vec3u) {
     FlowSpawnIndex_record_visible(id.x, !was_visible);
 }
 
-fn FlowParticles_canonical_displacement(
-    position: FlowVelocityAddressFixedPosition,
-    ground_meters: vec2f,
-) -> vec2f {
+fn FlowParticles_projected_scale(position: FlowVelocityAddressFixedPosition) -> f32 {
     // Only latitude is reduced to a world fraction. Canonical position stays wide-fixed.
     let address = FlowVelocityAddress_address(position, 0u);
     let normalized_y = (f32(address.texel.y) + address.sub_texel.y) / 256.0;
     let latitude_mercator = 3.141592653589793 * (1.0 - 2.0 * normalized_y);
     let secant_latitude = (exp(latitude_mercator) + exp(-latitude_mercator)) * 0.5;
     // Flow Layer uses a 6371000m sphere for displacement; WebMercator uses 6378137m.
-    let projected_scale = secant_latitude * (6378137.0 / 6371000.0);
-    // U/V are east/north; canonical addresses grow east/south.
-    return vec2f(ground_meters.x, -ground_meters.y) * projected_scale;
+    return secant_latitude * (6378137.0 / 6371000.0);
+}
+
+fn FlowParticles_predicted_substeps(projected_displacement: vec2f) -> u32 {
+    // Resolve prediction against requested source texels, never camera pixels or
+    // a coarser residency fallback. This is not continuous collision detection:
+    // later acceleration and the 16-step cap can exceed one texel per substep.
+    let desired = ceil(length(projected_displacement) / flowParticleConfig.visual_time.z);
+    return u32(clamp(max(f32(flowParticleConfig.substeps), desired), 1.0, 16.0));
 }
 
 fn FlowParticles_dormant(particle: ptr<function, FlowParticle>) {
@@ -239,8 +250,7 @@ fn FlowParticles_simulate(@builtin(global_invocation_id) global_id: vec3u) {
         sample.speed < flowParticleConfig.activity_kill;
 
     particle.random_state = FlowParticles_random(particle.random_state ^ flowParticleConfig.frame_seed);
-    let drop_probability = clamp(0.003 + 0.001 * sample.speed /
-        flowParticleConfig.maximum_speed, 0.0, 1.0);
+    let drop_probability = FlowParticles_drop_probability(sample.speed);
     let random_fraction = f32(particle.random_state >> 8u) / 16777216.0;
     retire = retire || random_fraction < drop_probability;
     var refill = false;
@@ -257,13 +267,17 @@ fn FlowParticles_simulate(@builtin(global_invocation_id) global_id: vec3u) {
         var candidate = particle.current;
         var displacement_meters = vec2f(0.0);
         var pending = false;
-        for (var substep = 0u; substep < flowParticleConfig.substeps; substep++) {
+        var projected_scale = FlowParticles_projected_scale(candidate);
+        let predicted_ground = sample.velocity * flowParticleConfig.time_step * flowParticleConfig.legacy_displacement_scale;
+        let steps = FlowParticles_predicted_substeps(vec2f(predicted_ground.x, -predicted_ground.y) * projected_scale);
+        for (var substep = 0u; substep < steps; substep++) {
             let delta_meters = sample.velocity * flowParticleConfig.time_step *
                 flowParticleConfig.legacy_displacement_scale /
-                f32(flowParticleConfig.substeps);
+                f32(steps);
             let advanced = FlowScreen_advance_meters(
                 candidate,
-                FlowParticles_canonical_displacement(candidate, delta_meters),
+                // Keep the reference's ground division before projected scaling.
+                vec2f(delta_meters.x, -delta_meters.y) * projected_scale,
             );
             if (advanced.north_south_valid == 0u) {
                 retire = true;
@@ -289,6 +303,7 @@ fn FlowParticles_simulate(@builtin(global_invocation_id) global_id: vec3u) {
                 retire = true;
                 break;
             }
+            if (substep + 1u < steps) { projected_scale = FlowParticles_projected_scale(candidate); }
         }
         if (pending) {
             // current was never published during substeps: discard every tentative
@@ -302,7 +317,7 @@ fn FlowParticles_simulate(@builtin(global_invocation_id) global_id: vec3u) {
             particle.stagnant_steps = select(
                 FlowParticles_increment_saturated(particle.stagnant_steps),
                 0u,
-                length(displacement_meters) >= flowParticleConfig.minimum_displacement_meters,
+                length(displacement_meters) >= flowParticleConfig.minimum_displacement_meters * flowParticleConfig.visual_time.x,
             );
             atomicAdd(&flowParticleCounters.active_count, 1u);
         }

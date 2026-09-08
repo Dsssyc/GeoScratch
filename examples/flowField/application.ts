@@ -326,7 +326,7 @@ export async function startFlowFieldApplication(
                 })
             }
             try {
-                const rendered = await renderer.render(frameNumber, captured, current)
+                const rendered = await renderer.render(frameNumber, captured, current, wallTime)
                 lastFrame = rendered.value
                 return rendered
             } catch (error) {
@@ -467,12 +467,14 @@ export async function startFlowFieldApplication(
     function play(input: Readonly<{ wallTime: number }>): FlowTimelineSnapshot {
 
         assertControllable()
+        renderer.resetVisualClock()
         return applyControl(timeline.play(input))
     }
 
     function pause(input: Readonly<{ wallTime: number }>): FlowTimelineSnapshot {
 
         assertControllable()
+        renderer.resetVisualClock()
         return applyControl(timeline.pause(input))
     }
 
@@ -559,7 +561,8 @@ export async function startFlowFieldApplication(
         const rendered = await renderer.render(
             renderer.facts().frameCount + 1,
             capture,
-            admitted
+            admitted,
+            readWallTime(options)
         )
         lifetime.assertActive()
         lastFrame = rendered.value

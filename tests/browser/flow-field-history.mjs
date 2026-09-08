@@ -209,6 +209,7 @@ try {
                 vec(288,[8,1]);vec(296,[8,1])
                 camera.flatMap(axis=>[axis.low,axis.high]).forEach((value,index)=>view.setUint32(304+index*4,value,true))
                 vec(320,[0.5,0]);put(332,fixture.progress??(fixture.support===1?.5:0));put(336,fixture.threshold??0.001);put(340,0.25)
+                view.setUint32(344,1,true)
                 const resource=buffer(bytes,GPUBufferUsage.UNIFORM)
                 return device.createBindGroup({layout:layout0,entries:[{binding:0,resource:{buffer:resource}}]})
             }

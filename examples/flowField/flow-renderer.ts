@@ -108,6 +108,8 @@ import type {
 import { FLOW_FIELD_PRESENTATION, flowFieldPresentation } from './flow-presentation.ts'
 import type { FlowFieldPresentation } from './flow-presentation.ts'
 import { FLOW_CENTER_CACHE_MAX_PAGES } from './flow-center-cache-plan.ts'
+import { createFlowVisualClock } from './flow-visual-clock.ts'
+import type { FlowVisualTime } from './flow-visual-clock.ts'
 import { createFlowScreenInspector } from './flow-screen-inspector.ts'
 import { flowPairViewReady, flowRuntimeViewReady } from './flow-pair-presentation.ts'
 
@@ -132,6 +134,7 @@ export type FlowFieldRendererFrame = Readonly<{
     presentationReady: boolean
     /** Local particle work may proceed while full-view presentation remains incomplete. */
     particlesAdvancing: boolean
+    visualTime: FlowVisualTime
 }>
 
 export type FlowFieldRendererFacts = Readonly<{
@@ -142,6 +145,7 @@ export type FlowFieldRendererFacts = Readonly<{
     maximumCandidatePages: number
     maximumCandidateCount: number
     maximumSpeed: number
+    visualTime: FlowVisualTime
     temporalWindow: ReturnType<FlowTemporalRuntimeWindow<FlowVelocitySampleRuntime>['snapshot']>
     temporal: ReturnType<FlowTemporalBindings['facts']>
     viewDemand: ReturnType<FlowViewDemandAdapter['facts']>
@@ -156,7 +160,8 @@ export type FlowFieldRenderer = Readonly<{
     render(
         frameNumber: number,
         capture: GeoViewSourceCapture<MapLibrePlanarCameraState>,
-        timeline: FlowTimelineSnapshot
+        timeline: FlowTimelineSnapshot,
+        wallTime: number
     ): Promise<GeoFrameResult<FlowFieldRendererFrame>>
     suspendTemporal(): Promise<void>
     presentRetained(
@@ -165,6 +170,8 @@ export type FlowFieldRenderer = Readonly<{
     ): Promise<GeoFrameResult<undefined>>
     setPresentation(presentation: FlowFieldPresentation): void
     resetVisuals(): void
+    /** Reanchors animation time without clearing the currently visible image. */
+    resetVisualClock(): void
     flushResidency(): Promise<void>
     facts(): FlowFieldRendererFacts
     dispose(): Promise<void>
@@ -223,6 +230,8 @@ export async function createFlowFieldRenderer(
     let appliedResetRevision = 0
     let presentationRevision = 0
     let clearedPresentationRevision = 0
+    const visualClock = createFlowVisualClock()
+    let visualTime: FlowVisualTime = Object.freeze({referenceSteps:0,wholeSteps:0,discardedSeconds:0})
 
     try {
         constructionCapture = temporalWindow.capture()
@@ -349,12 +358,13 @@ export async function createFlowFieldRenderer(
         async function render(
             frameNumber: number,
             capture: GeoViewSourceCapture<MapLibrePlanarCameraState>,
-            timeline: FlowTimelineSnapshot
+            timeline: FlowTimelineSnapshot,
+            wallTime: number
         ): Promise<GeoFrameResult<FlowFieldRendererFrame>> {
 
             assertActive()
             if (!Number.isSafeInteger(frameNumber) || frameNumber <= frameCount ||
-                capture?.view === undefined || timeline?.readiness !== 'ready') {
+                capture?.view === undefined || timeline?.readiness !== 'ready' || !Number.isFinite(wallTime) || wallTime < 0) {
                 throw new TypeError(
                     'Flow Field render requires one monotonic view and admitted timeline'
                 )
@@ -486,12 +496,15 @@ export async function createFlowFieldRenderer(
                     particles.reset()
                     populatedParticleView = undefined
                     appliedResetRevision = frameResetRevision
+                    visualClock.reset()
                 }
                 // Sampling uses this capture's immutable publications at actual
                 // particle positions, not camera-equality as a global permission.
                 // An explicit seek/loop reset must still precede any new ink.
-                const particlesAdvancing = framePresentation.view === 'particles' &&
+                const particlesEligible = framePresentation.view === 'particles' &&
                     appliedResetRevision === frameResetRevision
+                visualTime = visualClock.tick(wallTime,particlesEligible && timeline.playing)
+                const particlesAdvancing = particlesEligible && visualTime.referenceSteps > 0
                 renderView.encode(builder, view)
                 if (packedCells !== demandFrame.candidateCells) {
                     packedCandidates = packFlowCandidateCells(
@@ -529,7 +542,8 @@ export async function createFlowFieldRenderer(
                         }
                     }
                     particles.encode(builder, particleSpawn.bindings, prepared, view,
-                        framePresentation.boundary === 'sdf-center-linear' || framePresentation.boundary === 'sdf-center-smooth')
+                        framePresentation.boundary === 'sdf-center-linear' || framePresentation.boundary === 'sdf-center-smooth',
+                        visualTime.referenceSteps,visualTime.wholeSteps)
                 }
                 if (presentationReady && framePresentation.contour) contour.encode(builder, candidates, demandFrame.candidateCells.length, {
                     generation: supportSnapshot.generation,
@@ -538,11 +552,11 @@ export async function createFlowFieldRenderer(
                     progress: supportSnapshot.progress,
                     activityKill: supportSnapshot.activityKill,
                 }, prepared)
-                const content = framePresentation.view === 'particles' ? [particleRender.draw]
+                const content = framePresentation.view === 'particles' ? (particlesAdvancing ? [particleRender.draw] : [])
                     : presentationReady ? [inspector.encode(builder, view, prepared, framePresentation)] : []
                 const historyFrame = presentationReady || particlesAdvancing ? history.encode(builder, view,
                     content,
-                    framePresentation.view === 'particles' && framePresentation.trails,
+                    framePresentation.view === 'particles' && (framePresentation.trails || visualTime.referenceSteps === 0),
                     framePresentation.view === 'particles' ? prepared : undefined,
                     framePresentation.view === 'particles' ? framePresentation.boundary : 'hard',
                     framePresentation.sdfFeatherTexels,
@@ -550,7 +564,8 @@ export async function createFlowFieldRenderer(
                         pages: demandFrame.candidatePages,
                         lowerSnapshot: publications.find(value=>value.runtime===prepared.temporal.lower.runtime)!.publication.publication.snapshot,
                         upperSnapshot: publications.find(value=>value.runtime===prepared.temporal.upper.runtime)!.publication.publication.snapshot,
-                    }
+                    },
+                    visualTime.wholeSteps
                 ) : history.presentRetained(builder, view)
                 if (presentationReady && framePresentation.contour) builder.render(overlayPass, [contour.draw])
                 const submitted = builder.submit()
@@ -592,6 +607,7 @@ export async function createFlowFieldRenderer(
                         history: historyFrame,
                         presentationReady,
                         particlesAdvancing,
+                        visualTime,
                     }),
                 })
             } finally {
@@ -624,6 +640,7 @@ export async function createFlowFieldRenderer(
         }
 
         async function suspendTemporal(): Promise<void> {
+            resetVisualClock()
 
             assertActive()
             if (constructionInFlight !== undefined) await constructionInFlight
@@ -649,6 +666,7 @@ export async function createFlowFieldRenderer(
             frameNumber: number,
             capture: GeoViewSourceCapture<MapLibrePlanarCameraState>
         ): Promise<GeoFrameResult<undefined>> {
+            resetVisualClock()
             assertActive()
             if (constructionInFlight !== undefined || frameInFlight !== undefined) {
                 throw new Error('Flow retained presentation requires an idle renderer')
@@ -732,6 +750,7 @@ export async function createFlowFieldRenderer(
                 initialized,
                 disposed,
                 frameCount,
+                visualTime,
                 cellsPerPageEdge,
                 maximumCandidatePages,
                 maximumCandidateCount,
@@ -783,6 +802,12 @@ export async function createFlowFieldRenderer(
         function resetVisuals(): void {
             assertActive()
             resetRevision++
+            resetVisualClock()
+        }
+
+        function resetVisualClock(): void {
+            visualClock.reset()
+            visualTime = Object.freeze({referenceSteps:0,wholeSteps:0,discardedSeconds:0})
         }
 
         function setPresentation(value: FlowFieldPresentation): void {
@@ -792,12 +817,13 @@ export async function createFlowFieldRenderer(
                 next.sample !== presentation.sample) {
                 resetRevision++
                 presentationRevision++
+                resetVisualClock()
             }
             presentation = next
         }
 
         return Object.freeze({
-            render, suspendTemporal, presentRetained, setPresentation, resetVisuals,
+            render, suspendTemporal, presentRetained, setPresentation, resetVisuals, resetVisualClock,
             flushResidency, facts, dispose,
         })
     } catch (error) {

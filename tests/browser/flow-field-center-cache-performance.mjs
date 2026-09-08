@@ -27,7 +27,7 @@ try {
             await route.fulfill({response,body:body.replace(marker,'centerCache: void 0')})
         })
         await page.goto(`${base}/${reference?'flowLayer':'flowField'}/?proof=1&rate=0.000000001&zoom=9`)
-        await page.waitForFunction(reference=>document.body.dataset.status==='error'||(reference
+        await page.waitForFunction(reference=>document.body.dataset.status==='error'||document.body.dataset.status==='ready'&&(reference
             ? window.__FLOW_LAYER_PROOF__?.facts()?.observedFrames>=75
             : window.__FLOW_FIELD_PROOF__?.facts()?.lastFrame.presentationReady),reference,{timeout:90000})
         assert.equal(await page.locator('body').getAttribute('data-status'),'ready',errors.join('\n'))

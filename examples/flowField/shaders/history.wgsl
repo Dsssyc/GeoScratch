@@ -25,6 +25,7 @@ struct FlowFieldHistoryUniform {
     progress: f32,
     activityKill: f32,
     presentationFeather: f32,
+    decaySteps: u32,
 };
 
 struct HistoryProjection {
@@ -142,7 +143,11 @@ fn fMain(input: VertexOutput) -> @location(0) vec4f {
         let historyPixel = clamp(historyUv * dim - vec2f(0.5), vec2f(0.0), dim - vec2f(1.0));
         color = linearSampling(historyTexture, historyPixel, dim);
     }
-    let faded = floor(255.0 * color * cleanupUniform.trailDecay) / 255.0;
+    if (cleanupUniform.decaySteps == 0u) { return color; }
+    var faded = color;
+    for (var tick = 0u; tick < min(cleanupUniform.decaySteps, 3u); tick++) {
+        faded = floor(255.0 * faded * cleanupUniform.trailDecay) / 255.0;
+    }
     let residual = max(max(faded.r, faded.g), faded.b);
     if (residual <= cleanupUniform.trailCutoff) {
         return vec4f(0.0);
