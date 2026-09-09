@@ -2,7 +2,7 @@
 docId: geo.view-cover.zh
 canonical: false
 translationOf: ./view-cover.md
-canonicalDigest: 88e35103ebacd94d4f2dfbad30ccc9b844dd774dfc9048758e200b48ae00fd6a
+canonicalDigest: f057e0c2e82deee6b87d3679164e37f5b447eee848661c75ec7ccccc738ec412
 ---
 # WebMercatorQuad 视图覆盖
 
@@ -35,7 +35,8 @@ Kernel 从声明的最小几何窗口开始，探查有限 parent，保留每个
 prefix-free 可见 cut，并执行局部 2:1 closure。它不从世界根开始、
 不做 root-to-leaf quadtree traversal、不统计 trial cut、不检查 atlas slot，也不把
 上一帧拓扑作为选择权威。descriptor、lookup 或 patch 容量溢出是硬诊断，不会静默
-粗化 cut。
+粗化 cut。合法空可见 cut 返回 `patchCount: 0`，省略 level/span 范围；范围哨兵值
+不是公共结果。即使没有剩余 patch，溢出或未完成的 2:1 closure 仍是失败。
 
 `WebMercatorTileVerticalBounds` 是几何 fact，不是 terrain 身份。平面 consumer
 可以使用 `[0, 0]`；terrain 可以转换 source elevation metadata；挤出要素可以提供
@@ -55,12 +56,15 @@ compute，`capture()` 只读取几何 state。反馈包含 candidate/patch 数�
 frame，拥有 source coverage 与 parity resource，对可执行 source tile 去重，并保持
 `desiredSampleLevel`、`sourceLevelCeiling`、请求身份、相机环绕距离优先级、frame
 epoch 和 residency epoch 分离。其有限反馈可转换为 `ViewTileDemandSet`；Virtual
-Raster 仍然位于下游且保持被动。
+Raster 仍然位于下游且保持被动。Projection 在读取 patch 前拒绝失败 cover 或不匹配
+的 frame，输出零 demand 并设置既有 `overflowCount` 失败标记。因此非零 overflow
+也可能表示上游 cover 无效；反馈解码会拒绝它，不会把它视为合法空 demand。
 
 `GpuWebMercatorQuadPatchDraw` 是独立 draw-count adapter。它借用 cover state，
 拥有 consumer element count 和 parity draw-indirect buffer，通过一次持久 compute
 写入 `[elementCount, patchCount, 0, 0, 0]`。该 20-byte record 可直接用于 indexed
-draw，其前 16 bytes 也可用于 non-indexed draw。Cover 不拥有这些 buffer 或 consumer mesh。
+draw，其前 16 bytes 也可用于 non-indexed draw。失败 cover 输出零 instance，避免在
+CPU 反馈尚未返回时绘制部分几何。Cover 不拥有这些 buffer 或 consumer mesh。
 
 相关决策：ADR-083 建立 inverse cover 与被动 Virtual Raster；ADR-084 建立
 reference-pixel 质量；ADR-086 废弃其中的 pitch gate，并分开 cover、source demand

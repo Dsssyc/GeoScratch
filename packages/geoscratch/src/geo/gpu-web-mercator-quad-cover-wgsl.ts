@@ -806,5 +806,12 @@ fn generateWebMercatorQuadCover() {
     coverBalancePatches();
     coverCompactVisiblePatches();
     coverFinalizeLookup();
+    if (coverState.descriptorOverflowCount != 0u ||
+        coverState.lookupOverflowCount != 0u ||
+        coverState.maximumAdjacentLevelDelta > 1u) {
+        // Preserve failure feedback, but revoke the partial cut before any consumer.
+        coverState.patchCount = 0u;
+        coverClearLookup();
+    }
 }
 `

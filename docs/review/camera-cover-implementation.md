@@ -41,7 +41,7 @@ constraints are:
 5. Integration acceptance: all current Terrain gates and Flow spatial/resource
    continuity gates; record timings and limitations without extrapolating old data.
 
-Stages 2–5 are pending. The design commit does not certify their implementation.
+Stage 2 is verified. Stages 3–5 remain pending.
 
 ## Correctness Obligations
 
@@ -76,4 +76,57 @@ Do not reset this checkout, edit frozen Flow Layer or regenerate backend data.
 | Stage | Commit / evidence | Status |
 | --- | --- | --- |
 | Baseline | `071d82b` | Source and resource audit completed before branch creation |
-| Design | This document and ADR-125; `npm run docs:check` and `git diff --check` | Verified |
+| Design | `635016b`; `npm run docs:check` and `git diff --check` | Verified |
+| Outcome boundary | Empty feedback, failed-cut revocation and GPU consumer guards | Verified: main, wireframe and streaming native gates passed |
+
+
+## Baseline Observations (2026-09-09)
+
+The exact `071d82b` source was archived into an isolated temporary checkout, with
+existing DEM data reused. Chrome 152.0.7977.83 ran headless on the native Apple
+Metal 3 adapter (not a fallback adapter). Original assertions in the three Terrain
+browser scripts all passed; only build preparation was skipped in their temporary
+runners. COG and manifest hashes were unchanged, and all owned browser/server ports
+closed. The wireframe proof includes DPR 1, 1.25, 1.5, 2 and 3, continuous pitch,
+wide top-down, zoom, A-B-A, 2:1 and 90-frame shaded/wireframe camera transitions.
+Both 90-frame runs submitted all 90 transitions with no stale transition.
+
+A separate public-cover microbenchmark used synthetic projection matrices, no
+Surface, no Worker and no backend. Each scenario submitted 112 frames: 14 warmup,
+98 timed; one encoder in seven carried timestamps, giving 14 GPU samples. These
+numbers are not Flow Field timings or end-to-end frame critical paths.
+
+| Scenario | Patches | Candidate feedback | GPU cover mean |
+| --- | ---: | ---: | ---: |
+| flat-z9 | 8 | 1028 | 2.904 ms |
+| pitch70-z10 | 64 | 1044 | 8.846 ms |
+| wide-flat-z13 | 8 | 1092 | 3.622 ms |
+
+Timestamp and native errors were empty. Stage comparisons must reuse these exact
+synthetic inputs and measurement conditions, including the observer overhead.
+
+## Outcome Boundary Verification
+
+The focused native outcome fixture injects valid and invalid cover state into the
+public downstream adapters. Both parity resources are exercised. Normal and
+post-failure recovery produce two demand pages/two draw instances; a valid empty
+cut produces neither. Descriptor overflow, lookup overflow and incomplete adjacency
+produce zero draw instances and zero demands with a projection failure marker.
+Frame mismatch is rejected by projection and feedback; the draw adapter has no
+independent frame metadata binding and the fixture does not claim otherwise.
+
+The cover kernel itself revokes its patch count and lookup when construction fails.
+CPU feedback still rejects that failed result. This prevents partial geometry use
+without converting failure into a successful empty cut. The eight native fixture
+cases passed with successful native observation, no uncaptured error and zero final
+resource/readback/staging/mapping/pending counts.
+
+Node focused cover tests: 20 passing. Full `npm test`: 1690 passing, 2 pending. `npm run typecheck` and `npm run build` passed; the
+existing Vite large-chunk warning remains. Bilingual API generation, translation
+digests and read-only docs checks passed.
+
+All three Terrain gates also passed on the outcome-boundary implementation.
+Each shaded/wireframe run retained 90 submitted transitions, zero stale transitions,
+and the two-frame bound. Backend hashes remained unchanged; all owned ports and
+browsers closed. Revert this stage to restore the old outcome handling while
+retaining the design record.

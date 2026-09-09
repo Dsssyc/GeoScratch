@@ -530,7 +530,7 @@ type GpuWebMercatorQuadCoverReadWgslOptions = Readonly<{ group: number; lookupEn
 
 Kind: `Function`.
 
-Decodes and validates bounded inverse-cover geometry feedback.
+Validates bounded cover feedback and omits level/span ranges for a successful empty cut.
 
 ```ts
 Function decodeGpuWebMercatorQuadCoverFeedback
@@ -798,7 +798,7 @@ type GpuWebMercatorQuadProjectedDemand = Readonly<{ decisionFrameEpoch: number; 
 
 Kind: `Class`.
 
-Prepares indexed- or non-indexed draw-indirect arguments from one GPU cover patch count.
+Owns draw-indirect arguments and suppresses instances when its borrowed GPU cover fails.
 
 ```ts
 class GpuWebMercatorQuadPatchDraw

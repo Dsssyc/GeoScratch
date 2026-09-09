@@ -965,7 +965,7 @@ export function assertGpuWebMercatorQuadCoverFrameEncoded(
     }
 }
 
-/** Decodes and validates bounded inverse-cover geometry feedback. */
+/** Validates bounded cover feedback and omits level/span ranges for a successful empty cut. */
 export function decodeGpuWebMercatorQuadCoverFeedback(
     stateBytes: Uint8Array,
     options: Readonly<{
@@ -1000,8 +1000,8 @@ export function decodeGpuWebMercatorQuadCoverFeedback(
         descriptorOverflowCount !== 0 ||
         lookupOverflowCount !== 0 ||
         maximumAdjacentLevelDelta > 1 ||
-        minimumCellSpanQ8 > maximumCellSpanQ8 ||
         (patchCount > 0 && (
+            minimumCellSpanQ8 > maximumCellSpanQ8 ||
             minimumMatrixLevel === 0xffff_ffff ||
             minimumMatrixLevel > maximumMatrixLevel ||
             maximumMatrixLevel > finestMatrixLevel

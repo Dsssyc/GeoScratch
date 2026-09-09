@@ -44,7 +44,9 @@ parents are never unioned into a level-wide rectangle. It does not start at worl
 traverse a root-to-leaf
 quadtree, count trial cuts, inspect atlas slots, or retain previous-frame topology as
 selection authority. Descriptor, lookup, or patch-capacity overflow is a hard
-diagnostic; no path silently coarsens the cut.
+diagnostic; no path silently coarsens the cut. A successful empty visible cut has
+`patchCount: 0` and omits level/span ranges. Overflow or incomplete 2:1 closure
+remains failure even when no patches survive; range sentinels are not public values.
 
 `WebMercatorTileVerticalBounds` is a geometry fact rather than terrain identity. A
 flat consumer can use `[0, 0]`; terrain can convert source elevation metadata; an
@@ -69,13 +71,17 @@ a cover frame, owns one source coverage and its own parity resources, deduplicat
 executable source tiles, and preserves `desiredSampleLevel`, `sourceLevelCeiling`,
 request identity, wrapped camera-distance priority, frame epoch, and residency epoch as
 separate facts. Its bounded feedback can be converted to `ViewTileDemandSet`; Virtual
-Raster remains downstream and passive.
+Raster remains downstream and passive. Before reading patches, projection rejects
+a failed cover or mismatched frame: it emits no demands and sets its existing
+`overflowCount` failure marker. Nonzero overflow therefore also includes an invalid
+upstream cover, and feedback decoding rejects it instead of reporting a valid empty demand.
 
 `GpuWebMercatorQuadPatchDraw` is the separate draw-count adapter. It borrows cover
 state, owns one consumer element count plus parity draw-indirect buffers, and uses one
 persistent compute dispatch to write `[elementCount, patchCount, 0, 0, 0]`. The 20-byte
 record is valid for indexed draw and its first 16 bytes remain valid for non-indexed draw.
-The cover owns neither those buffers nor the consumer mesh.
+A failed cover produces zero instances, so partial geometry is never drawn while
+CPU feedback is pending. The cover owns neither those buffers nor the consumer mesh.
 
 Related decisions: ADR-083 establishes inverse-cover and passive Virtual Raster;
 ADR-084 establishes reference-pixel quality; ADR-086 supersedes their pitch-gated
