@@ -8,7 +8,7 @@ GeoScratch 是一个基于 WebGPU 的 ES module 图形库，面向地理可视�
 
 这个库适合需要直接控制 WebGPU 资源的开发者，用于构建场景、地图、地球、地形图层或 GPU 驱动的实验性可视化。
 
-![GeoScratch preview](https://raw.githubusercontent.com/YcSoku/GeoScratch/main/DayDream.png)
+![GeoScratch 地球动态预览](./docs/assets/DayDream.webp)
 
 ## 快速开始
 
