@@ -5,9 +5,10 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
 import { createServer } from 'vite'
+import { encodeFullFrameAnimation } from './readme-webp.mjs'
 
-// Run after the package build. Requires Chrome, ffmpeg, and img2webp on PATH.
-// Globe rendering uses the existing example; no production source is patched.
+// Run after the package build. Requires Chrome, ffmpeg, cwebp, and webpmux.
+// The capture-only Vite transform changes camera composition, not rendering code.
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const still = process.argv.includes('--still')
 const output = resolve(root, process.argv.slice(2).find(argument => argument !== '--still') ??
@@ -37,6 +38,16 @@ try {
     server = await createServer({
         root: join(root, 'examples'),
         server: { host: '127.0.0.1', port: 0, open: false },
+        plugins: [{
+            name: 'readme-full-canvas-camera',
+            enforce: 'pre',
+            transform(code, id) {
+                if (!id.endsWith('/helloGAW/main.ts')) return
+                const anchor = "    proof.reach('after-graph-created')"
+                if (code.split(anchor).length !== 2) throw new Error('Hello GAW camera capture anchor changed')
+                return code.replace(anchor, `${anchor}\n    graph.matrices.projection[0] *= 1.12\n    graph.matrices.projection[5] *= 1.12\n    graph.matrices.projection[8] = -(2 * 580 / 840 - 1)\n    canvas.dataset.previewCamera = 'full-canvas'`)
+            },
+        }],
     })
     await server.listen()
     const address = server.httpServer.address()
@@ -44,7 +55,7 @@ try {
         channel: 'chrome', headless: true, args: ['--enable-unsafe-webgpu'],
     })
     const brandPage = await browser.newPage({
-        viewport: { width: 900, height: 480 }, deviceScaleFactor: 2,
+        viewport: { width: 840, height: 480 }, deviceScaleFactor: 2,
     })
     const icon = await readFile(join(root, 'docs/assets/icons/icon_light.png'))
     const branding = await readFile(join(root, 'docs/assets/preview-branding.html'), 'utf8')
@@ -53,7 +64,7 @@ try {
     await brandPage.screenshot({ path: join(temporary, 'branding.png'), omitBackground: true })
     await brandPage.close()
     const page = await browser.newPage({
-        viewport: { width: 2400, height: 2400 }, deviceScaleFactor: 1,
+        viewport: { width: 2520, height: 1440 }, deviceScaleFactor: 1,
     })
     page.on('pageerror', error => failures.push(String(error)))
     page.on('console', message => {
@@ -116,7 +127,7 @@ try {
         if (sample % frameRate === 0) console.log(`Captured ${sample + 1}/${samples} samples`)
     }
     const facts = await page.locator('#GPUFrame').evaluate(canvas => ({ ...canvas.dataset }))
-    if (facts.status !== 'ready' || facts.diagnosticIncidents !== '0' ||
+    if (facts.status !== 'ready' || facts.previewCamera !== 'full-canvas' || facts.resizeGeneration !== '0' || facts.diagnosticIncidents !== '0' ||
         facts.uncapturedErrors !== '0' || facts.deviceLosses !== '0' ||
         Number(facts.frames) !== rendered || Number(facts.observedFrames) !== rendered) {
         throw new Error(`Invalid render evidence: ${JSON.stringify(facts)}`)
@@ -128,8 +139,9 @@ try {
         '-framerate', String(frameRate), '-i', join(temporary, '%03d.png'),
         '-loop', '1', '-framerate', String(frameRate), '-i', join(temporary, 'branding.png'),
         '-filter_complex', [
-            // Place the full scene first; crop only the outer banner bounds.
-            '[0:v]scale=536:536:flags=area,gblur=sigma=0.3[resized]',
+            // The render viewport already IS the banner. No crop, pad, image
+            // translation, masking, or separate background is allowed here.
+            '[0:v]scale=840:480:flags=area,gblur=sigma=0.3[resized]',
             ...(still ? ['[resized]null[cycle]'] : [
                 '[resized]split=3[head][body][tail]',
                 `[head]trim=end_frame=${seamFrames},setpts=PTS-STARTPTS[h]`,
@@ -138,8 +150,8 @@ try {
                 `[body]trim=start_frame=${seamFrames}:end_frame=${cycleFrames},setpts=PTS-STARTPTS[b]`,
                 '[seam][b]concat=n=2:v=1:a=0[cycle]',
             ]),
-            "[cycle]format=gbrp,lutrgb=r='255*pow(val/255,0.8)':g='255*pow(val/255,0.8)':b='255*pow(val/255,0.8)',pad=1000:600:382:32:black,crop=900:480:0:60[earth]",
-            '[1:v]scale=900:480:flags=area[brand]',
+            "[cycle]format=gbrp,lutrgb=r='255*pow(val/255,0.8)':g='255*pow(val/255,0.8)':b='255*pow(val/255,0.8)'[earth]",
+            '[1:v]scale=840:480:flags=area[brand]',
             `[earth][brand]overlay=0:0:shortest=1,trim=end_frame=${still ? 1 : cycleFrames},format=rgb24[out]`,
         ].join(';'),
         '-map', '[out]', '-frames:v', String(still ? 1 : cycleFrames),
@@ -147,16 +159,13 @@ try {
     ])
     if (still) {
         await writeFile(output, await readFile(join(compositeDirectory, '000.png')))
-    } else await run('img2webp', [
-        '-min_size', '-loop', '0', '-lossy', '-q', '60', '-m', '4', '-d', String(1000 / frameRate),
-        ...Array.from({ length: cycleFrames }, (_, index) =>
-            join(compositeDirectory, `${String(index).padStart(3, '0')}.png`)),
-        '-o', output,
-    ])
+    } else await encodeFullFrameAnimation(compositeDirectory, output, {
+        width: 840, height: 480, count: cycleFrames, duration: 1000 / frameRate,
+    })
     const evidence = {
         browser: await browser.version(), headless: true, adapter,
         renderedFrames: rendered, samples, animationFrames: still ? 1 : cycleFrames,
-        width: 900, height: 480, durationSeconds: still ? 0 : durationSeconds, frameRate, earthTurns: still ? 0 : 1,
+        width: 840, height: 480, durationSeconds: still ? 0 : durationSeconds, frameRate, earthTurns: still ? 0 : 1,
         bytes: (await stat(output)).size, failures, facts,
     }
     await writeFile(join(temporary, 'evidence.json'), JSON.stringify(evidence, null, 2))
