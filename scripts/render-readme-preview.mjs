@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { mkdtemp, mkdir, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -7,20 +7,19 @@ import { chromium } from 'playwright'
 import { createServer } from 'vite'
 
 // Run after the package build. Requires Chrome, ffmpeg, and img2webp on PATH.
-// All rendering uses the existing example; no production source is patched.
+// Globe rendering uses the existing example; no production source is patched.
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const output = resolve(root, process.argv[2] ?? 'docs/assets/DayDream.webp')
+const still = process.argv.includes('--still')
+const output = resolve(root, process.argv.slice(2).find(argument => argument !== '--still') ??
+    (still ? join(tmpdir(), 'geoscratch-preview.png') : 'docs/assets/DayDream.webp'))
 const temporary = await mkdtemp(join(tmpdir(), 'geoscratch-preview-'))
 const frameRate = 20
 const durationSeconds = 30
 const cycleFrames = frameRate * durationSeconds
 const seamFrames = frameRate * 2
-const samples = cycleFrames + seamFrames
+const samples = still ? 1 : cycleFrames + seamFrames
 const compositeDirectory = join(temporary, 'composite')
 const failures = []
-const feather = ['r', 'g', 'b'].map(channel =>
-    `${channel}='${channel}(X,Y)*clip(min(X,W-1-X)/24,0,1)*clip(min(Y,H-1-Y)/24,0,1)'`
-).join(':')
 let server
 let browser
 
@@ -44,6 +43,15 @@ try {
     browser = await chromium.launch({
         channel: 'chrome', headless: true, args: ['--enable-unsafe-webgpu'],
     })
+    const brandPage = await browser.newPage({
+        viewport: { width: 900, height: 480 }, deviceScaleFactor: 2,
+    })
+    const icon = await readFile(join(root, 'docs/assets/icons/icon_light.png'))
+    const branding = await readFile(join(root, 'docs/assets/preview-branding.html'), 'utf8')
+    await brandPage.setContent(branding.replace('./icons/icon_light.png', `data:image/png;base64,${icon.toString('base64')}`))
+    await brandPage.locator('img').evaluate(image => image.decode())
+    await brandPage.screenshot({ path: join(temporary, 'branding.png'), omitBackground: true })
+    await brandPage.close()
     const page = await browser.newPage({
         viewport: { width: 2400, height: 2400 }, deviceScaleFactor: 1,
     })
@@ -99,9 +107,10 @@ try {
         }, target - rendered)
         rendered = target
         if (failures.length) throw new Error(failures.join('\n'))
+        // Bloom extends beyond the globe. Keep the complete viewport, with no
+        // screenshot clip or rectangular edge mask on the rendering layer.
         await page.screenshot({
             path: join(temporary, `${String(sample).padStart(3, '0')}.png`),
-            clip: { x: 320, y: 320, width: 1760, height: 1760 },
             timeout: 30_000,
         })
         if (sample % frameRate === 0) console.log(`Captured ${sample + 1}/${samples} samples`)
@@ -117,21 +126,28 @@ try {
     await run('ffmpeg', [
         '-hide_banner', '-loglevel', 'error', '-y',
         '-framerate', String(frameRate), '-i', join(temporary, '%03d.png'),
-        '-loop', '1', '-framerate', String(frameRate), '-i', join(root, 'DayDream.png'),
+        '-loop', '1', '-framerate', String(frameRate), '-i', join(temporary, 'branding.png'),
         '-filter_complex', [
-            '[0:v]scale=480:480:flags=area,gblur=sigma=0.3,split=3[head][body][tail]',
-            `[head]trim=end_frame=${seamFrames},setpts=PTS-STARTPTS[h]`,
-            `[tail]trim=start_frame=${cycleFrames},setpts=PTS-STARTPTS[t]`,
-            `[t][h]blend=all_expr='A*(1-N/${seamFrames})+B*(N/${seamFrames})'[seam]`,
-            `[body]trim=start_frame=${seamFrames}:end_frame=${cycleFrames},setpts=PTS-STARTPTS[b]`,
-            `[seam][b]concat=n=2:v=1:a=0,format=gbrp,lutrgb=r='255*pow(val/255,0.8)':g='255*pow(val/255,0.8)':b='255*pow(val/255,0.8)',geq=${feather}[earth]`,
-            `[1:v]crop=850:1024:0:0,scale=398:480:flags=lanczos,format=gbrp,geq=${feather},pad=960:480:0:0:black[brand]`,
-            `[brand][earth]overlay=480:0:shortest=1,trim=end_frame=${cycleFrames},format=rgb24,scale=800:400:flags=area,format=rgb24[out]`,
+            // Place the full scene first; crop only the outer banner bounds.
+            '[0:v]scale=536:536:flags=area,gblur=sigma=0.3[resized]',
+            ...(still ? ['[resized]null[cycle]'] : [
+                '[resized]split=3[head][body][tail]',
+                `[head]trim=end_frame=${seamFrames},setpts=PTS-STARTPTS[h]`,
+                `[tail]trim=start_frame=${cycleFrames},setpts=PTS-STARTPTS[t]`,
+                `[t][h]blend=all_expr='A*(1-N/${seamFrames})+B*(N/${seamFrames})'[seam]`,
+                `[body]trim=start_frame=${seamFrames}:end_frame=${cycleFrames},setpts=PTS-STARTPTS[b]`,
+                '[seam][b]concat=n=2:v=1:a=0[cycle]',
+            ]),
+            "[cycle]format=gbrp,lutrgb=r='255*pow(val/255,0.8)':g='255*pow(val/255,0.8)':b='255*pow(val/255,0.8)',pad=1000:600:382:32:black,crop=900:480:0:60[earth]",
+            '[1:v]scale=900:480:flags=area[brand]',
+            `[earth][brand]overlay=0:0:shortest=1,trim=end_frame=${still ? 1 : cycleFrames},format=rgb24[out]`,
         ].join(';'),
-        '-map', '[out]', '-frames:v', String(cycleFrames),
+        '-map', '[out]', '-frames:v', String(still ? 1 : cycleFrames),
         '-start_number', '0', join(compositeDirectory, '%03d.png'),
     ])
-    await run('img2webp', [
+    if (still) {
+        await writeFile(output, await readFile(join(compositeDirectory, '000.png')))
+    } else await run('img2webp', [
         '-min_size', '-loop', '0', '-lossy', '-q', '60', '-m', '4', '-d', String(1000 / frameRate),
         ...Array.from({ length: cycleFrames }, (_, index) =>
             join(compositeDirectory, `${String(index).padStart(3, '0')}.png`)),
@@ -139,8 +155,8 @@ try {
     ])
     const evidence = {
         browser: await browser.version(), headless: true, adapter,
-        renderedFrames: rendered, samples, animationFrames: cycleFrames,
-        width: 800, height: 400, durationSeconds, frameRate, earthTurns: 1,
+        renderedFrames: rendered, samples, animationFrames: still ? 1 : cycleFrames,
+        width: 900, height: 480, durationSeconds: still ? 0 : durationSeconds, frameRate, earthTurns: still ? 0 : 1,
         bytes: (await stat(output)).size, failures, facts,
     }
     await writeFile(join(temporary, 'evidence.json'), JSON.stringify(evidence, null, 2))
