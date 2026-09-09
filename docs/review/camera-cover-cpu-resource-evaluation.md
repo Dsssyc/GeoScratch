@@ -1,16 +1,18 @@
 # Camera cover execution and asynchronous resource observation
 
-Date: 2026-09-09. Design review against `camera-cover` at `d6e2e9e`.
-The production worktree was clean throughout the experiments. This review records
+Date: 2026-09-09; integrated evaluation updated 2026-09-10. Production source
+reviewed at `d6e2e9e`; integration experiments start from `e318dc6`.
+The production source remained unchanged throughout the experiments. This review records
 experimental alternatives; it does not supersede the canonical API or ADR-125.
 
 ## Recommendation
 
-Evaluate **one CPU geometry selector plus CPU source-demand projection, with the
+The integrated evaluation supports **one CPU geometry selector plus CPU source-demand projection, with the
 existing persistent GPU atlas/page tables and existing Worker/Virtual Raster
-publication pipeline**, as the preferred next integration experiment. Retain the
-current GPU selector as an isolated comparison, rather than making both authorities
-active in a renderer.
+publication pipeline** as the preferred implementation direction. The decisive
+result is request progress during continuous camera motion. Merely moving cover
+computation to CPU while retaining the old demand feedback delay is not a compelling
+change. This remains an evaluation recommendation, not an accepted public API switch.
 
 GPU-origin usage, missing-page observations and procedural results can feed bounded
 asynchronous CPU reconciliation. CPU-owned allocation and upload decisions need not
@@ -18,11 +20,153 @@ make a GPU round trip before the CPU can schedule resources. Geometry execution
 location, source-demand execution location and persistent resource storage are
 separate choices.
 
-The evidence makes this CPU alternative credible. It does **not** establish an
-end-to-end winner: the CPU prototype has numerical and integration limits, and its
+The evidence establishes a useful integrated CPU alternative. It does **not** establish
+a universal frame-time winner: the CPU prototype has numerical and integration limits, and its
 individual-call timings vary substantially. MapLibre's hot-loop timings cannot be
 promised for GeoScratch's stronger geometry contract. Optimizing Scratch's repeated
 host bookkeeping is useful independently of the cover placement decision.
+
+## Integrated terrain results, 2026-09-10
+
+The [opt-in experiment](../../tests/experiments/terrain-cover-placement/README.md)
+now runs the real Underwater Terrain application, MapLibre frame driver, two-frame
+admission policy, Scratch uploads and epoch validation, Worker/network/decode phases,
+Virtual Raster ownership/publication, terrain sampling, indexed draw and native
+acknowledgement. Temporary Vite source substitutions select one experimental producer
+per run. CPU observations carry explicit experimental tags, and upload-to-draw
+provenance uses actual submitted producer epochs. No production selector switch or
+public contract was added.
+
+Three execution variants were measured:
+
+- Current GPU cover and GPU source demand.
+- CPU cover with fresh metadata/patch/lookup/state uploads, retaining GPU source
+  demand and delayed readback.
+- CPU cover plus CPU source intent, using the existing demand producer/scheduler
+  immediately after the complete CPU product enters a valid submission. Raster
+  publication still waits for native acknowledgement; CPU intent is not GPU-ready
+  evidence. The separate GPU patch-draw adapter remains in this experiment.
+
+### Continuous motion reveals the largest practical difference
+
+A fresh instance first settles its initial zoom-9 view. It then enters a pitched
+zoom-10.25 view with unloaded fine pages and issues 90 camera moves over about
+1.5 seconds. Source requests are recorded at the real request executor boundary.
+
+| Observation | Current GPU path | CPU cover + CPU source intent |
+| --- | ---: | ---: |
+| New detail requests during motion | 0 | 18 |
+| New detail requests after motion | 18 | 0 |
+| First executor request from motion start | about 1,529 ms in the final matched-camera run | about 32 ms in that run |
+| All selected resources acknowledged while moving | not reached | about 163 ms in that run |
+| Remaining readiness wait after motion stops | about 168 ms | about 21 ms including final camera admission |
+
+The zero-versus-18 request result repeats. Earlier probes did not wait for admission
+of the final requested camera pose and reported an effectively zero post-motion CPU
+wait; the final probe checks the observed camera explicitly. This is not a statement that GPU traversal
+inherently cannot stream during motion. The current renderer deliberately waits for
+a newer frame before consuming GPU feedback, then rejects feedback whose decision
+serial is no longer current. Continuously changing camera facts make each observed
+decision obsolete by that point. Geometry still draws correctly through existing
+raster fallback; current detail discovery is what waits for the camera to stop.
+See `startFeedbackPump`, `drainReadyFeedback` and `settleConsumedFeedback` in the
+[terrain renderer](../../packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts).
+
+The CPU-intent experiment can reconcile the current decision before the next camera
+update, retaining current resident pages and in-flight requests. It does not remove
+stale-source/slot checks or make previous topology authoritative. A future GPU-retaining
+alternative would need an explicit policy for useful past-view resource observations;
+simply deleting the currentness checks would not be a safe substitute.
+
+### Full-frame costs are a tradeoff
+
+The warm 1280×800, pitch-70, zoom-10.25 traces each report 69 patches at levels 8–12. Each mode
+runs shaded and wireframe 90-move traces. CPU/native observation timing is collected
+without timestamp queries; separate traces sample GPU passes every seventh frame.
+
+| Variant | CPU construction p50, shaded / wireframe | Native observation p50, shaded / wireframe |
+| --- | --- | --- |
+| GPU, two baseline observations | 1.5–1.7 / 1.7–1.8 ms | 9.3–9.5 / 8.9–10.3 ms |
+| CPU cover only | 2.1 / 2.1 ms | 9.2 / 8.6 ms |
+| CPU cover + source intent | 1.9 / 1.8 ms | 7.5 / 9.4 ms |
+
+The original GPU cover pass costs approximately 1.6–2.5 ms in these sampled real
+terrain traces; source projection adds approximately 0.25–0.37 ms. CPU substitution
+removes those passes, but terrain drawing alone varies around 6–10 ms and CPU
+construction can increase. There is no consistent wireframe latency win. These
+small sample sets do not establish device-independent speed ratios, and native
+observation includes asynchronous scheduling rather than pure GPU execution. The
+headless host cadence is approximately 60 Hz, not a new 120 Hz throughput proof.
+
+### Resource completion when the camera stops
+
+For a single move into unloaded detail, representative runs issue the same 18 new
+requests:
+
+| Variant | First executor request | Acknowledged selected-resource readiness |
+| --- | ---: | ---: |
+| GPU | about 28–32 ms | about 190–197 ms |
+| CPU cover only | about 33 ms | about 199 ms |
+| CPU cover + source intent | about 6 ms | about 153 ms |
+
+With an artificial 80 ms request delay, GPU and CPU-intent readiness are about
+1,004 and 997 ms respectively. The readiness poll is 20 ms, so that difference is
+not meaningful evidence of a readiness improvement. Earlier discovery does not
+remove network/decode cost. The continuous-motion result is stronger because
+resource production can overlap the user's motion instead of starting afterward.
+
+### Integrated correctness and cleanup
+
+- The CPU-intent variant passes the existing terrain rendering gate: wide top-down
+  symmetry, canonical zoom/approach cases, pitch transitions, native wireframe,
+  shaded/wireframe 90-frame tracking, A-B-A, 2:1, DPR invariance and pixel checks.
+- It passes the full streaming gate: cold/warm persistent cache, tight atlas budget,
+  selected resident retention, terminal missing page, cancellation/late results,
+  eviction churn, reload and repeated disposal. Worker phase bounds remain network
+  2 / decode 1 and terrain admission remains two frames.
+- A 52-bit shadow run keeps the GPU renderer authoritative while checking the CPU
+  cut, all state words, effective lookup and source-demand records against same-
+  submission GPU observations, including the rendering/DPR gate. It passes. The
+  current example itself defaults to 40 bits; the experiment explicitly tests both
+  actual configuration and 52-bit support without changing backend identity/data.
+- Browser, Vite, tile service, readbacks and owned resources are released. Production
+  source, frozen Flow source and existing COG/manifest hashes are unchanged.
+- `npm run typecheck`, `npm test` (1,722 passing, two opt-in pending) and
+  `npm run build` pass. Build retains the existing large-chunk warning.
+
+Two measurement/prototype defects were found and corrected before accepted results.
+The initial CPU helper assumed 52-bit input while terrain supplied 40-bit metadata,
+producing an empty cut; the helper now reads the actual profile precision and exact
+minimum geometry domain. Also, a first readiness probe latched an earlier successful
+cover and could finish during a later publication's transition. It now requires a
+currently converged cover and acknowledged selected-resource state. The first
+incorrect A-B-A observation from that probe is excluded.
+
+These are finite integration proofs. General floating-point threshold equivalence,
+all possible address domains, a finalized typed CPU-product API, CPU-specific failure
+injection at every new allocation boundary and a native 120 Hz proof remain necessary
+before shipping a replacement. The experiment retains unused original GPU objects
+to keep setup and existing consumer interfaces stable, so its startup memory is not
+the budget of a finished CPU implementation. It introduces no second live geometry
+selector outside the explicitly instrumented shadow comparison.
+
+### Reproduction and rollback
+
+Run the commands in the experiment README serially. Each invocation writes source,
+data and experiment hashes, native observations, results and process cleanup facts
+to a separate output directory. It never builds backend data. Results used here are
+under `/tmp/geoscratch-terrain-placement/`, including `gpu-full-0.json`,
+`cpu-cover-full-0.json`, `cpu-all-full-0.json`, the `*-full-80.json` runs,
+`repo-run-cpu/`, `repo-streaming/`, `repo-shadow52/` and the `reveal-*` directories.
+One early repeated reveal also overlapped Node tests and is used only to confirm
+request ordering; the final reveal reruns are isolated from build/test work.
+
+The experiment reference is commit `2a918d3`; the real-application runner and gates
+are commit `5241c16`. To roll back, first revert the commit adding this integrated
+results section, then `git revert 5241c16`, then `git revert 2a918d3`. This removes
+only opt-in tests and their review. Production remains on
+the existing GPU renderer. A formal CPU transition must update English/Chinese
+canonical cover/terrain APIs, its accepted ADR and ownership/failure tests together.
 
 ## Measurement boundaries
 
