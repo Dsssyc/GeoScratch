@@ -262,7 +262,9 @@ export async function runCameraCoverProof() {
                             `${scenario.name}: A-B-A identities or output ordering changed`)
                     }
                     const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(sorted))
+                    const orderedDigest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(raw))
                     rows.push({ name: `${domain.fullCandidates ? 'full-' : ''}${scenario.name}`, patchCount: count,
+                        orderedIdentitySha256: Array.from(new Uint8Array(orderedDigest), x => x.toString(16).padStart(2, '0')).join(''),
                         identitySha256: Array.from(new Uint8Array(digest), x => x.toString(16).padStart(2, '0')).join(''),
                         presentationSize: capture.presentationSize, referenceViewport: view.referenceViewport,
                         feedback, validation, nativeStatus: native.status })

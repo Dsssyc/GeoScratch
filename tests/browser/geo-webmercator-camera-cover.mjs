@@ -57,7 +57,7 @@ try {
     if (first.dpr !== 1 || second.dpr !== 2 || first.rows.length !== second.rows.length) failures.push('DPR contexts differ from their requested values')
     for (let i = 0; i < first.rows.length; i++) {
         const a = first.rows[i], b = second.rows[i]
-        if (a.name !== b.name || a.identitySha256 !== b.identitySha256 || a.patchCount !== b.patchCount) {
+        if (a.name !== b.name || a.identitySha256 !== b.identitySha256 || a.orderedIdentitySha256 !== b.orderedIdentitySha256 || a.patchCount !== b.patchCount) {
             failures.push(`DPR changed cover identity in ${a.name}`)
         }
         if (a.presentationSize && (b.presentationSize.width !== a.presentationSize.width * 2 ||

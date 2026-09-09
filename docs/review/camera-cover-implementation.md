@@ -416,3 +416,64 @@ FPS for these GPU timings. Backend data and frozen Flow Layer remain unchanged.
 
 Rollback: revert dependent cleanup first, then this height-volume commit; the
 separately committed metadata/diagnostic repair `8f6e93c` remains available.
+
+## Review Repairs: Remove Repeated Work
+
+The final cleanup preserves the `3b27598` cut and feedback semantics:
+
+- A successful adjacency round already visited every edge. It records the maximum
+  delta during marking and publishes the same construction's final visible lookup.
+  Finalization only computes level ranges; failure still compacts/rebuilds/rechecks.
+- Zero raw refinement flags skip parent hash queries, and materialization stops at
+  its already known finest selected level. These skips perform no topology mutation.
+- Outward f64 rounding uses two u32 limbs instead of BigInt allocation. The current
+  view's inverse residual is reused for its certificate, and flat candidate domains
+  skip unused volume-radius calculations. No prior view or provenance is reused.
+
+The CPU proof compares 100011 raw IEEE-754 inputs against the prior BigInt behavior
+and 672 complete candidate/certificate results for flat and non-flat descriptors.
+The native comparison checks 148 cases against archived `3b27598`, including both
+sorted and ordered identity hashes, all feedback counts/spans, failure states and
+independent coverage/quality validation. Every compared result is unchanged.
+
+### Measured Cost
+
+Chrome 152, Apple Metal, isolated headless processes; the existing three-scenario
+cover microbenchmark, 112 frames per scenario, 14 warmup frames and 14 GPU timestamp
+samples per scenario. These are cover-pass measurements, not complete Flow/terrain
+frame costs. The sequence includes a final return to archived `3b27598` as a drift
+control. Timing varies and the wide case shows no convincing improvement.
+
+| Scene | Before GPU p50 | Cleanup GPU p50 | Return-to-baseline GPU p50 |
+| --- | ---: | ---: | ---: |
+| flat-z9 | 1.574 ms | 1.192 ms | 2.220 ms |
+| pitch70-z10 | 2.035 ms | 1.294 ms | 2.033 ms |
+| wide-flat-z13 | 1.132 ms | 1.108 ms | 0.981 ms |
+
+Browser CPU construction p50 was 0.7/0.6/0.5 ms before and 0.6/0.6/0.5 ms after.
+A separate alternating Node helper-only measurement observed median candidate
+preparation 0.246/0.253/0.228 ms before and 0.150/0.150/0.139 ms after. It excludes
+packing, upload creation, submission and GPU work. No general speedup is promised.
+
+### Final Verification and Rollback
+
+Focused checks, typecheck, docs generation/translations/check, production build and
+the full suite (1722 passing, 2 opt-in pending) pass. All three terrain browser
+suites and all six Flow acceptance scenarios pass, including continuous camera
+changes, spatial reuse, paused resource recovery, inspector handoff, failed/pending
+prefetch, empty-view recovery, delayed feedback and complete disposal. A temporary
+Flow wrapper initially failed to route its second page to the owned test backend;
+the unchanged assertion passes with both navigation URLs routed correctly.
+
+Evidence is under `/tmp/geoscratch-cover-fixes/optimization/`: `cpu-equivalence.json`,
+`cpu-audit.json`, `equivalence.json`, `camera-order.json`, `camera-baseline-order.json`,
+the terrain/outcome JSON files, `benchmark.json`, `benchmark-baseline-return.json`,
+`flow/summary.json` plus the corrected `flow-prefetch-verified/summary.json`, and
+`integrity.json`. The integrity comparison checks 84 Flow data files and the existing
+DEM COG/manifest; all hashes are unchanged. Frozen Flow Layer is unchanged. Owned
+debug browsers/services close, while the user's frontend and terrain backend remain.
+
+Each repair has its own commit. To roll back the cleanup, revert its commit first;
+then `git revert 3b27598` removes the height-volume repair, and `git revert 8f6e93c`
+removes metadata/diagnostic repair if desired. Do not reset the shared checkout.
+No backend or resource-store migration is involved.

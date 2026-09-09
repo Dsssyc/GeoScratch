@@ -114,6 +114,7 @@ fn coverBalanceIndexedPatches() -> bool {
             coverCandidates[patchIndex] = 0u;
         }
         var changed = false;
+        coverState.maximumAdjacentLevelDelta = 0u;
         // Complete all queries and marks before replacing any parent. Every
         // lookup patchIndex refers to this round's unchanged input topology.
         for (var patchIndex = 0u; patchIndex < inputCount; patchIndex += 1u) {
@@ -121,17 +122,15 @@ fn coverBalanceIndexedPatches() -> bool {
             for (var edge = 0u; edge < 4u; edge += 1u) {
                 let neighborIndex = coverIndexedCoarserNeighbor(candidate, edge);
                 if (neighborIndex == 0xffffffffu) { continue; }
-                if (candidate.matrixLevel >
-                    coverPatches[neighborIndex].matrixLevel + 1u) {
+                let delta = candidate.matrixLevel - coverPatches[neighborIndex].matrixLevel;
+                coverState.maximumAdjacentLevelDelta = max(coverState.maximumAdjacentLevelDelta, delta);
+                if (delta > 1u) {
                     coverCandidates[neighborIndex] = 1u;
                     changed = true;
                 }
             }
         }
-        if (!changed) {
-            coverFinalizeAdjacentLevelDelta();
-            return coverState.maximumAdjacentLevelDelta <= 1u;
-        }
+        if (!changed) { return true; }
         for (var patchIndex = 0u; patchIndex < inputCount; patchIndex += 1u) {
             if (coverCandidates[patchIndex] != 0u && !coverSplitPatch(patchIndex)) {
                 return false;

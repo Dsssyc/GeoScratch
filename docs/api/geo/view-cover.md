@@ -21,8 +21,8 @@ Every patch is an OGC identity `(tileMatrix, tileRow, tileCol)`. Camera-derived 
 addresses the fixed global matrix and never creates a moving game-style grid. At every
 pitch, `writeView()` prepares conservative standard-parent windows from the actual
 projection matrix and precise fixed-point camera. The GPU records an exact sparse
-parent identity only where the maximum
-singular stretch of one projected geometry cell exceeds
+parent identity when the conservative bound on maximum singular projected-cell
+stretch over that patch exceeds
 `maximumCellSpanReferencePixels * (1 + refinementTolerance)`. Pitch and FOV affect the
 projection naturally; they never select a uniform/variable algorithm mode.
 
@@ -132,7 +132,9 @@ many small dispatches for the bounded cut. Expensive candidate and final quality
 work is parallel. Each closure round queries an immutable full-identity leaf index
 from the fine side of every edge, marks coarse neighbors, then replaces only marked
 parents and compacts visibility. Invisible transient children cannot influence
-later marks in that round. This removes pairwise all-patch neighbor scans and
+later marks in that round. A successful fixed point publishes the already validated
+visible lookup from that construction and adjacency delta; it does not repeat visibility compaction, rebuild
+the lookup, or scan every edge again. Failure retains a full final validation. This removes pairwise all-patch neighbor scans and
 processing-order propagation. The `maximumPatches * levelCount` round budget must
 fit u32; exhaustion with remaining adjacency violations is a failed cut.
 

@@ -2,7 +2,7 @@
 docId: geo.view-cover.zh
 canonical: false
 translationOf: ./view-cover.md
-canonicalDigest: 5bdb1c62401c65e43deca4ab9ba9d17f0b8ab857be1b39c594586a193bdace6c
+canonicalDigest: 040d44932898067fef9def7e1cefe96468f4b6167de18902429e88bceeee0dbc
 ---
 # WebMercatorQuad 视图覆盖
 
@@ -15,8 +15,8 @@ lookup、GPU patch count 和几何反馈。它不拥有 tiled source、栅格 de
 
 每个 patch 都是 OGC `(tileMatrix, tileRow, tileCol)` 身份。相机派生的探查始终寻址
 固定全局矩阵，不创建移动式游戏格网。所有 pitch 都由 `writeView()` 使用实际投影
-矩阵和精确 fixed-point 相机准备保守标准 parent 窗口；GPU 仅在一个几何 cell 的投影最大奇异
-拉伸超过 `maximumCellSpanReferencePixels * (1 + refinementTolerance)` 时记录精确的
+矩阵和精确 fixed-point 相机准备保守标准 parent 窗口；GPU 在该 patch 的投影 cell
+最大奇异拉伸保守上界超过 `maximumCellSpanReferencePixels * (1 + refinementTolerance)` 时记录精确的
 稀疏 parent 身份。Pitch 和 FOV 只自然参与投影，
 不选择 uniform/variable 算法模式。
 
@@ -100,7 +100,8 @@ atomic 归约 Q8 span 范围。Barrier 仅在组内使用，跨组可见性来�
 拓扑协调明确保留串行，避免为有界 cut 引入全局排序／scan 和大量小 dispatch；昂贵
 的候选与最终质量计算并行。每轮闭包从各细边查询不可变的完整身份 leaf index，先
 标记粗邻居，再只替换标记 parent 并压缩可见性；本轮临时不可见 child 不会影响后续
-标记。这移除了全体 patch 两两邻接扫描以及处理顺序传播。轮次预算
+标记。成功达到固定点后直接发布本次构建中已验证的可见 lookup 和邻接 delta，不重复压缩可见性、
+重建 lookup 或扫描全部边；失败路径保留完整最终验证。这移除了全体 patch 两两邻接扫描以及处理顺序传播。轮次预算
 `maximumPatches * levelCount` 必须可用 u32 表示；预算耗尽后若仍违反邻接约束，cut 失败。
 
 Cover 为每个 parity 拥有一份 u32 candidate workspace。物化结束后，其前

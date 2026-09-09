@@ -551,6 +551,12 @@ fn coverMarkSparseRefinements() {
                 tileCol <= search.maxTileCol;
                 tileCol += 1i) {
                 coverState.candidateCount += 1u;
+                var start = 0u;
+                if (parentLevel > 0u) { start = mapMeta.candidateWindows[parentLevel - 1u].w; }
+                let width = u32(search.maxTileCol - search.minTileCol + 1i);
+                let index = start + u32(tileRow - search.minTileRow) * width +
+                    u32(tileCol - search.minTileCol);
+                if (coverCandidates[index] == 0u) { continue; }
                 if (parentLevel > coverPolicy.minimumMatrixLevel &&
                     !coverRefinementContains(
                         parentLevel - 1u,
@@ -559,12 +565,6 @@ fn coverMarkSparseRefinements() {
                     )) {
                     continue;
                 }
-                var start = 0u;
-                if (parentLevel > 0u) { start = mapMeta.candidateWindows[parentLevel - 1u].w; }
-                let width = u32(search.maxTileCol - search.minTileCol + 1i);
-                let index = start + u32(tileRow - search.minTileRow) * width +
-                    u32(tileCol - search.minTileCol);
-                if (coverCandidates[index] == 0u) { continue; }
                 if (!coverLookupInsertIdentity(
                     parentLevel,
                     u32(tileRow),
@@ -679,7 +679,7 @@ fn coverSeedMinimumPatches() {
 
 fn coverMaterializeSparseRefinements() {
     for (var matrixLevel = coverPolicy.minimumMatrixLevel;
-        matrixLevel < coverPolicy.maximumMatrixLevel;
+        matrixLevel < coverState.finestMatrixLevel;
         matrixLevel += 1u) {
         let inputCount = coverState.patchCount;
         for (var patchIndex = 0u; patchIndex < inputCount; patchIndex += 1u) {
@@ -697,13 +697,12 @@ fn coverMaterializeSparseRefinements() {
     }
 }
 
-fn coverFinalizeLookup() {
+fn coverFinalizeLookup(rebuild: bool) {
     coverState.minimumMatrixLevel = 0xffffffffu;
     coverState.maximumMatrixLevel = 0u;
-    coverState.maximumAdjacentLevelDelta = 0u;
     coverState.minimumCellSpanQ8 = 0xffffffffu;
     coverState.maximumCellSpanQ8 = 0u;
-    coverClearLookup();
+    if (rebuild) { coverClearLookup(); }
     for (var patchIndex = 0u; patchIndex < coverState.patchCount; patchIndex += 1u) {
         let candidate = coverPatches[patchIndex];
         coverState.minimumMatrixLevel = min(
@@ -714,11 +713,11 @@ fn coverFinalizeLookup() {
             coverState.maximumMatrixLevel,
             candidate.matrixLevel,
         );
-        if (!coverLookupInsert(patchIndex)) {
+        if (rebuild && !coverLookupInsert(patchIndex)) {
             coverState.lookupOverflowCount += 1u;
         }
     }
-    coverFinalizeAdjacentLevelDelta();
+    if (rebuild) { coverFinalizeAdjacentLevelDelta(); }
 }
 
 @compute @workgroup_size(64)
@@ -770,10 +769,12 @@ fn generateWebMercatorQuadCover(@builtin(local_invocation_index) lane: u32) {
         coverSeedMinimumPatches();
         coverMaterializeSparseRefinements();
         let balanced = coverBalanceIndexedPatches();
-        // Final adjacency validation retains any incomplete closure as failure.
-        _ = balanced;
-        coverCompactVisiblePatches();
-        coverFinalizeLookup();
+        // A successful fixed point already owns the final visible index/delta.
+        // Failure keeps the complete final recheck and its diagnostic counts.
+        let rebuild = !balanced || coverState.descriptorOverflowCount != 0u ||
+            coverState.lookupOverflowCount != 0u;
+        if (rebuild) { coverCompactVisiblePatches(); }
+        coverFinalizeLookup(rebuild);
         if (coverState.descriptorOverflowCount != 0u ||
             coverState.lookupOverflowCount != 0u ||
             coverState.maximumAdjacentLevelDelta > 1u) {

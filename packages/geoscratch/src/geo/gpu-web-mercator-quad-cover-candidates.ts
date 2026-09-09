@@ -140,7 +140,7 @@ export function gpuWebMercatorQuadCoverCandidates(
         refinementCandidateCount += window.count
     }
     return Object.freeze({
-        ...coverClipWCertificate(matrix, inverse),
+        ...coverClipWCertificate(matrix, inverse, residual),
         seedWindow,
         windows: Object.freeze(windows),
         candidateCount: seedWindow.count + refinementCandidateCount,
@@ -260,11 +260,14 @@ function boundCandidates(input: Readonly<{
     // centre satisfies -Rw <= centreW <= depthCap+Rw and each clip-plane
     // support bounds centreX/Y/Z. The radii include the complete height range.
     // Mapping these centre intervals is conservative even if no corner is visible.
-    const radius = [upward(WORLD_METERS / scale * 0.5 + xError),
-        upward(WORLD_METERS / scale * 0.5 + yError),
-        upward((heightHigh - heightLow) * 0.5 + zError), 0]
-    const r = [0, 1, 2, 3].map(row => absoluteDot(rowValues(matrix, row), radius))
     const volume = heightLow !== heightHigh
+    let r = [0, 0, 0, 0]
+    if (volume) {
+        const radius = [upward(WORLD_METERS / scale * 0.5 + xError),
+            upward(WORLD_METERS / scale * 0.5 + yError),
+            upward((heightHigh - heightLow) * 0.5 + zError), 0]
+        r = [0, 1, 2, 3].map(row => absoluteDot(rowValues(matrix, row), radius))
+    }
     const extra = volume ? r.map(value => upward(value + 2 * r[3]!)) : [0, 0, 0, 0]
     const clipped: Interval[] = [
         [-depthCap - clipConstraintError - extra[0]!, depthCap + clipConstraintError + extra[0]!],
@@ -294,7 +297,9 @@ function boundCandidates(input: Readonly<{
 }
 
 /** @internal A residual certificate for positive clip-w throughout the visible frustum. */
-export function coverClipWCertificate(matrix: readonly number[], inverse = invert(matrix)) {
+export function coverClipWCertificate(
+    matrix: readonly number[], inverse = invert(matrix), residuals?: readonly Interval[]
+) {
     const empty = { clipWPositive: [0, 0, 0, 0], clipWNegative: [0, 0, 0, 0],
         clipWResidual: Array.from({ length: 4 }, () => [0, 0, 0, 0]) }
     if (inverse === undefined) return empty
@@ -304,7 +309,7 @@ export function coverClipWCertificate(matrix: readonly number[], inverse = inver
     // Outward residuals certify the actual k, without assuming an exact inverse.
     const upperF32 = (value: number) => value <= 0 ? 0 :
         Math.fround(upward(value * (1 + 2 ** -23) + MIN_NORMAL))
-    const positive = [], negative = [], residual = inverseResidual(inverse, matrix)
+    const positive = [], negative = [], residual = residuals ?? inverseResidual(inverse, matrix)
     for (let row = 0; row < 4; row++) {
         const k = rowValues(inverse, row)
         const xy = addIntervals([Math.abs(k[0]!), Math.abs(k[0]!)],
@@ -447,8 +452,17 @@ function upward(value: number): number {
     if (!Number.isFinite(value)) return value
     if (value === 0) return Number.MIN_VALUE
     rounds.setFloat64(0, value)
-    const bits = rounds.getBigUint64(0)
-    rounds.setBigUint64(0, value > 0 ? bits + 1n : bits - 1n)
+    let high = rounds.getUint32(0)
+    let low = rounds.getUint32(4)
+    if (value > 0) {
+        low = (low + 1) >>> 0
+        if (low === 0) high = (high + 1) >>> 0
+    } else {
+        if (low === 0) high = (high - 1) >>> 0
+        low = (low - 1) >>> 0
+    }
+    rounds.setUint32(0, high)
+    rounds.setUint32(4, low)
     return rounds.getFloat64(0)
 }
 
