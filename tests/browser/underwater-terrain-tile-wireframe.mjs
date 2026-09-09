@@ -700,7 +700,9 @@ function validateProof(value, processState) {
         baseline.graphContract.sourceMaximumMatrixLevel === 10 &&
         baseline.graphContract.coverMaximumMatrixLevel === 14 &&
         baseline.graphContract.commandIds?.cover?.length === 2 &&
-        baseline.graphContract.commandIds.cover.every(ids => ids.length === 2) &&
+        baseline.graphContract.commandIds.cover.every(ids =>
+            ids.length === 3 && new Set(ids).size === 3) &&
+        new Set(baseline.graphContract.commandIds.cover.flat()).size === 6 &&
         baseline.graphContract.commandIds?.demandProjection?.length === 2 &&
         baseline.graphContract.commandIds.demandProjection.every(ids => ids.length === 3) &&
         baseline.graphContract.commandIds?.patchDraw?.length === 2,

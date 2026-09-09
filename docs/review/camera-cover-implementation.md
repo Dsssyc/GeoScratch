@@ -41,7 +41,8 @@ constraints are:
 5. Integration acceptance: all current Terrain gates and Flow spatial/resource
    continuity gates; record timings and limitations without extrapolating old data.
 
-Stages 2–3 are verified. Parallel execution and final Flow integration remain pending.
+All implementation stages and final integration gates are verified. The resource
+production, temporal readiness and frame-admission authorities remain unchanged.
 
 ## Correctness Obligations
 
@@ -77,7 +78,9 @@ Do not reset this checkout, edit frozen Flow Layer or regenerate backend data.
 | --- | --- | --- |
 | Baseline | `071d82b` | Source and resource audit completed before branch creation |
 | Design | `635016b`; `npm run docs:check` and `git diff --check` | Verified |
-| Outcome boundary | `0b3381c`; empty feedback, failed-cut revocation and GPU consumer guards | Verified: main, wireframe and streaming native gates passed |
+| Outcome boundary | `0b3381c`; empty feedback, failed-cut revocation and GPU consumer guards | Verified |
+| Candidates and clipping | `9346313`; conservative domains and relative-world clipping | Verified |
+| Parallel execution | Final implementation checkpoint; indexed closure and ownership cleanup | Verified |
 
 
 ## Baseline Observations (2026-09-09)
@@ -230,3 +233,106 @@ parallelization (14 samples per scene; milliseconds):
 All benchmark native/page errors were empty and its runtime, timestamp mappings,
 browser and Vite port closed. This is a checkpoint for controlled comparison,
 not a general frame-rate claim.
+
+
+## Parallel Execution and Order-Independent Closure
+
+The graph uses two persistent dispatch commands per parity within its existing
+compute pass. An indirect candidate dispatch (64 invocations/workgroup) consumes
+CPU-known window counts from the same view upload. Its separate binding layout
+reads only selection inputs and writes candidate workspace; it does not fabricate
+writes/content epochs for public patches or state. A following 64-invocation
+workgroup coordinates deterministic topology in one lane, then uses all lanes for
+final quality evaluation and workgroup integer min/max reduction. Group-local
+barriers do not stand in for a cross-workgroup barrier.
+
+The topology coordinator remains serial; this implementation does not claim to
+parallelize every instruction. It avoids global sorting/scan storage and repeated
+level dispatches while parallelizing the expensive geometric predicates. Actual
+measurements below, not workgroup size alone, determine the benefit.
+
+Fine-side full-identity neighbor queries replace all-pairs GPU adjacency. Every
+round marks its unchanged input before splitting and visibility compaction. A
+minimal old-order counterexample starts with `3/6/4`, `2/3/1`, `5/27/20`; visibility
+is `east + south > 47.5` in z5 integer coordinates. The new cut is `2/3/1`,
+`4/13/9`, `5/27/20`. The old scan unnecessarily replaces `2/3/1` with visible child
+`3/7/3` after temporarily invisible children of another split trigger it. All six
+input permutations now produce the same identity set. The CPU oracle uses independent
+pairwise marking, and persistent tests include 120 randomized cuts, holes,
+minimum levels 0/3/20, z24, corner-only contacts and finite world boundaries.
+
+Creation review also found the existing two `Promise.all` joins could clean up
+while a sibling native allocation/BindSet preparation was still pending. Cover now
+waits for every sibling to settle before cleanup. Three injected tests prove late
+resource/binding ownership and multiple-failure aggregation; restoring the old
+join in an isolated compiled copy makes all three tests fail.
+
+For `maximumPatches=512` and the default `maximumCandidates=32768`, both workspace
+buffers total 256 KiB. Existing patch/lookup buffers and upload/compiler costs are
+separate. Indirect dimensions cover the actual candidates; the two-dimensional
+mapping guards extra groups before multiplying to a u32 element index.
+
+
+## Final Acceptance (2026-09-09)
+
+- `npm run typecheck`: passed, including examples and WebGPU declarations.
+- `npm test`: 1713 passing, 2 pending optional gates. No failing tests.
+- `npm run build`: passed. The existing large Vite chunk warning remains.
+- Canonical API generation, reviewed Chinese translation digests, and `docs:check`:
+  828 symbols, 20 canonical pages and 20 translations verified.
+- Native cover outcome: eight cases passed. Independent native camera cover: 46
+  cases at each of DPR 1 and 2 passed, including descriptor-level topology and
+  finite point coverage/quality checks, real failure revocation and legal emptiness.
+- Terrain main, wireframe and streaming gates all passed on the final production
+  hashes. The wireframe graph assertion now requires three unique command IDs per
+  parity and six across both parities (`evaluate`, `generate`, feedback); it no
+  longer assumes the removed single-dispatch graph.
+- Flow camera continuity, spatial reuse, spatial handoff, inspector handoff,
+  prefetch failure and the old empty-pan/reverse-recovery reproduction all passed.
+  Five camera gestures admitted one particle step per submitted frame without
+  resets/history clears. The empty-pan sequence observed demand pages 1 -> 0 -> 1.
+- DEM and all 27 Flow COGs and their metadata retained their hashes. No backend
+  build/data regeneration ran in browser validation. All owned browser/server
+  processes closed and resource/readback/staging/mapping/capture cleanup passed.
+
+The old spatial-handoff test required a refill while paused, contradicting ADR-119.
+It failed unchanged on exact `071d82b` and `9346313`, as well as the new graph.
+The corrected test passed on both baselines and the final implementation. It first
+drains a zero-time observed frame, then requires resource recovery without changing
+particle steps or refill count. Playback resume must consume the deferred refill.
+For a paused seek, `resetCount` counts the call to `reset()`, not GPU execution:
+one request is recorded while `resetPending` stays true and steps stay unchanged;
+resume clears pending and advances without requesting a second reset. Production
+Flow code, timeout limits and resource budgets were not changed to satisfy this test.
+
+### Final Paired Performance Check
+
+The committed benchmark ran exact `9346313` from an isolated archive immediately
+before the final parallel source, with the same three synthetic inputs and native
+Apple Metal 3 adapter. Each row has 14 GPU timestamp samples. Times below include
+both parallel dispatches in the cover pass; no intermediate host readback was added.
+They are not measurements of Flow's total frame cost or GPU utilization.
+
+| Scene | Serial GPU p50 | Parallel GPU p50 | Serial CPU construction p95 | Parallel CPU construction p95 |
+| --- | ---: | ---: | ---: | ---: |
+| flat-z9 | 2.510 ms | 2.137 ms | 0.700 ms | 0.800 ms |
+| pitch70-z10 | 6.194 ms | 2.048 ms | 0.600 ms | 0.600 ms |
+| wide-flat-z13 | 3.215 ms | 1.181 ms | 0.500 ms | 0.600 ms |
+
+Two additional final-source runs observed GPU p50 values of 1.943/2.681/1.135 ms
+and 1.853/2.627/1.129 ms in the same scene order. An earlier run was faster. These
+variations are retained rather than choosing the best sample: small cuts can be
+sensitive to dispatch/driver/system costs, and no fixed speedup is promised. The
+pitched and wide cases consistently improved in these measurements. Topology
+coordination is still serial and remains a possible future bottleneck at large
+capacities; further parallel compaction must earn its additional dispatch/storage
+cost in measured cases.
+
+### Rollback
+
+Revert later dependent commits first. Reverting the parallel implementation restores
+`9346313`'s verified serial geometry construction while retaining the candidate and
+clipping repairs. Reverting that earlier stage also requires removing its dependent
+parallel implementation; `0b3381c` retains only valid-empty/failed-cut protection.
+The design checkpoint `635016b` has no runtime effect. No backend migration or data
+rollback is involved, and frozen Flow Layer has no changes in this branch.

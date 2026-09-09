@@ -51,6 +51,21 @@ describe('Camera cover candidate budget', () => {
         } finally { await runtime.dispose() }
     })
 
+    it('rejects unrepresentable output storage before allocating cover resources', async() => {
+        const fake = createFakeGpu()
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
+        try {
+            const input = descriptor(2)
+            input.policy.maximumMatrixLevel = 24
+            input.policy.maximumPatches = 2 ** 28
+            let failure
+            try { await GpuWebMercatorQuadCover.create(runtime, input) }
+            catch (error) { failure = error }
+            expect(failure).to.be.instanceOf(RangeError)
+            expect(fake.calls.buffers).to.have.length(0)
+        } finally { await runtime.dispose() }
+    })
+
     it('reports an uncertified full-domain capacity failure without truncating its input', async() => {
         const runtime = await GPURuntime.create({ gpu: createFakeGpu().gpu })
         const cover = await GpuWebMercatorQuadCover.create(runtime, descriptor(1))
@@ -61,6 +76,7 @@ describe('Camera cover candidate budget', () => {
             expect(failure.actual).to.include({ candidateCount: 2, conservativeFallback: true })
             expect(cover.identityObjects().resources.map(resource => resource.id)).to.deep.equal(identities)
             expect(cover.facts().candidateCapacity).to.equal(1)
+            expect(cover.facts().candidateWorkspaceBytes).to.equal(8 * cover.descriptor.policy.maximumPatches)
         } finally {
             cover.dispose()
             await runtime.dispose()

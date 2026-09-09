@@ -2,7 +2,7 @@
 docId: geo.view-cover.zh
 canonical: false
 translationOf: ./view-cover.md
-canonicalDigest: 97b878e6e059b117780c6fc02a06b931a48ae4164dee4a83fdf9d7b23cd6d869
+canonicalDigest: 8b80b7f7e0e67a2c33df1ec1f714bf2796fc7d4f4d83b9c9d06cb23ceb06e64d
 ---
 # WebMercatorQuad 视图覆盖
 
@@ -64,8 +64,31 @@ prefix-free 可见 cut，并执行局部 2:1 closure。它不从世界根开始�
 
 `GpuWebMercatorQuadCoverTemplate` 为下游 GPU component 暴露借用的 parity
 resource：map metadata、patches、lookup 和完整 state。`writeView()` 拥有临时
-upload，其中同时包含相机事实和保守窗口；`frame()` 选择 parity，`encode()` 提交一次自适应
-compute，`capture()` 只读取几何 state。反馈包含 candidate/patch 数、level range、
+upload，其中同时包含相机事实和保守窗口；`frame()` 选择 parity。`encode()` 在一个
+compute pass 中按序追加两个 dispatch，`capture()` 只读取最终几何 state。
+`commandsFor()` 暴露当前自有 frame 的持久 `evaluate`、`generate`、`stateFeedback`
+命令；消费者通过 `encode()` 保持完整依赖顺序，不能只执行 `generate`。
+
+第一个 dispatch 每个 workgroup 使用 64 个 invocation，并行计算所有配置层级的
+独立候选可见性和投影 metric。Indirect count 与相机事实在同一次 view upload 中
+打包，只覆盖实际候选域；没有中间 GPU 回读或按层 CPU 调度。第二个 dispatch 使用
+一个 64-invocation workgroup：单个 lane 保留精确父链、确定性物化与索引邻接闭包；
+完成 workgroup storage 同步后，所有 lane 并行度量最终 patch，通过 workgroup
+atomic 归约 Q8 span 范围。Barrier 仅在组内使用，跨组可见性来自前一个有序 dispatch。
+
+拓扑协调明确保留串行，避免为有界 cut 引入全局排序／scan 和大量小 dispatch；昂贵
+的候选与最终质量计算并行。每轮闭包从各细边查询不可变的完整身份 leaf index，先
+标记粗邻居，再只替换标记 parent 并压缩可见性；本轮临时不可见 child 不会影响后续
+标记。这移除了全体 patch 两两邻接扫描以及处理顺序传播。轮次预算
+`maximumPatches * levelCount` 必须可用 u32 表示；预算耗尽后若仍违反邻接约束，cut 失败。
+
+Cover 为每个 parity 拥有一份 u32 candidate workspace。物化结束后，其前
+`maximumPatches` 个 word 可复用为闭包标记。两份持久 workspace 共
+`8 * max(maximumCandidates, maximumPatches)` bytes，由
+`facts().candidateWorkspaceBytes` 报告；不包含普通 cover buffer、upload snapshot
+和编译器私有 shader 存储。分配不依赖历史 view。并行构造失败时，先等待两个分支
+停止生产再统一清理，包括迟到 sibling 返回的 resource/BindSet；单个底层失败保留原
+对象，多个失败聚合。反馈包含 candidate/patch 数、level range、
 邻接、projected-cell span 和 overflow fact，不包含 demand 或 selection mode。
 
 `gpuWebMercatorQuadCoverReadWgslModule()` 提供完整身份 lookup、covering-neighbor

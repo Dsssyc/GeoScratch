@@ -2,8 +2,12 @@
 
 ## Status
 
-Open, independently reproduced while verifying ADR-104. Not fixed by that change.
-No Geo cover validation is bypassed or downgraded in the Flow example.
+Resolved by the camera-cover branch under ADR-125. `0b3381c` distinguishes a
+successful empty cut from failed construction; the final branch's independent
+native cover gate and this exact Flow pan/reverse-pan reproduction passed. Demand
+pages changed 1 -> 0 -> 1 with normal recovery and terminal cleanup. No Flow
+production validation bypass, backend change or readiness shortcut was introduced.
+The original observation below remains as historical evidence.
 
 ## Reproduction
 

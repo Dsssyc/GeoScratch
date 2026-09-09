@@ -58,7 +58,10 @@ try {
     proof = await Promise.race([
         page.evaluate(async() => {
             const { runCoverOutcomeProof } = await import('/proof.js')
-            return await runCoverOutcomeProof()
+            try { return await runCoverOutcomeProof() }
+            catch (error) {
+                throw new Error(JSON.stringify({ message: error.message, diagnostic: error.diagnostic }))
+            }
         }),
         new Promise((_, reject) => {
             proofTimeout = setTimeout(() => reject(new Error('Cover outcome proof timed out')), 60_000)

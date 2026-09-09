@@ -83,7 +83,38 @@ cannot change these bounds.
 `GpuWebMercatorQuadCoverTemplate` exposes borrowed parity resources for downstream
 GPU components: map metadata, patches, lookup, and full state. `writeView()` owns one
 ephemeral upload containing camera facts and the conservative windows; `frame()` selects parity,
-`encode()` submits one adaptive compute, and `capture()` reads only geometry state.
+`encode()` appends two ordered dispatches in one compute pass, and `capture()` reads
+only the final geometry state. `commandsFor()` exposes persistent `evaluate`,
+`generate`, and `stateFeedback` commands for the owned frame; consumers use `encode()`
+to preserve the complete dependency sequence, not `generate` alone.
+
+The first dispatch evaluates visibility and the projected metric for independent
+candidates at every configured level with 64 invocations per workgroup. Its indirect
+count is packed into the same view upload and uses only the actual candidate domain;
+no intermediate GPU readback or per-level host scheduling is required. The second
+dispatch uses one 64-invocation workgroup: one lane preserves exact parent chains,
+materializes deterministic output and coordinates indexed adjacency closure. After
+workgroup storage synchronization, all lanes measure final patches and reduce their
+Q8 span range with workgroup atomics. Only group-local synchronization is used;
+cross-group visibility comes from the preceding ordered dispatch.
+
+Topology coordination remains serial deliberately, avoiding a global sort/scan and
+many small dispatches for the bounded cut. Expensive candidate and final quality
+work is parallel. Each closure round queries an immutable full-identity leaf index
+from the fine side of every edge, marks coarse neighbors, then replaces only marked
+parents and compacts visibility. Invisible transient children cannot influence
+later marks in that round. This removes pairwise all-patch neighbor scans and
+processing-order propagation. The `maximumPatches * levelCount` round budget must
+fit u32; exhaustion with remaining adjacency violations is a failed cut.
+
+Cover owns one u32 candidate workspace per parity. After materialization, its first
+`maximumPatches` words may be reused for closure marks. Total persistent workspace
+bytes are `8 * max(maximumCandidates, maximumPatches)`, exposed as
+`facts().candidateWorkspaceBytes`; this excludes ordinary cover buffers, upload
+snapshots and compiler-private shader storage. Allocation does not depend on prior
+views. Both parallel construction branches settle before cleanup on failure,
+including resources/bindings returned by a late sibling; one underlying failure is
+preserved, and multiple failures are aggregated.
 Feedback reports candidate/patch counts, level range, adjacency, projected-cell span,
 and overflow facts. It contains no demand records or selection mode.
 

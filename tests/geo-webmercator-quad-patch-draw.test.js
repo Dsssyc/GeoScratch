@@ -102,7 +102,11 @@ describe('GPU WebMercatorQuad patch draw preparation', () => {
         patchDraw.encode(builder, drawFrame)
         builder.submit()
 
-        expect(fake.calls.dispatchCalls).to.have.length(2)
+        expect(fake.calls.dispatchCalls).to.have.length(3)
+        expect(fake.calls.dispatchCalls[0].type).to.equal('dispatchWorkgroupsIndirect')
+        expect(fake.calls.dispatchCalls.slice(1)).to.deep.equal([
+            { x: 1, y: 1, z: 1 }, { x: 1, y: 1, z: 1 },
+        ])
         expect(drawFrame.drawArgument.size).to.equal(20)
         expect(patchDraw.facts()).to.deep.include({
             coverId: cover.id,

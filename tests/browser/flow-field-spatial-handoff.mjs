@@ -24,9 +24,12 @@ try {
             const f = window.__FLOW_FIELD_PROOF__.facts(), frame = f.lastFrame
             return {
                 state:document.body.dataset.status, ready:frame.presentationReady,
+                playing:f.timeline.playing, visualTime:frame.visualTime,
                 particlesAdvancing:frame.particlesAdvancing,
                 frames:f.frames.observedFrameCount, steps:f.renderer.particles.encodedSteps,
                 resets:f.renderer.particles.resetCount, refills:f.renderer.particles.viewRefillCount,
+                resetPending:f.renderer.particles.resetPending,
+                inFlight:f.frames.submittedFrameCount-f.frames.observedFrameCount,
                 pair:f.temporalWindow.pairGeneration, workers:f.workers.activeTaskCount,
                 level:frame.demand?.requestedLevel, history:frame.history,
                 pitch:frame.view?.cameraPitchRadians,
@@ -35,6 +38,18 @@ try {
                 presented:document.querySelector('[data-flow-control="presented"]').textContent,
             }
         })
+    }
+    async function pausedFrame() {
+        // A frame admitted before pause may still contain positive visual time.
+        // Drain it before attributing subsequent readiness work to a paused frame.
+        await page.waitForFunction(() => {
+            const f = window.__FLOW_FIELD_PROOF__.facts()
+            return !f.timeline.playing && f.lastFrame.state === 'rendered' &&
+                f.lastFrame.visualTime.referenceSteps === 0 &&
+                !f.lastFrame.particlesAdvancing &&
+                f.frames.observedFrameCount >= f.frames.submittedFrameCount
+        }, undefined, {timeout:30000})
+        return facts()
     }
     async function image(label) {
         const png = await page.screenshot({path:`${output}/${label}.png`,
@@ -113,6 +128,7 @@ try {
 
     // Residency completion must wake even a paused application without another input.
     await page.locator('[data-flow-control="play-pause"]').click()
+    const paused = await pausedFrame()
     release()
     await page.waitForFunction(() => document.body.dataset.status === 'ready' &&
         window.__FLOW_FIELD_PROOF__.facts().workers.activeTaskCount===0,undefined,{timeout:60000})
@@ -121,9 +137,28 @@ try {
     assert.equal(recovered.pair,baseline.pair)
     assert.ok(recovered.steps>held.steps)
     assert.equal(recovered.resets,baseline.resets)
-    assert.ok(recovered.refills>held.refills)
+    assert.equal(recovered.playing,false)
+    assert.equal(recovered.visualTime.referenceSteps,0)
+    assert.equal(recovered.particlesAdvancing,false)
+    assert.equal(recovered.steps,paused.steps,'Paused readiness must not run a hidden particle step')
+    assert.equal(recovered.refills,paused.refills,'Paused readiness must not consume the reveal baseline')
     assert.ok(finalImage.colored>20000)
     await page.unroute(allTiles)
+
+    // ADR-119 permits the deferred reveal only after positive visual time resumes.
+    await page.locator('[data-flow-control="play-pause"]').click()
+    await page.waitForFunction(before => {
+        const f = window.__FLOW_FIELD_PROOF__.facts()
+        return f.lastFrame.presentationReady && f.lastFrame.particlesAdvancing &&
+            f.renderer.particles.encodedSteps > before.steps &&
+            f.renderer.particles.viewRefillCount > before.refills
+    }, recovered, {timeout:30000})
+    const resumed = await facts()
+    assert.ok(resumed.refills>recovered.refills,'Resume must consume the complete-view reveal baseline')
+    assert.ok(resumed.steps>recovered.steps)
+    assert.equal(resumed.resets,recovered.resets)
+    await page.locator('[data-flow-control="play-pause"]').click()
+    const beforeSeek = await pausedFrame()
 
     // A deliberate seek is different from an ordinary camera update. Even once
     // t10/t11 safety runtimes are ready, the pending visual reset must keep old
@@ -151,8 +186,8 @@ try {
     assert.equal(seekHeld.state,'loading')
     assert.equal(seekHeld.windowState,'ready','Test the reset gate, not an unconstructed runtime')
     assert.equal(seekHeld.particlesAdvancing,false,'Pending seek reset must block new ink from the old particle pool')
-    assert.equal(seekHeld.resets,recovered.resets,'Do not clear the old pool before replacement is ready')
-    assert.equal(seekHeld.refills,recovered.refills)
+    assert.equal(seekHeld.resets,beforeSeek.resets,'Do not clear the old pool before replacement is ready')
+    assert.equal(seekHeld.refills,beforeSeek.refills)
     assert.equal(seekHeld.history.cleared,false)
     assert.ok(seekHeldImage.colored>10000,'Keep the old image while the new pair is incomplete')
     await page.waitForTimeout(350)
@@ -173,10 +208,27 @@ try {
             f.lastFrame.temporal?.upperSampleKey === 't11' && f.lastFrame.presentationReady
     },undefined,{timeout:60000})
     const seekRecovered = await facts()
-    assert.equal(seekRecovered.particlesAdvancing,true)
-    assert.equal(seekRecovered.resets,seekHeld.resets+1,'Apply exactly one seek reset before resumed simulation')
-    assert.ok(seekRecovered.steps>seekHeld.steps)
+    assert.equal(seekRecovered.playing,false)
+    assert.equal(seekRecovered.visualTime.referenceSteps,0)
+    assert.equal(seekRecovered.particlesAdvancing,false)
+    assert.equal(seekRecovered.resetPending,true,'Keep the particle reset pending until a real simulation tick')
+    assert.equal(seekRecovered.resets,seekHeld.resets+1,'Schedule exactly one pending seek reset')
+    assert.equal(seekRecovered.steps,seekHeld.steps,'A paused seek must not warm a hidden particle pool')
+    assert.equal(seekRecovered.refills,seekHeld.refills)
     assert.notEqual(seekRecovered.presented,seekHeld.presented)
+
+    await page.locator('[data-flow-control="play-pause"]').click()
+    await page.waitForFunction(before => {
+        const f = window.__FLOW_FIELD_PROOF__.facts()
+        return f.lastFrame.presentationReady && f.lastFrame.particlesAdvancing &&
+            f.renderer.particles.encodedSteps > before.steps &&
+            !f.renderer.particles.resetPending
+    }, seekRecovered, {timeout:30000})
+    const seekResumed = await facts()
+    assert.equal(seekResumed.resets,seekHeld.resets+1,'Apply exactly one seek reset before resumed simulation')
+    assert.equal(seekResumed.resets,seekRecovered.resets,'Resume must consume the existing reset without requesting another')
+    assert.ok(seekResumed.steps>seekHeld.steps)
+    assert.equal(seekResumed.resetPending,false)
     const cleanup = await page.evaluate(() => window.__FLOW_FIELD_PROOF__.dispose())
     assert.equal(cleanup.cleanupFailures.length,0)
     const disposed = await page.evaluate(() => {
@@ -188,9 +240,9 @@ try {
     assert.equal(disposed.window.activeCaptureCount,0)
     assert.equal(disposed.activeTasks,0)
     assert.deepEqual(errors,[])
-    console.log(JSON.stringify({status:'passed',blockedRequests,baseline,held,waiting,panned,recovered,
+    console.log(JSON.stringify({status:'passed',blockedRequests,baseline,held,waiting,panned,paused,recovered,resumed,beforeSeek,
         firstImage,secondImage,pannedImage,finalImage,blockedSeekRequests,seekHeld,seekWaiting,
-        seekHeldImage,seekWaitingImage,seekRecovered,disposed,errors}))
+        seekHeldImage,seekWaitingImage,seekRecovered,seekResumed,disposed,errors}))
 } finally {
     release?.()
     releaseSeek?.()

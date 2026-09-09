@@ -680,7 +680,7 @@ describe('GPU WebMercatorQuad inverse cover lowering', () => {
         })
         expect(cover.facts().parity).to.have.length(2)
         expect(cover.facts().parity.every(parity =>
-            parity.commandIds.length === 2
+            parity.commandIds.length === 3 && new Set(parity.commandIds).size === 3
         )).to.equal(true)
         expect(cover.facts().parity.every(parity =>
             !('demandBufferId' in parity) && !('drawArgumentBufferId' in parity)
@@ -706,7 +706,7 @@ describe('GPU WebMercatorQuad inverse cover lowering', () => {
         cover.capture(builder, frame)
         const submitted = builder.submit()
         expect(submitted.readbacks.map(link => link.commandId)).to.have.length(1)
-        expect(fake.calls.dispatchCalls).to.have.length(1)
+        expect(fake.calls.dispatchCalls).to.have.length(2)
 
         token.dispose()
         cover.dispose()

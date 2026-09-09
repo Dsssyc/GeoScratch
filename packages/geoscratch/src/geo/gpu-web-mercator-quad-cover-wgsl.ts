@@ -40,6 +40,10 @@ var<storage, read_write> coverPatches: array<GpuWebMercatorQuadCoverPatch>;
 var<storage, read_write> coverLookup: array<GpuWebMercatorQuadCoverLookupEntry>;
 @group(0) @binding(6)
 var<storage, read_write> coverState: GpuWebMercatorQuadCoverState;
+@group(0) @binding(7)
+var<storage, read_write> coverCandidates: array<u32>;
+var<workgroup> coverMinimumSpan: atomic<u32>;
+var<workgroup> coverMaximumSpan: atomic<u32>;
 const WEB_MERCATOR_WORLD_WIDTH_METERS: f32 = 40075016.0f;
 
 fn coverEffectiveCellSpanThreshold() -> f32 {
@@ -489,16 +493,12 @@ fn coverMarkSparseRefinements() {
                     )) {
                     continue;
                 }
-                let bounds = coverPatchBounds(
-                    parentLevel,
-                    u32(tileRow),
-                    u32(tileCol),
-                );
-                if (!coverPatchVisible(bounds) ||
-                    coverProjectedCellSpanPixels(bounds) <=
-                        coverEffectiveCellSpanThreshold()) {
-                    continue;
-                }
+                var start = 0u;
+                if (parentLevel > 0u) { start = mapMeta.candidateWindows[parentLevel - 1u].w; }
+                let width = u32(search.maxTileCol - search.minTileCol + 1i);
+                let index = start + u32(tileRow - search.minTileRow) * width +
+                    u32(tileCol - search.minTileCol);
+                if (coverCandidates[index] == 0u) { continue; }
                 if (!coverLookupInsertIdentity(
                     parentLevel,
                     u32(tileRow),
@@ -539,46 +539,6 @@ fn coverEmitPatch(matrixLevel: u32, tileRow: u32, tileCol: u32) {
     let candidate = GpuWebMercatorQuadCoverPatch(matrixLevel, tileRow, tileCol);
     coverPatches[patchIndex] = candidate;
     coverState.patchCount += 1u;
-}
-
-fn coverScaledBounds(
-    candidate: GpuWebMercatorQuadCoverPatch,
-) -> vec4u {
-    let scale = 1u << (coverPolicy.maximumMatrixLevel - candidate.matrixLevel);
-    return vec4u(
-        candidate.tileCol * scale,
-        candidate.tileRow * scale,
-        (candidate.tileCol + 1u) * scale,
-        (candidate.tileRow + 1u) * scale,
-    );
-}
-
-fn coverEdgeAdjacent(left: vec4u, right: vec4u) -> bool {
-    let horizontal = (left.z == right.x || right.z == left.x) &&
-        max(left.y, right.y) < min(left.w, right.w);
-    let vertical = (left.w == right.y || right.w == left.y) &&
-        max(left.x, right.x) < min(left.z, right.z);
-    return horizontal || vertical;
-}
-
-fn coverMaximumFinerNeighborDelta(
-    candidateIndex: u32,
-) -> u32 {
-    let candidate = coverPatches[candidateIndex];
-    let candidateBounds = coverScaledBounds(candidate);
-    var maximumDelta = 0u;
-    for (var otherIndex = 0u; otherIndex < coverState.patchCount; otherIndex += 1u) {
-        if (otherIndex == candidateIndex) { continue; }
-        let other = coverPatches[otherIndex];
-        if (other.matrixLevel <= candidate.matrixLevel + 1u) { continue; }
-        if (coverEdgeAdjacent(candidateBounds, coverScaledBounds(other))) {
-            maximumDelta = max(
-                maximumDelta,
-                other.matrixLevel - candidate.matrixLevel,
-            );
-        }
-    }
-    return maximumDelta;
 }
 
 fn coverSplitPatch(patchIndex: u32) -> bool {
@@ -671,20 +631,6 @@ fn coverMaterializeSparseRefinements() {
     }
 }
 
-fn coverBalancePatches() {
-    for (var iteration = 0u; iteration < 24u; iteration += 1u) {
-        let inputCount = coverState.patchCount;
-        var changed = false;
-        for (var patchIndex = 0u; patchIndex < inputCount; patchIndex += 1u) {
-            if (coverMaximumFinerNeighborDelta(patchIndex) > 1u &&
-                coverSplitPatch(patchIndex)) {
-                changed = true;
-            }
-        }
-        if (!changed) { break; }
-    }
-}
-
 fn coverFinalizeLookup() {
     coverState.minimumMatrixLevel = 0xffffffffu;
     coverState.maximumMatrixLevel = 0u;
@@ -702,67 +648,90 @@ fn coverFinalizeLookup() {
             coverState.maximumMatrixLevel,
             candidate.matrixLevel,
         );
-        let cellSpan = coverCellSpanQ8(coverProjectedCellSpanPixels(
-            coverPatchBounds(
-                candidate.matrixLevel,
-                candidate.tileRow,
-                candidate.tileCol,
-            ),
-        ));
-        coverState.minimumCellSpanQ8 = min(
-            coverState.minimumCellSpanQ8,
-            cellSpan,
-        );
-        coverState.maximumCellSpanQ8 = max(
-            coverState.maximumCellSpanQ8,
-            cellSpan,
-        );
         if (!coverLookupInsert(patchIndex)) {
             coverState.lookupOverflowCount += 1u;
         }
     }
-    for (var leftIndex = 0u; leftIndex < coverState.patchCount; leftIndex += 1u) {
-        let left = coverPatches[leftIndex];
-        let leftBounds = coverScaledBounds(left);
-        for (var rightIndex = leftIndex + 1u;
-            rightIndex < coverState.patchCount;
-            rightIndex += 1u) {
-            let right = coverPatches[rightIndex];
-            if (coverEdgeAdjacent(leftBounds, coverScaledBounds(right))) {
-                coverState.maximumAdjacentLevelDelta = max(
-                    coverState.maximumAdjacentLevelDelta,
-                    u32(abs(i32(left.matrixLevel) - i32(right.matrixLevel))),
-                );
-            }
-        }
-    }
+    coverFinalizeAdjacentLevelDelta();
 }
 
-@compute @workgroup_size(1)
-fn generateWebMercatorQuadCover() {
-    coverState.frameEpoch = mapMeta.frameEpoch;
-    coverState.candidateCount = 0u;
-    coverState.patchCount = 0u;
-    coverState.descriptorOverflowCount = 0u;
-    coverState.lookupOverflowCount = 0u;
-    coverState.minimumMatrixLevel = 0xffffffffu;
-    coverState.maximumMatrixLevel = 0u;
-    coverState.maximumAdjacentLevelDelta = 0u;
-    coverState.minimumCellSpanQ8 = 0xffffffffu;
-    coverState.maximumCellSpanQ8 = 0u;
-
-    coverMarkSparseRefinements();
-    coverSeedMinimumPatches();
-    coverMaterializeSparseRefinements();
-    coverBalancePatches();
-    coverCompactVisiblePatches();
-    coverFinalizeLookup();
-    if (coverState.descriptorOverflowCount != 0u ||
-        coverState.lookupOverflowCount != 0u ||
-        coverState.maximumAdjacentLevelDelta > 1u) {
-        // Preserve failure feedback, but revoke the partial cut before any consumer.
-        coverState.patchCount = 0u;
-        coverClearLookup();
+@compute @workgroup_size(64)
+fn evaluateWebMercatorQuadCandidates(
+    @builtin(workgroup_id) group: vec3u,
+    @builtin(num_workgroups) groups: vec3u,
+    @builtin(local_invocation_index) lane: u32,
+) {
+    if (mapMeta.refinementCandidateCount == 0u) { return; }
+    let groupIndex = group.y * groups.x + group.x;
+    if (groupIndex >= (mapMeta.refinementCandidateCount - 1u) / 64u + 1u) { return; }
+    let index = groupIndex * 64u + lane;
+    if (index >= mapMeta.refinementCandidateCount) { return; }
+    var matrixLevel = coverPolicy.minimumMatrixLevel;
+    var start = 0u;
+    loop {
+        if (index < mapMeta.candidateWindows[matrixLevel].w) { break; }
+        start = mapMeta.candidateWindows[matrixLevel].w;
+        matrixLevel += 1u;
     }
+    let window = mapMeta.candidateWindows[matrixLevel];
+    let candidateOffset = index - start;
+    let bounds = coverPatchBounds(matrixLevel, window.x + candidateOffset / window.z,
+        window.y + candidateOffset % window.z);
+    var refine = false;
+    if (coverPatchVisible(bounds)) {
+        refine = coverProjectedCellSpanPixels(bounds) > coverEffectiveCellSpanThreshold();
+    }
+    coverCandidates[index] = select(0u, 1u, refine);
+}
+
+@compute @workgroup_size(64)
+fn generateWebMercatorQuadCover(@builtin(local_invocation_index) lane: u32) {
+    if (lane == 0u) {
+        atomicStore(&coverMinimumSpan, 0xffffffffu);
+        atomicStore(&coverMaximumSpan, 0u);
+        coverState.frameEpoch = mapMeta.frameEpoch;
+        coverState.candidateCount = 0u;
+        coverState.patchCount = 0u;
+        coverState.descriptorOverflowCount = 0u;
+        coverState.lookupOverflowCount = 0u;
+        coverState.minimumMatrixLevel = 0xffffffffu;
+        coverState.maximumMatrixLevel = 0u;
+        coverState.maximumAdjacentLevelDelta = 0u;
+        coverState.minimumCellSpanQ8 = 0xffffffffu;
+        coverState.maximumCellSpanQ8 = 0u;
+
+        coverMarkSparseRefinements();
+        coverSeedMinimumPatches();
+        coverMaterializeSparseRefinements();
+        let balanced = coverBalanceIndexedPatches();
+        // Final adjacency validation retains any incomplete closure as failure.
+        _ = balanced;
+        coverCompactVisiblePatches();
+        coverFinalizeLookup();
+        if (coverState.descriptorOverflowCount != 0u ||
+            coverState.lookupOverflowCount != 0u ||
+            coverState.maximumAdjacentLevelDelta > 1u) {
+            // Preserve failure feedback, but revoke the partial cut before any consumer.
+            coverState.patchCount = 0u;
+            coverClearLookup();
+        }
+    }
+    // All cross-workgroup work finished in the preceding ordered dispatch.
+    // This one workgroup publishes topology once and measures its leaves in parallel.
+    storageBarrier();
+    workgroupBarrier();
+    for (var index = lane; index < coverState.patchCount; index += 64u) {
+        let measuredPatch = coverPatches[index];
+        let span = coverCellSpanQ8(coverProjectedCellSpanPixels(
+            coverPatchBounds(measuredPatch.matrixLevel, measuredPatch.tileRow, measuredPatch.tileCol)));
+        atomicMin(&coverMinimumSpan, span);
+        atomicMax(&coverMaximumSpan, span);
+    }
+    workgroupBarrier();
+    if (lane == 0u) {
+        coverState.minimumCellSpanQ8 = atomicLoad(&coverMinimumSpan);
+        coverState.maximumCellSpanQ8 = atomicLoad(&coverMaximumSpan);
+    }
+
 }
 `

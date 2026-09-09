@@ -29,6 +29,7 @@ import {
     gpuWebMercatorQuadCoverVerticalBoundsCodec,
 } from './gpu-web-mercator-quad-cover-layout.js'
 import { gpuWebMercatorQuadCoverCandidates } from './gpu-web-mercator-quad-cover-candidates.js'
+import { GPU_WEB_MERCATOR_QUAD_COVER_NEIGHBORS_WGSL } from './gpu-web-mercator-quad-cover-neighbors-wgsl.js'
 import { GPU_WEB_MERCATOR_QUAD_COVER_WGSL } from './gpu-web-mercator-quad-cover-wgsl.js'
 import type { WebMercatorPlanarTileSpatialProfile } from './tile-spatial-profile.js'
 import { WebMercatorQuad } from './web-mercator-quad.js'
@@ -37,6 +38,7 @@ const BUFFER_COPY_DST = 0x08
 const BUFFER_COPY_SRC = 0x04
 const BUFFER_UNIFORM = 0x40
 const BUFFER_STORAGE = 0x80
+const BUFFER_INDIRECT = 0x100
 
 type Disposable = { dispose(): void }
 type BufferBindingType = 'uniform' | 'read-storage' | 'storage'
@@ -118,6 +120,7 @@ export type GpuWebMercatorQuadCoverFeedback =
     }>
 
 export type GpuWebMercatorQuadCoverCommands = Readonly<{
+    evaluate: DispatchCommand
     generate: DispatchCommand
     stateFeedback: ReadbackCommand
 }>
@@ -130,6 +133,7 @@ export type GpuWebMercatorQuadCoverFacts = Readonly<{
     policy: GpuWebMercatorQuadCoverPolicy
     lookupCapacity: number
     candidateCapacity: number
+    candidateWorkspaceBytes: number
     coverageLimitCount: number
     verticalBoundsMode: 'global' | 'hierarchy'
     verticalBoundCount: number
@@ -161,11 +165,13 @@ type ParityResources = Readonly<{
     patches: BufferResource
     lookup: BufferResource
     state: BufferResource
+    candidates: BufferResource
 }>
 
 type ParityTemplate = Readonly<{
     resources: ParityResources
     bindSet: BindSet
+    evaluateBindSet: BindSet
     commands: GpuWebMercatorQuadCoverCommands
     template: GpuWebMercatorQuadCoverTemplate
 }>
@@ -337,6 +343,20 @@ export class GpuWebMercatorQuadCover {
             lookupCapacity,
             gpuWebMercatorQuadCoverLookupEntryCodec.byteLength()
         )
+        const candidateBytes = checkedProduct(
+            Math.max(descriptor.maximumCandidates!, descriptor.policy.maximumPatches), 4
+        )
+        const closureRounds = descriptor.policy.maximumPatches * (
+            descriptor.policy.maximumMatrixLevel - descriptor.policy.minimumMatrixLevel + 1
+        )
+        if (!Number.isSafeInteger(closureRounds) || closureRounds > 0xffff_ffff) {
+            return throwGeoDiagnostic({
+                code: 'GEO_WEB_MERCATOR_COVER_CLOSURE_BUDGET_INVALID',
+                phase: 'selection', subject: { kind: 'web-mercator-quad-cover' },
+                message: 'The indexed closure work budget must fit a u32 counter.',
+                expected: { maximumRounds: 'u32' }, actual: { maximumRounds: closureRounds },
+            })
+        }
         const owned: Disposable[] = []
         const own = <Value extends Disposable>(value: Value): Value => {
             owned.push(value)
@@ -392,7 +412,7 @@ export class GpuWebMercatorQuadCover {
                     verticalBoundRecords
                 ),
             }))
-            const parityResources = await Promise.all([ 0, 1 ].map(
+            const parityResources = await settleCoverCreation([ 0, 1 ].map(
                 async parityValue => {
                     const parity = parityValue as 0 | 1
                     return Object.freeze({
@@ -400,7 +420,7 @@ export class GpuWebMercatorQuadCover {
                         mapMeta: own(await runtime.createBuffer({
                             label: `GPU WebMercatorQuad cover map metadata ${parity}`,
                             size: gpuWebMercatorQuadCoverMapMetaCodec.byteLength(),
-                            usage: BUFFER_COPY_DST | BUFFER_UNIFORM,
+                            usage: BUFFER_COPY_DST | BUFFER_UNIFORM | BUFFER_INDIRECT,
                         })),
                         patches: own(await runtime.createBuffer({
                             label: `GPU WebMercatorQuad cover patches ${parity}`,
@@ -410,6 +430,11 @@ export class GpuWebMercatorQuadCover {
                         lookup: own(await runtime.createBuffer({
                             label: `GPU WebMercatorQuad cover lookup ${parity}`,
                             size: lookupBytes,
+                            usage: BUFFER_COPY_DST | BUFFER_STORAGE,
+                        })),
+                        candidates: own(await runtime.createBuffer({
+                            label: `GPU WebMercatorQuad candidate workspace ${parity}`,
+                            size: candidateBytes,
                             usage: BUFFER_COPY_DST | BUFFER_STORAGE,
                         })),
                         state: own(await runtime.createBuffer({
@@ -424,6 +449,7 @@ export class GpuWebMercatorQuadCover {
                 resources.patches,
                 resources.lookup,
                 resources.state,
+                resources.candidates,
             ].map((resource, index) => own(runtime.createClearBufferCommand({
                 label: `Clear GPU WebMercatorQuad cover ${resources.parity} resource ${index}`,
                 target: resource.region(),
@@ -463,7 +489,8 @@ export class GpuWebMercatorQuadCover {
                     },
                     {
                         label: 'GPU WebMercatorQuad inverse-cover kernel',
-                        code: GPU_WEB_MERCATOR_QUAD_COVER_WGSL,
+                        code: GPU_WEB_MERCATOR_QUAD_COVER_WGSL +
+                            GPU_WEB_MERCATOR_QUAD_COVER_NEIGHBORS_WGSL,
                     },
                 ],
             }))
@@ -498,6 +525,7 @@ export class GpuWebMercatorQuadCover {
                         'storage',
                         gpuWebMercatorQuadCoverStateCodec.byteLength()
                     ),
+                    binding(7, 'coverCandidates', 'storage', candidateBytes),
                 ],
             }))
             const program = own(runtime.createProgram({
@@ -512,10 +540,30 @@ export class GpuWebMercatorQuadCover {
                 program,
                 layout: { mode: 'explicit', bindLayouts: [ layout ] },
             }))
+            const evaluateLayout = own(await runtime.createBindLayout({
+                label: 'GPU WebMercatorQuad candidate evaluation layout',
+                group: 0,
+                entries: [
+                    binding(0, 'mapMeta', 'uniform', gpuWebMercatorQuadCoverMapMetaCodec.byteLength()),
+                    binding(1, 'coverPolicy', 'uniform', gpuWebMercatorQuadCoverPolicyCodec.byteLength()),
+                    binding(2, 'coverageLimits', 'read-storage', coverageLimits.size),
+                    binding(3, 'verticalBounds', 'read-storage', verticalBoundsBuffer.size),
+                    binding(7, 'coverCandidates', 'storage', candidateBytes),
+                ],
+            }))
+            const evaluateProgram = own(runtime.createProgram({
+                label: 'GPU WebMercatorQuad candidate evaluation program',
+                compute: { module: shader, entryPoint: 'evaluateWebMercatorQuadCandidates' },
+            }))
+            const evaluatePipeline = own(await runtime.createComputePipeline({
+                label: 'GPU WebMercatorQuad parallel candidate pipeline',
+                program: evaluateProgram,
+                layout: { mode: 'explicit', bindLayouts: [ evaluateLayout ] },
+            }))
             const pass = own(runtime.createComputePass({
                 label: 'GPU WebMercatorQuad inverse-cover stage',
             }))
-            const templates = await Promise.all(parityResources.map(
+            const templates = await settleCoverCreation(parityResources.map(
                 async resources => {
                     const bindSet = own(await runtime.createBindSet(layout, {
                         mapMeta: resources.mapMeta.region({
@@ -536,11 +584,33 @@ export class GpuWebMercatorQuadCover {
                         coverLookup: resources.lookup.region({
                             layout: gpuWebMercatorQuadCoverLookupEntryCodec.artifact,
                         }),
+                        coverCandidates: resources.candidates.region(),
                         coverState: resources.state.region({
                             layout: gpuWebMercatorQuadCoverStateCodec.artifact,
                         }),
                     }, {
                         label: `GPU WebMercatorQuad inverse-cover bindings ${resources.parity}`,
+                    }))
+                    const evaluateBindSet = own(await runtime.createBindSet(evaluateLayout, {
+                        mapMeta: resources.mapMeta.region({ layout: gpuWebMercatorQuadCoverMapMetaCodec.artifact }),
+                        coverPolicy: policy.region({ layout: gpuWebMercatorQuadCoverPolicyCodec.artifact }),
+                        coverageLimits: coverageLimits.region({ layout: gpuWebMercatorQuadCoverLimitCodec.artifact }),
+                        verticalBounds: verticalBoundsBuffer.region({ layout: gpuWebMercatorQuadCoverVerticalBoundsCodec.artifact }),
+                        coverCandidates: resources.candidates.region(),
+                    }, { label: `GPU WebMercatorQuad candidate bindings ${resources.parity}` }))
+                    const evaluate = own(runtime.createDispatchCommand({
+                        label: `Evaluate GPU WebMercatorQuad candidates ${resources.parity}`,
+                        pipeline: evaluatePipeline,
+                        bindSets: [ { set: evaluateBindSet } ],
+                        count: { indirect: resources.mapMeta.region({
+                            offset: gpuWebMercatorQuadCoverMapMetaCodec.artifact.fields
+                                .find(field => field.name === 'candidateDispatch')!.offset,
+                            size: 12,
+                        }) },
+                        resources: currentAccess([
+                            resources.mapMeta, policy, coverageLimits, verticalBoundsBuffer, resources.candidates,
+                        ], [ resources.candidates ]),
+                        whenMissing: 'throw',
                     }))
                     const generate = own(runtime.createDispatchCommand({
                         label: `Generate GPU WebMercatorQuad inverse cover ${resources.parity}`,
@@ -555,10 +625,12 @@ export class GpuWebMercatorQuadCover {
                             resources.patches,
                             resources.lookup,
                             resources.state,
+                            resources.candidates,
                         ], [
                             resources.patches,
                             resources.lookup,
                             resources.state,
+                            resources.candidates,
                         ]),
                         whenMissing: 'throw',
                     }))
@@ -584,7 +656,9 @@ export class GpuWebMercatorQuadCover {
                     return Object.freeze({
                         resources,
                         bindSet,
+                        evaluateBindSet,
                         commands: Object.freeze({
+                            evaluate,
                             generate,
                             stateFeedback,
                         }),
@@ -607,17 +681,19 @@ export class GpuWebMercatorQuadCover {
                         resources.patches,
                         resources.lookup,
                         resources.state,
+                        resources.candidates,
                     ]),
                 ]),
                 uploads: initializationUploads,
-                bindLayouts: Object.freeze([ layout ]),
-                bindSets: Object.freeze(templates.map(template => template.bindSet)),
-                programs: Object.freeze([ program ]),
-                pipelines: Object.freeze([ pipeline ]),
+                bindLayouts: Object.freeze([ layout, evaluateLayout ]),
+                bindSets: Object.freeze(templates.flatMap(template => [ template.bindSet, template.evaluateBindSet ])),
+                programs: Object.freeze([ program, evaluateProgram ]),
+                pipelines: Object.freeze([ pipeline, evaluatePipeline ]),
                 passes: Object.freeze([ pass ]),
                 commands: Object.freeze([
                     ...initializationClears,
                     ...templates.flatMap(template => [
+                        template.commands.evaluate,
                         template.commands.generate,
                         template.commands.stateFeedback,
                     ]),
@@ -782,7 +858,9 @@ export class GpuWebMercatorQuadCover {
         }
         builder.require(record.view.viewStamp)
         builder.upload(record.view.command)
-        builder.compute(this.#pass, [ record.template.commands.generate ])
+        builder.compute(this.#pass, [
+            record.template.commands.evaluate, record.template.commands.generate,
+        ])
         builder.consume(record.view.sequenceStamp)
         encodedBuilders.set(builder, frame)
         return builder
@@ -892,6 +970,8 @@ export class GpuWebMercatorQuadCover {
             policy: this.descriptor.policy,
             lookupCapacity: this.#lookupCapacity,
             candidateCapacity: this.descriptor.maximumCandidates!,
+            candidateWorkspaceBytes: 8 * Math.max(this.descriptor.maximumCandidates!,
+                this.descriptor.policy.maximumPatches),
             coverageLimitCount: this.descriptor.spatialProfile.coverage.limits.length,
             verticalBoundsMode: this.descriptor.verticalBounds === undefined
                 ? 'global' as const
@@ -905,6 +985,7 @@ export class GpuWebMercatorQuadCover {
                 lookupBufferId: template.resources.lookup.id,
                 stateBufferId: template.resources.state.id,
                 commandIds: Object.freeze([
+                    template.commands.evaluate.id,
                     template.commands.generate.id,
                     template.commands.stateFeedback.id,
                 ]),
@@ -1232,6 +1313,11 @@ function mapMetaRecord(
         verticalFovRadians: view.verticalFovRadians,
         frameEpoch: view.frameEpoch,
         residencySnapshotEpoch: view.residencySnapshotEpoch,
+        candidateDispatch: [
+            Math.min(65535, Math.ceil(candidates.refinementCandidateCount / 64)),
+            Math.max(1, Math.ceil(Math.ceil(candidates.refinementCandidateCount / 64) / 65535)),
+            1,
+        ],
         refinementCandidateCount: candidates.refinementCandidateCount,
         candidateWindows,
     }
@@ -1289,6 +1375,18 @@ function checkedProduct(left: number, right: number): number {
         throw new RangeError('GPU WebMercatorQuad cover buffer size exceeds u32 bounds')
     }
     return result
+}
+
+async function settleCoverCreation<Value>(parts: readonly Promise<Value>[]): Promise<Value[]> {
+
+    // A rejected parity must not start cleanup while another parity can still
+    // acquire resources. Keep initial creation concurrent, then settle every
+    // producer before the owning catch releases the complete acquired set.
+    const settled = await Promise.allSettled(parts)
+    const failures = settled.flatMap(result => result.status === 'rejected' ? [result.reason] : [])
+    if (failures.length === 1) throw failures[0]
+    if (failures.length > 1) throw new AggregateError(failures, 'GPU WebMercatorQuad cover creation failed')
+    return settled.map(result => (result as PromiseFulfilledResult<Value>).value)
 }
 
 function disposeReverse(values: readonly Disposable[]): void {

@@ -96,3 +96,25 @@ Merging resource availability into geometry selection is rejected: it would rest
 network-dependent topology and conflate desired precision with delayed availability.
 Combining all readiness promises is rejected: it would reintroduce the coupling
 removed by ADR-106 and may hold publication bytes across unrelated work.
+
+
+## Selected Execution Structure
+
+The measured implementation uses two ordered dispatches within the existing cover
+pass. Independent raw candidates across all levels run in parallel; a bounded
+single-workgroup topology coordinator preserves parent decisions and stable output,
+then its lanes measure final quality in parallel. Candidate dispatch parameters
+travel with the view metadata upload. There are no per-level CPU readbacks, new
+queue authority or resource-ready tickets.
+
+Fine-side standard-identity ancestor lookup replaces quadratic adjacency scans.
+Each closure round reads an immutable cut, marks all required coarse splits, then
+materializes and compacts. The old in-place scan could let temporarily invisible
+children trigger unrelated extra refinement later in the same round. The CPU
+reference retains independent pairwise edge checks but adopts the same frozen-round
+semantics. This is a correction to processing-order propagation, not hysteresis.
+
+The extra workspace is explicitly bounded per parity and reused only after its
+previous role is finished. Native tests and resource-access validation keep the
+candidate pass from pretending to write public cover products. Creation waits for
+all asynchronous parity branches before releasing owned objects after a failure.

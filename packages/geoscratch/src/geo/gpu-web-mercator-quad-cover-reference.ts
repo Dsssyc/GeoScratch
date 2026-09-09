@@ -211,26 +211,44 @@ function childPatches(
     ])
 }
 
-function balancePatches(
+/**
+ * Balances an explicit reference cut with independent pairwise edge checks.
+ * The input is the already-visible cut produced by materialization.
+ * Each round marks its immutable input before replacing parents and removing
+ * invisible children, so traversal order cannot propagate transient geometry.
+ * The optional visibility predicate supports independent non-rectangular proofs.
+ * @internal
+ */
+export function balancePatches(
     input: GpuWebMercatorQuadCoverReferenceInput,
-    patches: GpuWebMercatorQuadCoverReferencePatch[]
+    patches: GpuWebMercatorQuadCoverReferencePatch[],
+    isVisible: (patch: GpuWebMercatorQuadCoverReferencePatch) => boolean = patch =>
+        intersectsVisible(patch, input.visibleBounds)
 ): number {
 
     let candidateCount = 0
-    for (let iteration = 0; iteration < 24; iteration++) {
+    const maximumRounds = input.policy.maximumPatches * (
+        input.policy.maximumMatrixLevel - input.policy.minimumMatrixLevel + 1
+    )
+    if (!Number.isSafeInteger(maximumRounds) || maximumRounds <= 0 || maximumRounds > 0xffff_ffff) {
+        return invalidCover(
+            'The balanced standard cover requires a finite u32 closure work budget.',
+            { maximumRounds: 'positive u32' },
+            { maximumRounds }
+        )
+    }
+    const marks = () => patches.map((candidate, patchIndex) => patches.some((other, otherIndex) =>
+        otherIndex !== patchIndex &&
+        other.matrixLevel > candidate.matrixLevel + 1 &&
+        edgeAdjacentAtLevel(candidate, other, input.policy.maximumMatrixLevel)
+    ))
+    for (let iteration = 0; iteration < maximumRounds; iteration++) {
         const inputCount = patches.length
-        let changed = false
+        const marked = marks()
+        if (!marked.some(Boolean)) return candidateCount
         for (let patchIndex = 0; patchIndex < inputCount; patchIndex++) {
+            if (!marked[patchIndex]) continue
             const candidate = patches[patchIndex]!
-            if (!patches.some((other, otherIndex) =>
-                otherIndex !== patchIndex &&
-                other.matrixLevel > candidate.matrixLevel + 1 &&
-                edgeAdjacentAtLevel(
-                    candidate,
-                    other,
-                    input.policy.maximumMatrixLevel
-                )
-            )) continue
             const children = childPatches(candidate)
             const patchCount = patches.length + 3
             if (patchCount > input.policy.maximumPatches) {
@@ -241,17 +259,19 @@ function balancePatches(
                 )
             }
             candidateCount += 4
-            if (children.length === 0) continue
             patches[patchIndex] = children[0]!
             patches.push(...children.slice(1))
-            changed = true
         }
-        if (!changed) break
+        const visible = patches.filter(isVisible)
+        patches.splice(0, patches.length, ...visible)
     }
-    const visible = patches.filter(patch =>
-        intersectsVisible(patch, input.visibleBounds)
-    )
-    patches.splice(0, patches.length, ...visible)
+    if (marks().some(Boolean)) {
+        return invalidCover(
+            'The balanced standard cover did not close within its declared work budget.',
+            { maximumAdjacentLevelDelta: 1, maximumRounds },
+            { patchCount: patches.length }
+        )
+    }
     return candidateCount
 }
 
