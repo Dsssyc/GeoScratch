@@ -8,7 +8,7 @@ GeoScratch is an ES module graphics library for WebGPU-based geovisualization. I
 
 The library is designed for developers who want direct control over WebGPU resources while building scenes, maps, globes, terrain layers, or GPU-driven experiments.
 
-![GeoScratch preview](https://raw.githubusercontent.com/YcSoku/GeoScratch/main/DayDream.png)
+![GeoScratch animated globe preview](./docs/assets/DayDream.webp)
 
 ## Quick Start
 
