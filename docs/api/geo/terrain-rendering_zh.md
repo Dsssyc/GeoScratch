@@ -2,7 +2,7 @@
 docId: geo.terrain-rendering.zh
 canonical: false
 translationOf: ./terrain-rendering.md
-canonicalDigest: 5055808270b966fa0b38cc2bb25331639ff0d64a46be95e3935c94018fca8aba
+canonicalDigest: 4f577664997823ede0a6781e908b4bc6fc2feb5c18c753afa575fd9a94880477
 ---
 # 地形渲染
 
@@ -36,7 +36,10 @@ presentation size 与 DPR 不参与质量度量。
 
 `elevationRangeMeters` 和可选 `WebMercatorTerrainElevationBounds` 仍然是 terrain
 source fact。Renderer 应用 exaggeration，再把它们转换为通用
-`WebMercatorTileVerticalBounds` 后构造 cover。Hierarchy 必须完整匹配 source
+`WebMercatorTileVerticalBounds` 后构造 cover。源范围描述各自栅格层级，renderer
+因此将后代范围并入每个有效祖先，再验证几何层级的包含关系；派生 bounds 使用独立
+snapshot，不改变源 metadata 或后端数据，并在 renderer GPU 分配前完成验证。
+此转换不依赖驻留和请求状态（ADR-126）。Hierarchy 必须完整匹配 source
 coverage；省略时使用全局范围。cache hit、atlas page 和请求完成不能提供或改变 bounds。
 
 Demand feedback 保持期望几何精度、source ceiling 和可执行请求瓦片互相独立。

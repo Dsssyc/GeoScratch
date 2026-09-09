@@ -2,7 +2,7 @@
 docId: geo.view-cover.zh
 canonical: false
 translationOf: ./view-cover.md
-canonicalDigest: 8b80b7f7e0e67a2c33df1ec1f714bf2796fc7d4f4d83b9c9d06cb23ceb06e64d
+canonicalDigest: 73b4b82630da18739055579c632474470ac3c83b1f483424f1276337420f9401
 ---
 # WebMercatorQuad 视图覆盖
 
@@ -16,7 +16,7 @@ lookup、GPU patch count 和几何反馈。它不拥有 tiled source、栅格 de
 每个 patch 都是 OGC `(tileMatrix, tileRow, tileCol)` 身份。相机派生的探查始终寻址
 固定全局矩阵，不创建移动式游戏格网。所有 pitch 都由 `writeView()` 使用实际投影
 矩阵和精确 fixed-point 相机准备保守标准 parent 窗口；GPU 仅在一个几何 cell 的投影最大奇异
-拉伸超过 `maximumCellSpanReferencePixels` 加 `refinementTolerance` 时记录精确的
+拉伸超过 `maximumCellSpanReferencePixels * (1 + refinementTolerance)` 时记录精确的
 稀疏 parent 身份。Pitch 和 FOV 只自然参与投影，
 不选择 uniform/variable 算法模式。
 
@@ -59,8 +59,13 @@ prefix-free 可见 cut，并执行局部 2:1 closure。它不从世界根开始�
 
 `WebMercatorTileVerticalBounds` 是几何 fact，不是 terrain 身份。平面 consumer
 可以使用 `[0, 0]`；terrain 可以转换 source elevation metadata；挤出要素可以提供
-保守高度。层级数据必须完整匹配 spatial profile；更细几何使用最高层祖先；省略
-层级时使用 `verticalRangeMeters`。缓存、请求和驻留状态不能改变这些 bounds。
+保守高度。层级数据必须按 level/row/column 顺序完整匹配 spatial profile 声明的每个
+瓦片；后代高度范围必须包含于最近声明祖先以及全局高度范围，所有声明瓦片必须属于
+最小几何域的后代。几何位于细级 metadata limit 之外或超过最高 metadata level 时，
+使用最近的有效祖先 bounds。声明范围内缺记录、顺序错误或祖先不包含后代，会在
+GPU 分配前产生 `GEO_WEB_MERCATOR_COVER_VERTICAL_BOUNDS_INVALID`；较小的细级空间
+覆盖本身不属于缺失 metadata。记录数不符时直接失败，不枚举可能覆盖全球的缺失层级。
+省略层级时使用 `verticalRangeMeters`。缓存、请求和驻留状态不能改变这些 bounds。
 
 `GpuWebMercatorQuadCoverTemplate` 为下游 GPU component 暴露借用的 parity
 resource：map metadata、patches、lookup 和完整 state。`writeView()` 拥有临时
@@ -88,7 +93,14 @@ Cover 为每个 parity 拥有一份 u32 candidate workspace。物化结束后，
 `facts().candidateWorkspaceBytes` 报告；不包含普通 cover buffer、upload snapshot
 和编译器私有 shader 存储。分配不依赖历史 view。并行构造失败时，先等待两个分支
 停止生产再统一清理，包括迟到 sibling 返回的 resource/BindSet；单个底层失败保留原
-对象，多个失败聚合。反馈包含 candidate/patch 数、level range、
+对象，多个失败聚合。
+两个公共反馈 decoder 对无效 bytes、失败或过期结果统一抛出 `GeoDiagnosticError`，
+code 分别为 `GEO_WEB_MERCATOR_COVER_FEEDBACK_INVALID` 和
+`GEO_WEB_MERCATOR_DEMAND_FEEDBACK_INVALID`。`diagnostic.actual.reason` 区分
+`byte-length`、`frame-epoch`，cover 的 `patch-capacity`／`descriptor-overflow`／
+`lookup-overflow`／`adjacency`／`range`，或 demand 的 `demand-capacity`／`overflow`／
+`source-ceiling`／`record`，同时携带 state/record 事实。消费者检查结构化诊断，不解析
+异常文字或依赖 RangeError/TypeError 类型。反馈包含 candidate/patch 数、level range、
 邻接、projected-cell span 和 overflow fact，不包含 demand 或 selection mode。
 
 `gpuWebMercatorQuadCoverReadWgslModule()` 提供完整身份 lookup、covering-neighbor
@@ -113,3 +125,5 @@ reference-pixel 质量；ADR-086 废弃其中的 pitch gate，并分开 cover、
 和 patch draw 权限；ADR-087 保留稀疏 parent 决策；ADR-088 定义投影最大拉伸；
 ADR-089 定义 consumer-neutral indexed/non-indexed indirect ABI；ADR-125 记录候选完整性、
 失败 cut 撤销与有界执行设计。
+
+ADR-126 明确完整垂直元数据与最近祖先包含关系。

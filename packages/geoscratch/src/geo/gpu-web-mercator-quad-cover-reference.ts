@@ -1,4 +1,5 @@
 import { gpuWebMercatorQuadCoverCandidates } from './gpu-web-mercator-quad-cover-candidates.js'
+import { snapshotWebMercatorCoverVerticalBounds } from './gpu-web-mercator-quad-cover-vertical-bounds.js'
 import { throwGeoDiagnostic } from './diagnostics.js'
 import type { GeoViewSnapshot } from './geo-view.js'
 import type { GpuWebMercatorQuadCoverPolicy } from './gpu-web-mercator-quad-cover.js'
@@ -404,18 +405,21 @@ function verticalRangeForPatch(
     const boundsMaximumMatrixLevel = Number(
         input.spatialProfile.coverage.limits.at(-1)!.matrixId
     )
-    const matrixLevel = Math.min(
+    const maximumLevel = Math.min(
         patch.matrixLevel,
         boundsMaximumMatrixLevel
     )
-    const shift = patch.matrixLevel - matrixLevel
-    const tileRow = patch.tileRow >> shift
-    const tileCol = patch.tileCol >> shift
-    const bounds = hierarchy.find(entry =>
-        entry.matrixLevel === matrixLevel &&
-        entry.tileRow === tileRow && entry.tileCol === tileCol
-    )!
-    return [ bounds.minimumVerticalMeters, bounds.maximumVerticalMeters ]
+    for (let matrixLevel = maximumLevel; matrixLevel >= input.policy.minimumMatrixLevel; matrixLevel--) {
+        const shift = patch.matrixLevel - matrixLevel
+        const tileRow = patch.tileRow >> shift
+        const tileCol = patch.tileCol >> shift
+        const bounds = hierarchy.find(entry =>
+            entry.matrixLevel === matrixLevel &&
+            entry.tileRow === tileRow && entry.tileCol === tileCol
+        )
+        if (bounds !== undefined) return [ bounds.minimumVerticalMeters, bounds.maximumVerticalMeters ]
+    }
+    return input.verticalRangeMeters
 }
 
 function projectedPlaneCellSpanPixels(
@@ -595,38 +599,8 @@ function validateInput(input: GpuWebMercatorQuadCoverReferenceInput): void {
             input
         )
     }
-    validateVerticalBounds(input)
-}
-
-function validateVerticalBounds(input: GpuWebMercatorQuadCoverReferenceInput): void {
-
-    const hierarchy = input.verticalBounds
-    if (hierarchy === undefined) return
-    const expected = input.spatialProfile.coverage.limits.flatMap(limit =>
-        Array.from(
-            { length: limit.maxTileRow - limit.minTileRow + 1 },
-            (_, rowOffset) => Array.from(
-                { length: limit.maxTileCol - limit.minTileCol + 1 },
-                (_, colOffset) => `${limit.matrixId}/` +
-                    `${limit.minTileRow + rowOffset}/${limit.minTileCol + colOffset}`
-            )
-        ).flat()
-    )
-    const valid = hierarchy.length === expected.length && hierarchy.every((entry, index) =>
-        Number.isSafeInteger(entry?.matrixLevel) &&
-        Number.isSafeInteger(entry?.tileRow) && Number.isSafeInteger(entry?.tileCol) &&
-        `${entry.matrixLevel}/${entry.tileRow}/${entry.tileCol}` === expected[index] &&
-        Number.isFinite(entry.minimumVerticalMeters) &&
-        Number.isFinite(entry.maximumVerticalMeters) &&
-        entry.minimumVerticalMeters <= entry.maximumVerticalMeters
-    )
-    if (!valid) {
-        invalidCover(
-            'The inverse-cover vertical hierarchy must exactly match declared coverage.',
-            { tileKeys: expected },
-            hierarchy
-        )
-    }
+    snapshotWebMercatorCoverVerticalBounds(input.verticalBounds,
+        input.spatialProfile.coverage.limits, input.verticalRangeMeters)
 }
 
 function clamp(value: number, minimum: number, maximum: number): number {

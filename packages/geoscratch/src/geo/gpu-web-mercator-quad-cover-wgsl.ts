@@ -132,17 +132,26 @@ fn coverPatchVerticalBounds(
             coverPolicy.maximumVerticalMeters,
         );
     }
-    let boundsLevel = min(matrixLevel, coverPolicy.boundsMaximumMatrixLevel);
-    let shift = matrixLevel - boundsLevel;
-    let boundsRow = row >> shift;
-    let boundsColumn = column >> shift;
-    let limit = coverLimit(boundsLevel);
-    let width = limit.maxTileCol - limit.minTileCol + 1u;
-    let index = limit.verticalBoundsOffset +
-        (boundsRow - limit.minTileRow) * width +
-        (boundsColumn - limit.minTileCol);
-    let bounds = verticalBounds[index];
-    return vec2f(bounds.minimumVerticalMeters, bounds.maximumVerticalMeters);
+    var boundsLevel = min(matrixLevel, coverPolicy.boundsMaximumMatrixLevel);
+    loop {
+        let shift = matrixLevel - boundsLevel;
+        let boundsRow = row >> shift;
+        let boundsColumn = column >> shift;
+        let limit = coverLimit(boundsLevel);
+        if (boundsRow >= limit.minTileRow && boundsRow <= limit.maxTileRow &&
+            boundsColumn >= limit.minTileCol && boundsColumn <= limit.maxTileCol) {
+            let width = limit.maxTileCol - limit.minTileCol + 1u;
+            let index = limit.verticalBoundsOffset +
+                (boundsRow - limit.minTileRow) * width +
+                (boundsColumn - limit.minTileCol);
+            let bounds = verticalBounds[index];
+            return vec2f(bounds.minimumVerticalMeters, bounds.maximumVerticalMeters);
+        }
+        if (boundsLevel == coverPolicy.minimumMatrixLevel) { break; }
+        boundsLevel -= 1u;
+    }
+    // Validated geometry is contained in the complete minimum-level domain.
+    return vec2f(coverPolicy.minimumVerticalMeters, coverPolicy.maximumVerticalMeters);
 }
 
 fn coverPatchBounds(

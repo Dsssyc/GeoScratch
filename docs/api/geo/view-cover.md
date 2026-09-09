@@ -23,7 +23,7 @@ pitch, `writeView()` prepares conservative standard-parent windows from the actu
 projection matrix and precise fixed-point camera. The GPU records an exact sparse
 parent identity only where the maximum
 singular stretch of one projected geometry cell exceeds
-`maximumCellSpanReferencePixels` plus `refinementTolerance`. Pitch and FOV affect the
+`maximumCellSpanReferencePixels * (1 + refinementTolerance)`. Pitch and FOV affect the
 projection naturally; they never select a uniform/variable algorithm mode.
 
 Candidate membership follows a projected-depth bound, not radial distance or a
@@ -76,7 +76,14 @@ remains failure even when no patches survive; range sentinels are not public val
 `WebMercatorTileVerticalBounds` is a geometry fact rather than terrain identity. A
 flat consumer can use `[0, 0]`; terrain can convert source elevation metadata; an
 extruded consumer can provide conservative feature heights. A supplied hierarchy must
-exactly match the spatial profile. Geometry above its highest level uses that ancestor.
+exactly match every declared tile of the spatial profile, in level/row/column order.
+Every descendant range must lie within its nearest declared ancestor range and the
+global range; every declared tile must descend from the minimum geometry domain.
+Geometry outside a finer metadata limit, or above the highest metadata level, uses
+its nearest declared enclosing ancestor. Missing records inside a declared limit,
+misordered records, or non-enclosing ranges fail before GPU allocation with
+`GEO_WEB_MERCATOR_COVER_VERTICAL_BOUNDS_INVALID`; absent finer spatial coverage is
+not missing metadata. Count validation does not enumerate an absent world-sized hierarchy.
 An omitted hierarchy uses `verticalRangeMeters`. Cache, request, and residency state
 cannot change these bounds.
 
@@ -115,6 +122,13 @@ snapshots and compiler-private shader storage. Allocation does not depend on pri
 views. Both parallel construction branches settle before cleanup on failure,
 including resources/bindings returned by a late sibling; one underlying failure is
 preserved, and multiple failures are aggregated.
+Both public feedback decoders reject invalid bytes and failed/stale results with
+`GeoDiagnosticError`: codes `GEO_WEB_MERCATOR_COVER_FEEDBACK_INVALID` and
+`GEO_WEB_MERCATOR_DEMAND_FEEDBACK_INVALID`. `diagnostic.actual.reason` distinguishes
+`byte-length`, `frame-epoch`, cover `patch-capacity`/`descriptor-overflow`/
+`lookup-overflow`/`adjacency`/`range`, or demand `demand-capacity`/`overflow`/
+`source-ceiling`/`record`. State/record facts accompany the reason. Callers inspect
+the diagnostic instead of parsing exception prose or testing RangeError/TypeError.
 Feedback reports candidate/patch counts, level range, adjacency, projected-cell span,
 and overflow facts. It contains no demand records or selection mode.
 
@@ -145,3 +159,5 @@ parts and separates cover, source demand, and patch draw ownership; ADR-087 pres
 sparse parent decisions; ADR-088 defines maximum projected stretch; ADR-089 defines the
 consumer-neutral indexed/non-indexed indirect ABI. ADR-125 records candidate
 completeness, failed-cut revocation and the bounded execution work.
+
+ADR-126 clarifies complete vertical metadata and nearest-ancestor enclosure.

@@ -15,7 +15,7 @@ const WORLD = 40075016
 const SOURCE_WORLD = 40075016.6855784
 const f = Math.fround
 
-function fixture({ minimum = 0, maximum = 8, row = 0, column = 0, width = 1 } = {}) {
+function fixture({ minimum = 0, maximum = 8, row = 0, column = 0, width = 1, coordinateBits = 52 } = {}) {
     const coverage = tileMatrixCoverage({
         tileMatrixSet: WebMercatorQuad,
         limits: [{
@@ -25,7 +25,7 @@ function fixture({ minimum = 0, maximum = 8, row = 0, column = 0, width = 1 } = 
     })
     return {
         spatialProfile: webMercatorPlanarTileSpatialProfile({
-            addressCodec: webMercatorQuadAddressCodec({ coverage }),
+            addressCodec: webMercatorQuadAddressCodec({ coverage, coordinateBits }),
         }),
         policy: {
             minimumMatrixLevel: minimum, maximumMatrixLevel: maximum,
@@ -193,11 +193,11 @@ describe('conservative WebMercator refinement candidate domains', function() {
         expect(omitted).to.be.greaterThan(1000)
     })
 
-    it('keeps 52-bit positions and z24 boundary candidates near and away from the camera', () => {
+    for (const coordinateBits of [40, 52]) it(`keeps ${coordinateBits}-bit positions and z24 boundary candidates near and away from the camera`, () => {
         const minimum = 20
         const row = 435711
         const column = 871422
-        const descriptor = fixture({ minimum, maximum: 24, row, column, width: 2 })
+        const descriptor = fixture({ minimum, maximum: 24, row, column, width: 2, coordinateBits })
         const x = ((column + 0.9999999) / 2 ** minimum - 0.5) * SOURCE_WORLD
         const y = (0.5 - (row + 1.0000001) / 2 ** minimum) * SOURCE_WORLD
         for (const [altitude, pitch] of [[25, 0], [500, 1.45], [10000, 0.7]]) {

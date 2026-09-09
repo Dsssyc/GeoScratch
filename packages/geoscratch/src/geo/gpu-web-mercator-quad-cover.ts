@@ -29,6 +29,7 @@ import {
     gpuWebMercatorQuadCoverVerticalBoundsCodec,
 } from './gpu-web-mercator-quad-cover-layout.js'
 import { gpuWebMercatorQuadCoverCandidates } from './gpu-web-mercator-quad-cover-candidates.js'
+import { snapshotWebMercatorCoverVerticalBounds } from './gpu-web-mercator-quad-cover-vertical-bounds.js'
 import { GPU_WEB_MERCATOR_QUAD_COVER_NEIGHBORS_WGSL } from './gpu-web-mercator-quad-cover-neighbors-wgsl.js'
 import { GPU_WEB_MERCATOR_QUAD_COVER_WGSL } from './gpu-web-mercator-quad-cover-wgsl.js'
 import type { WebMercatorPlanarTileSpatialProfile } from './tile-spatial-profile.js'
@@ -239,11 +240,6 @@ function level(value: number): boolean {
 function positiveSafeInteger(value: number): boolean {
 
     return Number.isSafeInteger(value) && value > 0
-}
-
-function nonNegativeSafeInteger(value: number): boolean {
-
-    return Number.isSafeInteger(value) && value >= 0
 }
 
 function positiveFinite(value: number): boolean {
@@ -1052,7 +1048,7 @@ export function assertGpuWebMercatorQuadCoverFrameEncoded(
     }
 }
 
-/** Validates bounded cover feedback and omits level/span ranges for a successful empty cut. */
+/** Validates cover feedback, throws GeoDiagnosticError on failure, and omits empty-cut ranges. */
 export function decodeGpuWebMercatorQuadCoverFeedback(
     stateBytes: Uint8Array,
     options: Readonly<{
@@ -1063,7 +1059,13 @@ export function decodeGpuWebMercatorQuadCoverFeedback(
 
     const stateSize = gpuWebMercatorQuadCoverStateCodec.byteLength()
     if (!(stateBytes instanceof Uint8Array) || stateBytes.byteLength !== stateSize) {
-        throw new TypeError('GPU WebMercatorQuad cover feedback byte length is invalid')
+        return throwGeoDiagnostic({
+            code: 'GEO_WEB_MERCATOR_COVER_FEEDBACK_INVALID',
+            phase: 'selection', subject: { kind: 'web-mercator-quad-cover' },
+            message: 'Cover feedback requires one complete state record.',
+            expected: { byteLength: stateSize },
+            actual: { reason: 'byte-length', byteLength: stateBytes?.byteLength },
+        })
     }
     const state = new DataView(
         stateBytes.buffer,
@@ -1082,30 +1084,25 @@ export function decodeGpuWebMercatorQuadCoverFeedback(
     const finestMatrixLevel = word(8)
     const minimumCellSpanQ8 = word(9)
     const maximumCellSpanQ8 = word(10)
-    if (frameEpoch !== options.expectedFrameEpoch ||
-        patchCount > options.maximumPatches ||
-        descriptorOverflowCount !== 0 ||
-        lookupOverflowCount !== 0 ||
-        maximumAdjacentLevelDelta > 1 ||
-        (patchCount > 0 && (
-            minimumCellSpanQ8 > maximumCellSpanQ8 ||
-            minimumMatrixLevel === 0xffff_ffff ||
-            minimumMatrixLevel > maximumMatrixLevel ||
-            maximumMatrixLevel > finestMatrixLevel
-        ))) {
-        throw new RangeError(`GPU WebMercatorQuad cover feedback is inconsistent: ${JSON.stringify({
-            frameEpoch,
-            candidateCount,
-            patchCount,
-            descriptorOverflowCount,
-            lookupOverflowCount,
-            minimumMatrixLevel,
-            maximumMatrixLevel,
-            maximumAdjacentLevelDelta,
-            finestMatrixLevel,
-            minimumCellSpanQ8,
-            maximumCellSpanQ8,
-        })}`)
+    const reason = frameEpoch !== options.expectedFrameEpoch ? 'frame-epoch' :
+        patchCount > options.maximumPatches ? 'patch-capacity' :
+        descriptorOverflowCount !== 0 ? 'descriptor-overflow' :
+        lookupOverflowCount !== 0 ? 'lookup-overflow' :
+        maximumAdjacentLevelDelta > 1 ? 'adjacency' :
+        patchCount > 0 && (minimumCellSpanQ8 > maximumCellSpanQ8 ||
+            minimumMatrixLevel === 0xffff_ffff || minimumMatrixLevel > maximumMatrixLevel ||
+            maximumMatrixLevel > finestMatrixLevel) ? 'range' : undefined
+    if (reason !== undefined) {
+        return throwGeoDiagnostic({
+            code: 'GEO_WEB_MERCATOR_COVER_FEEDBACK_INVALID',
+            phase: 'selection', subject: { kind: 'web-mercator-quad-cover' },
+            message: 'Cover feedback is stale, incomplete, or inconsistent.',
+            expected: options,
+            actual: { reason, frameEpoch, candidateCount, patchCount,
+                descriptorOverflowCount, lookupOverflowCount, minimumMatrixLevel,
+                maximumMatrixLevel, maximumAdjacentLevelDelta, finestMatrixLevel,
+                minimumCellSpanQ8, maximumCellSpanQ8 },
+        })
     }
     const facts: {
         frameEpoch: number
@@ -1205,7 +1202,7 @@ function snapshotDescriptor(
         input.verticalRangeMeters[0],
         input.verticalRangeMeters[1],
     ]) as readonly [number, number]
-    const verticalBounds = snapshotVerticalBounds(
+    const verticalBounds = snapshotWebMercatorCoverVerticalBounds(
         input.verticalBounds,
         limits,
         verticalRangeMeters
@@ -1217,46 +1214,6 @@ function snapshotDescriptor(
         verticalRangeMeters,
         ...(verticalBounds === undefined ? {} : { verticalBounds }),
     })
-}
-
-function snapshotVerticalBounds(
-    input: readonly WebMercatorTileVerticalBounds[] | undefined,
-    limits: WebMercatorPlanarTileSpatialProfile['coverage']['limits'],
-    globalRange: readonly [number, number]
-): readonly WebMercatorTileVerticalBounds[] | undefined {
-
-    if (input === undefined) return undefined
-    const expected = limits.flatMap(limit =>
-        Array.from(
-            { length: limit.maxTileRow - limit.minTileRow + 1 },
-            (_, rowOffset) => Array.from(
-                { length: limit.maxTileCol - limit.minTileCol + 1 },
-                (_, colOffset) => `${limit.matrixId}/` +
-                    `${limit.minTileRow + rowOffset}/${limit.minTileCol + colOffset}`
-            )
-        ).flat()
-    )
-    const valid = input.length === expected.length && input.every((entry, index) =>
-        level(entry?.matrixLevel) && nonNegativeSafeInteger(entry?.tileRow) &&
-        nonNegativeSafeInteger(entry?.tileCol) &&
-        `${entry.matrixLevel}/${entry.tileRow}/${entry.tileCol}` === expected[index] &&
-        Number.isFinite(entry.minimumVerticalMeters) &&
-        Number.isFinite(entry.maximumVerticalMeters) &&
-        entry.minimumVerticalMeters <= entry.maximumVerticalMeters &&
-        entry.minimumVerticalMeters >= globalRange[0] &&
-        entry.maximumVerticalMeters <= globalRange[1]
-    )
-    if (!valid) {
-        return throwGeoDiagnostic({
-            code: 'GEO_WEB_MERCATOR_COVER_VERTICAL_BOUNDS_INVALID',
-            phase: 'selection',
-            subject: { kind: 'web-mercator-quad-cover' },
-            message: 'WebMercatorQuad vertical bounds must exactly cover declared tiles.',
-            expected: { tileKeys: expected, globalRange },
-            actual: input,
-        })
-    }
-    return Object.freeze(input.map(entry => Object.freeze({ ...entry })))
 }
 
 function validateView(view: GeoViewSnapshot): void {

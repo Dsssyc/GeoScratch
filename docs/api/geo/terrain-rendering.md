@@ -41,7 +41,12 @@ participate in the quality metric.
 
 `elevationRangeMeters` and optional `WebMercatorTerrainElevationBounds` remain terrain
 source facts. The renderer applies exaggeration and converts them to generalized
-`WebMercatorTileVerticalBounds` before creating the cover. A hierarchy must completely
+`WebMercatorTileVerticalBounds` before creating the cover. Source ranges describe
+individual raster levels, so the renderer unions descendant ranges into every
+available ancestor before validating the enclosing geometry hierarchy. It snapshots
+these derived bounds without changing source metadata or backend data, and validates
+them before allocating renderer GPU resources. This conversion is independent of
+residency and request state (ADR-126). A hierarchy must completely
 match source coverage; omitted metadata uses the global range. Cache hits, atlas pages,
 and request completion cannot supply or mutate bounds.
 

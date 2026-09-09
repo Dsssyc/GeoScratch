@@ -1,5 +1,6 @@
 import { expect } from 'chai'
 import {
+    GeoDiagnosticError,
     decodeGpuWebMercatorQuadCoverFeedback,
     decodeGpuWebMercatorQuadDemandProjectionFeedback,
 } from 'geoscratch/geo'
@@ -36,6 +37,24 @@ function decodeCover(bytes) {
 
 describe('GPU WebMercatorQuad cover outcomes', () => {
 
+    it('reports byte lengths and failed state through stable Geo diagnostics', () => {
+        for (const [bytes, reason] of [[new Uint8Array(4), 'byte-length'],
+            [coverState({ 0: 0 }), 'frame-epoch'], [coverState({ 3: 1 }), 'descriptor-overflow'],
+            [coverState({ 4: 1 }), 'lookup-overflow'], [coverState({ 7: 2 }), 'adjacency']]) {
+            let failure
+            try { decodeCover(bytes) } catch (error) { failure = error }
+            expect(failure).to.be.instanceOf(GeoDiagnosticError)
+            expect(failure.diagnostic.code).to.equal('GEO_WEB_MERCATOR_COVER_FEEDBACK_INVALID')
+            expect(failure.diagnostic.actual.reason).to.equal(reason)
+            expect(failure.diagnostic.phase).to.equal('selection')
+        }
+        let failure
+        try { decodeGpuWebMercatorQuadDemandProjectionFeedback(new Uint8Array(), new Uint8Array(), {}) }
+        catch (error) { failure = error }
+        expect(failure.diagnostic.code).to.equal('GEO_WEB_MERCATOR_DEMAND_FEEDBACK_INVALID')
+        expect(failure.diagnostic.actual.reason).to.equal('byte-length')
+    })
+
     it('accepts a successful empty cut without exposing untouched range sentinels', () => {
 
         const facts = decodeCover(coverState())
@@ -60,7 +79,7 @@ describe('GPU WebMercatorQuad cover outcomes', () => {
             { 4: 1 },
             { 7: 2 },
         ]) {
-            expect(() => decodeCover(coverState(overrides))).to.throw(RangeError)
+            expect(() => decodeCover(coverState(overrides))).to.throw(GeoDiagnosticError)
         }
     })
 
@@ -85,7 +104,7 @@ describe('GPU WebMercatorQuad cover outcomes', () => {
             { 9: 513 },
         ]) {
             expect(() => decodeCover(coverState({ ...populated, ...invalid })))
-                .to.throw(RangeError)
+                .to.throw(GeoDiagnosticError)
         }
     })
 
@@ -112,6 +131,6 @@ describe('GPU WebMercatorQuad cover outcomes', () => {
         })
         expect(() => decodeGpuWebMercatorQuadDemandProjectionFeedback(
             state(1), demands, options
-        )).to.throw(RangeError)
+        )).to.throw(GeoDiagnosticError)
     })
 })

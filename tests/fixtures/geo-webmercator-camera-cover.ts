@@ -1,6 +1,6 @@
 import { GPURuntime, type BufferResource } from 'geoscratch/scratch'
 import {
-    GpuWebMercatorQuadCover, WebMercatorQuad, createGeoViewSnapshot, createGeoViewSource,
+    GeoDiagnosticError, GpuWebMercatorQuadCover, WebMercatorQuad, createGeoViewSnapshot, createGeoViewSource,
     gpuWebMercatorQuadCoverPolicy, tileMatrixCoverage, webMercatorPlanarTileSpatialProfile,
     webMercatorQuadAddressCodec, type GeoViewSnapshot,
 } from 'geoscratch/geo'
@@ -15,7 +15,7 @@ const QUALITY_ROUNDOFF = 0.02
 const CLIP_MARGIN = 1e-5
 type Patch = { level: number, row: number, col: number }
 type Domain = { minLevel: number, maxLevel: number, row: number, col: number,
-    width: number, height: number, maximumPatches: number, elevation: number }
+    width: number, height: number, maximumPatches: number, elevation: number, metadataChild?: boolean }
 type Scenario = { name: string, zoom: number, pitch: number, x?: number, y?: number,
     altitude?: number, viewport?: readonly [number, number], fov?: number,
     equalTo?: string, anchor?: string, expect?: 'empty' | 'overflow' | 'bounded' }
@@ -53,6 +53,11 @@ export async function runCameraCoverProof() {
         await runDomain({ ...world, elevation: 1500 }, [
             { name: 'elevated-plane', zoom: 10, pitch: 75 },
             { name: 'elevated-camera', zoom: 10, pitch: 75, altitude: 12000 },
+        ])
+        await runDomain({ ...world, maxLevel: 18, elevation: 1500, metadataChild: true }, [
+            { name: 'partial-metadata-A', zoom: 16, pitch: 0, altitude: 2000, anchor: 'metadata-A' },
+            { name: 'partial-metadata-pitched', zoom: 16, pitch: 65, altitude: 2000 },
+            { name: 'partial-metadata-A-return', zoom: 16, pitch: 0, altitude: 2000, equalTo: 'metadata-A' },
         ])
         // This stress view has an explicit small output budget. A valid complete cut
         // or an explicit capacity failure is allowed; partial success is never allowed.
@@ -101,7 +106,9 @@ export async function runCameraCoverProof() {
             matrixId: String(domain.minLevel), minTileRow: domain.row,
             maxTileRow: domain.row + domain.height - 1, minTileCol: domain.col,
             maxTileCol: domain.col + domain.width - 1,
-        } ] })
+        }, ...(domain.metadataChild ? [{ matrixId: String(domain.minLevel + 1),
+            minTileRow: domain.row * 2, maxTileRow: domain.row * 2,
+            minTileCol: domain.col * 2, maxTileCol: domain.col * 2 }] : []) ] })
         const cover = await GpuWebMercatorQuadCover.create(runtime, {
             spatialProfile: webMercatorPlanarTileSpatialProfile({
                 addressCodec: webMercatorQuadAddressCodec({ coverage, coordinateBits: 52 }),
@@ -112,6 +119,11 @@ export async function runCameraCoverProof() {
                 refinementTolerance: 0.005 }),
             maximumCandidates: 1_048_576,
             verticalRangeMeters: [domain.elevation, domain.elevation],
+            ...(domain.metadataChild ? { verticalBounds: coverage.limits.map(limit => ({
+                matrixLevel: Number(limit.matrixId), tileRow: limit.minTileRow,
+                tileCol: limit.minTileCol, minimumVerticalMeters: domain.elevation,
+                maximumVerticalMeters: domain.elevation,
+            })) } : {}),
         })
         const observers = await Promise.all(cover.templates().map(template => createObserver(
             runtime, template.state, template.patches, domain.maximumPatches)))
@@ -152,7 +164,7 @@ export async function runCameraCoverProof() {
                     let rejected = false
                     try { feedback = await cover.feedback(frame, submitted) }
                     catch (error) {
-                        if (!(error instanceof RangeError)) throw error
+                        if (!(error instanceof GeoDiagnosticError)) throw error
                         rejected = true
                     }
                     await submitted.done

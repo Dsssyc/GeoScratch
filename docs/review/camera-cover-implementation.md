@@ -336,3 +336,41 @@ clipping repairs. Reverting that earlier stage also requires removing its depend
 parallel implementation; `0b3381c` retains only valid-empty/failed-cut protection.
 The design checkpoint `635016b` has no runtime effect. No backend migration or data
 rollback is involved, and frozen Flow Layer has no changes in this branch.
+
+## Review Repairs: Vertical Metadata and Feedback
+
+The post-implementation review found two pre-existing height issues. This first
+repair addresses metadata lookup/enclosure; continuous height-interval projection
+remains a separate subsequent repair. ADR-126 records the distinction.
+
+- Cover and CPU reference resolve the nearest declared ancestor outside narrower
+  finer limits, reject incomplete or non-enclosing declared records before GPU
+  allocation, and reject missing huge hierarchies by count without enumeration.
+- Native terrain exposed source-level extrema that were not ancestor envelopes.
+  Terrain now derives the conservative envelope from immutable source metadata
+  before allocating its resources. No DEM/Worker/backend data was rebuilt or edited.
+- Cover/demand feedback use stable Geo diagnostic codes and reason fields. Empty
+  results, failed-cut revocation, epochs and downstream ownership are preserved.
+- Candidate fixtures explicitly exercise both 40-bit and 52-bit positions.
+  Canonical English/Chinese docs clarify relative tolerance and metadata conversion.
+
+Verification: focused tests, typecheck, docs generation/translations/check, production
+build and the full suite (1719 passing, 2 opt-in pending) passed. Native outcome
+checks and 49 camera scenarios at each of DPR 1/2 passed, including narrower metadata
+coverage and A-B-A. All three existing terrain browser suites passed: wide top-down,
+continuous pitch/zoom, DPR, 90-frame shaded/wireframe, rapid transitions, source
+demand, feedback convergence, streaming/failure/cancellation and cleanup. Owned
+browser/service processes closed. The user's frontend/backend remained running.
+
+Evidence is under `/tmp/geoscratch-cover-fixes/metadata/`. Earlier failed runs are
+retained: a 2-second documentation scan timeout passed in isolation and on full
+rerun; a development-server stale module-resolution cache was refreshed; stricter
+enclosure validation exposed the source-to-geometry conversion defect fixed above.
+One source-parity run overlapped a local edit and was superseded by the frozen-source
+full run. The successful logs are `test-verified.log`, `build-verified.log`,
+`wireframe-final.json`, `terrain.json`, `streaming.json`, `camera.json`, and
+`outcome.json`. The default backend-building commands in browser scripts were
+bypassed only in temporary runner copies, reusing the existing immutable COG.
+
+Rollback: revert later dependent commits first, then this metadata/feedback repair.
+It requires no backend migration or resource-state rollback.

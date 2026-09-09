@@ -530,7 +530,7 @@ type GpuWebMercatorQuadCoverReadWgslOptions = Readonly<{ group: number; lookupEn
 
 Kind: `Function`.
 
-Validates bounded cover feedback and omits level/span ranges for a successful empty cut.
+Validates cover feedback, throws GeoDiagnosticError on failure, and omits empty-cut ranges.
 
 ```ts
 Function decodeGpuWebMercatorQuadCoverFeedback
@@ -690,7 +690,7 @@ type WebMercatorTileVerticalBounds = Readonly<{ matrixLevel: number; maximumVert
 
 Kind: `Function`.
 
-Decodes and validates bounded projected source-demand feedback.
+Decodes bounded source-demand feedback and throws GeoDiagnosticError for invalid records.
 
 ```ts
 Function decodeGpuWebMercatorQuadDemandProjectionFeedback
@@ -2997,7 +2997,7 @@ type WebMercatorTileSampleAddress = Readonly<{ compactIndex?: number; covered: b
 
 Kind: `Function`.
 
-Assembles a WebMercatorQuad Virtual Raster terrain renderer with GPU-driven selection, precision-aware vertex generation, mesh stitching, and explicit lifetime.
+Assembles a WebMercatorQuad Virtual Raster terrain renderer with GPU-driven selection, conservative ancestor elevation envelopes, mesh stitching, and explicit lifetime.
 
 ```ts
 Function createWebMercatorTerrainRenderer

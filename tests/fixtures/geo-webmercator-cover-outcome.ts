@@ -1,5 +1,6 @@
 import { GPURuntime, type BufferResource } from 'geoscratch/scratch'
 import {
+    GeoDiagnosticError,
     GpuWebMercatorQuadCover,
     GpuWebMercatorQuadDemandProjection,
     GpuWebMercatorQuadPatchDraw,
@@ -145,7 +146,7 @@ export async function runCoverOutcomeProof() {
                         expectedFrameEpoch: frameEpoch, maximumDemands: 8, sourceLevelCeiling: 1,
                     })
                 } catch (error) {
-                    if (!(error instanceof RangeError)) throw error
+                    if (!(error instanceof GeoDiagnosticError)) throw error
                     projectionRejected = true
                 }
                 let coverRejected = false
@@ -156,7 +157,7 @@ export async function runCoverOutcomeProof() {
                         throw new Error('Empty cover exposed untouched range sentinels')
                     }
                 } catch (error) {
-                    if (!(error instanceof RangeError)) throw error
+                    if (!(error instanceof GeoDiagnosticError)) throw error
                     coverRejected = true
                 }
                 await submitted.done

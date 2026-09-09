@@ -1,3 +1,4 @@
+import { snapshotWebMercatorCoverVerticalBounds } from './gpu-web-mercator-quad-cover-vertical-bounds.js'
 import {
     GPURuntime,
     plane,
@@ -375,7 +376,7 @@ const TEXTURE_RENDER_ATTACHMENT = 0x10
 
 /**
  * Assembles a WebMercatorQuad Virtual Raster terrain renderer with GPU-driven
- * selection, precision-aware vertex generation, mesh stitching, and explicit lifetime.
+ * selection, conservative ancestor elevation envelopes, mesh stitching, and explicit lifetime.
  */
 export async function createWebMercatorTerrainRenderer<
     ViewInput,
@@ -413,27 +414,15 @@ export async function createWebMercatorTerrainRenderer<
         throw new TypeError('Web Mercator terrain provenance observer must be a function')
     }
 
+    const exaggeratedElevationRange = scaleElevationRange(elevationRangeMeters, exaggeration)
+    const verticalBounds = snapshotWebMercatorCoverVerticalBounds(
+        terrainCoverVerticalBounds(elevationBounds, exaggeration),
+        terrainFieldLayer.spatialProfile.coverage.limits,
+        exaggeratedElevationRange
+    )
     const geometry = createTerrainGeometry()
     const buffers = await createBufferResources(runtime, geometry)
     const textures = await createTextures(runtime, size)
-    const exaggeratedElevationRange = scaleElevationRange(
-        elevationRangeMeters,
-        exaggeration
-    )
-    const verticalBounds: readonly WebMercatorTileVerticalBounds[] | undefined =
-        elevationBounds?.map(bounds => {
-        const range = scaleElevationRange([
-            bounds.minimumElevationMeters,
-            bounds.maximumElevationMeters,
-        ], exaggeration)
-        return Object.freeze({
-            matrixLevel: bounds.matrixLevel,
-            tileRow: bounds.tileRow,
-            tileCol: bounds.tileCol,
-            minimumVerticalMeters: range[0],
-            maximumVerticalMeters: range[1],
-        })
-    })
     const sourceMinimumMatrixLevel = Number(
         virtualRaster.coverage.limits[0]!.matrixId
     )
@@ -1081,6 +1070,36 @@ async function createTextures(runtime: GPURuntime, size: SurfaceSize) {
             depth: depth.view(),
         },
     }
+}
+
+/** @internal Converts source sample ranges into enclosing geometry bounds without mutating source metadata. */
+export function terrainCoverVerticalBounds(
+    input: readonly WebMercatorTerrainElevationBounds[] | undefined,
+    exaggeration: number
+): readonly WebMercatorTileVerticalBounds[] | undefined {
+
+    if (input === undefined) return undefined
+    const bounds = input.map(entry => {
+        const range = scaleElevationRange([
+            entry.minimumElevationMeters, entry.maximumElevationMeters,
+        ], exaggeration)
+        return { matrixLevel: entry.matrixLevel, tileRow: entry.tileRow, tileCol: entry.tileCol,
+            minimumVerticalMeters: range[0], maximumVerticalMeters: range[1] }
+    })
+    const byIdentity = new Map(bounds.map(entry =>
+        [`${entry.matrixLevel}/${entry.tileRow}/${entry.tileCol}`, entry]))
+    // Source min/max describe each sampled raster level. Geometry ancestors must
+    // also contain every descendant range before they can conservatively prune it.
+    for (const entry of bounds) {
+        for (let level = 0; level < Math.min(24, entry.matrixLevel); level++) {
+            const scale = 2 ** (entry.matrixLevel - level)
+            const ancestor = byIdentity.get(`${level}/${Math.floor(entry.tileRow / scale)}/${Math.floor(entry.tileCol / scale)}`)
+            if (ancestor === undefined) continue
+            ancestor.minimumVerticalMeters = Math.min(ancestor.minimumVerticalMeters, entry.minimumVerticalMeters)
+            ancestor.maximumVerticalMeters = Math.max(ancestor.maximumVerticalMeters, entry.maximumVerticalMeters)
+        }
+    }
+    return Object.freeze(bounds.map(entry => Object.freeze(entry)))
 }
 
 function scaleElevationRange(
