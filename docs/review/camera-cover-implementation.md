@@ -41,7 +41,7 @@ constraints are:
 5. Integration acceptance: all current Terrain gates and Flow spatial/resource
    continuity gates; record timings and limitations without extrapolating old data.
 
-Stage 2 is verified. Stages 3–5 remain pending.
+Stages 2–3 are verified. Parallel execution and final Flow integration remain pending.
 
 ## Correctness Obligations
 
@@ -77,7 +77,7 @@ Do not reset this checkout, edit frozen Flow Layer or regenerate backend data.
 | --- | --- | --- |
 | Baseline | `071d82b` | Source and resource audit completed before branch creation |
 | Design | `635016b`; `npm run docs:check` and `git diff --check` | Verified |
-| Outcome boundary | Empty feedback, failed-cut revocation and GPU consumer guards | Verified: main, wireframe and streaming native gates passed |
+| Outcome boundary | `0b3381c`; empty feedback, failed-cut revocation and GPU consumer guards | Verified: main, wireframe and streaming native gates passed |
 
 
 ## Baseline Observations (2026-09-09)
@@ -130,3 +130,103 @@ Each shaded/wireframe run retained 90 submitted transitions, zero stale transiti
 and the two-frame bound. Backend hashes remained unchanged; all owned ports and
 browsers closed. Revert this stage to restore the old outcome handling while
 retaining the design record.
+
+
+## Candidate Domain Derivation
+
+For a clipped sample, the Jacobian column is `h * s_i / w * (M_ij - ndc_i * M_wj)`.
+Clamping numerical NDC to the exact clipping domain gives the Frobenius bound
+`h * ||B||F / w`, where `B_ij = s_i * (abs(M_ij) + abs(M_wj))`. The minimum-cell-w
+refinement guard supplies a second depth cap. Their maximum includes every parent
+whose implemented metric can exceed the threshold. If `A` approximates `M^-1`,
+`p = A*c + (I-A*M)*p`; outward interval arithmetic bounds both terms over the known
+geometry prism and clipped depth box. Four intersections only reduce domains already
+proved to contain split candidates; this is not convergence-based early stopping.
+
+The numerical contract is explicit: use the uploaded f32 matrix/viewport, include
+52-bit-to-relative-f32 coordinate error and cell-width error, keep clipping ratios
+within [0,1], and use a midpoint below a 2^-120 denominator. Clipping error has a
+separate absolute floor. The computed metric bound follows entrywise Jacobian bounds,
+Gram/Cauchy-Schwarz and the trace/Frobenius envelope; it does not apply relative
+error to the cancellation in `xx-yy`. Nested-sqrt underflow has an absolute fourth-root
+floor. Unsupported ranges fall back to the complete domain, subject to an independent
+hard input enumeration budget. A budget failure is not proof that output patches
+would overflow, and it never permits a smaller candidate window.
+
+The independent finite-domain checker enumerates every tile without inverse bounds,
+search radius or parent pruning. It also probes high-zoom window edges. Its explicit
+f32 round-to-nearest execution is one implementation, not an exhaustive enumeration
+of all WGSL-permitted floating-point outcomes. Native boundary tests remain required.
+
+A concrete old-radius counterexample uses a top-down view at altitude 100000 m,
+16384 x 128 reference pixels and FOV pi/3. At z6, row32/col40 has measured f32
+cell stretch 5.4500594 above threshold 5.0250001. The old radius is three and ends
+at camera column32+3=35. Its z5 parent at row16/col20 also lies outside the old
+window and exceeds the threshold. Every ancestor qualifies; new windows contain
+this complete chain. The correction therefore addresses a demonstrated candidate
+omission, independently from GPU parallelization or resource readiness.
+
+
+## Coarse High-Pitch Clipping Correction
+
+An independent native descriptor/point gate found a baseline defect outside the
+existing MapLibre camera scenarios. At synthetic world pitch 85 degrees, the old
+kernel retained only `0/0/0` with reported span zero, while a visible point in that
+leaf measured approximately 434 reference pixels. The same result reproduced on
+exact `071d82b`; it was not caused by the candidate-window change.
+
+A dynamic-identity shader probe traced polygon counts `[4,4,4,4,4,0]`. Mixing large
+clip-space coordinates lost the near/far depth constant: after near clipping,
+`w-z` was approximately 0.00256 instead of approximately one. The far intersection
+then collapsed to roughly 2558 metres, and the final upper screen plane rejected
+the polygon. Constant-folded probe identities produced different floating-point
+expressions, so only the dynamic probe reproduced the production fault.
+
+Clipping now stores camera-relative world xyz, forms the six raw plane equations
+from the actual uploaded f32 matrix rows, interpolates xyz with homogeneous w fixed
+to one, and projects only final samples. This is the same exact geometric predicate
+with a stable numerical expression, not a new pitch mode or threshold. The
+candidate numerical envelope separately includes world-coordinate/matrix FTZ
+amplification and 256 clipping operation units. Uncertifiable nonnormal plane
+coefficients retain the complete domain.
+
+The corrected production gate passed 46 cases at each of DPR 1 and 2. Each DPR
+checked 50,596 uniquely covered visible points and 45,789 independent point-quality
+samples (maximum 4.9737 reference pixels). It covers actual descriptors, prefix
+freedom, all positive-length edge overlaps, A-B-A/raw output order, high zoom to z24,
+millimetre motion, height changes, legal empty visibility and real construction
+failure. The extreme-wide top-down view must succeed; the separately budgeted
+extreme-wide pitched stress accepts only a fully validated result or explicit
+capacity failure with revoked patch count. No threshold was relaxed.
+
+These finite samples complement the candidate-domain proof; they do not prove a
+continuous whole-volume quality supremum. All native ownership counters converged,
+and the proof's browsers/HTTP servers closed. The outcome fixture's eight cases
+also passed on this production source. All three Terrain integration gates were rerun after this numerical correction
+and passed with frozen production hashes, unchanged backend data, and complete
+process cleanup. Nine canvas PNGs and all 86 pitch patch counts still match the
+original baseline. These are the current shader acceptance results.
+
+
+Candidate/clipping stage verification: `npm run typecheck`, `npm test` (1703 passing,
+2 pending), `npm run build`, docs generation/translation checks and `git diff --check`
+passed. One earlier full-suite run hit the existing 2-second API-document fixture
+timeout under concurrent browser work; its isolated rerun and the subsequent full
+suite passed without changing that test or its timeout. The emit-parity test now
+allows added Geo modules while retaining independent exact comparison of every
+emitted JavaScript/declaration file and rejecting missing/stale output.
+
+The committed `tests/benchmarks/webmercator-camera-cover.mjs` reproduces the synthetic
+measurement with CPU construction breakdown and source provenance. The final serial
+correctness checkpoint measured the following GPU pass times immediately before
+parallelization (14 samples per scene; milliseconds):
+
+| Scene | Mean | p50 | p95 | CPU construction p95 |
+| --- | ---: | ---: | ---: | ---: |
+| flat-z9 | 2.744 | 2.505 | 3.702 | 0.800 |
+| pitch70-z10 | 6.283 | 6.226 | 6.488 | 0.700 |
+| wide-flat-z13 | 3.283 | 3.213 | 3.490 | 0.600 |
+
+All benchmark native/page errors were empty and its runtime, timestamp mappings,
+browser and Vite port closed. This is a checkpoint for controlled comparison,
+not a general frame-rate claim.

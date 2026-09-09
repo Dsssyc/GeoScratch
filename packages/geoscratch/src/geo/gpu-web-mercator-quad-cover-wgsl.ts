@@ -221,13 +221,20 @@ fn coverPatchVisible(bounds: GpuWebMercatorQuadCoverBounds) -> bool {
 }
 
 fn coverClipPlaneDistance(point: vec4f, plane: u32) -> f32 {
+    // Combine the plane before projection. Subtracting two large clip coordinates
+    // loses the near/far depth constant on coarse patches at high pitch.
+    let matrix = mapMeta.clipFromRelativeWorld;
+    let row0 = vec4f(matrix[0].x, matrix[1].x, matrix[2].x, matrix[3].x);
+    let row1 = vec4f(matrix[0].y, matrix[1].y, matrix[2].y, matrix[3].y);
+    let row2 = vec4f(matrix[0].z, matrix[1].z, matrix[2].z, matrix[3].z);
+    let row3 = vec4f(matrix[0].w, matrix[1].w, matrix[2].w, matrix[3].w);
     switch plane {
-        case 0u: { return point.z; }
-        case 1u: { return point.w - point.z; }
-        case 2u: { return point.x + point.w; }
-        case 3u: { return point.w - point.x; }
-        case 4u: { return point.y + point.w; }
-        default: { return point.w - point.y; }
+        case 0u: { return dot(row2, point); }
+        case 1u: { return dot(row3 - row2, point); }
+        case 2u: { return dot(row3 + row0, point); }
+        case 3u: { return dot(row3 - row0, point); }
+        case 4u: { return dot(row3 + row1, point); }
+        default: { return dot(row3 - row1, point); }
     }
 }
 
@@ -245,8 +252,12 @@ fn coverClipPolygonToPlane(
         let startInside = startDistance >= 0.0f;
         let endInside = endDistance >= 0.0f;
         if (startInside != endInside) {
-            let ratio = startDistance / (startDistance - endDistance);
-            output.vertices[output.count] = mix(start, end, ratio);
+            let denominator = startDistance - endDistance;
+            var ratio = 0.5f;
+            if (abs(denominator) >= 0x1p-120f) {
+                ratio = clamp(startDistance / denominator, 0.0f, 1.0f);
+            }
+            output.vertices[output.count] = vec4f(mix(start.xyz, end.xyz, ratio), 1.0f);
             output.count += 1u;
         }
         if (endInside) {
@@ -262,7 +273,7 @@ fn coverClipPolygonToPlane(
 fn coverProjectedAxisCellDeltaPixels(clip: vec4f, delta: vec4f) -> vec2f {
     let reciprocalW = 1.0f / clip.w;
     let ndcDelta = (
-        delta.xy - clip.xy * reciprocalW * delta.w
+        delta.xy - clamp(clip.xy * reciprocalW, vec2f(-1.0f), vec2f(1.0f)) * delta.w
     ) * reciprocalW;
     return ndcDelta * mapMeta.referenceViewport * 0.5f;
 }
@@ -310,7 +321,7 @@ fn coverProjectedPlaneCellSpanPixels(
             select(bounds.minimum.y, bounds.maximum.y, index >= 2u),
             elevation,
         );
-        polygon.vertices[index] = mapMeta.clipFromRelativeWorld * vec4f(point, 1.0f);
+        polygon.vertices[index] = vec4f(point, 1.0f);
     }
     for (var plane = 0u; plane < 6u; plane += 1u) {
         polygon = coverClipPolygonToPlane(polygon, plane);
@@ -328,7 +339,7 @@ fn coverProjectedPlaneCellSpanPixels(
         maximumSpan = max(
             maximumSpan,
             coverProjectedCellMaximumStretchPixels(
-                polygon.vertices[index],
+                mapMeta.clipFromRelativeWorld * polygon.vertices[index],
                 xDelta,
                 yDelta,
             ),
@@ -372,60 +383,16 @@ fn coverGeometryWindow(matrixLevel: u32) -> GpuWebMercatorQuadCoverWindow {
     );
 }
 
-fn coverFitStart(value: i32, span: i32, minimum: i32, maximum: i32) -> i32 {
-    return clamp(value, minimum, maximum - span + 1i);
-}
-
-fn coverFitWindow(
-    value: GpuWebMercatorQuadCoverWindow,
-    limit: GpuWebMercatorQuadCoverWindow,
-) -> GpuWebMercatorQuadCoverWindow {
-    let height = min(
-        value.maxTileRow - value.minTileRow + 1i,
-        limit.maxTileRow - limit.minTileRow + 1i,
-    );
-    let width = min(
-        value.maxTileCol - value.minTileCol + 1i,
-        limit.maxTileCol - limit.minTileCol + 1i,
-    );
-    let minRow = coverFitStart(
-        value.minTileRow,
-        height,
-        limit.minTileRow,
-        limit.maxTileRow,
-    );
-    let minCol = coverFitStart(
-        value.minTileCol,
-        width,
-        limit.minTileCol,
-        limit.maxTileCol,
-    );
+fn coverCandidateWindow(matrixLevel: u32) -> GpuWebMercatorQuadCoverWindow {
+    let window = mapMeta.candidateWindows[matrixLevel];
+    var start = 0u;
+    if (matrixLevel > 0u) { start = mapMeta.candidateWindows[matrixLevel - 1u].w; }
+    let count = window.w - start;
+    if (count == 0u) { return GpuWebMercatorQuadCoverWindow(0, -1, 0, -1); }
     return GpuWebMercatorQuadCoverWindow(
-        minRow,
-        minRow + height - 1i,
-        minCol,
-        minCol + width - 1i,
+        i32(window.x), i32(window.x + count / window.z - 1u),
+        i32(window.y), i32(window.y + window.z - 1u),
     );
-}
-
-fn coverCameraTileIndex(low: u32, high: u32, matrixLevel: u32) -> u32 {
-    let shift = coverPolicy.coordinateBits - matrixLevel;
-    if (shift >= 32u) {
-        return high >> (shift - 32u);
-    }
-    if (shift == 0u) {
-        return low;
-    }
-    return (high << (32u - shift)) | (low >> shift);
-}
-
-fn coverProjectedSearchRadiusTiles() -> i32 {
-    let focalPixels = mapMeta.referenceViewport.y * 0.5f /
-        tan(mapMeta.verticalFovRadians * 0.5f);
-    return max(2i, i32(ceil(
-        focalPixels /
-        (f32(coverPolicy.cellsPerPatchEdge) * coverEffectiveCellSpanThreshold())
-    )) + 2i);
 }
 
 fn coverClearLookup() {
@@ -503,26 +470,10 @@ fn coverRefinementContains(
 fn coverMarkSparseRefinements() {
     coverClearLookup();
     coverState.finestMatrixLevel = coverPolicy.minimumMatrixLevel;
-    let radius = coverProjectedSearchRadiusTiles();
     for (var parentLevel = coverPolicy.minimumMatrixLevel;
         parentLevel < coverPolicy.maximumMatrixLevel;
         parentLevel += 1u) {
-        let parentRow = i32(coverCameraTileIndex(
-            mapMeta.cameraFixedLow.y,
-            mapMeta.cameraFixedHigh.y,
-            parentLevel,
-        ));
-        let parentCol = i32(coverCameraTileIndex(
-            mapMeta.cameraFixedLow.x,
-            mapMeta.cameraFixedHigh.x,
-            parentLevel,
-        ));
-        let search = coverFitWindow(GpuWebMercatorQuadCoverWindow(
-            parentRow - radius,
-            parentRow + radius,
-            parentCol - radius,
-            parentCol + radius,
-        ), coverGeometryWindow(parentLevel));
+        let search = coverCandidateWindow(parentLevel);
         for (var tileRow = search.minTileRow;
             tileRow <= search.maxTileRow;
             tileRow += 1i) {
@@ -555,7 +506,7 @@ fn coverMarkSparseRefinements() {
                     0xffffffffu,
                 )) {
                     coverState.lookupOverflowCount += 1u;
-                    continue;
+                    return;
                 }
                 coverState.finestMatrixLevel = max(
                     coverState.finestMatrixLevel,

@@ -28,6 +28,7 @@ import {
     gpuWebMercatorQuadCoverStateCodec,
     gpuWebMercatorQuadCoverVerticalBoundsCodec,
 } from './gpu-web-mercator-quad-cover-layout.js'
+import { gpuWebMercatorQuadCoverCandidates } from './gpu-web-mercator-quad-cover-candidates.js'
 import { GPU_WEB_MERCATOR_QUAD_COVER_WGSL } from './gpu-web-mercator-quad-cover-wgsl.js'
 import type { WebMercatorPlanarTileSpatialProfile } from './tile-spatial-profile.js'
 import { WebMercatorQuad } from './web-mercator-quad.js'
@@ -62,6 +63,8 @@ export type GpuWebMercatorQuadCoverDescriptor = Readonly<{
     spatialProfile: WebMercatorPlanarTileSpatialProfile
     policy: GpuWebMercatorQuadCoverPolicy
     verticalRangeMeters: readonly [number, number]
+    /** Hard input enumeration budget; defaults to max(16384, 64 * maximumPatches). */
+    maximumCandidates?: number
     verticalBounds?: readonly WebMercatorTileVerticalBounds[]
 }>
 
@@ -126,6 +129,7 @@ export type GpuWebMercatorQuadCoverFacts = Readonly<{
     disposed: boolean
     policy: GpuWebMercatorQuadCoverPolicy
     lookupCapacity: number
+    candidateCapacity: number
     coverageLimitCount: number
     verticalBoundsMode: 'global' | 'hierarchy'
     verticalBoundCount: number
@@ -660,6 +664,7 @@ export class GpuWebMercatorQuadCover {
 
         this.#assertActive()
         validateView(view)
+        const metadata = mapMetaRecord(this.descriptor, view)
         const sequenceStamp = this.#sequenceAuthority.stamp()
         const parity = (sequenceStamp.revision & 1) as 0 | 1
         const template = this.#templates[parity]
@@ -669,7 +674,7 @@ export class GpuWebMercatorQuadCover {
                 layout: gpuWebMercatorQuadCoverMapMetaCodec.artifact,
             }),
             data: gpuWebMercatorQuadCoverMapMetaCodec.uploadView(
-                mapMetaRecord(this.descriptor.spatialProfile, view)
+                metadata
             ),
         })
         let viewStamp: SubmissionAuthorityStamp
@@ -886,6 +891,7 @@ export class GpuWebMercatorQuadCover {
             disposed: this.#disposed,
             policy: this.descriptor.policy,
             lookupCapacity: this.#lookupCapacity,
+            candidateCapacity: this.descriptor.maximumCandidates!,
             coverageLimitCount: this.descriptor.spatialProfile.coverage.limits.length,
             verticalBoundsMode: this.descriptor.verticalBounds === undefined
                 ? 'global' as const
@@ -1075,6 +1081,17 @@ function snapshotDescriptor(
         })
     }
     const policy = gpuWebMercatorQuadCoverPolicy(input.policy)
+    const maximumCandidates = input.maximumCandidates ?? Math.max(16384, policy.maximumPatches * 64)
+    if (!positiveSafeInteger(maximumCandidates) || maximumCandidates > 0xffff_ffff) {
+        return throwGeoDiagnostic({
+            code: 'GEO_WEB_MERCATOR_COVER_CANDIDATE_BUDGET_INVALID',
+            phase: 'selection',
+            subject: { kind: 'web-mercator-quad-cover' },
+            message: 'Cover input enumeration requires an explicit positive u32 candidate budget.',
+            expected: { maximumCandidates: 'positive u32' },
+            actual: { maximumCandidates },
+        })
+    }
     const limits = spatialProfile.coverage.limits
     const boundsMaximumMatrixLevel = Number(limits.at(-1)?.matrixId)
     const expectedLimitCount = boundsMaximumMatrixLevel - policy.minimumMatrixLevel + 1
@@ -1115,6 +1132,7 @@ function snapshotDescriptor(
     return Object.freeze({
         spatialProfile,
         policy,
+        maximumCandidates,
         verticalRangeMeters,
         ...(verticalBounds === undefined ? {} : { verticalBounds }),
     })
@@ -1168,10 +1186,32 @@ function validateView(view: GeoViewSnapshot): void {
 }
 
 function mapMetaRecord(
-    profile: WebMercatorPlanarTileSpatialProfile,
+    descriptor: GpuWebMercatorQuadCoverDescriptor,
     view: GeoViewSnapshot
 ): Record<string, unknown> {
 
+    const profile = descriptor.spatialProfile
+    const candidates = gpuWebMercatorQuadCoverCandidates(descriptor, view)
+    if (!Number.isSafeInteger(candidates.candidateCount) ||
+        candidates.candidateCount > descriptor.maximumCandidates!) {
+        return throwGeoDiagnostic({
+            code: 'GEO_WEB_MERCATOR_COVER_CANDIDATE_CAPACITY_EXCEEDED',
+            phase: 'selection',
+            subject: { kind: 'web-mercator-quad-cover', viewId: view.id },
+            message: 'The conservative cover input domain exceeds its declared enumeration budget.',
+            expected: { maximumCandidates: descriptor.maximumCandidates },
+            actual: { candidateCount: candidates.candidateCount,
+                conservativeFallback: candidates.conservativeFallback,
+                fallbackReasons: candidates.fallbackReasons },
+        })
+    }
+    const candidateWindows = Array.from({ length: 25 }, () => [0, 0, 0, 0])
+    for (const window of candidates.windows) {
+        candidateWindows[window.matrixLevel] = window.count === 0
+            ? [0, 0, 0, window.offset]
+            : [window.minTileRow, window.minTileCol,
+                window.maxTileCol - window.minTileCol + 1, window.offset + window.count]
+    }
     const matrix = view.clipFromRelativeWorld
     const camera = profile.encodeCamera([
         view.cameraHigh[0] + view.cameraLow[0],
@@ -1192,6 +1232,8 @@ function mapMetaRecord(
         verticalFovRadians: view.verticalFovRadians,
         frameEpoch: view.frameEpoch,
         residencySnapshotEpoch: view.residencySnapshotEpoch,
+        refinementCandidateCount: candidates.refinementCandidateCount,
+        candidateWindows,
     }
 }
 

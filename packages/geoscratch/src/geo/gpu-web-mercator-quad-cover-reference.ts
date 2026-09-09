@@ -1,3 +1,4 @@
+import { gpuWebMercatorQuadCoverCandidates } from './gpu-web-mercator-quad-cover-candidates.js'
 import { throwGeoDiagnostic } from './diagnostics.js'
 import type { GeoViewSnapshot } from './geo-view.js'
 import type { GpuWebMercatorQuadCoverPolicy } from './gpu-web-mercator-quad-cover.js'
@@ -63,7 +64,7 @@ export function evaluateGpuWebMercatorQuadCoverReference(
 ): GpuWebMercatorQuadCoverReferenceResult {
 
     validateInput(input)
-    const generated = generateVariable(input, cameraFixedPosition(input))
+    const generated = generateVariable(input)
     if (generated.patches.length > input.policy.maximumPatches) {
         return invalidCover(
             'The minimum standard cover exceeds its declared patch capacity.',
@@ -96,11 +97,10 @@ export function evaluateGpuWebMercatorQuadCoverReference(
 }
 
 function generateVariable(
-    input: GpuWebMercatorQuadCoverReferenceInput,
-    fixedCamera: readonly [bigint, bigint]
+    input: GpuWebMercatorQuadCoverReferenceInput
 ) {
 
-    const refinements = sparseRefinements(input, fixedCamera)
+    const refinements = sparseRefinements(input)
     let candidateCount = refinements.candidateCount
     const seeded = seedMinimumPatches(input)
     candidateCount += seeded.candidateCount
@@ -142,8 +142,7 @@ function generateVariable(
 }
 
 function sparseRefinements(
-    input: GpuWebMercatorQuadCoverReferenceInput,
-    fixedCamera: readonly [bigint, bigint]
+    input: GpuWebMercatorQuadCoverReferenceInput
 ): Readonly<{
     parents: ReadonlySet<string>
     candidateCount: number
@@ -151,29 +150,13 @@ function sparseRefinements(
 }> {
 
     const parents = new Set<string>()
-    const radius = projectedSearchRadius(input)
+    const candidates = gpuWebMercatorQuadCoverCandidates(input, input.view)
     let candidateCount = 0
     let finestMatrixLevel = input.policy.minimumMatrixLevel
     for (let parentLevel = input.policy.minimumMatrixLevel;
         parentLevel < input.policy.maximumMatrixLevel;
         parentLevel++) {
-        const parentLimit = geometryLimit(input, parentLevel)
-        const cameraRow = cameraTileIndex(
-            fixedCamera[1],
-            parentLevel,
-            input.spatialProfile.coordinateBits
-        )
-        const cameraCol = cameraTileIndex(
-            fixedCamera[0],
-            parentLevel,
-            input.spatialProfile.coordinateBits
-        )
-        const search = fitWindow({
-            minTileRow: cameraRow - radius,
-            maxTileRow: cameraRow + radius,
-            minTileCol: cameraCol - radius,
-            maxTileCol: cameraCol + radius,
-        }, parentLimit)
+        const search = candidates.windows[parentLevel - input.policy.minimumMatrixLevel]!
         for (let tileRow = search.minTileRow; tileRow <= search.maxTileRow; tileRow++) {
             for (let tileCol = search.minTileCol; tileCol <= search.maxTileCol; tileCol++) {
                 candidateCount++
@@ -296,40 +279,6 @@ function edgeAdjacentAtLevel(
     return horizontal || vertical
 }
 
-function cameraFixedPosition(
-    input: GpuWebMercatorQuadCoverReferenceInput
-): readonly [bigint, bigint] {
-
-    const encoded = input.spatialProfile.encodeCamera([
-        input.view.cameraHigh[0] + input.view.cameraLow[0],
-        input.view.cameraHigh[1] + input.view.cameraLow[1],
-    ])
-    return Object.freeze([
-        (BigInt(encoded.high[0]) << 32n) | BigInt(encoded.low[0]),
-        (BigInt(encoded.high[1]) << 32n) | BigInt(encoded.low[1]),
-    ]) as readonly [bigint, bigint]
-}
-
-function cameraTileIndex(
-    fixed: bigint,
-    matrixLevel: number,
-    coordinateBits: number
-): number {
-
-    const fractionalBits = BigInt(coordinateBits - matrixLevel)
-    return Number(fixed >> fractionalBits)
-}
-
-function projectedSearchRadius(input: GpuWebMercatorQuadCoverReferenceInput): number {
-
-    const focalPixels = input.view.referenceViewport[1] /
-        (2 * Math.tan(input.view.verticalFovRadians / 2))
-    return Math.max(2, Math.ceil(
-        focalPixels /
-        (input.policy.cellsPerPatchEdge * effectiveCellSpanThreshold(input))
-    ) + 2)
-}
-
 function effectiveCellSpanThreshold(
     input: GpuWebMercatorQuadCoverReferenceInput
 ): number {
@@ -381,41 +330,6 @@ function referencePatch(
         tileCol: tile.tileCol,
         key: tile.key,
     })
-}
-
-function fitWindow(bounds: IntegerBounds, limit: IntegerBounds): IntegerBounds {
-
-    const height = Math.min(
-        bounds.maxTileRow - bounds.minTileRow + 1,
-        limit.maxTileRow - limit.minTileRow + 1
-    )
-    const width = Math.min(
-        bounds.maxTileCol - bounds.minTileCol + 1,
-        limit.maxTileCol - limit.minTileCol + 1
-    )
-    const minTileRow = fitStart(
-        bounds.minTileRow,
-        height,
-        limit.minTileRow,
-        limit.maxTileRow
-    )
-    const minTileCol = fitStart(
-        bounds.minTileCol,
-        width,
-        limit.minTileCol,
-        limit.maxTileCol
-    )
-    return Object.freeze({
-        minTileRow,
-        maxTileRow: minTileRow + height - 1,
-        minTileCol,
-        maxTileCol: minTileCol + width - 1,
-    })
-}
-
-function fitStart(value: number, span: number, minimum: number, maximum: number): number {
-
-    return clamp(value, minimum, maximum - span + 1)
 }
 
 function intersectsVisible(
@@ -497,13 +411,13 @@ function projectedPlaneCellSpanPixels(
 
     const matrix = input.view.clipFromRelativeWorld
     let polygon: ClipPoint[] = [
-        multiplyClip(matrix, [ bounds.minimumX, bounds.minimumY, vertical, 1 ]),
-        multiplyClip(matrix, [ bounds.maximumX, bounds.minimumY, vertical, 1 ]),
-        multiplyClip(matrix, [ bounds.maximumX, bounds.maximumY, vertical, 1 ]),
-        multiplyClip(matrix, [ bounds.minimumX, bounds.maximumY, vertical, 1 ]),
+        [ bounds.minimumX, bounds.minimumY, vertical, 1 ],
+        [ bounds.maximumX, bounds.minimumY, vertical, 1 ],
+        [ bounds.maximumX, bounds.maximumY, vertical, 1 ],
+        [ bounds.minimumX, bounds.maximumY, vertical, 1 ],
     ]
     for (let plane = 0; plane < 6 && polygon.length > 0; plane++) {
-        polygon = clipPolygonToPlane(polygon, plane)
+        polygon = clipPolygonToPlane(polygon, plane, matrix)
     }
     if (polygon.length === 0) return 0
 
@@ -523,7 +437,7 @@ function projectedPlaneCellSpanPixels(
     ]
     return Math.max(...polygon.map(point => projectedCellMaximumStretchPixels(
         input.view.referenceViewport,
-        point,
+        multiplyClip(matrix, point),
         xDelta,
         yDelta
     )))
@@ -539,20 +453,24 @@ function multiplyClip(matrix: readonly number[], point: ClipPoint): ClipPoint {
     )) as unknown as ClipPoint
 }
 
-function clipPolygonToPlane(input: readonly ClipPoint[], plane: number): ClipPoint[] {
+function clipPolygonToPlane(
+    input: readonly ClipPoint[], plane: number, matrix: readonly number[]
+): ClipPoint[] {
 
     if (input.length === 0) return []
     const output: ClipPoint[] = []
     let start = input.at(-1)!
-    let startDistance = clipPlaneDistance(start, plane)
+    let startDistance = clipPlaneDistance(start, plane, matrix)
     for (const end of input) {
-        const endDistance = clipPlaneDistance(end, plane)
+        const endDistance = clipPlaneDistance(end, plane, matrix)
         const startInside = startDistance >= 0
         const endInside = endDistance >= 0
         if (startInside !== endInside) {
-            const ratio = startDistance / (startDistance - endDistance)
+            const denominator = startDistance - endDistance
+            const ratio = Math.abs(denominator) < 2 ** -120 ? 0.5 :
+                clamp(startDistance / denominator, 0, 1)
             output.push(Object.freeze(start.map((value, index) =>
-                value + (end[index]! - value) * ratio
+                index === 3 ? 1 : value + (end[index]! - value) * ratio
             )) as unknown as ClipPoint)
         }
         if (endInside) output.push(end)
@@ -562,16 +480,14 @@ function clipPolygonToPlane(input: readonly ClipPoint[], plane: number): ClipPoi
     return output
 }
 
-function clipPlaneDistance(point: ClipPoint, plane: number): number {
+function clipPlaneDistance(point: ClipPoint, plane: number, matrix: readonly number[]): number {
 
-    switch (plane) {
-        case 0: return point[2]
-        case 1: return point[3] - point[2]
-        case 2: return point[0] + point[3]
-        case 3: return point[3] - point[0]
-        case 4: return point[1] + point[3]
-        default: return point[3] - point[1]
-    }
+    const row = (index: number) => [0, 1, 2, 3].map(column => matrix[column * 4 + index]!)
+    const row3 = row(3)
+    const other = row(plane < 2 ? 2 : plane < 4 ? 0 : 1)
+    const equation = plane === 0 ? other : row3.map((value, index) =>
+        value + (plane === 2 || plane === 4 ? other[index]! : -other[index]!))
+    return equation.reduce((sum, value, index) => sum + value * point[index]!, 0)
 }
 
 function projectedCellMaximumStretchPixels(
@@ -607,8 +523,8 @@ function projectedAxisCellDeltaPixels(
 
     const reciprocalW = 1 / clip[3]
     return Object.freeze([
-        (delta[0] - clip[0] * reciprocalW * delta[3]) * reciprocalW * viewport[0] * 0.5,
-        (delta[1] - clip[1] * reciprocalW * delta[3]) * reciprocalW * viewport[1] * 0.5,
+        (delta[0] - clamp(clip[0] * reciprocalW, -1, 1) * delta[3]) * reciprocalW * viewport[0] * 0.5,
+        (delta[1] - clamp(clip[1] * reciprocalW, -1, 1) * delta[3]) * reciprocalW * viewport[1] * 0.5,
     ])
 }
 

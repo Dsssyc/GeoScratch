@@ -593,7 +593,7 @@ type GpuWebMercatorQuadCoverCommands = Readonly<{ generate: DispatchCommand; sta
 Kind: `Type Alias`.
 
 ```ts
-type GpuWebMercatorQuadCoverDescriptor = Readonly<{ policy: GpuWebMercatorQuadCoverPolicy; spatialProfile: WebMercatorPlanarTileSpatialProfile; verticalBounds?: readonly WebMercatorTileVerticalBounds[]; verticalRangeMeters: readonly [number, number] }>
+type GpuWebMercatorQuadCoverDescriptor = Readonly<{ maximumCandidates?: number; policy: GpuWebMercatorQuadCoverPolicy; spatialProfile: WebMercatorPlanarTileSpatialProfile; verticalBounds?: readonly WebMercatorTileVerticalBounds[]; verticalRangeMeters: readonly [number, number] }>
 ```
 
 ### `GpuWebMercatorQuadCoverFacts`
@@ -601,7 +601,7 @@ type GpuWebMercatorQuadCoverDescriptor = Readonly<{ policy: GpuWebMercatorQuadCo
 Kind: `Type Alias`.
 
 ```ts
-type GpuWebMercatorQuadCoverFacts = Readonly<{ coverageLimitCount: number; disposed: boolean; id: string; lookupCapacity: number; parity: readonly Readonly<{ commandIds: readonly string[]; lookupBufferId: string; mapMetaBufferId: string; parity: 0 | 1; patchBufferId: string; stateBufferId: string }>[]; policy: GpuWebMercatorQuadCoverPolicy; runtimeId: string; selectionPath: "gpu-camera-inverse-webmercatorquad-cover"; verticalBoundCount: number; verticalBoundsBufferId: string; verticalBoundsMode: "global" | "hierarchy" }>
+type GpuWebMercatorQuadCoverFacts = Readonly<{ candidateCapacity: number; coverageLimitCount: number; disposed: boolean; id: string; lookupCapacity: number; parity: readonly Readonly<{ commandIds: readonly string[]; lookupBufferId: string; mapMetaBufferId: string; parity: 0 | 1; patchBufferId: string; stateBufferId: string }>[]; policy: GpuWebMercatorQuadCoverPolicy; runtimeId: string; selectionPath: "gpu-camera-inverse-webmercatorquad-cover"; verticalBoundCount: number; verticalBoundsBufferId: string; verticalBoundsMode: "global" | "hierarchy" }>
 ```
 
 ### `GpuWebMercatorQuadCoverFeedback`

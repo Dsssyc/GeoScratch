@@ -19,11 +19,36 @@ mesh vertex count, or draw arguments.
 
 Every patch is an OGC identity `(tileMatrix, tileRow, tileCol)`. Camera-derived probing
 addresses the fixed global matrix and never creates a moving game-style grid. At every
-pitch, one adaptive kernel probes bounded standard parents around the precise fixed-point
-camera position and records an exact sparse parent identity only where the maximum
+pitch, `writeView()` prepares conservative standard-parent windows from the actual
+projection matrix and precise fixed-point camera. The GPU records an exact sparse
+parent identity only where the maximum
 singular stretch of one projected geometry cell exceeds
 `maximumCellSpanReferencePixels` plus `refinementTolerance`. Pitch and FOV affect the
 projection naturally; they never select a uniform/variable algorithm mode.
+
+Candidate membership follows a projected-depth bound, not radial distance or a
+pitch/FOV-hint algorithm switch. With cell width `h`, reference pixel scales `s`,
+and the actual projection `M`, `B_ij = s_i * (abs(M_ij) + abs(M_wj))` bounds the
+clipped Jacobian: `maximumStretch <= h * ||B||F / w`. The inverse projection maps
+the resulting depth cap to conservative standard row/column windows. Separate f32
+coordinate/clipping/metric error bounds and inverse residual intervals enlarge the
+window. Clipping retains camera-relative world vertices and evaluates raw plane
+equations formed from matrix rows before projection. Only the clipped vertices
+are projected for quality evaluation. This avoids losing near/far depth constants
+when mixing or subtracting large clip coordinates on coarse patches; interpolation
+retains affine homogeneous `w=1`. The shader clamps clipped NDC and interpolation ratios to their mathematical
+domains and avoids division by a subnormal clipping denominator. These constraints
+limit roundoff; they do not change the exact projected-cell definition.
+
+Uncertifiable arithmetic uses the complete declared geometry domain. The independent
+coarse seed domain is never restricted by a refinement cap. `maximumCandidates` on
+the cover descriptor bounds the sum of seed and refinement input candidates; it
+defaults to `max(16384, 64 * maximumPatches)`. Invalid budgets fail at construction;
+an over-budget view fails synchronously in `writeView()` with
+`GEO_WEB_MERCATOR_COVER_CANDIDATE_CAPACITY_EXCEEDED`, before an upload/token is created.
+The selector never shrinks the domain to fit. This input budget does not count
+materialized children or subsequent adjacency work. `facts().candidateCapacity`
+reports it separately from output patch and lookup capacity.
 
 The projected metric uses `GeoViewSnapshot.referenceViewport`, a rotation-invariant
 local projective Jacobian, perspective, foreshortening, and immutable vertical bounds.
@@ -57,7 +82,7 @@ cannot change these bounds.
 
 `GpuWebMercatorQuadCoverTemplate` exposes borrowed parity resources for downstream
 GPU components: map metadata, patches, lookup, and full state. `writeView()` owns one
-ephemeral upload, `frame()` selects parity,
+ephemeral upload containing camera facts and the conservative windows; `frame()` selects parity,
 `encode()` submits one adaptive compute, and `capture()` reads only geometry state.
 Feedback reports candidate/patch counts, level range, adjacency, projected-cell span,
 and overflow facts. It contains no demand records or selection mode.
@@ -87,4 +112,5 @@ Related decisions: ADR-083 establishes inverse-cover and passive Virtual Raster;
 ADR-084 establishes reference-pixel quality; ADR-086 supersedes their pitch-gated
 parts and separates cover, source demand, and patch draw ownership; ADR-087 preserves
 sparse parent decisions; ADR-088 defines maximum projected stretch; ADR-089 defines the
-consumer-neutral indexed/non-indexed indirect ABI.
+consumer-neutral indexed/non-indexed indirect ABI. ADR-125 records candidate
+completeness, failed-cut revocation and the bounded execution work.

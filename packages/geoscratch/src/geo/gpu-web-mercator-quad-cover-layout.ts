@@ -15,6 +15,8 @@ export const gpuWebMercatorQuadCoverMapMetaCodec = layoutCodec({
         { name: 'verticalFovRadians', type: 'f32' },
         { name: 'frameEpoch', type: 'u32' },
         { name: 'residencySnapshotEpoch', type: 'u32' },
+        { name: 'refinementCandidateCount', type: 'u32' },
+        { name: 'candidateWindows', type: { element: 'vec4u', count: 25 } },
     ],
 }, { usage: [ 'uniform', 'storage', 'readback' ] })
 
