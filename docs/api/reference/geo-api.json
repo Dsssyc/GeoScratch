@@ -1328,7 +1328,7 @@
           "packages/geoscratch/src/geo/gpu-web-mercator-quad-cover-layout.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/geo/gpu-web-mercator-quad-cover-layout.ts:118"
+          "packages/geoscratch/src/geo/gpu-web-mercator-quad-cover-layout.ts:121"
         ],
         "summary": "Generates standard-tile lookup, neighbor, and edge-stitching WGSL for one cover.",
         "declaration": "Function gpuWebMercatorQuadCoverReadWgslModule",
@@ -1345,7 +1345,7 @@
           "packages/geoscratch/src/geo/gpu-web-mercator-quad-cover-layout.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/geo/gpu-web-mercator-quad-cover-layout.ts:105"
+          "packages/geoscratch/src/geo/gpu-web-mercator-quad-cover-layout.ts:108"
         ],
         "summary": "",
         "declaration": "type GpuWebMercatorQuadCoverReadWgslModule = Readonly<{ bindings: Readonly<{ group: number; lookupEntries: number; patches: number }>; code: string; kind: \"gpu-web-mercator-quad-cover-read-wgsl-module\"; layoutDependencies: readonly LayoutArtifact[]; namespace: string }>"
@@ -1359,7 +1359,7 @@
           "packages/geoscratch/src/geo/gpu-web-mercator-quad-cover-layout.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/geo/gpu-web-mercator-quad-cover-layout.ts:98"
+          "packages/geoscratch/src/geo/gpu-web-mercator-quad-cover-layout.ts:101"
         ],
         "summary": "",
         "declaration": "type GpuWebMercatorQuadCoverReadWgslOptions = Readonly<{ group: number; lookupEntriesBinding: number; namespace?: string; patchesBinding: number }>"
@@ -1644,7 +1644,7 @@
           "packages/geoscratch/src/geo/gpu-web-mercator-quad-patch-draw.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/geo/gpu-web-mercator-quad-patch-draw.ts:127"
+          "packages/geoscratch/src/geo/gpu-web-mercator-quad-patch-draw.ts:128"
         ],
         "summary": "Owns draw-indirect arguments and suppresses instances when its borrowed GPU cover fails.",
         "declaration": "class GpuWebMercatorQuadPatchDraw",
@@ -1769,7 +1769,7 @@
           "packages/geoscratch/src/geo/gpu-web-mercator-quad-patch-draw.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/geo/gpu-web-mercator-quad-patch-draw.ts:60"
+          "packages/geoscratch/src/geo/gpu-web-mercator-quad-patch-draw.ts:61"
         ],
         "summary": "",
         "declaration": "type GpuWebMercatorQuadPatchDrawDescriptor = Readonly<{ cover: GpuWebMercatorQuadCover; elementCount: number }>"
@@ -1783,7 +1783,7 @@
           "packages/geoscratch/src/geo/gpu-web-mercator-quad-patch-draw.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/geo/gpu-web-mercator-quad-patch-draw.ts:84"
+          "packages/geoscratch/src/geo/gpu-web-mercator-quad-patch-draw.ts:85"
         ],
         "summary": "",
         "declaration": "type GpuWebMercatorQuadPatchDrawFacts = Readonly<{ coverId: string; disposed: boolean; elementCount: number; id: string; parity: readonly Readonly<{ commandId: string; drawArgumentBufferId: string; parity: 0 | 1 }>[]; runtimeId: string }>"
@@ -1797,7 +1797,7 @@
           "packages/geoscratch/src/geo/gpu-web-mercator-quad-patch-draw.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/geo/gpu-web-mercator-quad-patch-draw.ts:65"
+          "packages/geoscratch/src/geo/gpu-web-mercator-quad-patch-draw.ts:66"
         ],
         "summary": "",
         "declaration": "type GpuWebMercatorQuadPatchDrawFrame = Readonly<{ coverId: string; drawArgument: Readonly<{ offset: 0; region: BufferRegion; resource: BufferResource; size: 20 }>; frameEpoch: number; kind: \"gpu-web-mercator-quad-patch-draw-frame\"; parity: 0 | 1; patchDrawId: string }>"
@@ -1811,7 +1811,7 @@
           "packages/geoscratch/src/geo/gpu-web-mercator-quad-patch-draw.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/geo/gpu-web-mercator-quad-patch-draw.ts:97"
+          "packages/geoscratch/src/geo/gpu-web-mercator-quad-patch-draw.ts:98"
         ],
         "summary": "",
         "declaration": "type GpuWebMercatorQuadPatchDrawIdentityObjects = Readonly<{ bindLayouts: readonly BindLayout[]; bindSets: readonly BindSet[]; commands: readonly (ClearBufferCommand | DispatchCommand)[]; passes: readonly ComputePassSpec[]; pipelines: readonly ComputePipeline[]; programs: readonly Program[]; resources: readonly BufferResource[]; uploads: readonly UploadCommand[] }>"
@@ -1825,7 +1825,7 @@
           "packages/geoscratch/src/geo/gpu-web-mercator-quad-patch-draw.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/geo/gpu-web-mercator-quad-patch-draw.ts:79"
+          "packages/geoscratch/src/geo/gpu-web-mercator-quad-patch-draw.ts:80"
         ],
         "summary": "",
         "declaration": "type GpuWebMercatorQuadPatchDrawTemplate = Readonly<{ drawArgument: GpuWebMercatorQuadPatchDrawFrame[\"drawArgument\"]; parity: 0 | 1 }>"

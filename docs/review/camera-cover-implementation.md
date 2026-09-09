@@ -374,3 +374,45 @@ bypassed only in temporary runner copies, reusing the existing immutable COG.
 
 Rollback: revert later dependent commits first, then this metadata/feedback repair.
 It requires no backend migration or resource-state rollback.
+
+## Review Repairs: Continuous Height Volume
+
+ADR-127 records the metric/candidate proofs. The GPU now bounds the affine
+Jacobian numerator over the projected height prism and obtains positive depth
+from box and inverse-row coordinate-slab certificates. Flat patches clip once
+and separately bound numerator/depth over the polygon. Scaled singular arithmetic
+and absolute rounding allowances replace the former endpoint maximum. Candidate
+windows include projected box radii for the non-flat predicate; coarse seeds,
+independent parent decisions and the two-dispatch graph remain intact.
+
+The map upload grows by 96 bytes to 656 bytes. Candidate workspaces and the 44-byte
+feedback ABI are unchanged. An uncertified final footprint uses a reserved span
+marker and revokes the complete cut before demand/draw; finite bounds at the
+explicit geometry ceiling are reported even when above the target.
+
+Native red/green evidence is in `/tmp/geoscratch-cover-fixes/volume/`: archived
+`8f6e93c` fails `height-volume-A`, retaining z20 with reported 1.58984375 pixels
+versus an independently measured 20.68637864-pixel visible cell. The repair emits
+a mixed z22–24 cut; its sampled actual surface satisfies the point-quality gate.
+Reported conservative bounds can be higher than these sampled values, as expected.
+`camera-verified.json` passes 74 cases per DPR (1 and 2), including multiple allowed
+surface heights, camera transitions, A-B-A, true quality failure/recovery, and
+complete-enumeration controls with identical ordered final cuts. The earlier
+`camera-final.json` failure was a test flag that did not actually install its
+singular matrix; the verified fixture sets that matrix explicitly.
+
+Focused checks (60 passing), full tests (1722 passing, 2 opt-in pending), typecheck,
+docs generation/translations/check and production build passed. Native outcome
+injection, all three terrain suites and their construction/native-observation,
+wide/pitch/zoom/DPR/2:1/90-frame/streaming/cleanup gates passed. The independent
+inverse-point test checks 3072 coordinate-slab certificates. Finite tests support
+the algebraic argument; they do not establish universal hardware performance or
+replace its numerical assumptions.
+
+`benchmark.json` records the measured volume-repair baseline for the following
+semantics-preserving cleanup. It has 14 GPU timestamp samples per scenario and
+explicit source provenance/cleanup. No performance comparison should substitute
+FPS for these GPU timings. Backend data and frozen Flow Layer remain unchanged.
+
+Rollback: revert dependent cleanup first, then this height-volume commit; the
+separately committed metadata/diagnostic repair `8f6e93c` remains available.

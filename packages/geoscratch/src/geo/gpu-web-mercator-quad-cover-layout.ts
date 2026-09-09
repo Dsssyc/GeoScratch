@@ -18,6 +18,9 @@ export const gpuWebMercatorQuadCoverMapMetaCodec = layoutCodec({
         { name: 'refinementCandidateCount', type: 'u32' },
         { name: 'candidateWindows', type: { element: 'vec4u', count: 25 } },
         { name: 'candidateDispatch', type: 'vec3u' },
+        { name: 'clipWPositive', type: 'vec4f' },
+        { name: 'clipWNegative', type: 'vec4f' },
+        { name: 'clipWResidual', type: 'mat4x4f' },
     ],
 }, { usage: [ 'uniform', 'storage', 'readback' ] })
 

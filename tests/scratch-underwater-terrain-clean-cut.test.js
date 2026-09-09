@@ -323,7 +323,7 @@ describe('Underwater Terrain clean cut', () => {
         expect(wgsl).to.include('coverCandidateWindow')
         expect(wgsl).not.to.include('coverProjectedSearchRadiusTiles')
         expect(wgsl).to.include('fn coverProjectedCellSpanPixels(')
-        expect(wgsl).to.include('fn coverProjectedCellMaximumStretchPixels(')
+        expect(wgsl).to.include('fn coverMaximumStretch(')
         expect(wgsl).to.include('(xx - yy) * (xx - yy) + 4.0f * xy * xy')
         expect(wgsl).not.to.include('fn coverProjectedCellAreaScalePixels(')
         expect(wgsl).to.include('fn coverMarkSparseRefinements(')

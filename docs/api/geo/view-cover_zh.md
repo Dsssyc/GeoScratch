@@ -2,7 +2,7 @@
 docId: geo.view-cover.zh
 canonical: false
 translationOf: ./view-cover.md
-canonicalDigest: 73b4b82630da18739055579c632474470ac3c83b1f483424f1276337420f9401
+canonicalDigest: 5bdb1c62401c65e43deca4ab9ba9d17f0b8ab857be1b39c594586a193bdace6c
 ---
 # WebMercatorQuad 视图覆盖
 
@@ -24,9 +24,12 @@ lookup、GPU patch count 和几何反馈。它不拥有 tiled source、栅格 de
 宽度为 `h`、参考像素比例为 `s`、实际投影为 `M`，则
 `B_ij = s_i * (abs(M_ij) + abs(M_wj))` 给出裁剪后 Jacobian 的界：
 `maximumStretch <= h * ||B||F / w`。逆投影将此深度上界映射为保守标准行列窗口。
+非平面体的最小深度可能在裁剪区域之外，因此必须用整个包围体的投影半径扩大逆投影域
+再舍入到瓦片；不能沿用原来仅针对裁剪点的候选域。
 f32 坐标、clipping、metric 的独立误差预算及逆矩阵 residual 区间会向外扩大窗口。
 Clipping 在相机相对世界坐标中进行：先组合矩阵行得到原始平面方程，再求点距离，
-最终才投影裁剪顶点。这避免大尺度粗 patch 的 clip 坐标相减／混合丢失 near/far
+平面 bounds 最终才投影裁剪顶点。非平面高度区间使用整个高度棱柱的投影包络，
+不再只检查两个端点平面。这避免大尺度粗 patch 的 clip 坐标相减／混合丢失 near/far
 常量并把可见区域误判为空；插值始终保持 affine homogeneous `w=1`。
 Shader 将裁剪 NDC 和插值比例约束在其数学定义域，避免对 subnormal clipping
 分母做除法。这些约束处理舍入误差，不改变精确的投影 cell 定义。
@@ -42,7 +45,20 @@ refinement 输入候选之和，默认 `max(16384, 64 * maximumPatches)`。无�
 投影度量使用 `GeoViewSnapshot.referenceViewport`、旋转不变的局部 projective
 Jacobian、透视、缩短效应和不可变垂直包围体。最大奇异值约束最长屏幕方向，不会用
 较小投影面积掩盖细长 cell。物理 presentation size 与 DPR 不会改变 cover 身份；
-可能跨过相机平面的 cell 会保守细分。
+无法认证 footprint 正深度的 cell 会保守细分。
+
+令 `J = N(q) / w`，仿射分子 `N(q)` 的谱范数是凸函数。平面 bounds 用裁剪多边形
+顶点的最大分子除以最小深度，约束整个多边形；非平面 bounds 用保守投影 XY 矩形约束
+所有允许高度的分子。整个包围体为正深度时投影其角点，跨相机平面时使用视锥矩形。
+深度取包围体和逆投影坐标 slab 下界中的最大值，每个逆矩阵行都有向外舍入的 residual
+证书。即使视锥位于高度区间内部，也不会因为两端平面都不可见而漏掉它。
+
+度量使用缩放后的奇异值计算和分子／坐标的绝对舍入误差 allowance。反馈 span 报告
+保守上界，不再是端点采样值。在显式 `maximumMatrixLevel` 处，有限上界可能超过质量
+目标，反馈会如实报告。最终 footprint 无法认证时使用保留的
+`maximumCellSpanQ8 = 0xffffffff`，撤销全部 patch 和 lookup，解码产生
+`actual.reason: 'unbounded-quality'`。Demand 和 draw 在 CPU 反馈返回前就拒绝该状态。
+普通 44-byte cover state ABI 和有限 Q8 span 编码保持不变（ADR-127）。
 
 `GpuWebMercatorQuadCoverPolicy` 声明有序几何层级、硬 patch 容量、
 `cellsPerPatchEdge`、`maximumCellSpanReferencePixels` 和数值容差。无效 fact 在
@@ -69,7 +85,7 @@ GPU 分配前产生 `GEO_WEB_MERCATOR_COVER_VERTICAL_BOUNDS_INVALID`；较小的
 
 `GpuWebMercatorQuadCoverTemplate` 为下游 GPU component 暴露借用的 parity
 resource：map metadata、patches、lookup 和完整 state。`writeView()` 拥有临时
-upload，其中同时包含相机事实和保守窗口；`frame()` 选择 parity。`encode()` 在一个
+upload，其中同时包含相机事实、保守窗口与逆矩阵行的深度证书；`frame()` 选择 parity。`encode()` 在一个
 compute pass 中按序追加两个 dispatch，`capture()` 只读取最终几何 state。
 `commandsFor()` 暴露当前自有 frame 的持久 `evaluate`、`generate`、`stateFeedback`
 命令；消费者通过 `encode()` 保持完整依赖顺序，不能只执行 `generate`。
@@ -98,7 +114,7 @@ Cover 为每个 parity 拥有一份 u32 candidate workspace。物化结束后，
 code 分别为 `GEO_WEB_MERCATOR_COVER_FEEDBACK_INVALID` 和
 `GEO_WEB_MERCATOR_DEMAND_FEEDBACK_INVALID`。`diagnostic.actual.reason` 区分
 `byte-length`、`frame-epoch`，cover 的 `patch-capacity`／`descriptor-overflow`／
-`lookup-overflow`／`adjacency`／`range`，或 demand 的 `demand-capacity`／`overflow`／
+`lookup-overflow`／`adjacency`／`range`／`unbounded-quality`，或 demand 的 `demand-capacity`／`overflow`／
 `source-ceiling`／`record`，同时携带 state/record 事实。消费者检查结构化诊断，不解析
 异常文字或依赖 RangeError/TypeError 类型。反馈包含 candidate/patch 数、level range、
 邻接、projected-cell span 和 overflow fact，不包含 demand 或 selection mode。
@@ -127,3 +143,7 @@ ADR-089 定义 consumer-neutral indexed/non-indexed indirect ABI；ADR-125 记�
 失败 cut 撤销与有界执行设计。
 
 ADR-126 明确完整垂直元数据与最近祖先包含关系。
+
+Map metadata 布局从 560 bytes 增为 656 bytes：两个 vec4 深度支持向量和四行 residual
+vec4，每个 parity 及每次 view upload 增加 96 bytes。候选 workspace 容量、dispatch 数
+与反馈频率保持不变。ADR-127 记录高度体与候选域证明，以及有限原生对照。

@@ -30,11 +30,14 @@ Candidate membership follows a projected-depth bound, not radial distance or a
 pitch/FOV-hint algorithm switch. With cell width `h`, reference pixel scales `s`,
 and the actual projection `M`, `B_ij = s_i * (abs(M_ij) + abs(M_wj))` bounds the
 clipped Jacobian: `maximumStretch <= h * ||B||F / w`. The inverse projection maps
-the resulting depth cap to conservative standard row/column windows. Separate f32
+the resulting depth cap to conservative standard row/column windows. For a non-flat
+prism the minimum depth may occur outside the clipped portion, so its full projected
+box radii enlarge the inverse domain before tile rounding; restricting this to the
+old clipped-point domain would be unsound. Separate f32
 coordinate/clipping/metric error bounds and inverse residual intervals enlarge the
 window. Clipping retains camera-relative world vertices and evaluates raw plane
-equations formed from matrix rows before projection. Only the clipped vertices
-are projected for quality evaluation. This avoids losing near/far depth constants
+equations formed from matrix rows before projection. Flat bounds project the clipped polygon vertices. A non-flat vertical interval uses
+an enclosure of its whole height prism; it does not test only its two endpoint planes. This avoids losing near/far depth constants
 when mixing or subtracting large clip coordinates on coarse patches; interpolation
 retains affine homogeneous `w=1`. The shader clamps clipped NDC and interpolation ratios to their mathematical
 domains and avoids division by a subnormal clipping denominator. These constraints
@@ -54,7 +57,25 @@ The projected metric uses `GeoViewSnapshot.referenceViewport`, a rotation-invari
 local projective Jacobian, perspective, foreshortening, and immutable vertical bounds.
 Its largest singular value constrains the longest screen direction instead of hiding a
 long, thin cell behind small projected area. Physical presentation size and DPR never
-change cover identities. A cell that can cross the camera plane refines conservatively.
+change cover identities. A cell that cannot certify positive footprint depth refines conservatively.
+
+Writing `J = N(q) / w`, the spectral norm of the affine numerator `N(q)` is convex.
+For flat bounds, its maximum over clipped polygon vertices divided by minimum depth
+bounds the polygon. For non-flat bounds, a conservative projected XY rectangle bounds
+`N(q)` for all admissible heights. A positive-depth box uses its projected corners;
+a box crossing the camera plane uses the frustum rectangle. Depth comes from the
+strongest box or inverse-projection coordinate-slab bound, including an outward
+residual certificate for each inverse row. Thus a frustum lying inside the height
+interval cannot disappear merely because neither endpoint plane is visible.
+
+The metric uses scaled singular-value arithmetic and absolute numerator/coordinate
+roundoff allowances. Feedback spans report these conservative bounds, not endpoint
+samples. A finite bound may exceed the target at the explicitly configured
+`maximumMatrixLevel`; it is reported rather than presented as meeting the target.
+An uncertified final footprint uses reserved `maximumCellSpanQ8 = 0xffffffff`, revokes
+all patches/lookup entries, and fails decoding with `actual.reason: 'unbounded-quality'`.
+Demand and draw reject that state before any CPU feedback arrives. The ordinary
+44-byte cover-state ABI and finite Q8 span encoding remain unchanged (ADR-127).
 
 `GpuWebMercatorQuadCoverPolicy` declares ordered geometry levels, hard patch capacity,
 `cellsPerPatchEdge`, `maximumCellSpanReferencePixels`, and numerical tolerance. Invalid
@@ -89,7 +110,8 @@ cannot change these bounds.
 
 `GpuWebMercatorQuadCoverTemplate` exposes borrowed parity resources for downstream
 GPU components: map metadata, patches, lookup, and full state. `writeView()` owns one
-ephemeral upload containing camera facts and the conservative windows; `frame()` selects parity,
+ephemeral upload containing camera facts, conservative windows, and inverse-row depth
+certificates; `frame()` selects parity,
 `encode()` appends two ordered dispatches in one compute pass, and `capture()` reads
 only the final geometry state. `commandsFor()` exposes persistent `evaluate`,
 `generate`, and `stateFeedback` commands for the owned frame; consumers use `encode()`
@@ -126,7 +148,7 @@ Both public feedback decoders reject invalid bytes and failed/stale results with
 `GeoDiagnosticError`: codes `GEO_WEB_MERCATOR_COVER_FEEDBACK_INVALID` and
 `GEO_WEB_MERCATOR_DEMAND_FEEDBACK_INVALID`. `diagnostic.actual.reason` distinguishes
 `byte-length`, `frame-epoch`, cover `patch-capacity`/`descriptor-overflow`/
-`lookup-overflow`/`adjacency`/`range`, or demand `demand-capacity`/`overflow`/
+`lookup-overflow`/`adjacency`/`range`/`unbounded-quality`, or demand `demand-capacity`/`overflow`/
 `source-ceiling`/`record`. State/record facts accompany the reason. Callers inspect
 the diagnostic instead of parsing exception prose or testing RangeError/TypeError.
 Feedback reports candidate/patch counts, level range, adjacency, projected-cell span,
@@ -161,3 +183,8 @@ consumer-neutral indexed/non-indexed indirect ABI. ADR-125 records candidate
 completeness, failed-cut revocation and the bounded execution work.
 
 ADR-126 clarifies complete vertical metadata and nearest-ancestor enclosure.
+
+The map-metadata layout is now 656 bytes (previously 560): two vec4 depth-support
+vectors and four residual vec4 rows add 96 bytes per parity and view upload. Candidate
+workspace capacities, dispatch count, and feedback cadence are unchanged. ADR-127
+records the volume and candidate-domain proofs and their finite native comparisons.

@@ -49,7 +49,8 @@ fn prepareWebMercatorQuadPatchDraw() {
     drawArguments[4] = 0u;
     if (coverState.descriptorOverflowCount == 0u &&
         coverState.lookupOverflowCount == 0u &&
-        coverState.maximumAdjacentLevelDelta <= 1u) {
+        coverState.maximumAdjacentLevelDelta <= 1u &&
+        coverState.maximumCellSpanQ8 != 0xffffffffu) {
         drawArguments[1] = coverState.patchCount;
     }
 }

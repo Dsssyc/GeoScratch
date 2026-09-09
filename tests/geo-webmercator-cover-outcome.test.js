@@ -40,7 +40,7 @@ describe('GPU WebMercatorQuad cover outcomes', () => {
     it('reports byte lengths and failed state through stable Geo diagnostics', () => {
         for (const [bytes, reason] of [[new Uint8Array(4), 'byte-length'],
             [coverState({ 0: 0 }), 'frame-epoch'], [coverState({ 3: 1 }), 'descriptor-overflow'],
-            [coverState({ 4: 1 }), 'lookup-overflow'], [coverState({ 7: 2 }), 'adjacency']]) {
+            [coverState({ 4: 1 }), 'lookup-overflow'], [coverState({ 10: 0xffff_ffff }), 'unbounded-quality'], [coverState({ 7: 2 }), 'adjacency']]) {
             let failure
             try { decodeCover(bytes) } catch (error) { failure = error }
             expect(failure).to.be.instanceOf(GeoDiagnosticError)

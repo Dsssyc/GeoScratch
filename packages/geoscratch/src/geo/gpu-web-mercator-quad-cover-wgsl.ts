@@ -283,39 +283,33 @@ fn coverClipPolygonToPlane(
     return output;
 }
 
-fn coverProjectedAxisCellDeltaPixels(clip: vec4f, delta: vec4f) -> vec2f {
-    let reciprocalW = 1.0f / clip.w;
-    let ndcDelta = (
-        delta.xy - clamp(clip.xy * reciprocalW, vec2f(-1.0f), vec2f(1.0f)) * delta.w
-    ) * reciprocalW;
-    return ndcDelta * mapMeta.referenceViewport * 0.5f;
+// Scaling avoids overflow in the Gram discriminant without changing sigma_max.
+fn coverMaximumStretch(xPixels: vec2f, yPixels: vec2f) -> f32 {
+    let scale = max(max(abs(xPixels.x), abs(xPixels.y)), max(abs(yPixels.x), abs(yPixels.y)));
+    if (scale == 0.0f) { return 0.0f; }
+    if (!(scale < 0x1p110f)) { return 0x1p120f; }
+    let x = xPixels / scale;
+    let y = yPixels / scale;
+    let xx = dot(x, x);
+    let xy = dot(x, y);
+    let yy = dot(y, y);
+    let discriminant = sqrt(max(0.0f, (xx - yy) * (xx - yy) + 4.0f * xy * xy));
+    return scale * sqrt(max(0.0f, 0.5f * (xx + yy + discriminant)));
 }
 
-fn coverProjectedCellMaximumStretchPixels(
-    clip: vec4f,
-    xDelta: vec4f,
-    yDelta: vec4f,
-) -> f32 {
-    let minimumCellW = clip.w - 0.5f * (
-        abs(xDelta.w) + abs(yDelta.w)
-    );
-    if (minimumCellW <= 1e-5f) {
-        return max(mapMeta.referenceViewport.x, mapMeta.referenceViewport.y);
-    }
-    let xPixels = coverProjectedAxisCellDeltaPixels(clip, xDelta);
-    let yPixels = coverProjectedAxisCellDeltaPixels(clip, yDelta);
-    let xx = dot(xPixels, xPixels);
-    let xy = dot(xPixels, yPixels);
-    let yy = dot(yPixels, yPixels);
-    let discriminant = sqrt(max(
-        0.0f,
-        (xx - yy) * (xx - yy) + 4.0f * xy * xy,
-    ));
-    let maximumStretch = sqrt(max(
-        0.0f,
-        0.5f * (xx + yy + discriminant),
-    ));
-    return maximumStretch;
+fn coverProjectedNumeratorStretch(ndc: vec2f, xDelta: vec4f, yDelta: vec4f) -> f32 {
+    let pixels = mapMeta.referenceViewport * 0.5f;
+    return coverMaximumStretch((xDelta.xy - ndc * xDelta.w) * pixels,
+        (yDelta.xy - ndc * yDelta.w) * pixels);
+}
+
+fn coverNumeratorRoundoff(xDelta: vec4f, yDelta: vec4f) -> f32 {
+    let pixels = mapMeta.referenceViewport * 0.5f;
+    // An absolute Frobenius envelope covers cancelling derivatives and singular
+    // directions; a relative error in their possibly zero norm would not suffice.
+    let x = (abs(xDelta.xy) + vec2f(abs(xDelta.w))) * pixels;
+    let y = (abs(yDelta.xy) + vec2f(abs(yDelta.w))) * pixels;
+    return 2e-5f * (x.x + x.y + y.x + y.y) + 1e-20f;
 }
 
 fn coverProjectedPlaneCellSpanPixels(
@@ -347,28 +341,91 @@ fn coverProjectedPlaneCellSpanPixels(
     ) / f32(coverPolicy.cellsPerPatchEdge);
     let xDelta = mapMeta.clipFromRelativeWorld[0] * cellMeters;
     let yDelta = mapMeta.clipFromRelativeWorld[1] * cellMeters;
-    var maximumSpan = 0.0f;
+    var maximumNumerator = 0.0f;
+    var minimumW = 0x1p120f;
     for (var index = 0u; index < polygon.count; index += 1u) {
-        maximumSpan = max(
-            maximumSpan,
-            coverProjectedCellMaximumStretchPixels(
-                mapMeta.clipFromRelativeWorld * polygon.vertices[index],
-                xDelta,
-                yDelta,
-            ),
-        );
+        let clip = mapMeta.clipFromRelativeWorld * polygon.vertices[index];
+        minimumW = min(minimumW, clip.w);
+        if (clip.w <= 1e-5f) { return 0x1p120f; }
+        maximumNumerator = max(maximumNumerator, coverProjectedNumeratorStretch(
+            clamp(clip.xy / clip.w, vec2f(-1.0f), vec2f(1.0f)), xDelta, yDelta));
     }
-    return maximumSpan;
+    if (minimumW - 0.5f * (abs(xDelta.w) + abs(yDelta.w)) <= 1e-5f) { return 0x1p120f; }
+    // Positive-w projective images are convex; the numerator's spectral norm
+    // is convex, so its vertex maximum bounds every point in the polygon.
+    return (maximumNumerator + coverNumeratorRoundoff(xDelta, yDelta)) / minimumW;
+}
+
+fn coverProjectedVolumeCellSpanPixels(bounds: GpuWebMercatorQuadCoverBounds) -> f32 {
+    let matrix = mapMeta.clipFromRelativeWorld;
+    let magnitude = max(abs(bounds.minimum), abs(bounds.maximum));
+    let clipError = (abs(matrix[0]) * magnitude.x + abs(matrix[1]) * magnitude.y +
+        abs(matrix[2]) * magnitude.z + abs(matrix[3])) * 4e-6f + vec4f(1e-30f);
+    var minimumBoxW = 0x1p120f;
+    for (var corner = 0u; corner < 8u; corner += 1u) {
+        let point = select(bounds.minimum, bounds.maximum,
+            vec3<bool>((corner & 1u) != 0u, (corner & 2u) != 0u, (corner & 4u) != 0u));
+        minimumBoxW = min(minimumBoxW, (matrix * vec4f(point, 1.0f)).w - clipError.w);
+    }
+    var ndcMinimum = vec2f(-1.0f);
+    var ndcMaximum = vec2f(1.0f);
+    if (minimumBoxW > 1e-5f) {
+        var low = vec2f(0x1p120f);
+        var high = vec2f(-0x1p120f);
+        for (var corner = 0u; corner < 8u; corner += 1u) {
+            let point = select(bounds.minimum, bounds.maximum,
+                vec3<bool>((corner & 1u) != 0u, (corner & 2u) != 0u, (corner & 4u) != 0u));
+            let clip = matrix * vec4f(point, 1.0f);
+            let ndc = clip.xy / clip.w;
+            let error = (clipError.xy + abs(ndc) * clipError.w) / minimumBoxW +
+                abs(ndc) * 2e-6f + vec2f(1e-20f);
+            low = min(low, ndc - error);
+            high = max(high, ndc + error);
+        }
+        ndcMinimum = max(ndcMinimum, low);
+        ndcMaximum = min(ndcMaximum, high);
+        if (any(ndcMinimum > ndcMaximum)) { return 0.0f; }
+    }
+    var frustumMinimumW = 0.0f;
+    let lower = vec4f(bounds.minimum, 1.0f);
+    let upper = vec4f(bounds.maximum, 1.0f);
+    for (var axis = 0u; axis < 4u; axis += 1u) {
+        let residual = dot(mapMeta.clipWResidual[axis], vec4f(magnitude, 1.0f)) * 1.000002f;
+        let error = residual + 2e-6f * max(abs(lower[axis]), abs(upper[axis])) + 1e-30f;
+        if (mapMeta.clipWPositive[axis] > 0.0f) {
+            frustumMinimumW = max(frustumMinimumW, max(0.0f, lower[axis] - error) /
+                mapMeta.clipWPositive[axis] * 0.999998f);
+        }
+        if (mapMeta.clipWNegative[axis] > 0.0f) {
+            frustumMinimumW = max(frustumMinimumW, max(0.0f, -upper[axis] - error) /
+                mapMeta.clipWNegative[axis] * 0.999998f);
+        }
+    }
+    let minimumW = max(minimumBoxW, frustumMinimumW);
+    let cellMeters = max(bounds.maximum.x - bounds.minimum.x,
+        bounds.maximum.y - bounds.minimum.y) / f32(coverPolicy.cellsPerPatchEdge);
+    let xDelta = matrix[0] * cellMeters;
+    let yDelta = matrix[1] * cellMeters;
+    if (minimumW - 0.5f * (abs(xDelta.w) + abs(yDelta.w)) <= 1e-5f) { return 0x1p120f; }
+    var maximumNumerator = 0.0f;
+    for (var corner = 0u; corner < 4u; corner += 1u) {
+        let ndc = select(ndcMinimum, ndcMaximum,
+            vec2<bool>((corner & 1u) != 0u, (corner & 2u) != 0u));
+        maximumNumerator = max(maximumNumerator, coverProjectedNumeratorStretch(ndc, xDelta, yDelta));
+    }
+    // Encloses every allowed height and horizontal point, not just endpoint samples.
+    return (maximumNumerator + coverNumeratorRoundoff(xDelta, yDelta)) / minimumW * 1.000002f;
 }
 
 fn coverProjectedCellSpanPixels(bounds: GpuWebMercatorQuadCoverBounds) -> f32 {
-    return max(
-        coverProjectedPlaneCellSpanPixels(bounds, bounds.minimum.z),
-        coverProjectedPlaneCellSpanPixels(bounds, bounds.maximum.z),
-    );
+    if (bounds.minimum.z == bounds.maximum.z) {
+        return coverProjectedPlaneCellSpanPixels(bounds, bounds.minimum.z);
+    }
+    return coverProjectedVolumeCellSpanPixels(bounds);
 }
 
 fn coverCellSpanQ8(value: f32) -> u32 {
+    if (!(value >= 0.0f && value < 0x1p120f)) { return 0xffffffffu; }
     return u32(round(clamp(value, 0.0f, 65535.0f) * 256.0f));
 }
 
@@ -740,6 +797,10 @@ fn generateWebMercatorQuadCover(@builtin(local_invocation_index) lane: u32) {
     if (lane == 0u) {
         coverState.minimumCellSpanQ8 = atomicLoad(&coverMinimumSpan);
         coverState.maximumCellSpanQ8 = atomicLoad(&coverMaximumSpan);
+        if (coverState.maximumCellSpanQ8 == 0xffffffffu) {
+            coverState.patchCount = 0u;
+            coverClearLookup();
+        }
     }
 
 }

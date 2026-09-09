@@ -17,6 +17,9 @@ export type WebMercatorCoverCandidateWindow = WindowBounds & Readonly<{
 
 export type WebMercatorCoverCandidates = Readonly<{
     seedWindow: WebMercatorCoverCandidateWindow
+    clipWPositive: readonly number[]
+    clipWNegative: readonly number[]
+    clipWResidual: readonly (readonly number[])[]
     windows: readonly WebMercatorCoverCandidateWindow[]
     candidateCount: number
     refinementCandidateCount: number
@@ -33,7 +36,7 @@ const MIN_NORMAL = 2 ** -126
 const WORLD_METERS = 40075016
 const CLIP_PLANES = 6
 const CLIP_OPERATION_UNITS = CLIP_PLANES * 32 + 64
-const METRIC_OPERATION_UNITS = 128
+const METRIC_OPERATION_UNITS = 512
 const MAX_CERTIFIED_MAGNITUDE = 2 ** 60
 const MINIMUM_CELL_W = Math.fround(1e-5)
 const rounds = new DataView(new ArrayBuffer(8))
@@ -61,8 +64,9 @@ const rounds = new DataView(new ArrayBuffer(8))
  * certified domain no split is possible. Seeds are never restricted by a split
  * cap. Uncertifiable arithmetic returns the complete geometry domain.
  *
- * This proves search completeness relative to the implemented metric, not that
- * sampling polygon vertices bounds every interior terrain projection error.
+ * Non-flat bounds additionally map the box-centre support domain: the minimum
+ * depth used by the volume metric need not occur at a clipped vertex. This proves
+ * candidate completeness for both the clipped-plane and height-volume predicates.
  * @internal
  */
 export function gpuWebMercatorQuadCoverCandidates(
@@ -136,6 +140,7 @@ export function gpuWebMercatorQuadCoverCandidates(
         refinementCandidateCount += window.count
     }
     return Object.freeze({
+        ...coverClipWCertificate(matrix, inverse),
         seedWindow,
         windows: Object.freeze(windows),
         candidateCount: seedWindow.count + refinementCandidateCount,
@@ -226,7 +231,10 @@ function boundCandidates(input: Readonly<{
     // discriminant and trace instead of dividing by their cancelling terms.
     // Allowing 16 units for derivatives, 8 for Gram/k, 32 for discriminant/trace,
     // 24 for two inherited sqrt operations, and 48 for reassociation gives 128.
-    // The resulting Frobenius envelope does not assert spatial convexity.
+    // The normalized singular calculation additionally divides both columns by
+    // their largest entry. A 512-unit envelope includes that normalization, the
+    // 2e-5 absolute L1 numerator allowance (<=4e-5*Frobenius), and the final
+    // depth division. Spatial convexity is established separately for N(q).
     // The guard keeps reciprocals below 1/minimumCellW. This absolute budget
     // covers flushed metric intermediates, including the final squared norm,
     // separately from the relative ULP budget. Its permitted viewport and
@@ -247,11 +255,22 @@ function boundCandidates(input: Readonly<{
         (Math.abs(matrix[3]!) + Math.abs(matrix[7]!)) * (1 + gamma(8))) * (1 + gamma(4)))
     const depthCap = Math.max(metricCap, guardCap)
     if (!Number.isFinite(depthCap) || depthCap > MAX_CERTIFIED_MAGNITUDE) return undefined
+    // The volume predicate may use the minimum w at an UNCLIPPED box corner.
+    // If it splits, minBoxW <= depthCap. For a potentially visible box, its
+    // centre satisfies -Rw <= centreW <= depthCap+Rw and each clip-plane
+    // support bounds centreX/Y/Z. The radii include the complete height range.
+    // Mapping these centre intervals is conservative even if no corner is visible.
+    const radius = [upward(WORLD_METERS / scale * 0.5 + xError),
+        upward(WORLD_METERS / scale * 0.5 + yError),
+        upward((heightHigh - heightLow) * 0.5 + zError), 0]
+    const r = [0, 1, 2, 3].map(row => absoluteDot(rowValues(matrix, row), radius))
+    const volume = heightLow !== heightHigh
+    const extra = volume ? r.map(value => upward(value + 2 * r[3]!)) : [0, 0, 0, 0]
     const clipped: Interval[] = [
-        [-depthCap - clipConstraintError, depthCap + clipConstraintError],
-        [-depthCap - clipConstraintError, depthCap + clipConstraintError],
-        [-clipConstraintError, depthCap + clipConstraintError],
-        [-clipConstraintError, depthCap],
+        [-depthCap - clipConstraintError - extra[0]!, depthCap + clipConstraintError + extra[0]!],
+        [-depthCap - clipConstraintError - extra[1]!, depthCap + clipConstraintError + extra[1]!],
+        [-clipConstraintError - (volume ? r[2]! : 0), depthCap + clipConstraintError + extra[2]!],
+        [-clipConstraintError - (volume ? r[3]! : 0), depthCap + (volume ? r[3]! : 0)],
     ]
     const projected = [0, 1].map(row => {
         const fromClip = intervalDot(rowValues(inverse, row), clipped)
@@ -272,6 +291,34 @@ function boundCandidates(input: Readonly<{
         minTileRow: Math.ceil(downward((camera[1]! - normalizedY[1] / WORLD_METERS) * scale)) - 1,
         maxTileRow: Math.floor(upward((camera[1]! - normalizedY[0] / WORLD_METERS) * scale)),
     }
+}
+
+/** @internal A residual certificate for positive clip-w throughout the visible frustum. */
+export function coverClipWCertificate(matrix: readonly number[], inverse = invert(matrix)) {
+    const empty = { clipWPositive: [0, 0, 0, 0], clipWNegative: [0, 0, 0, 0],
+        clipWResidual: Array.from({ length: 4 }, () => [0, 0, 0, 0]) }
+    if (inverse === undefined) return empty
+    // p_j=k_j*M*p+(e_j-k_j*M)*p. Each positive/negative coordinate slab
+    // therefore gives a lower clip-w bound over qx/qy in [-1,1], qz in [0,1].
+    // The homogeneous row also bounds a frustum entirely inside the height slab.
+    // Outward residuals certify the actual k, without assuming an exact inverse.
+    const upperF32 = (value: number) => value <= 0 ? 0 :
+        Math.fround(upward(value * (1 + 2 ** -23) + MIN_NORMAL))
+    const positive = [], negative = [], residual = inverseResidual(inverse, matrix)
+    for (let row = 0; row < 4; row++) {
+        const k = rowValues(inverse, row)
+        const xy = addIntervals([Math.abs(k[0]!), Math.abs(k[0]!)],
+            [Math.abs(k[1]!), Math.abs(k[1]!)])
+        const sum = (sign: number) => addIntervals(xy, addIntervals(
+            [Math.max(0, sign * k[2]!), Math.max(0, sign * k[2]!)],
+            [sign * k[3]!, sign * k[3]!]))[1]
+        positive.push(upperF32(sum(1)))
+        negative.push(upperF32(sum(-1)))
+    }
+    const clipWResidual = Array.from({ length: 4 }, (_, row) =>
+        residual.slice(row * 4, row * 4 + 4).map(range => upperF32(magnitude(range))))
+    if (![...positive, ...negative, ...clipWResidual.flat()].every(Number.isFinite)) return empty
+    return { clipWPositive: positive, clipWNegative: negative, clipWResidual }
 }
 
 function gamma(operations: number): number {

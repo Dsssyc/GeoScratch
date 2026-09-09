@@ -25,6 +25,7 @@ const cases = [
     { name: 'empty', instances: 0, demands: 0, overflow: 0 },
     { name: 'descriptor-overflow', instances: 0, demands: 0, overflow: 1 },
     { name: 'lookup-overflow', instances: 0, demands: 0, overflow: 1 },
+    { name: 'unbounded-quality', instances: 0, demands: 0, overflow: 1 },
     { name: 'adjacency-invalid', instances: 0, demands: 0, overflow: 1 },
     // The draw adapter borrows state only; epoch validation belongs to projection.
     { name: 'frame-mismatch', instances: 2, demands: 0, overflow: 1 },
@@ -112,7 +113,7 @@ export async function runCoverOutcomeProof() {
                     maximumAdjacentLevelDelta: scenario.name === 'adjacency-invalid' ? 2 : 0,
                     finestMatrixLevel: 1,
                     minimumCellSpanQ8: empty ? 0xffff_ffff : 256,
-                    maximumCellSpanQ8: empty ? 0 : 256,
+                    maximumCellSpanQ8: scenario.name === 'unbounded-quality' ? 0xffff_ffff : empty ? 0 : 256,
                 }),
             })
             const patchUpload = runtime.createUploadCommand({

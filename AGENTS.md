@@ -65,8 +65,13 @@ environment override. Preserve each exact parent tile's sparse refinement decisi
 materialization: replace a selected parent only with its own four children, and never union
 independent decisions into one level-wide rectangular refinement window. A complete immutable
 tile-vertical-bounds hierarchy may tighten patch
-bounds; partial metadata is invalid and residency cannot supply missing bounds. Cover geometry,
-tiled source-demand projection, and patch-mesh indirect arguments have separate owners. Do not
+bounds; partial metadata is invalid and residency cannot supply missing bounds.
+Each declared height range must enclose its declared descendants. Terrain converts
+source-level extrema into conservative ancestor envelopes before cover creation;
+geometry outside a finer metadata limit uses the nearest declared ancestor. A non-flat
+height interval requires a projected volume bound, never just its two endpoint planes.
+Uncertified final quality revokes the complete cut before downstream demand or draw.
+Cover geometry, tiled source-demand projection, and patch-mesh indirect arguments have separate owners. Do not
 put source ceilings, raster request identities, mesh vertex counts, or draw-argument buffers back
 inside `GpuWebMercatorQuadCover`.
 WebMercator terrain uses indexed indirect drawing over its immutable grid. Preserve the generic

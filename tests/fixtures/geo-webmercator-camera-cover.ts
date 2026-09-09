@@ -1,3 +1,4 @@
+import { gpuWebMercatorQuadCoverMapMetaCodec } from '../../packages/geoscratch/src/geo/gpu-web-mercator-quad-cover-layout.js'
 import { GPURuntime, type BufferResource } from 'geoscratch/scratch'
 import {
     GeoDiagnosticError, GpuWebMercatorQuadCover, WebMercatorQuad, createGeoViewSnapshot, createGeoViewSource,
@@ -15,10 +16,10 @@ const QUALITY_ROUNDOFF = 0.02
 const CLIP_MARGIN = 1e-5
 type Patch = { level: number, row: number, col: number }
 type Domain = { minLevel: number, maxLevel: number, row: number, col: number,
-    width: number, height: number, maximumPatches: number, elevation: number, metadataChild?: boolean }
+    width: number, height: number, maximumPatches: number, elevation: number, metadataChild?: boolean, verticalRange?: readonly [number, number], fullCandidates?: boolean }
 type Scenario = { name: string, zoom: number, pitch: number, x?: number, y?: number,
     altitude?: number, viewport?: readonly [number, number], fov?: number,
-    equalTo?: string, anchor?: string, expect?: 'empty' | 'overflow' | 'bounded' }
+    equalTo?: string, anchor?: string, expect?: 'empty' | 'overflow' | 'bounded' | 'unbounded', singular?: boolean }
 const world: Domain = { minLevel: 0, maxLevel: MAX_LEVEL, row: 0, col: 0,
     width: 1, height: 1, maximumPatches: 2048, elevation: 0 }
 
@@ -28,6 +29,7 @@ export async function runCameraCoverProof() {
     const uncaptured: string[] = []
     runtime.device.addEventListener('uncapturederror', event => uncaptured.push(event.error.message))
     const rows: unknown[] = []
+    const observedCovers = new Map<string, string>()
     let epoch = 0
     try {
         const ordinary: Scenario[] = [ { name: 'A-initial', zoom: 10, pitch: 0, anchor: 'A' } ]
@@ -59,6 +61,27 @@ export async function runCameraCoverProof() {
             { name: 'partial-metadata-pitched', zoom: 16, pitch: 65, altitude: 2000 },
             { name: 'partial-metadata-A-return', zoom: 16, pitch: 0, altitude: 2000, equalTo: 'metadata-A' },
         ])
+        const volume: Domain = { minLevel: 20, maxLevel: 24, row: 524287, col: 524288,
+            width: 1, height: 1, maximumPatches: 512, elevation: 0, verticalRange: [-120, 500] }
+        const volumeX = 19.10925707129402, volumeY = 19.10925707129402
+        const volumeScenarios: Scenario[] = [
+            { name: 'height-volume-A', zoom: 20, pitch: 0, x: volumeX, y: volumeY, altitude: 10, anchor: 'volume-A' },
+            ...[0, 30, 60, 85].map(pitch => ({ name: `height-volume-pitch-${pitch}`, zoom: 20, pitch,
+                x: volumeX, y: volumeY, altitude: 10 })),
+            { name: 'height-volume-above', zoom: 20, pitch: 0, x: volumeX, y: volumeY, altitude: 510 },
+            { name: 'height-volume-A-return', zoom: 20, pitch: 0, x: volumeX, y: volumeY, altitude: 10, equalTo: 'volume-A' },
+        ]
+        await runDomain(volume, volumeScenarios)
+        await runDomain({ ...volume, fullCandidates: true }, volumeScenarios)
+        for (const elevation of [-100, 250, 499]) await runDomain({ ...volume, elevation }, [
+            { name: `height-volume-surface-${elevation}`, zoom: 20, pitch: 0, x: volumeX, y: volumeY, altitude: 510 },
+        ])
+        const finite: Domain = { ...world, minLevel: 4, maxLevel: 8, row: 7, col: 8,
+            width: 2, height: 2, maximumPatches: 1024, verticalRange: [-120, 500] }
+        const finiteScenarios = [0, 45, 80].map(pitch => ({ name: `finite-volume-${pitch}`,
+            zoom: 6, pitch, x: 300000, y: -200000 }))
+        await runDomain(finite, finiteScenarios)
+        await runDomain({ ...finite, fullCandidates: true }, finiteScenarios)
         // This stress view has an explicit small output budget. A valid complete cut
         // or an explicit capacity failure is allowed; partial success is never allowed.
         await runDomain({ ...world, maximumPatches: 128 }, [
@@ -76,6 +99,10 @@ export async function runCameraCoverProof() {
             { name: 'outside-domain-empty', zoom: 10, pitch: 0, expect: 'empty' },
             { name: 'z24-A-return', zoom: 24, pitch: 0, x: localX, y: localY, equalTo: 'local-A' },
         ])
+        await runDomain({ ...world, maxLevel: 0, verticalRange: [-120, 500] }, [
+            { name: 'uncertified-quality', zoom: 10, pitch: 0, singular: true, expect: 'unbounded' },
+            { name: 'quality-after-failure', zoom: 10, pitch: 0 },
+        ])
         await runDomain({ ...world, maximumPatches: 1 }, [
             { name: 'real-patch-overflow', zoom: 10, pitch: 0, expect: 'overflow' },
         ])
@@ -91,7 +118,7 @@ export async function runCameraCoverProof() {
     return {
         adapter: runtime.adapterInfo, dpr: window.devicePixelRatio, rows, uncaptured,
         limits: { coverage: 'Finite screen-ray and local tile-centre samples; not a continuous proof',
-            quality: 'Independent point Jacobian checks on visible flat planes; not a whole-volume bound',
+            quality: 'Independent point Jacobians at multiple actual heights inside declared volumes; algebraic bound documented separately',
             dpr: 'Actual browser DPR and capture presentationSize vary; no Surface is created',
             qualityRoundoffReferencePixels: QUALITY_ROUNDOFF, clipMargin: CLIP_MARGIN },
         cleanup: { runtimeDisposed: runtime.isDisposed, resources: terminal.resources.length,
@@ -118,13 +145,32 @@ export async function runCameraCoverProof() {
                 cellsPerPatchEdge: CELL_COUNT, maximumCellSpanReferencePixels: 5,
                 refinementTolerance: 0.005 }),
             maximumCandidates: 1_048_576,
-            verticalRangeMeters: [domain.elevation, domain.elevation],
+            verticalRangeMeters: domain.verticalRange ?? [domain.elevation, domain.elevation],
             ...(domain.metadataChild ? { verticalBounds: coverage.limits.map(limit => ({
                 matrixLevel: Number(limit.matrixId), tileRow: limit.minTileRow,
                 tileCol: limit.minTileCol, minimumVerticalMeters: domain.elevation,
                 maximumVerticalMeters: domain.elevation,
             })) } : {}),
         })
+        const candidateOverrides = domain.fullCandidates ? cover.templates().map(template => {
+            const fields = gpuWebMercatorQuadCoverMapMetaCodec.artifact.fields
+            const offset = (name: string) => fields.find(field => field.name === name)!.offset
+            const start = offset('refinementCandidateCount')
+            const data = new Uint32Array((offset('candidateDispatch') + 12 - start) / 4)
+            let count = 0
+            for (let level = domain.minLevel; level < domain.maxLevel; level++) {
+                const scale = 2 ** (level - domain.minLevel)
+                const width = domain.width * scale
+                count += width * domain.height * scale
+                data.set([domain.row * scale, domain.col * scale, width, count],
+                    (offset('candidateWindows') - start) / 4 + 4 * level)
+            }
+            data[0] = count
+            data.set([Math.ceil(count / 64), 1, 1], (offset('candidateDispatch') - start) / 4)
+            assert(count <= 1_048_576, 'Exhaustive test domain exceeds its workspace')
+            return runtime.createUploadCommand({ label: 'Test full finite candidate domain',
+                target: template.mapMeta.region({ offset: start, size: data.byteLength }), data })
+        }) : []
         const observers = await Promise.all(cover.templates().map(template => createObserver(
             runtime, template.state, template.patches, domain.maximumPatches)))
         const initialization = runtime.submission()
@@ -153,6 +199,13 @@ export async function runCameraCoverProof() {
                     const observer = observers[frame.parity]!
                     const builder = runtime.submission()
                     cover.encode(builder, frame)
+                    if (domain.fullCandidates) {
+                        // A second complete construction with only the search domain
+                        // replaced. No consumer sees the first cut in this test.
+                        builder.upload(candidateOverrides[frame.parity]!)
+                        const commands = cover.commandsFor(frame)
+                        builder.compute(cover.identityObjects().passes[0]!, [commands.evaluate, commands.generate])
+                    }
                     builder.compute(observer.pass, [observer.command]).readback(observer.readback)
                     cover.capture(builder, frame)
                     const submitted = builder.submit()
@@ -171,8 +224,9 @@ export async function runCameraCoverProof() {
                     const native = await submitted.nativeOutcome
                     assert(native.status === 'observed-succeeded', `${scenario.name}: native failure`, native)
                     assert(words[0] === view.frameEpoch, `${scenario.name}: stale frame epoch`)
-                    const failed = words[3]! > 0 || words[4]! > 0 || words[7]! > 1
-                    if (scenario.expect === 'overflow' || (scenario.expect === 'bounded' && failed)) {
+                    const failed = words[3]! > 0 || words[4]! > 0 || words[7]! > 1 || words[10] === 0xffff_ffff
+                    if (scenario.expect === 'overflow' || scenario.expect === 'unbounded' || (scenario.expect === 'bounded' && failed)) {
+                        if (scenario.expect === 'unbounded') assert(words[10] === 0xffff_ffff, 'Missing quality failure marker')
                         assert(failed && rejected && words[2] === 0,
                             'Real overflow did not invalidate all consumer-visible patches', Array.from(words.slice(0, 11)))
                         rows.push({ name: scenario.name, overflow: true,
@@ -198,6 +252,9 @@ export async function runCameraCoverProof() {
                     }
                     const raw = patches.map(identity).join(';')
                     const sorted = patches.map(identity).sort().join(';')
+                    if (domain.fullCandidates) assert(raw === observedCovers.get(scenario.name),
+                        `${scenario.name}: bounded search differs from complete finite enumeration`)
+                    else observedCovers.set(scenario.name, raw)
                     if (scenario.anchor) anchors.set(scenario.anchor, { sorted, raw })
                     if (scenario.equalTo) {
                         const previous = anchors.get(scenario.equalTo)
@@ -205,14 +262,14 @@ export async function runCameraCoverProof() {
                             `${scenario.name}: A-B-A identities or output ordering changed`)
                     }
                     const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(sorted))
-                    rows.push({ name: scenario.name, patchCount: count,
+                    rows.push({ name: `${domain.fullCandidates ? 'full-' : ''}${scenario.name}`, patchCount: count,
                         identitySha256: Array.from(new Uint8Array(digest), x => x.toString(16).padStart(2, '0')).join(''),
                         presentationSize: capture.presentationSize, referenceViewport: view.referenceViewport,
                         feedback, validation, nativeStatus: native.status })
                     document.documentElement.dataset.cameraCoverStage = 'validated'
                 } finally { token.dispose() }
             }
-        } finally { cover.dispose() }
+        } finally { for (const upload of candidateOverrides) upload.dispose(); cover.dispose() }
     }
 }
 
@@ -231,6 +288,7 @@ function makeView(scenario: Scenario, epoch: number): GeoViewSnapshot {
         for (let k = 0; k < 4; k++) matrix[col * 4 + row]! += projection[k * 4 + row]! * rotation[col * 4 + k]!
     }
     const camera = [scenario.x ?? 0, scenario.y ?? 0, altitude]
+    if (scenario.singular) matrix.fill(0)
     return createGeoViewSnapshot({ id: 'native-camera-cover', clipFromRelativeWorld: matrix,
         cameraHigh: camera.map(Math.fround) as [number, number, number],
         cameraLow: camera.map(x => x - Math.fround(x)) as [number, number, number],

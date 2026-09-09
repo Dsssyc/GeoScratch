@@ -135,7 +135,8 @@ fn projectWebMercatorQuadDemands() {
     if (coverState.frameEpoch != mapMeta.frameEpoch ||
         coverState.descriptorOverflowCount != 0u ||
         coverState.lookupOverflowCount != 0u ||
-        coverState.maximumAdjacentLevelDelta > 1u) {
+        coverState.maximumAdjacentLevelDelta > 1u ||
+        coverState.maximumCellSpanQ8 == 0xffffffffu) {
         // Preserve failure in feedback without projecting a partial geometry cut.
         projectionState.overflowCount = 1u;
         return;

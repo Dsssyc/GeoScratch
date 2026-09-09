@@ -1089,6 +1089,7 @@ export function decodeGpuWebMercatorQuadCoverFeedback(
         descriptorOverflowCount !== 0 ? 'descriptor-overflow' :
         lookupOverflowCount !== 0 ? 'lookup-overflow' :
         maximumAdjacentLevelDelta > 1 ? 'adjacency' :
+        maximumCellSpanQ8 === 0xffff_ffff ? 'unbounded-quality' :
         patchCount > 0 && (minimumCellSpanQ8 > maximumCellSpanQ8 ||
             minimumMatrixLevel === 0xffff_ffff || minimumMatrixLevel > maximumMatrixLevel ||
             maximumMatrixLevel > finestMatrixLevel) ? 'range' : undefined
@@ -1277,6 +1278,9 @@ function mapMetaRecord(
         ],
         refinementCandidateCount: candidates.refinementCandidateCount,
         candidateWindows,
+        clipWPositive: candidates.clipWPositive,
+        clipWNegative: candidates.clipWNegative,
+        clipWResidual: candidates.clipWResidual,
     }
 }
 
