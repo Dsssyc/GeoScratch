@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import { readFile, writeFile } from 'node:fs/promises'
 import { pathToFileURL } from 'node:url'
 
@@ -8,11 +9,16 @@ function substitute(source, before, after) {
 
 // Reuse the real browser gates without their backend rebuild or service launch.
 // Only the asserted producer location/upload count changes for CPU variants.
-export async function prepareGate(root, outputDirectory, suite) {
-    if (suite === 'lifecycle') return prepareLifecycleGate(root, outputDirectory)
+async function gateSource(root, name, baseline) {
+    const file = `tests/browser/${name}.mjs`
+    return baseline === undefined ? readFile(`${root}/${file}`, 'utf8') :
+        execFileSync('git', ['show', `${baseline}:${file}`], { cwd: root }).toString()
+}
+export async function prepareGate(root, outputDirectory, suite, baseline) {
+    if (suite === 'lifecycle') return prepareLifecycleGate(root, outputDirectory, baseline)
     const streaming = suite === 'streaming'
     const name = streaming ? 'underwater-terrain-streaming' : 'underwater-terrain-tile-wireframe'
-    let source = await readFile(`${root}/tests/browser/${name}.mjs`, 'utf8')
+    let source = await gateSource(root, name, baseline)
     source = substitute(source, "from 'playwright'", `from '${pathToFileURL(`${root}/node_modules/playwright/index.mjs`).href}'`)
     source = substitute(source,
         "const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..')",
@@ -28,9 +34,9 @@ export async function prepareGate(root, outputDirectory, suite) {
             'let baseUrl, tileBaseUrl, cacheNamespace, expectedSelectionPath, expectedCoordinateBits\n' +
             source.slice(cameraStart, launchStart) + gateEntry(true) + source.slice(functionsStart)
         source = substitute(source,
-            "facts.selectionPath !== 'gpu-camera-inverse-webmercatorquad-cover'",
+            `facts.selectionPath !== '${baseline === undefined ? "cpu" : "gpu"}-camera-inverse-webmercatorquad-cover'`,
             'facts.selectionPath !== expectedSelectionPath')
-        source = substitute(source, "facts.cpuSelectionUploadCount !== '0'",
+        if (baseline !== undefined) source = substitute(source, "facts.cpuSelectionUploadCount !== '0'",
             "(expectedSelectionPath.startsWith('experimental') ? !(Number(facts.cpuSelectionUploadCount) > 0) : facts.cpuSelectionUploadCount !== '0')")
         source = substitute(source, 'virtualRaster?.coordinateBits !== 40',
             'virtualRaster?.coordinateBits !== expectedCoordinateBits')
@@ -39,7 +45,7 @@ export async function prepareGate(root, outputDirectory, suite) {
             'let baseUrl, tileBaseUrl, expectedSelectionPath\n' +
             gateEntry(false) + source.slice(functionsStart)
         source = substitute(source,
-            "baseline?.graphContract?.selectionPath ===\n            'gpu-camera-inverse-webmercatorquad-cover'",
+            `baseline?.graphContract?.selectionPath ===\n            '${baseline === undefined ? "cpu" : "gpu"}-camera-inverse-webmercatorquad-cover'`,
             'baseline?.graphContract?.selectionPath === expectedSelectionPath')
     }
     const file = `${outputDirectory}/${name}-adapter.mjs`
@@ -47,8 +53,8 @@ export async function prepareGate(root, outputDirectory, suite) {
     return (await import(pathToFileURL(file).href)).runGate
 }
 
-async function prepareLifecycleGate(root, outputDirectory) {
-    let source = await readFile(`${root}/tests/browser/scratch-underwater-terrain.mjs`, 'utf8')
+async function prepareLifecycleGate(root, outputDirectory, baseline) {
+    let source = await gateSource(root, 'scratch-underwater-terrain', baseline)
     source = substitute(source, "from 'playwright'", `from '${pathToFileURL(`${root}/node_modules/playwright/index.mjs`).href}'`)
     source = substitute(source,
         "const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..')",

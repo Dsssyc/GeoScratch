@@ -46,7 +46,7 @@ Treat `maximumInFlightFrames` as measured application policy. Underwater Terrain
 its 120 Hz proof shows one slot suppresses half of host-frame submissions; do not increase the
 bound or restore single-flight without rerunning camera-transition, stale-state, lag, and cleanup
 proofs.
-WebMercator terrain uses exactly one `GpuWebMercatorQuadCover` geometry-LoD authority. Its output
+WebMercator terrain uses exactly one CPU `WebMercatorQuadCover` geometry-LoD authority. Its output
 must remain standard OGC tile-matrix identities, camera-derived without root-forward traversal,
 prefix-free, deterministic, and edge-adjacent by at most one level. Virtual Raster consumes
 explicit `ViewTileDemandSet` pages and owns no camera, zoom, SSE, or adjacency policy; keep
@@ -73,21 +73,27 @@ height interval requires a projected volume bound, never just its two endpoint p
 Uncertified final quality revokes the complete cut before downstream demand or draw.
 Cover geometry, tiled source-demand projection, and patch-mesh indirect arguments have separate owners. Do not
 put source ceilings, raster request identities, mesh vertex counts, or draw-argument buffers back
-inside `GpuWebMercatorQuadCover`.
+inside either CPU or frozen GPU cover.
 WebMercator terrain uses indexed indirect drawing over its immutable grid. Preserve the generic
 20-byte `[elementCount, patchCount, 0, 0, 0]` patch-draw ABI, INDEX-only index buffers,
 logical vertex reuse, and the equal-count renderer-owned
 triangle-list/line-list index buffers. Wireframe must draw native line topology; do not restore
 fragment-inferred grid edges, unindexed triangle-corner sampling, or an experimental fragment
 `primitive_index` extension.
-Terrain consumes feedback after its own submission without waiting for a newer frame.
-Pending same-decision frames share feedback settlement; capture backpressure retains at most
-one latest-frame waiter, awakened by released feedback capacity. Do not poll readback by
-rendering extra frames or use an empty settlement to repeatedly reset the follow-up budget.
-Only current-decision feedback certifies geometry; monotonically newer complete source-demand
-observations may independently advance resources with their original provenance. Preserve
-selected resident pages and completion wakeups for retained active requests. Never reinterpret
-an older resource observation as current-view readiness or geometry authority.
+Terrain synchronously selects a complete immutable CPU cut and source intent, uploads
+geometry plus renderer-owned indexed indirect arguments, and reconciles source demands
+only after accepting the exact upload receipt. It allocates no production cover/demand
+compute or readback objects. Keep queued receipt, native success, request completion and
+raster publication acknowledgement separate. Preserve selected resident pages and retained
+active-request completion wakeups. Record a publication before later preparation can fail;
+retry local pre-queue failures with that exact update, and never republish over it. Borrowed
+Virtual Raster initialization failure, potentially partial queue issue and post-submit
+receipt/reconciliation/native failure are terminal. Once submission returns, its Work must
+remain observable even if later validation fails. Staged-page follow-up and resource
+completion wait for the applicable pending publication acknowledgement; do not spend
+follow-up frames polling it. Late callbacks cannot install old geometry or revive disposal.
+Renderer creation failure and disposal release all owned resources/commands/pipelines while
+preserving the borrowed runtime, Surface and Virtual Raster for their owners.
 Any change to this path
 must run wide top-down symmetry, continuous pitch sweeps, shaded and wireframe 90-frame pitched
 benchmarks, zoom monotonicity, A-B-A identity, standard/source-level demand, 2:1,
@@ -98,9 +104,11 @@ layout/helper and terrain shader files listed in
 `tests/fixtures/camera-cover-gpu-reference.json` are frozen consistency references;
 do not update their hashes to hide a behavioral change. CPU geometry and source-intent
 products have independent immutable ownership and must not reuse GPU feedback tags.
-Until the renderer migration slice lands, the terrain execution rule above remains
-current. Every new public CPU slice requires paired API documentation and native
-consistency checks against the frozen reference.
+Underwater Terrain uses the CPU production path. Flow Field remains an explicit GPU
+consumer; frozen Flow Layer and backend data stay outside this migration. Public CPU
+changes require paired API documentation and native consistency checks against the frozen
+reference. GPU A/B tools replay its recorded historical renderer instead of labelling the
+current CPU renderer as GPU.
 
 ## Build, Test, and Development Commands
 

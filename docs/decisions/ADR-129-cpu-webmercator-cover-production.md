@@ -2,10 +2,10 @@
 
 ## Status
 
-Accepted for staged implementation. Supersedes the terrain GPU execution-location
+Accepted and implemented in independently verified slices. Supersedes the terrain GPU execution-location
 decision in ADR-083/086/125/128; their geometry, resource ownership and native
-acknowledgement requirements remain. Until the renderer migration commit, the
-canonical terrain API continues to describe its existing GPU producer.
+acknowledgement requirements remain. The canonical terrain API describes its CPU
+producer; GPU APIs remain available as frozen references and explicit consumers.
 
 ## Date
 
@@ -114,11 +114,16 @@ not dispose the borrowed Virtual Raster runtime; that runtime's owner settles or
 abandons its publication and cancels requests during disposal.
 
 After `submit()` returns, receipt or reconciliation failures travel through the
-returned frame's observation/settlement promises; its `SubmittedWork` remains
+returned frame's observation promise; its `SubmittedWork` remains
 accounted for by the frame controller. Failed receipt validation starts no source
 requests. Immediate CPU settlement includes the actual unresolved active request
 count after reconciliation (new and retained), and its real completion promise.
-Only latest-frame completion drives publication follow-up; already resident or
+A staged-page follow-up waits for the applicable publication acknowledgement;
+request completion is joined with that acknowledgement before waking publication.
+The renderer never spends follow-up frames waiting for an update it cannot yet
+publish. Failure of the borrowed Virtual Raster one-shot initialization is terminal;
+only subsequent local pre-queue assembly can retry its already-returned publication.
+Only current admitted frame settlement drives publication follow-up; already resident or
 staged pages are not fabricated as pending requests. Current geometry adoption is
 bound to the current admitted decision and its accepted receipt, not later native
 callback arrival order.

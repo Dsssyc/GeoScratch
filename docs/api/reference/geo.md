@@ -3238,7 +3238,7 @@ type WebMercatorTileSampleAddress = Readonly<{ compactIndex?: number; covered: b
 
 Kind: `Function`.
 
-Assembles a WebMercatorQuad Virtual Raster terrain renderer with GPU-driven selection, conservative ancestor elevation envelopes, mesh stitching, and explicit lifetime. Keeps current geometry certification separate from monotonic resource observations and drives feedback/publication progress through bounded asynchronous settlement.
+Composes certified CPU cover/source intent, explicit geometry uploads and indexed terrain drawing. Owns its renderer resources; borrows Surface and Virtual Raster. Native success and raster publication acknowledgement remain asynchronous.
 
 ```ts
 Function createWebMercatorTerrainRenderer
@@ -3253,7 +3253,7 @@ createWebMercatorTerrainRenderer<ViewInput, Presentation extends string>(__named
 Kind: `Type Alias`.
 
 ```ts
-type WebMercatorTerrainContractFacts = Readonly<{ commandIds: Readonly<{ cover: readonly (readonly string[])[]; demandProjection: readonly (readonly string[])[]; drawTerrain: Readonly<Record<string, readonly string[]>>; patchDraw: readonly string[] }>; countPath: "gpu-produced-indirect-arguments"; cover: ReturnType<GpuWebMercatorQuadCover["facts"]>; coverMaximumMatrixLevel: number; demandProjection: ReturnType<GpuWebMercatorQuadDemandProjection["facts"]>; fieldLayer: Readonly<{ demandProducerId: string; fieldId: string; id: string; representationId: string; spatialProfileId: string; viewAdapterId: string }>; passIds: Readonly<{ cover: string; demandProjection: string; patchDraw: string; terrain: string }>; patchDraw: ReturnType<GpuWebMercatorQuadPatchDraw["facts"]>; persistentIdentityCount: number; selectionPath: "gpu-camera-inverse-webmercatorquad-cover"; sourceMaximumMatrixLevel: number; stageOrder: readonly string[]; terrainElementCount: number; virtualRaster: Readonly<{ completeImageUpload: false; coordinateEncoding: WebMercatorVirtualRasterField["addressCodec"]["positionCodec"]["facts"]["encoding"]; crossPageFiltering: "logical-bilinear"; levelCount: number; maxPhysicalPages: number; pageSize: readonly number[]; sourceRevision: string }> }>
+type WebMercatorTerrainContractFacts = Readonly<{ commandIds: Readonly<{ drawTerrain: Readonly<Record<string, readonly string[]>> }>; countPath: "cpu-produced-indirect-arguments"; cover: ReturnType<WebMercatorQuadCover["facts"]>; coverMaximumMatrixLevel: number; coverUpload: ReturnType<WebMercatorQuadCoverUpload["facts"]>; demandProjection: ReturnType<WebMercatorQuadDemandProjection["facts"]>; fieldLayer: Readonly<{ demandProducerId: string; fieldId: string; id: string; representationId: string; spatialProfileId: string; viewAdapterId: string }>; passIds: Readonly<{ terrain: string }>; patchDraw: Readonly<{ argumentByteLength: 20; bufferIds: readonly string[]; elementCount: number }>; persistentIdentityCount: number; selectionPath: "cpu-camera-inverse-webmercatorquad-cover"; sourceMaximumMatrixLevel: number; stageOrder: readonly string[]; terrainElementCount: number; virtualRaster: Readonly<{ completeImageUpload: false; coordinateEncoding: WebMercatorVirtualRasterField["addressCodec"]["positionCodec"]["facts"]["encoding"]; crossPageFiltering: "logical-bilinear"; levelCount: number; maxPhysicalPages: number; pageSize: readonly number[]; sourceRevision: string }> }>
 ```
 
 ### `WebMercatorTerrainElevationBounds`
@@ -3273,17 +3273,17 @@ Kind: `Type Alias`.
 Immediate identity and provenance facts for one submitted terrain frame.
 
 ```ts
-type WebMercatorTerrainFrame<Presentation extends string = string> = Readonly<{ provenance: readonly WebMercatorTerrainProvenanceFact[]; submitted: SubmittedWork; terrainPresentation: Presentation }>
+type WebMercatorTerrainFrame<Presentation extends string = string> = Readonly<{ provenance: readonly WebMercatorTerrainProvenanceFact[]; submitted: SubmittedWork; terrainPresentation: Presentation; uploadReceipt?: WebMercatorQuadCoverUploadReceipt }>
 ```
 
 ### `WebMercatorTerrainFrameSettlement`
 
 Kind: `Type Alias`.
 
-Async cover observations and resource progress; superseded observations never certify the current view.
+Current CPU selection/source intent with independent asynchronous resource progress.
 
 ```ts
-type WebMercatorTerrainFrameSettlement = GeoFrameSettlement & Readonly<{ coverFeedback?: GpuWebMercatorQuadCoverFeedback; demandFeedback?: GpuWebMercatorQuadDemandProjectionFeedback; reconciliation?: VirtualRasterFeedbackReconciliation; residencySettlement: Promise<unknown>; residencyWorkCount: number; superseded: boolean }>
+type WebMercatorTerrainFrameSettlement = GeoFrameSettlement & Readonly<{ coverSelection?: WebMercatorQuadCoverSelectionFacts; projectedDemands?: WebMercatorQuadProjectedDemands; reconciliation?: VirtualRasterFeedbackReconciliation; residencySettlement: Promise<unknown>; residencyWorkCount: number }>
 ```
 
 ### `WebMercatorTerrainFrameValue`
@@ -3357,7 +3357,7 @@ type WebMercatorTerrainRendererDescriptor<ViewInput, Presentation extends string
 Kind: `Type Alias`.
 
 ```ts
-type WebMercatorTerrainRendererState<Presentation extends string = string> = Readonly<{ convergenceState: "converged" | "transitioning"; coverCandidateCount: number; coverDescriptorOverflowCount: number; coverFeedback?: GpuWebMercatorQuadCoverFeedback; coverFinestMatrixLevel?: number; coverFrameEpoch?: number; coverLevelRange: readonly [number | undefined, number | undefined]; coverLookupOverflowCount: number; coverMaximumAdjacentLevelDelta: number; coverPatchCount: number; demandFeedback?: GpuWebMercatorQuadDemandProjectionFeedback; disposed: boolean; frame: number; initialized: boolean; lastResizeFacts?: WebMercatorTerrainResizeFacts; readbackInFlightCount: number; resizeGeneration: number; size: SurfaceSize; sourceDemandCount: number; sourceDemandOverflowCount: number; sourceLevelCeiling?: number; staleBindSetPreparationCount: number; staleFeedbackCount: number; supersededFeedbackCount: number; terrainPresentation: Presentation; virtualRequestedPageCount: number; virtualSnapshotEpoch: number }>
+type WebMercatorTerrainRendererState<Presentation extends string = string> = Readonly<{ convergenceState: "converged" | "transitioning" | "failed"; coverCandidateCount: number; coverDescriptorOverflowCount: number; coverFinestMatrixLevel?: number; coverFrameEpoch?: number; coverLevelRange: readonly [number | undefined, number | undefined]; coverLookupOverflowCount: number; coverMaximumAdjacentLevelDelta: number; coverPatchCount: number; coverSelection?: WebMercatorQuadCoverSelectionFacts; disposed: boolean; frame: number; initialized: boolean; lastResizeFacts?: WebMercatorTerrainResizeFacts; projectedDemands?: WebMercatorQuadProjectedDemands; resizeGeneration: number; size: SurfaceSize; sourceDemandCount: number; sourceDemandOverflowCount: number; sourceLevelCeiling?: number; staleBindSetPreparationCount: number; terrainPresentation: Presentation; virtualRequestedPageCount: number; virtualSnapshotEpoch: number }>
 ```
 
 ### `WebMercatorTerrainResizeFacts`

@@ -2,7 +2,7 @@
 docId: geo.view-cover.zh
 canonical: false
 translationOf: ./view-cover.md
-canonicalDigest: 553a7244fae25acbb0ee5e51713af5105dd3cc992997a7e30124ef18cc277383
+canonicalDigest: a9dfbbe645f537c04f63bab444902635137f22700dff90661e45b839eee4d331
 ---
 # WebMercatorQuad 视图覆盖
 
@@ -49,9 +49,9 @@ source ceiling、request level 和环绕相机距离优先级。容量不足以
 selector 释放后，仍可投影此前的真实产物；projector 自身释放后禁止继续投影。
 下游 `ViewDemandProducer` 和 Virtual Raster 继续拥有既有预算选择及资源生命周期。
 
-ADR-129 记录 CPU 生产迁移。CPU 产物现已可独立使用，地形集成属于后续独立验证阶段。
+ADR-129 记录 CPU 生产迁移。CPU 产物可独立使用，并组合为生产地形 renderer。
 以下 GPU API 冻结于 `ebb3336`，作为一致性参考，并继续供显式 GPU 消费者使用；
-当前地形 renderer 在其迁移阶段完成前仍使用该 GPU 路径。
+生产地形没有 CPU／GPU 执行切换开关。
 
 ## 上传 CPU 产物
 

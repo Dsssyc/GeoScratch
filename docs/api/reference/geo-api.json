@@ -491,9 +491,9 @@
           "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:383"
+          "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:348"
         ],
-        "summary": "Assembles a WebMercatorQuad Virtual Raster terrain renderer with GPU-driven selection, conservative ancestor elevation envelopes, mesh stitching, and explicit lifetime. Keeps current geometry certification separate from monotonic resource observations and drives feedback/publication progress through bounded asynchronous settlement.",
+        "summary": "Composes certified CPU cover/source intent, explicit geometry uploads and indexed terrain drawing. Owns its renderer resources; borrows Surface and Virtual Raster. Native success and raster publication acknowledgement remain asynchronous.",
         "declaration": "Function createWebMercatorTerrainRenderer",
         "signatures": [
           "createWebMercatorTerrainRenderer<ViewInput, Presentation extends string>(__namedParameters: WebMercatorTerrainRendererDescriptor<ViewInput, Presentation>): Promise<Readonly<{ stableIdentities: readonly string[]; stableIdentityFacts: WebMercatorTerrainIdentityFacts; stableIdentityHash: string; contractFacts: any; currentIdentityFacts: any; dispose: any; initialize: any; persistentFacts: any; render: any; setPresentation: any; state: any; virtualRasterFacts: any }>>"
@@ -6341,10 +6341,10 @@
           "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:157"
+          "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:154"
         ],
         "summary": "",
-        "declaration": "type WebMercatorTerrainContractFacts = Readonly<{ commandIds: Readonly<{ cover: readonly (readonly string[])[]; demandProjection: readonly (readonly string[])[]; drawTerrain: Readonly<Record<string, readonly string[]>>; patchDraw: readonly string[] }>; countPath: \"gpu-produced-indirect-arguments\"; cover: ReturnType<GpuWebMercatorQuadCover[\"facts\"]>; coverMaximumMatrixLevel: number; demandProjection: ReturnType<GpuWebMercatorQuadDemandProjection[\"facts\"]>; fieldLayer: Readonly<{ demandProducerId: string; fieldId: string; id: string; representationId: string; spatialProfileId: string; viewAdapterId: string }>; passIds: Readonly<{ cover: string; demandProjection: string; patchDraw: string; terrain: string }>; patchDraw: ReturnType<GpuWebMercatorQuadPatchDraw[\"facts\"]>; persistentIdentityCount: number; selectionPath: \"gpu-camera-inverse-webmercatorquad-cover\"; sourceMaximumMatrixLevel: number; stageOrder: readonly string[]; terrainElementCount: number; virtualRaster: Readonly<{ completeImageUpload: false; coordinateEncoding: WebMercatorVirtualRasterField[\"addressCodec\"][\"positionCodec\"][\"facts\"][\"encoding\"]; crossPageFiltering: \"logical-bilinear\"; levelCount: number; maxPhysicalPages: number; pageSize: readonly number[]; sourceRevision: string }> }>"
+        "declaration": "type WebMercatorTerrainContractFacts = Readonly<{ commandIds: Readonly<{ drawTerrain: Readonly<Record<string, readonly string[]>> }>; countPath: \"cpu-produced-indirect-arguments\"; cover: ReturnType<WebMercatorQuadCover[\"facts\"]>; coverMaximumMatrixLevel: number; coverUpload: ReturnType<WebMercatorQuadCoverUpload[\"facts\"]>; demandProjection: ReturnType<WebMercatorQuadDemandProjection[\"facts\"]>; fieldLayer: Readonly<{ demandProducerId: string; fieldId: string; id: string; representationId: string; spatialProfileId: string; viewAdapterId: string }>; passIds: Readonly<{ terrain: string }>; patchDraw: Readonly<{ argumentByteLength: 20; bufferIds: readonly string[]; elementCount: number }>; persistentIdentityCount: number; selectionPath: \"cpu-camera-inverse-webmercatorquad-cover\"; sourceMaximumMatrixLevel: number; stageOrder: readonly string[]; terrainElementCount: number; virtualRaster: Readonly<{ completeImageUpload: false; coordinateEncoding: WebMercatorVirtualRasterField[\"addressCodec\"][\"positionCodec\"][\"facts\"][\"encoding\"]; crossPageFiltering: \"logical-bilinear\"; levelCount: number; maxPhysicalPages: number; pageSize: readonly number[]; sourceRevision: string }> }>"
       },
       {
         "id": "geoscratch/geo#WebMercatorTerrainElevationBounds",
@@ -6355,7 +6355,7 @@
           "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:75"
+          "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:72"
         ],
         "summary": "Immutable source elevation range for one standard terrain tile.",
         "declaration": "type WebMercatorTerrainElevationBounds = Readonly<{ matrixLevel: number; maximumElevationMeters: number; minimumElevationMeters: number; tileCol: number; tileRow: number }>"
@@ -6369,10 +6369,10 @@
           "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:121"
+          "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:117"
         ],
         "summary": "Immediate identity and provenance facts for one submitted terrain frame.",
-        "declaration": "type WebMercatorTerrainFrame<Presentation extends string = string> = Readonly<{ provenance: readonly WebMercatorTerrainProvenanceFact[]; submitted: SubmittedWork; terrainPresentation: Presentation }>"
+        "declaration": "type WebMercatorTerrainFrame<Presentation extends string = string> = Readonly<{ provenance: readonly WebMercatorTerrainProvenanceFact[]; submitted: SubmittedWork; terrainPresentation: Presentation; uploadReceipt?: WebMercatorQuadCoverUploadReceipt }>"
       },
       {
         "id": "geoscratch/geo#WebMercatorTerrainFrameSettlement",
@@ -6383,10 +6383,10 @@
           "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:111"
+          "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:108"
         ],
-        "summary": "Async cover observations and resource progress; superseded observations never certify the current view.",
-        "declaration": "type WebMercatorTerrainFrameSettlement = GeoFrameSettlement & Readonly<{ coverFeedback?: GpuWebMercatorQuadCoverFeedback; demandFeedback?: GpuWebMercatorQuadDemandProjectionFeedback; reconciliation?: VirtualRasterFeedbackReconciliation; residencySettlement: Promise<unknown>; residencyWorkCount: number; superseded: boolean }>"
+        "summary": "Current CPU selection/source intent with independent asynchronous resource progress.",
+        "declaration": "type WebMercatorTerrainFrameSettlement = GeoFrameSettlement & Readonly<{ coverSelection?: WebMercatorQuadCoverSelectionFacts; projectedDemands?: WebMercatorQuadProjectedDemands; reconciliation?: VirtualRasterFeedbackReconciliation; residencySettlement: Promise<unknown>; residencyWorkCount: number }>"
       },
       {
         "id": "geoscratch/geo#WebMercatorTerrainFrameValue",
@@ -6397,7 +6397,7 @@
           "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:128"
+          "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:125"
         ],
         "summary": "Terrain frame value paired with the exact view used for submission.",
         "declaration": "type WebMercatorTerrainFrameValue<ViewInput, Presentation extends string = string> = Readonly<{ frame: WebMercatorTerrainFrame<Presentation>; view: ViewInput }>"
@@ -6411,7 +6411,7 @@
           "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:136"
+          "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:133"
         ],
         "summary": "",
         "declaration": "type WebMercatorTerrainIdentityFacts = Readonly<{ bindLayouts: number; bindSets: number; commands: number; count: number; hash: string; passes: number; pipelines: number; programs: number; resources: number; uploads: number }>"
@@ -6425,7 +6425,7 @@
           "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:105"
+          "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:102"
         ],
         "summary": "",
         "declaration": "type WebMercatorTerrainInitialization = Readonly<{ observation: Promise<WebMercatorTerrainSubmissionObservation>; submitted: SubmittedWork }>"
@@ -6439,7 +6439,7 @@
           "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:149"
+          "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:146"
         ],
         "summary": "",
         "declaration": "type WebMercatorTerrainPersistentFacts = Readonly<{ bindLayouts: number; bindSets: number; logicalFootprintBytes: number; pipelines: number; resources: number }>"
@@ -6453,7 +6453,7 @@
           "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:61"
+          "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:58"
         ],
         "summary": "",
         "declaration": "type WebMercatorTerrainPresentationDescriptor<Presentation extends string = string> = Readonly<{ fragmentEntryPoint: string; id: Presentation; label?: string }>"
@@ -6467,7 +6467,7 @@
           "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:83"
+          "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:80"
         ],
         "summary": "",
         "declaration": "type WebMercatorTerrainProvenanceFact = Readonly<{ consumerStepIndex: number; declaredContentEpoch: \"current-at-step\"; name: string; producerContentEpoch: number; producerStepIndex: number; readContentEpoch: number; resourceId: string }>"
@@ -6481,7 +6481,7 @@
           "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:229"
+          "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:218"
         ],
         "summary": "",
         "declaration": "type WebMercatorTerrainRenderer<ViewInput, Presentation extends string = string> = Readonly<{ stableIdentities: readonly string[]; stableIdentityFacts: WebMercatorTerrainIdentityFacts; stableIdentityHash: string; contractFacts: any; currentIdentityFacts: any; dispose: any; initialize: any; persistentFacts: any; render: any; setPresentation: any; state: any; virtualRasterFacts: any }>"
@@ -6495,7 +6495,7 @@
           "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:249"
+          "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:238"
         ],
         "summary": "",
         "declaration": "type WebMercatorTerrainRendererDescriptor<ViewInput, Presentation extends string = string> = Readonly<{ elevationBounds?: readonly WebMercatorTerrainElevationBounds[]; elevationRangeMeters: readonly [number, number]; exaggeration?: number; fieldLayer: MapFieldLayer<ViewInput>; fieldSampling: WebMercatorTerrainSamplingWgslOptions; initialPresentation: Presentation; observeProvenance?: (facts: readonly WebMercatorTerrainProvenanceFact[]) => void; presentations: readonly WebMercatorTerrainPresentationDescriptor<Presentation>[]; presentationShader: string; runtime: GPURuntime; size: SurfaceSize; surface: Surface; virtualRaster: VirtualRasterRuntime<WebMercatorVirtualRasterField> }>"
@@ -6509,10 +6509,10 @@
           "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:199"
+          "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:191"
         ],
         "summary": "",
-        "declaration": "type WebMercatorTerrainRendererState<Presentation extends string = string> = Readonly<{ convergenceState: \"converged\" | \"transitioning\"; coverCandidateCount: number; coverDescriptorOverflowCount: number; coverFeedback?: GpuWebMercatorQuadCoverFeedback; coverFinestMatrixLevel?: number; coverFrameEpoch?: number; coverLevelRange: readonly [number | undefined, number | undefined]; coverLookupOverflowCount: number; coverMaximumAdjacentLevelDelta: number; coverPatchCount: number; demandFeedback?: GpuWebMercatorQuadDemandProjectionFeedback; disposed: boolean; frame: number; initialized: boolean; lastResizeFacts?: WebMercatorTerrainResizeFacts; readbackInFlightCount: number; resizeGeneration: number; size: SurfaceSize; sourceDemandCount: number; sourceDemandOverflowCount: number; sourceLevelCeiling?: number; staleBindSetPreparationCount: number; staleFeedbackCount: number; supersededFeedbackCount: number; terrainPresentation: Presentation; virtualRequestedPageCount: number; virtualSnapshotEpoch: number }>"
+        "declaration": "type WebMercatorTerrainRendererState<Presentation extends string = string> = Readonly<{ convergenceState: \"converged\" | \"transitioning\" | \"failed\"; coverCandidateCount: number; coverDescriptorOverflowCount: number; coverFinestMatrixLevel?: number; coverFrameEpoch?: number; coverLevelRange: readonly [number | undefined, number | undefined]; coverLookupOverflowCount: number; coverMaximumAdjacentLevelDelta: number; coverPatchCount: number; coverSelection?: WebMercatorQuadCoverSelectionFacts; disposed: boolean; frame: number; initialized: boolean; lastResizeFacts?: WebMercatorTerrainResizeFacts; projectedDemands?: WebMercatorQuadProjectedDemands; resizeGeneration: number; size: SurfaceSize; sourceDemandCount: number; sourceDemandOverflowCount: number; sourceLevelCeiling?: number; staleBindSetPreparationCount: number; terrainPresentation: Presentation; virtualRequestedPageCount: number; virtualSnapshotEpoch: number }>"
       },
       {
         "id": "geoscratch/geo#WebMercatorTerrainResizeFacts",
@@ -6523,7 +6523,7 @@
           "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:93"
+          "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:90"
         ],
         "summary": "",
         "declaration": "type WebMercatorTerrainResizeFacts = Readonly<{ depthAllocationVersion: number; preparedBindSetCount: number; resizeGeneration: number; staleBindSetCount: number }>"
@@ -6537,7 +6537,7 @@
           "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:68"
+          "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:65"
         ],
         "summary": "",
         "declaration": "type WebMercatorTerrainSamplingWgslOptions = Readonly<{ addressNamespace: string; namespace: string; transitionTexels?: number }>"
@@ -6551,7 +6551,7 @@
           "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts"
         ],
         "locations": [
-          "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:100"
+          "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:97"
         ],
         "summary": "",
         "declaration": "type WebMercatorTerrainSubmissionObservation = Readonly<{ nativeStatus: \"observed-succeeded\"; submissionId: string }>"

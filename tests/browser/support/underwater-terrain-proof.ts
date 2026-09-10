@@ -426,6 +426,7 @@ function publishFrameFacts({
         diagnostics.recorder.retainedIncidentCount <= diagnostics.recorder.incidentCapacity &&
         diagnostics.recorder.retainedEvidenceBytes <= diagnostics.recorder.evidenceByteCapacity
 
+    canvas.dataset.cpuSelectionUploadCount = String(graph.contractFacts().coverUpload.acceptedReceiptCount * 3)
     canvas.dataset.frames = String(submittedFrames)
     canvas.dataset.observedFrames = String(observedFrames)
     canvas.dataset.resizeGeneration = String(state.resizeGeneration)
@@ -444,12 +445,9 @@ function publishFrameFacts({
     canvas.dataset.coverFinestMatrixLevel = String(state.coverFinestMatrixLevel ?? '')
     canvas.dataset.sourceLevelCeiling = String(state.sourceLevelCeiling ?? '')
     canvas.dataset.coverFrameEpoch = String(state.coverFrameEpoch ?? '')
-    canvas.dataset.coverFeedback = JSON.stringify(state.coverFeedback ?? null)
-    canvas.dataset.demandFeedback = JSON.stringify(state.demandFeedback ?? null)
+    canvas.dataset.coverSelection = JSON.stringify(state.coverSelection ?? null)
+    canvas.dataset.projectedDemands = JSON.stringify(state.projectedDemands ?? null)
     canvas.dataset.convergenceState = state.convergenceState
-    canvas.dataset.readbackInFlightCount = String(state.readbackInFlightCount)
-    canvas.dataset.staleFeedbackCount = String(state.staleFeedbackCount)
-    canvas.dataset.supersededFeedbackCount = String(state.supersededFeedbackCount)
     canvas.dataset.virtualSnapshotEpoch = String(state.virtualSnapshotEpoch)
     canvas.dataset.virtualRequestedPageCount = String(state.virtualRequestedPageCount)
     canvas.dataset.virtualRaster = JSON.stringify(demVirtualRasterProofFacts(

@@ -1,16 +1,24 @@
 # Terrain cover placement experiment
 
-This opt-in experiment runs the real Underwater Terrain application, Worker source,
-Virtual Raster publication, indexed terrain shader and frame controller. It serves
-temporary Vite source substitutions. It changes no production files or public API,
-and is not a supported alternative renderer. The original GPU objects remain
-allocated in CPU variants to hold setup/consumer interfaces constant; startup memory
-is therefore not a measurement of a finished CPU design.
+This opt-in harness runs the real Underwater Terrain application, Worker source,
+Virtual Raster publication, indexed terrain shader and frame controller. The default
+`cpu-production` mode uses the production CPU renderer directly, with no selector
+substitution or unused GPU compute allocations. `gpu` replays the frozen historical
+renderer and proof from the commit in `tests/fixtures/camera-cover-gpu-reference.json`.
+The served renderer hash is recorded separately from current checkout provenance.
+Older CPU variants remain explicitly experimental historical comparisons; their
+original GPU objects stay allocated and their startup memory is not a production
+CPU measurement. No execution mode is added to the production application/API.
 
 Run from the repository root, with dependencies, existing Worker artifacts and
 `examples/underwaterTerrain/tile-server/cache/{manifest.json,dem.cog.tif}` available:
 
 ```sh
+node tests/experiments/terrain-cover-placement/run.mjs cpu-production performance
+node tests/experiments/terrain-cover-placement/run.mjs cpu-production render
+node tests/experiments/terrain-cover-placement/run.mjs cpu-production streaming
+node tests/experiments/terrain-cover-placement/run.mjs cpu-production lifecycle
+TERRAIN_PLACEMENT_SECONDARY_DISPLAY=1 TERRAIN_PLACEMENT_BITS=52 node tests/experiments/terrain-cover-placement/run.mjs cpu-production performance
 node tests/experiments/terrain-cover-placement/run.mjs gpu performance
 node tests/experiments/terrain-cover-placement/run.mjs gpu-eager reveal
 node tests/experiments/terrain-cover-placement/run.mjs cpu-cover performance
@@ -38,7 +46,11 @@ It verifies production/Flow source and backend data hashes before/after executio
 
 Modes:
 
-- `gpu`: current production selection and demand execution.
+- `cpu-production` (default): current certified CPU cover, CPU source intent and
+  revisioned uploads/receipts. Indexed arguments are CPU-produced; only the terrain
+  draw is a GPU pass. Resource/native readiness remain asynchronous.
+- `gpu`: frozen `ebb3336` GPU renderer with its matching historical proof and gate
+  assertions. It uses the unchanged reference kernels in the current checkout.
 - `gpu-original`: replay renderer source from `117af0b` to retain the original
   comparison after production scheduling changes. This requires that Git object.
 - `gpu-eager`: against the same pinned renderer, keep all currentness checks but start
@@ -46,9 +58,9 @@ Modes:
 - `gpu-observed`: against that renderer, additionally reconcile monotonically newer complete source-demand
   observations with their original view provenance. Old observations cannot update
   current geometry/readiness, and active retained requests participate in settlement.
-- `cpu-cover`: CPU cover plus fresh Scratch uploads; existing GPU source demand and
+- `cpu-cover`: historical experimental CPU cover plus fresh Scratch uploads; existing GPU source demand and
   delayed feedback remain. Actual upload-to-draw epochs are validated.
-- `cpu-all`: CPU cover and CPU source intent. Geometry is uploaded through Scratch,
+- `cpu-all`: historical experimental CPU cover and CPU source intent. Geometry is uploaded through Scratch,
   and request reconciliation consumes current CPU intent without a GPU readback.
   Native rendering/publication acknowledgement remain asynchronous and separate.
 - `shadow`: render the original GPU result while comparing CPU output against ordered
@@ -59,7 +71,8 @@ Modes:
 instrumentation and then with GPU pass timestamps on every seventh frame. CPU
 construction, asynchronous native observation, GPU pass duration, first executor
 request and acknowledged selected-resource readiness are separate measurements.
-`feedbackAdoptionCpuMs` times synchronous reconciliation/state adoption separately;
+`feedbackAdoptionCpuMs` times historical GPU feedback reconciliation/state adoption separately;
+production CPU adoption is included in construction and has no separate feedback callback. The historical metric
 it excludes GPU waits, mapping/decoding and Worker work, and is not total main-thread CPU.
 The readiness poll is every 20 ms. It must observe the **current** converged cover,
 selected resident demands, acknowledged publication, and drained scheduling/staging;
@@ -76,7 +89,7 @@ disabled. Sampling and timestamp instrumentation can change scheduling and costs
 only in the isolated source transforms. The frame boundary is the synchronous
 `graph.render()` call, matching the construction metric; later callbacks and proof
 DOM publication are excluded. `hostScopes` reports per-frame sums and call counts
-for each trace, including its final settlement frames. Parent/child scopes overlap
+for each trace, including its final settlement frames; production CPU scopes also report selection, demand projection and upload/receipt work. Parent/child scopes overlap
 and must not be summed. Native timings measure synchronous API calls, not GPU work
 or transfer completion. Timer resolution produces zero-duration samples; use the
 aggregate attribution and verify improvements with both host probes disabled.
@@ -127,9 +140,11 @@ precision without changing backend tile identity or data.
 
 This harness intentionally uses strict source anchors and fails when they drift.
 Its integration substitutions are experimental, not a proposed public interface.
-Formal adoption still needs a single geometry-product/lowering contract, complete
-construction/failure ownership tests and bilingual API/ADR updates. Geometry never
+ADR-129 and the canonical view-cover/terrain APIs define the production CPU product,
+upload ownership, failure handling and disposal contract. Historical substitutions
+are retained only for bounded comparisons. Geometry never
 depends on raster residency; complete selected resource intent includes resident pages.
 
-Revert the experiment commit to remove this harness. The production renderer remains
-the GPU implementation before and after running it.
+The harness never changes production source or backend data. Removing it does not
+change the production CPU renderer; frozen GPU reference APIs and standalone native
+consistency fixtures remain independently usable.

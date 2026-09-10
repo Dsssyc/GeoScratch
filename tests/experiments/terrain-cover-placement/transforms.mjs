@@ -4,9 +4,10 @@ function replace(source, from, to) {
         throw new Error('Experiment patch anchor missing: ' + from.slice(0, 90)); return source.replace(from, to)
 }
 export function transform(source, id, mode, { experimentDirectory: dir, outputDirectory, coordinateBits, feedbackDelayMs = 0, rendererBaseline, hostTiming = false }) {
-    if (!['gpu', 'gpu-original', 'gpu-eager', 'gpu-observed', 'shadow', 'cpu-cover', 'cpu-all'].includes(mode))
+    if (!['cpu-production', 'gpu', 'gpu-original', 'gpu-eager', 'gpu-observed', 'shadow', 'cpu-cover', 'cpu-all'].includes(mode))
         throw new Error('Invalid experimental execution mode')
     const gpuMode = mode.startsWith('gpu')
+    const productionCpu = mode === 'cpu-production'
     if (rendererBaseline !== undefined && id.endsWith('/geo/web-mercator-terrain-renderer.ts')) source = rendererBaseline
     if ((mode === 'gpu-eager' || mode === 'gpu-observed') && id.endsWith('/geo/web-mercator-terrain-renderer.ts')) {
         const heldFrame = 'ready.coverFrame.frameEpoch >= latestIssuedFrameEpoch'
@@ -77,7 +78,7 @@ export function transform(source, id, mode, { experimentDirectory: dir, outputDi
             if (timestampAudit) timestampAudit.frameEpoch = frameNumber
             const startedAt = performance.now()`)
     }
-    if (!gpuMode && id.endsWith('/geo/gpu-web-mercator-quad-cover.ts')) {
+    if (!productionCpu && !gpuMode && id.endsWith('/geo/gpu-web-mercator-quad-cover.ts')) {
         source = `// Isolated experiment source substitution; no public API change.
 import { CpuCover } from '${dir}/cpu-cover.ts'
 const experimentalSelectors = new WeakMap<object, CpuCover>()
@@ -197,7 +198,7 @@ const experimentalSelectors = new WeakMap<object, CpuCover>()
             kind: 'gpu-web-mercator-quad-demand-projection-feedback'`)
         }
     }
-    if (!gpuMode && mode !== 'shadow' && id.endsWith('/geo/web-mercator-terrain-renderer.ts')) {
+    if (!productionCpu && !gpuMode && mode !== 'shadow' && id.endsWith('/geo/web-mercator-terrain-renderer.ts')) {
         source = replace(source, "name: 'cover-map-meta-to-cover-compute',", "name: 'cpu-map-meta-to-terrain-draw',")
         source = replace(source, 'consumerCommandId: coverCommands.generate.id,', 'consumerCommandId: terrainCommand.id,')
         source = replace(source, "selectionPath: 'gpu-camera-inverse-webmercatorquad-cover',", "selectionPath: 'experimental-cpu-camera-cover',")
@@ -205,7 +206,7 @@ const experimentalSelectors = new WeakMap<object, CpuCover>()
         if (mode === 'cpu-all')
             source = source.replaceAll('ready.coverFrame.frameEpoch >= latestIssuedFrameEpoch', 'ready.coverFrame.frameEpoch > latestIssuedFrameEpoch')
     }
-    if (!gpuMode && mode !== 'shadow' && id.endsWith('/tests/browser/support/underwater-terrain-proof.ts'))
+    if (!productionCpu && !gpuMode && mode !== 'shadow' && id.endsWith('/tests/browser/support/underwater-terrain-proof.ts'))
         source = replace(source, "    canvas.dataset.frames = String(submittedFrames)", `    canvas.dataset.cpuSelectionUploadCount = String((globalThis as any).__terrainEval?.cpuSelectionUploadCount ?? 0)
     canvas.dataset.frames = String(submittedFrames)`)
     if (id.endsWith('/geo/virtual-raster-demand.ts'))
@@ -215,7 +216,7 @@ const experimentalSelectors = new WeakMap<object, CpuCover>()
         source = replace(source, '        const demandGeneration = ++generation\n        const normalized = Object.freeze({', `        if((globalThis as any).__terrainEval) (globalThis as any).__terrainEval.lastDemand = demandSet
         const demandGeneration = ++generation
         const normalized = Object.freeze({`)
-    if (id.endsWith('/geo/web-mercator-terrain-renderer.ts')) {
+    if (!productionCpu && id.endsWith('/geo/web-mercator-terrain-renderer.ts')) {
         source = replace(source, `    function settleConsumedFeedback(
         ready: PendingFeedback,
         consumed: ConsumedFeedback

@@ -7,6 +7,9 @@ const targets = {
         'submitFrame', 'stableIdentitySnapshot', 'persistentFactSnapshot',
         'verifyFrameProvenance', 'startFeedbackPump',
     ],
+    '/geo/web-mercator-quad-cover.ts': ['WebMercatorQuadCover.select'],
+    '/geo/web-mercator-quad-demand.ts': ['WebMercatorQuadDemandProjection.project'],
+    '/geo/web-mercator-quad-cover-upload.ts': ['WebMercatorQuadCoverUpload.prepare', 'WebMercatorQuadCoverUpload.encode', 'WebMercatorQuadCoverUpload.receipt'],
     '/geo/gpu-web-mercator-quad-cover.ts': [ 'GpuWebMercatorQuadCover.writeView', 'mapMetaRecord' ],
     '/scratch/gpu/submission.ts': [
         'SubmissionBuilder.submit', 'resolveSubmissionBeforeEncoding',
@@ -25,7 +28,7 @@ export function instrumentHostTiming(source, id) {
     const entry = Object.entries(targets).find(([suffix]) => id.endsWith(suffix))
     if (!entry) return source
     const [suffix, names] = entry
-    const remaining = new Set(names), edits = []
+    const remaining = new Set(names.filter(name => name !== 'startFeedbackPump' || !source.includes('new WebMercatorQuadCover({'))), edits = []
     const file = ts.createSourceFile(id, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
     function visit(node) {
         if ((ts.isFunctionDeclaration(node) || ts.isMethodDeclaration(node)) && node.body && node.name) {

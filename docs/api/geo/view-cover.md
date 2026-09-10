@@ -66,11 +66,10 @@ It remains usable with retained products after selector disposal; its own dispos
 prohibits further projection. `ViewDemandProducer` and Virtual Raster still own
 their existing downstream budget selection and resource lifecycle.
 
-ADR-129 records the CPU production migration. The CPU products are independently
-usable now; terrain integration is a separate verified slice. The following GPU
-APIs are frozen at `ebb3336` as the consistency reference and remain available for
-explicit GPU consumers. The current terrain renderer still uses that reference
-until its migration slice lands.
+ADR-129 records the CPU production migration. These products are independently
+usable and compose the production terrain renderer. The following GPU APIs remain
+frozen at `ebb3336` as the consistency reference and available for existing explicit
+GPU consumers. Production terrain has no CPU/GPU execution switch.
 
 ## Uploading CPU products
 

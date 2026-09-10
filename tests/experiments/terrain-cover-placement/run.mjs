@@ -16,7 +16,7 @@ import { launchSecondaryBrowser } from './secondary-browser.mjs'
 
 const experimentDirectory = dirname(fileURLToPath(import.meta.url))
 const root = resolve(experimentDirectory, '../../..')
-const mode = process.argv[2] ?? 'gpu'
+const mode = process.argv[2] ?? 'cpu-production'
 const suite = process.argv[3] ?? 'performance'
 const coordinateBits = Number(process.env.TERRAIN_PLACEMENT_BITS ?? 40)
 const delayMs = Number(process.env.TERRAIN_PLACEMENT_TILE_DELAY_MS ?? 0)
@@ -25,11 +25,11 @@ const hostProfile = process.env.TERRAIN_PLACEMENT_HOST_PROFILE === '1'
 const hostTiming = process.env.TERRAIN_PLACEMENT_HOST_TIMING === '1'
 const secondaryDisplay = process.env.TERRAIN_PLACEMENT_SECONDARY_DISPLAY === '1'
 const submissionBaseline = process.env.TERRAIN_PLACEMENT_SUBMISSION_BASELINE
-if (!['gpu', 'gpu-original', 'gpu-eager', 'gpu-observed', 'shadow', 'cpu-cover', 'cpu-all'].includes(mode) ||
+if (!['cpu-production', 'gpu', 'gpu-original', 'gpu-eager', 'gpu-observed', 'shadow', 'cpu-cover', 'cpu-all'].includes(mode) ||
     !['performance', 'reveal', 'render', 'streaming', 'lifecycle'].includes(suite) ||
     ![40, 52].includes(coordinateBits) || !Number.isInteger(delayMs) || delayMs < 0 || delayMs > 2000 ||
     !Number.isInteger(feedbackDelayMs) || feedbackDelayMs < 0 || feedbackDelayMs > 2000) {
-    throw new Error('Usage: node run.mjs [gpu|gpu-original|gpu-eager|gpu-observed|shadow|cpu-cover|cpu-all] [performance|reveal|render|streaming|lifecycle]; bits 40|52, delays 0..2000 ms')
+    throw new Error('Usage: node run.mjs [cpu-production|gpu|gpu-original|gpu-eager|gpu-observed|shadow|cpu-cover|cpu-all] [performance|reveal|render|streaming|lifecycle]; bits 40|52, delays 0..2000 ms')
 }
 if ((hostProfile || hostTiming) && !['performance', 'reveal'].includes(suite))
     throw new Error('Host profiling/timing requires the performance or reveal suite')
@@ -43,9 +43,13 @@ const submissionSources = new Map(submissionBaseline === undefined ? [] : [
     const file = `packages/geoscratch/src/scratch/gpu/${name}`
     return [`${root}/${file}`, execFileSync('git', ['show', `${submissionBaseline}:${file}`], { cwd: root }).toString()]
 }))
-const rendererBaseline = ['gpu-original', 'gpu-eager', 'gpu-observed'].includes(mode)
-    ? execFileSync('git', ['show', '117af0b:packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts'], { cwd: root }).toString()
-    : undefined
+const frozenReference = JSON.parse(await readFile(`${root}/tests/fixtures/camera-cover-gpu-reference.json`, 'utf8'))
+const rendererBaselineCommit = mode === 'cpu-production' ? undefined :
+    ['gpu-original', 'gpu-eager', 'gpu-observed'].includes(mode) ? '117af0b' : frozenReference.commit
+const rendererBaseline = rendererBaselineCommit === undefined ? undefined :
+    execFileSync('git', ['show', `${rendererBaselineCommit}:packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts`], { cwd: root }).toString()
+const referenceProof = mode === 'cpu-production' ? undefined :
+    execFileSync('git', ['show', `${frozenReference.commit}:tests/browser/support/underwater-terrain-proof.ts`], { cwd: root }).toString()
 const outputDirectory = process.env.TERRAIN_PLACEMENT_OUTPUT
     ? resolve(process.env.TERRAIN_PLACEMENT_OUTPUT)
     : await mkdtemp(resolve(tmpdir(), 'geoscratch-terrain-placement-'))
@@ -78,7 +82,8 @@ try {
             name: 'isolated-terrain-placement', enforce: 'pre',
             transform(code, id) {
                 const path = id.split('?')[0]
-                const source = transform(submissionSources.get(path) ?? code, path, mode,
+                const source = transform(submissionSources.get(path) ??
+                    (referenceProof !== undefined && path.endsWith('/tests/browser/support/underwater-terrain-proof.ts') ? referenceProof : code), path, mode,
                     { experimentDirectory, outputDirectory, coordinateBits, feedbackDelayMs, rendererBaseline, hostTiming })
                 return hostTiming ? instrumentHostTiming(source, path) : source
             },
@@ -159,10 +164,10 @@ try {
             throw new Error('A-B-A or timestamp cleanup verification failed')
         }
     } else {
-        const runGate = await prepareGate(root, outputDirectory, suite)
+        const runGate = await prepareGate(root, outputDirectory, suite, mode === 'cpu-production' ? undefined : frozenReference.commit)
         result = await runGate(browser, {
             baseUrl, tileBaseUrl, outputDirectory, coordinateBits,
-            selectionPath: mode.startsWith('gpu') || mode === 'shadow'
+            selectionPath: mode === 'cpu-production' ? 'cpu-camera-inverse-webmercatorquad-cover' : mode.startsWith('gpu') || mode === 'shadow'
                 ? 'gpu-camera-inverse-webmercatorquad-cover' : 'experimental-cpu-camera-cover',
         })
         if (result.failures.length) throw new Error(`Terrain gate failed: ${result.failures.join('; ')}`)
@@ -207,7 +212,7 @@ const record = { status, mode, suite, coordinateBits, delayMs, feedbackDelayMs, 
     secondaryDisplay: secondary?.evidence,
     ...(submissionBaseline === undefined ? {} : { submissionBaseline, submissionSourceHashes:
         Object.fromEntries([...submissionSources].map(([path, source]) => [path.slice(root.length + 1), digest(source)])) }),
-    ...(rendererBaseline === undefined ? {} : { rendererBaselineCommit: '117af0b', rendererBaselineHash: digest(rendererBaseline) }),
+    ...(rendererBaseline === undefined ? {} : { rendererBaselineCommit, rendererBaselineHash: digest(rendererBaseline) }),
     browserVersion: browser?.version(), before, after, result, error, events, cleanup, cleanupFailures,
     ...(error ? { serviceLog } : {}), outputDirectory }
 await writeFile(`${outputDirectory}/result.json`, JSON.stringify(record, null, 2) + '\n')

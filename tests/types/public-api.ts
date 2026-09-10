@@ -544,8 +544,12 @@ const typedTerrainSettlement: geoApi.WebMercatorTerrainFrameSettlement = {
     residencySettlement: Promise.resolve(),
     residencyWorkCount: 0,
     needsFollowUp: false,
-    superseded: false,
 }
+const typedCpuCoverFacts: geoApi.WebMercatorQuadCoverSelectionFacts | undefined = typedTerrainSettlement.coverSelection
+const typedCpuDemands: geoApi.WebMercatorQuadProjectedDemands | undefined = typedTerrainSettlement.projectedDemands
+const typedCpuUploadReceipt: geoApi.WebMercatorQuadCoverUploadReceipt | undefined = typedTerrainFrame.uploadReceipt
+// @ts-expect-error CPU terrain has no GPU feedback transport field.
+typedTerrainSettlement.coverFeedback
 const typedGeoSettlementFromTerrain: geoApi.GeoFrameSettlement = typedTerrainSettlement
 declare const typedTerrainRenderer: geoApi.WebMercatorTerrainRenderer<
     { frameEpoch: number },
