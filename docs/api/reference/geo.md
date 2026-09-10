@@ -2,7 +2,7 @@
 
 # geoscratch/geo API Reference
 
-Public symbols: 315.
+Public symbols: 322.
 
 ## `packages/geoscratch/src/geo/coordinate-domain.ts`
 
@@ -2820,6 +2820,95 @@ Kind: `Type Alias`.
 
 ```ts
 type VirtualRasterTileAddressSpaceDescriptor = Readonly<{ coverage: TileMatrixCoverage; id: string }>
+```
+
+## `packages/geoscratch/src/geo/web-mercator-quad-cover-upload.ts`
+
+### `WebMercatorQuadCoverUpload`
+
+Kind: `Class`.
+
+Lowers certified CPU selections to owned parity buffers through explicit, revisioned Scratch uploads.
+
+```ts
+class WebMercatorQuadCoverUpload
+```
+
+Members:
+
+- `create`: `Method create` (static)
+  - `create(runtime: GPURuntime, input: WebMercatorQuadCoverUploadDescriptor): Promise<WebMercatorQuadCoverUpload>`
+- `dispose`: `Method dispose`
+  - `dispose(): void`
+- `encode`: `Method encode`
+  - `encode(builder: SubmissionBuilder, frame: WebMercatorQuadCoverUploadFrame): SubmissionBuilder`
+- `facts`: `Method facts`
+  - `facts(): WebMercatorQuadCoverUploadFacts`
+- `id`: `Accessor id`
+  - `id(): string`
+- `isDisposed`: `Accessor isDisposed`
+  - `isDisposed(): boolean`
+- `prepare`: `Method prepare`
+  - `prepare(selection: WebMercatorQuadCoverSelection): WebMercatorQuadCoverUploadFrame`
+- `receipt`: `Method receipt`
+  - `receipt(frame: WebMercatorQuadCoverUploadFrame, submitted: SubmittedWork): WebMercatorQuadCoverUploadReceipt`
+- `resources`: `Method resources`
+  - `resources(): readonly BufferResource[]`
+- `runtime`: `Accessor runtime`
+  - `runtime(): GPURuntime`
+- `templates`: `Method templates`
+  - `templates(): readonly Readonly<{ coverId: string; coverLookup: BufferResource; mapMeta: BufferResource; parity: 0 | 1; patches: BufferResource; uploadId: string }>[]`
+
+### `WebMercatorQuadCoverUploadDescriptor`
+
+Kind: `Type Alias`.
+
+```ts
+type WebMercatorQuadCoverUploadDescriptor = Readonly<{ cover: WebMercatorQuadCover }>
+```
+
+### `WebMercatorQuadCoverUploadFacts`
+
+Kind: `Type Alias`.
+
+```ts
+type WebMercatorQuadCoverUploadFacts = Readonly<{ acceptedReceiptCount: number; coverId: string; disposed: boolean; id: string; parity: readonly Readonly<{ lookupBufferId: string; mapMetaBufferId: string; parity: 0 | 1; patchBufferId: string }>[]; persistentBufferBytes: number; poisoned: boolean; preparedFrameCount: number; runtimeId: string }>
+```
+
+### `WebMercatorQuadCoverUploadFrame`
+
+Kind: `Type Alias`.
+
+Owned prepared upload attempt; disposing unsubmitted work releases its private bytes/commands.
+
+```ts
+type WebMercatorQuadCoverUploadFrame = Readonly<{ coverId: string; frameEpoch: number; isDisposed: boolean; kind: "web-mercator-quad-cover-upload-frame"; parity: 0 | 1; residencySnapshotEpoch: number; selectionId: string; selectionRevision: number; uploadId: string; dispose: any }>
+```
+
+### `WebMercatorQuadCoverUploadReceipt`
+
+Kind: `Type Alias`.
+
+Immutable evidence of queued CPU geometry uploads, never a certificate of native success.
+
+```ts
+type WebMercatorQuadCoverUploadReceipt = Readonly<{ coverId: string; frameEpoch: number; kind: "web-mercator-quad-cover-upload-receipt"; parity: 0 | 1; residencySnapshotEpoch: number; resources: readonly WebMercatorQuadCoverUploadResourceFact[]; runtimeId: string; selectionId: string; selectionRevision: number; submissionId: string; uploadId: string; viewId: string }>
+```
+
+### `WebMercatorQuadCoverUploadResourceFact`
+
+Kind: `Type Alias`.
+
+```ts
+type WebMercatorQuadCoverUploadResourceFact = Readonly<{ allocationVersion: number; commandId: string; contentEpoch: number; name: "mapMeta" | "patches" | "coverLookup"; resourceId: string; stepIndex: number }>
+```
+
+### `WebMercatorQuadCoverUploadTemplate`
+
+Kind: `Type Alias`.
+
+```ts
+type WebMercatorQuadCoverUploadTemplate = Readonly<{ coverId: string; coverLookup: BufferResource; mapMeta: BufferResource; parity: 0 | 1; patches: BufferResource; uploadId: string }>
 ```
 
 ## `packages/geoscratch/src/geo/web-mercator-quad-cover.ts`

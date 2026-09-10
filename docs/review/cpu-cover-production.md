@@ -6,7 +6,7 @@ Baseline: `ebb3336`. Decision: [ADR-129](../decisions/ADR-129-cpu-webmercator-co
 
 - `2fd6d8f`: GPU cover, projection, patch-draw and terrain vertex/lookup shader
   reference hashes frozen. Production GPU algorithms are unchanged.
-- CPU products: `WebMercatorQuadCover` and `WebMercatorQuadDemandProjection`, immutable
+- `b660d22`: `WebMercatorQuadCover` and `WebMercatorQuadDemandProjection`, immutable
   branded selections and original view provenance, no GPU objects or readback.
   Focused tests and DPR 1/2 native consistency pass: 71 ordered successful cuts and
   three matching failed cuts per DPR, with matching source intents and the existing
@@ -14,7 +14,15 @@ Baseline: `ebb3336`. Decision: [ADR-129](../decisions/ADR-129-cpu-webmercator-co
   quality, A-B-A, 2:1, extreme views and bounded/full candidate tests are retained.
   Final slice checks pass: 1,749 tests, two opt-in pending, typecheck, build and
   docs validation (841 public symbols and 20 reviewed translation pairs).
-- Pending: explicit GPU upload ownership/receipt, CPU terrain integration, updated
+- Upload ownership/receipt implemented: six GPU buffers, private opaque uploads,
+  exact submitted producer checks, disposal/supersession and poisoned issued failures.
+  Fourteen focused tests cover all six allocation sites and queue/receipt failures.
+  Native DPR 1/2 comparisons also verify 71 actual camera/patch payloads and effective
+  neighbor lookup tables per DPR against the frozen GPU reference. Observation uses
+  proof-only uniform/storage mirrors because reference buffers omit COPY_SRC; their
+  original usage flags are unchanged. Full checks pass: 1,763 tests, two opt-in
+  pending, typecheck, build and bilingual docs (848 public symbols).
+- Pending: CPU terrain integration, updated
   production/native lifetime gates and final performance/cleanup evidence.
 
 ## Contract review

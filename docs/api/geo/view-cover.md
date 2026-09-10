@@ -4,6 +4,7 @@ canonical: true
 apiSources:
   - packages/geoscratch/src/geo/web-mercator-quad-cover.ts
   - packages/geoscratch/src/geo/web-mercator-quad-demand.ts
+  - packages/geoscratch/src/geo/web-mercator-quad-cover-upload.ts
   - packages/geoscratch/src/geo/gpu-web-mercator-quad-cover-layout.ts
   - packages/geoscratch/src/geo/gpu-web-mercator-quad-cover.ts
   - packages/geoscratch/src/geo/gpu-web-mercator-quad-demand.ts
@@ -70,6 +71,58 @@ usable now; terrain integration is a separate verified slice. The following GPU
 APIs are frozen at `ebb3336` as the consistency reference and remain available for
 explicit GPU consumers. The current terrain renderer still uses that reference
 until its migration slice lands.
+
+## Uploading CPU products
+
+`WebMercatorQuadCoverUpload.create(runtime, { cover })` borrows a real selector's
+immutable descriptor and owns six GPU buffers: two parity sets of map metadata,
+patches and neighbor lookup. It allocates no candidate/state-feedback buffers,
+shader modules or compute pipelines. Creation releases every earlier buffer if
+any allocation fails; it does not dispose the borrowed selector or runtime.
+
+`prepare(selection)` accepts genuine products of that cover, including retained
+products after selector disposal. Each attempt copies private metadata/patch/lookup
+bytes and owns three ephemeral upload commands. Only the effective patch prefix
+is uploaded; empty cuts upload a harmless zero record and draw zero instances.
+A new preparation supersedes and disposes earlier unsubmitted attempts after the
+new preparation succeeds. Failure while preparing replacement commands leaves the
+earlier attempt intact. Public frame facts contain product identity/revision,
+original frame/residency epochs and parity, not writable packet bytes.
+
+`encode(builder, frame)` appends three ordered opaque Scratch upload steps, requires
+the current prepared-view and queue-sequence stamps and consumes the sequence once.
+The opaque steps prevent changing the certified payload through public builder
+commands. Stale/foreign/disposed or repeated encoding is rejected before submission.
+Independent uploaders may compose in the same builder. Consumers borrow buffers
+from `templates()` and record reads after all three uploads; they do not mutate or
+dispose those buffers. The component does not own a mesh or indirect arguments.
+
+After `builder.submit()` returns, `receipt(frame, submitted)` authenticates the
+actual `SubmittedWork`, then checks the exact three command IDs, resource IDs,
+allocation versions, produced content epochs and step order from its immutable
+facts. Additional writes to these geometry buffers in that submission are invalid;
+every recorded consumer read must follow all uploads and read their exact epochs.
+Later edits to a closed builder do not change an already valid submitted receipt.
+A successful receipt releases its attempt's commands, is idempotent for the same
+submitted work, and remains immutable evidence after disposal. It is evidence of
+queued CPU uploads, not native completion, raster residency or current-view readiness.
+Native errors remain on `SubmittedWork.nativeOutcome`/`done` and must still be observed.
+
+`GEO_WEB_MERCATOR_COVER_UPLOAD_INVALID` reports lifecycle/provenance failures through
+`actual.reason`, including `foreign-cover`, `foreign-frame`, `stale-or-encoded-frame`,
+`unsubmitted-frame`, `pending-receipt`, `receipt-mismatch`, `poisoned`, `runtime` or
+`disposed`. Pending issued attempts require receipt validation before further
+preparation. A failed receipt after queue issue, or disposal of an issued attempt
+without an accepted receipt, poisons the uploader; it never silently reuses partial
+queued writes. A pre-issue failure permits disposal and a fresh preparation/builder.
+Only an accepted receipt may authorize the renderer's source reconciliation.
+
+`dispose()` idempotently releases outstanding attempt commands, owned buffers and
+revision authorities, while preserving borrowed CPU selections/runtime and already
+returned receipts. `facts()` exposes poison/disposal state, active prepared count,
+accepted receipts and live logical buffer bytes. Those bytes exclude transient CPU
+packets and do not claim physical GPU residency. Parity is a storage/queue-order
+choice, not an in-flight frame budget; the renderer/controller owns admission.
 
 ## Frozen GPU reference
 

@@ -25,7 +25,7 @@ const world: Domain = { minLevel: 0, maxLevel: MAX_LEVEL, row: 0, col: 0,
 
 export type CameraCoverComparison = {
     initialize(builder: SubmissionBuilder): void
-    encode(builder: SubmissionBuilder, frame: GpuWebMercatorQuadCoverFrame): void
+    encode(builder: SubmissionBuilder, frame: GpuWebMercatorQuadCoverFrame, view: GeoViewSnapshot): void
     check(view: GeoViewSnapshot, words: Uint32Array, submitted: SubmittedWork): Promise<void>
     dispose(): void
 }
@@ -217,7 +217,7 @@ export async function runCameraCoverProof(
                         const commands = cover.commandsFor(frame)
                         builder.compute(cover.identityObjects().passes[0]!, [commands.evaluate, commands.generate])
                     }
-                    comparison?.encode(builder, frame)
+                    comparison?.encode(builder, frame, view)
                     builder.compute(observer.pass, [observer.command]).readback(observer.readback)
                     cover.capture(builder, frame)
                     const submitted = builder.submit()

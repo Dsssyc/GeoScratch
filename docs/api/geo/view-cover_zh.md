@@ -2,7 +2,7 @@
 docId: geo.view-cover.zh
 canonical: false
 translationOf: ./view-cover.md
-canonicalDigest: f964db17030afb964554a330048cdda222dc4d5d545db6348dccab6cc890d89a
+canonicalDigest: 553a7244fae25acbb0ee5e51713af5105dd3cc992997a7e30124ef18cc277383
 ---
 # WebMercatorQuad 视图覆盖
 
@@ -52,6 +52,50 @@ selector 释放后，仍可投影此前的真实产物；projector 自身释放�
 ADR-129 记录 CPU 生产迁移。CPU 产物现已可独立使用，地形集成属于后续独立验证阶段。
 以下 GPU API 冻结于 `ebb3336`，作为一致性参考，并继续供显式 GPU 消费者使用；
 当前地形 renderer 在其迁移阶段完成前仍使用该 GPU 路径。
+
+## 上传 CPU 产物
+
+`WebMercatorQuadCoverUpload.create(runtime, { cover })` 借用真实 selector 的不可变
+descriptor，拥有六个 GPU 缓冲，即 metadata、patch、邻接 lookup 的两组 parity。
+它不分配候选／状态反馈缓冲、shader module 或 compute pipeline。任意分配失败都会
+释放此前取得的缓冲，不释放借用的 selector 或 runtime。
+
+`prepare(selection)` 接受该 cover 的真实产物，包括 selector 释放前已返回的快照。
+每个 attempt 复制私有 metadata／patch／lookup 字节，并拥有三个临时上传 command。
+patch 只上传有效前缀；空 cut 上传无害的零记录，绘制 instance 数为零。
+新准备成功后会取代并释放此前未提交的 attempt；创建新 command 失败时保留此前
+attempt。公开 frame facts 包含产物身份／revision、原始 frame／residency epoch 和
+parity，不包含可写的 packet 字节。
+
+`encode(builder, frame)` 追加三个有序的 Scratch opaque upload step，要求当前
+prepared-view 和 queue-sequence stamp，并且只消费一次 sequence。Opaque step
+防止调用方通过公开 builder command 改写已认证 payload。过期、外部、已释放或重复
+encoding 会在提交前被拒绝。独立 uploader 可组合到同一 builder 中。消费者从
+`templates()` 借用缓冲，在全部三个上传之后读取，不修改或释放这些缓冲。
+该组件不拥有 mesh 或 indirect arguments。
+
+`builder.submit()` 返回后，`receipt(frame, submitted)` 认证真实 `SubmittedWork`，
+再使用其不可变 facts 核对精确的三个 command ID、resource ID、allocation version、
+produced content epoch 和 step 顺序。同一 submission 内对这些几何缓冲的额外写入
+非法；每个记录的 consumer read 必须位于全部上传之后，并读取对应 epoch。
+提交后修改已关闭的 builder 不会改写真实 receipt。成功 receipt 释放 attempt 的
+command，对相同 submitted work 幂等，释放后仍是不可变证据。它只证明 CPU 上传
+已排入队列，不证明 native 完成、栅格驻留或当前视角 ready。仍须观察
+`SubmittedWork.nativeOutcome`／`done` 中的原生错误。
+
+生命周期／provenance 失败以 `GEO_WEB_MERCATOR_COVER_UPLOAD_INVALID` 报告，
+`actual.reason` 包括 `foreign-cover`、`foreign-frame`、`stale-or-encoded-frame`、
+`unsubmitted-frame`、`pending-receipt`、`receipt-mismatch`、`poisoned`、`runtime`
+或 `disposed`。已发出的 attempt 必须取得 receipt 后才能继续准备。队列已执行后
+receipt 失败，或未取得 receipt 就释放已发出的 attempt，都会使 uploader 进入
+poisoned 状态，禁止静默复用部分写入。尚未产生 queue effect 的失败允许释放后用
+新的 preparation／builder 重试。Renderer 只有在 receipt 被接受后才能协调源需求。
+
+`dispose()` 幂等释放未完成 attempt 的 command、自有缓冲和 revision authority；
+借用的 CPU 产物／runtime 及已返回 receipt 保留。`facts()` 报告 poison／disposal、
+活动准备数、已接受 receipt 数和活跃逻辑缓冲字节数；字节数不包括临时 CPU packet，
+也不声称等于物理 GPU 驻留。Parity 表示存储与队列顺序，不限制在途帧数，帧准入仍
+归 renderer／controller 所有。
 
 ## 冻结的 GPU 参考
 

@@ -141,6 +141,12 @@ export type {
     WebMercatorQuadCoverPolicy, WebMercatorQuadCoverSelection, WebMercatorQuadCoverSelectionFacts,
 } from './web-mercator-quad-cover.js'
 export { WebMercatorQuadDemandProjection } from './web-mercator-quad-demand.js'
+export { WebMercatorQuadCoverUpload } from './web-mercator-quad-cover-upload.js'
+export type {
+    WebMercatorQuadCoverUploadDescriptor, WebMercatorQuadCoverUploadTemplate,
+    WebMercatorQuadCoverUploadFrame, WebMercatorQuadCoverUploadReceipt,
+    WebMercatorQuadCoverUploadResourceFact, WebMercatorQuadCoverUploadFacts,
+} from './web-mercator-quad-cover-upload.js'
 export type {
     WebMercatorQuadDemandProjectionDescriptor, WebMercatorQuadDemandProjectionFacts,
     WebMercatorQuadProjectedDemand, WebMercatorQuadProjectedDemands,

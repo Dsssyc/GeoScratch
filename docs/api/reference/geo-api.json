@@ -5947,6 +5947,218 @@
         "declaration": "type WebMercatorQuadCoverSelectionFacts = Readonly<{ candidateCount: number; coverId: string; descriptorOverflowCount: number; finestMatrixLevel: number; frameEpoch: number; lookupOverflowCount: number; maximumAdjacentLevelDelta: number; maximumCellSpanReferencePixels?: number; maximumMatrixLevel?: number; minimumCellSpanReferencePixels?: number; minimumMatrixLevel?: number; patchCount: number; selectionId: string; selectionRevision: number }>"
       },
       {
+        "id": "geoscratch/geo#WebMercatorQuadCoverUpload",
+        "name": "WebMercatorQuadCoverUpload",
+        "kind": "Class",
+        "source": "packages/geoscratch/src/geo/web-mercator-quad-cover-upload.ts",
+        "sources": [
+          "packages/geoscratch/src/geo/web-mercator-quad-cover-upload.ts"
+        ],
+        "locations": [
+          "packages/geoscratch/src/geo/web-mercator-quad-cover-upload.ts:104"
+        ],
+        "summary": "Lowers certified CPU selections to owned parity buffers through explicit, revisioned Scratch uploads.",
+        "declaration": "class WebMercatorQuadCoverUpload",
+        "members": [
+          {
+            "name": "create",
+            "kind": "Method",
+            "modifiers": [
+              "static"
+            ],
+            "summary": "",
+            "declaration": "Method create",
+            "signatures": [
+              "create(runtime: GPURuntime, input: WebMercatorQuadCoverUploadDescriptor): Promise<WebMercatorQuadCoverUpload>"
+            ]
+          },
+          {
+            "name": "dispose",
+            "kind": "Method",
+            "modifiers": [],
+            "summary": "",
+            "declaration": "Method dispose",
+            "signatures": [
+              "dispose(): void"
+            ]
+          },
+          {
+            "name": "encode",
+            "kind": "Method",
+            "modifiers": [],
+            "summary": "",
+            "declaration": "Method encode",
+            "signatures": [
+              "encode(builder: SubmissionBuilder, frame: WebMercatorQuadCoverUploadFrame): SubmissionBuilder"
+            ]
+          },
+          {
+            "name": "facts",
+            "kind": "Method",
+            "modifiers": [],
+            "summary": "",
+            "declaration": "Method facts",
+            "signatures": [
+              "facts(): WebMercatorQuadCoverUploadFacts"
+            ]
+          },
+          {
+            "name": "id",
+            "kind": "Accessor",
+            "modifiers": [],
+            "summary": "",
+            "declaration": "Accessor id",
+            "signatures": [
+              "id(): string"
+            ]
+          },
+          {
+            "name": "isDisposed",
+            "kind": "Accessor",
+            "modifiers": [],
+            "summary": "",
+            "declaration": "Accessor isDisposed",
+            "signatures": [
+              "isDisposed(): boolean"
+            ]
+          },
+          {
+            "name": "prepare",
+            "kind": "Method",
+            "modifiers": [],
+            "summary": "",
+            "declaration": "Method prepare",
+            "signatures": [
+              "prepare(selection: WebMercatorQuadCoverSelection): WebMercatorQuadCoverUploadFrame"
+            ]
+          },
+          {
+            "name": "receipt",
+            "kind": "Method",
+            "modifiers": [],
+            "summary": "",
+            "declaration": "Method receipt",
+            "signatures": [
+              "receipt(frame: WebMercatorQuadCoverUploadFrame, submitted: SubmittedWork): WebMercatorQuadCoverUploadReceipt"
+            ]
+          },
+          {
+            "name": "resources",
+            "kind": "Method",
+            "modifiers": [],
+            "summary": "",
+            "declaration": "Method resources",
+            "signatures": [
+              "resources(): readonly BufferResource[]"
+            ]
+          },
+          {
+            "name": "runtime",
+            "kind": "Accessor",
+            "modifiers": [],
+            "summary": "",
+            "declaration": "Accessor runtime",
+            "signatures": [
+              "runtime(): GPURuntime"
+            ]
+          },
+          {
+            "name": "templates",
+            "kind": "Method",
+            "modifiers": [],
+            "summary": "",
+            "declaration": "Method templates",
+            "signatures": [
+              "templates(): readonly Readonly<{ coverId: string; coverLookup: BufferResource; mapMeta: BufferResource; parity: 0 | 1; patches: BufferResource; uploadId: string }>[]"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "geoscratch/geo#WebMercatorQuadCoverUploadDescriptor",
+        "name": "WebMercatorQuadCoverUploadDescriptor",
+        "kind": "Type Alias",
+        "source": "packages/geoscratch/src/geo/web-mercator-quad-cover-upload.ts",
+        "sources": [
+          "packages/geoscratch/src/geo/web-mercator-quad-cover-upload.ts"
+        ],
+        "locations": [
+          "packages/geoscratch/src/geo/web-mercator-quad-cover-upload.ts:17"
+        ],
+        "summary": "",
+        "declaration": "type WebMercatorQuadCoverUploadDescriptor = Readonly<{ cover: WebMercatorQuadCover }>"
+      },
+      {
+        "id": "geoscratch/geo#WebMercatorQuadCoverUploadFacts",
+        "name": "WebMercatorQuadCoverUploadFacts",
+        "kind": "Type Alias",
+        "source": "packages/geoscratch/src/geo/web-mercator-quad-cover-upload.ts",
+        "sources": [
+          "packages/geoscratch/src/geo/web-mercator-quad-cover-upload.ts"
+        ],
+        "locations": [
+          "packages/geoscratch/src/geo/web-mercator-quad-cover-upload.ts:66"
+        ],
+        "summary": "",
+        "declaration": "type WebMercatorQuadCoverUploadFacts = Readonly<{ acceptedReceiptCount: number; coverId: string; disposed: boolean; id: string; parity: readonly Readonly<{ lookupBufferId: string; mapMetaBufferId: string; parity: 0 | 1; patchBufferId: string }>[]; persistentBufferBytes: number; poisoned: boolean; preparedFrameCount: number; runtimeId: string }>"
+      },
+      {
+        "id": "geoscratch/geo#WebMercatorQuadCoverUploadFrame",
+        "name": "WebMercatorQuadCoverUploadFrame",
+        "kind": "Type Alias",
+        "source": "packages/geoscratch/src/geo/web-mercator-quad-cover-upload.ts",
+        "sources": [
+          "packages/geoscratch/src/geo/web-mercator-quad-cover-upload.ts"
+        ],
+        "locations": [
+          "packages/geoscratch/src/geo/web-mercator-quad-cover-upload.ts:28"
+        ],
+        "summary": "Owned prepared upload attempt; disposing unsubmitted work releases its private bytes/commands.",
+        "declaration": "type WebMercatorQuadCoverUploadFrame = Readonly<{ coverId: string; frameEpoch: number; isDisposed: boolean; kind: \"web-mercator-quad-cover-upload-frame\"; parity: 0 | 1; residencySnapshotEpoch: number; selectionId: string; selectionRevision: number; uploadId: string; dispose: any }>"
+      },
+      {
+        "id": "geoscratch/geo#WebMercatorQuadCoverUploadReceipt",
+        "name": "WebMercatorQuadCoverUploadReceipt",
+        "kind": "Type Alias",
+        "source": "packages/geoscratch/src/geo/web-mercator-quad-cover-upload.ts",
+        "sources": [
+          "packages/geoscratch/src/geo/web-mercator-quad-cover-upload.ts"
+        ],
+        "locations": [
+          "packages/geoscratch/src/geo/web-mercator-quad-cover-upload.ts:51"
+        ],
+        "summary": "Immutable evidence of queued CPU geometry uploads, never a certificate of native success.",
+        "declaration": "type WebMercatorQuadCoverUploadReceipt = Readonly<{ coverId: string; frameEpoch: number; kind: \"web-mercator-quad-cover-upload-receipt\"; parity: 0 | 1; residencySnapshotEpoch: number; resources: readonly WebMercatorQuadCoverUploadResourceFact[]; runtimeId: string; selectionId: string; selectionRevision: number; submissionId: string; uploadId: string; viewId: string }>"
+      },
+      {
+        "id": "geoscratch/geo#WebMercatorQuadCoverUploadResourceFact",
+        "name": "WebMercatorQuadCoverUploadResourceFact",
+        "kind": "Type Alias",
+        "source": "packages/geoscratch/src/geo/web-mercator-quad-cover-upload.ts",
+        "sources": [
+          "packages/geoscratch/src/geo/web-mercator-quad-cover-upload.ts"
+        ],
+        "locations": [
+          "packages/geoscratch/src/geo/web-mercator-quad-cover-upload.ts:41"
+        ],
+        "summary": "",
+        "declaration": "type WebMercatorQuadCoverUploadResourceFact = Readonly<{ allocationVersion: number; commandId: string; contentEpoch: number; name: \"mapMeta\" | \"patches\" | \"coverLookup\"; resourceId: string; stepIndex: number }>"
+      },
+      {
+        "id": "geoscratch/geo#WebMercatorQuadCoverUploadTemplate",
+        "name": "WebMercatorQuadCoverUploadTemplate",
+        "kind": "Type Alias",
+        "source": "packages/geoscratch/src/geo/web-mercator-quad-cover-upload.ts",
+        "sources": [
+          "packages/geoscratch/src/geo/web-mercator-quad-cover-upload.ts"
+        ],
+        "locations": [
+          "packages/geoscratch/src/geo/web-mercator-quad-cover-upload.ts:18"
+        ],
+        "summary": "",
+        "declaration": "type WebMercatorQuadCoverUploadTemplate = Readonly<{ coverId: string; coverLookup: BufferResource; mapMeta: BufferResource; parity: 0 | 1; patches: BufferResource; uploadId: string }>"
+      },
+      {
         "id": "geoscratch/geo#WebMercatorQuadDemandProjection",
         "name": "WebMercatorQuadDemandProjection",
         "kind": "Class",

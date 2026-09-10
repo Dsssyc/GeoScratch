@@ -115,6 +115,7 @@ const geoValues = [
     'WebMercatorQuad',
     'WebMercatorQuadAddressCodec',
     'WebMercatorQuadCover',
+    'WebMercatorQuadCoverUpload',
     'WebMercatorQuadDemandProjection',
     'WideFixedCodec',
     'adoptVirtualRasterPageTransfer',

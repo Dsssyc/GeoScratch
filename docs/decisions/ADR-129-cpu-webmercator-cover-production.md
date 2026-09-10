@@ -79,6 +79,10 @@ Queue consumption advances native-use sequence authority; a synchronous
 versions and produced epochs, and checks ordering before consumers. A receipt
 failure after submission poisons the uploader: already queued writes cannot be
 rolled back or silently reused. Receipts remain immutable evidence after disposal.
+Receipt validation uses immutable submitted facts and private encoded-step facts;
+later mutation of a closed builder cannot rewrite an already queued product.
+Pre-issue failure permits a fresh attempt, while a possibly partially issued queue
+transaction is terminal rather than treated as an untouched retry.
 
 Terrain owns its immutable mesh and two 20-byte indirect argument buffers. It
 uploads `[elementCount, patchCount, 0, 0, 0]` from the complete CPU selection and
