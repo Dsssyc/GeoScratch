@@ -10,7 +10,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const examplesRoot = resolve(root, 'examples')
 const viteEntry = resolve(root, 'node_modules/vite/bin/vite.js')
 const tileServer = resolve(
-    root, 'examples/flowField/tile-server/.venv/bin/flow-field-tile-serve'
+    root, 'examples/backend/.venv/bin/flow-field-tile-serve'
 )
 const tileOutput = resolve(root, 'examples/flowField/tile-server/cog-collection')
 const tileManifest = resolve(tileOutput, 'runtime-manifest.json')

@@ -18,7 +18,7 @@ from .contracts import (
 )
 
 
-TILE_SERVER_ROOT = Path(__file__).resolve().parents[2]
+TILE_SERVER_ROOT = Path(__file__).resolve().parents[3] / "flowField" / "tile-server"
 DEFAULT_DESCRIPTOR_PATH = TILE_SERVER_ROOT / "source-dataset.json"
 DEFAULT_DATA_DIRECTORY = (
     TILE_SERVER_ROOT.parent.parent / "public" / "json" / "examples" / "flow"

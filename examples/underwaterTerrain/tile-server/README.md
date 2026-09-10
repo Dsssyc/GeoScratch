@@ -16,9 +16,8 @@ it is never exposed as a browser fallback.
 From the repository root:
 
 ```bash
-python3 -m venv examples/underwaterTerrain/tile-server/.venv
-examples/underwaterTerrain/tile-server/.venv/bin/python -m pip install -e 'examples/underwaterTerrain/tile-server[test]'
-examples/underwaterTerrain/tile-server/.venv/bin/dem-tile-build
+npm run backend:setup
+examples/backend/.venv/bin/dem-tile-build
 ```
 
 Generated files are written to `examples/underwaterTerrain/tile-server/cache/` and are
@@ -28,7 +27,7 @@ metadata semantics.
 ## Serve
 
 ```bash
-examples/underwaterTerrain/tile-server/.venv/bin/dem-tile-serve --port 8787
+examples/backend/.venv/bin/dem-tile-serve --port 8787
 ```
 
 Endpoints are `/health`, `/manifest.json`,
@@ -40,8 +39,8 @@ the server reads only the requested COG window and does not pre-slice the world.
 ## Verify
 
 ```bash
-examples/underwaterTerrain/tile-server/.venv/bin/python -m pytest examples/underwaterTerrain/tile-server/tests
-examples/underwaterTerrain/tile-server/.venv/bin/rio cogeo validate examples/underwaterTerrain/tile-server/cache/dem.cog.tif
+examples/backend/.venv/bin/python -m pytest examples/underwaterTerrain/tile-server/tests
+examples/backend/.venv/bin/rio cogeo validate examples/underwaterTerrain/tile-server/cache/dem.cog.tif
 ```
 
 The second command is the installed rio-cogeo 7.0.2 CLI equivalent of the goal's

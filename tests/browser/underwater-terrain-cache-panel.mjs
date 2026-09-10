@@ -15,8 +15,8 @@ const workerBuildEntry = resolve(
     repositoryRoot,
     'packages/geoscratch/bin/geoscratch-worker.mjs'
 )
-const tileBuildEntry = resolve(tileServerRoot, '.venv/bin/dem-tile-build')
-const tileServeEntry = resolve(tileServerRoot, '.venv/bin/dem-tile-serve')
+const tileBuildEntry = resolve(examplesRoot, 'backend/.venv/bin/dem-tile-build')
+const tileServeEntry = resolve(examplesRoot, 'backend/.venv/bin/dem-tile-serve')
 const timeout = positiveInteger(
     process.env.UNDERWATER_TERRAIN_CACHE_PANEL_TIMEOUT_MS,
     90_000

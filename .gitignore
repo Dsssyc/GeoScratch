@@ -49,6 +49,12 @@ output/
 examples/public/json/examples/*
 examples/public/scratch-workers/
 *.bin
+examples/backend/.venv/
+examples/backend/.pytest_cache/
+examples/backend/**/__pycache__/
+examples/backend/**/*.py[cod]
+examples/backend/src/*.egg-info/
+examples/backend/build/
 examples/underwaterTerrain/tile-server/.venv/
 examples/underwaterTerrain/tile-server/cache/
 examples/underwaterTerrain/tile-server/.pytest_cache/
