@@ -3,13 +3,64 @@ function replace(source, from, to) {
     if (!source.includes(from))
         throw new Error('Experiment patch anchor missing: ' + from.slice(0, 90)); return source.replace(from, to)
 }
-export function transform(source, id, mode, { experimentDirectory: dir, outputDirectory, coordinateBits }) {
-    if (!['gpu', 'shadow', 'cpu-cover', 'cpu-all'].includes(mode))
+export function transform(source, id, mode, { experimentDirectory: dir, outputDirectory, coordinateBits, feedbackDelayMs = 0 }) {
+    if (!['gpu', 'gpu-eager', 'gpu-observed', 'shadow', 'cpu-cover', 'cpu-all'].includes(mode))
         throw new Error('Invalid experimental execution mode')
+    const gpuMode = mode === 'gpu' || mode === 'gpu-eager' || mode === 'gpu-observed'
+    if ((mode === 'gpu-eager' || mode === 'gpu-observed') && id.endsWith('/geo/web-mercator-terrain-renderer.ts')) {
+        const heldFrame = 'ready.coverFrame.frameEpoch >= latestIssuedFrameEpoch'
+        if (source.split(heldFrame).length !== 3) throw new Error('Expected both delayed-feedback guards')
+        source = source.replaceAll(heldFrame, 'ready.coverFrame.frameEpoch > latestIssuedFrameEpoch')
+    }
+    if (mode === 'gpu-observed' && id.endsWith('/geo/web-mercator-terrain-renderer.ts')) {
+        source = replace(source, '    let latestIssuedFrameEpoch = 0',
+            '    let latestIssuedFrameEpoch = 0\n    let latestResourceObservationFrameEpoch = 0')
+        const originalReconciliation = `        const reconciliation = demandFeedback === undefined
+            ? undefined
+            : virtualRaster.reconcileViewDemands(coverViewDemands(
+                virtualRaster,
+                terrainFieldLayer,
+                demandFeedback,
+                consumed.view
+            ))
+        if (reconciliation !== undefined) {
+            state.virtualRequestedPageCount += reconciliation.requestedCount
+        }`
+        source = replace(source, originalReconciliation, '')
+        source = replace(source, '        if (ready.decisionSerial !== latestDecisionSerial) {',
+            `        // Full source intent retains its observed view and residency provenance.
+        // Renderer-owned source/coverage identity is immutable for this lifetime.
+        const observedDemand = consumed.demandFeedback
+        const reconciliation = observedDemand !== undefined &&
+            ready.coverFrame.frameEpoch > latestResourceObservationFrameEpoch
+            ? virtualRaster.reconcileViewDemands(coverViewDemands(
+                virtualRaster, terrainFieldLayer, observedDemand, consumed.view))
+            : undefined
+        if (reconciliation !== undefined) {
+            latestResourceObservationFrameEpoch = ready.coverFrame.frameEpoch
+            state.virtualRequestedPageCount += reconciliation.requestedCount
+        }
+        const residencyWorkCount = reconciliation === undefined ? 0 :
+            virtualRaster.scheduler.inspect().activeRequestCount
+        if (ready.decisionSerial !== latestDecisionSerial) {`)
+        source = replace(source, `                residencySettlement: Promise.resolve(undefined),
+                residencyWorkCount: 0,
+                needsFollowUp: false,
+                superseded: true,`, `                residencySettlement: reconciliation?.settlement ?? Promise.resolve(undefined),
+                residencyWorkCount,
+                needsFollowUp: false,
+                superseded: true,`)
+        source = replace(source, '            residencyWorkCount: reconciliation?.requestedCount ?? 0,',
+            '            residencyWorkCount,')
+    }
+    if (gpuMode && feedbackDelayMs > 0 && id.endsWith('/geo/web-mercator-terrain-renderer.ts')) {
+        source = replace(source, '    const [ coverFeedback, demandFeedback ] = await Promise.all([',
+            `    await new Promise(resolve => setTimeout(resolve, ${feedbackDelayMs}))\n    const [ coverFeedback, demandFeedback ] = await Promise.all([`)
+    }
     if (coordinateBits === 52 && id.endsWith('/examples/underwaterTerrain/dem-source.ts'))
         source = replace(source, 'export const DEM_WEB_MERCATOR_COORDINATE_BITS = 40', 'export const DEM_WEB_MERCATOR_COORDINATE_BITS = 52')
     if (id.endsWith('/examples/underwaterTerrain/application.ts')) {
-        source = replace(source, '    proof?.observeRuntime(runtime)', `    ;(globalThis as any).__terrainEval = { runtime, source, events: [], mode: '${mode}' }
+        source = replace(source, '    proof?.observeRuntime(runtime)', `    ;(globalThis as any).__terrainEval = { runtime, source, events: [], feedbackCpu: [], mode: '${mode}' }
     proof?.observeRuntime(runtime)`)
         source = replace(source, '    const initialized = await graph.initialize()', `    Object.assign((globalThis as any).__terrainEval, { graph, virtualRaster })
     const initialized = await graph.initialize()`)
@@ -19,7 +70,7 @@ export function transform(source, id, mode, { experimentDirectory: dir, outputDi
             if (timestampAudit) timestampAudit.frameEpoch = frameNumber
             const startedAt = performance.now()`)
     }
-    if (mode !== 'gpu' && id.endsWith('/geo/gpu-web-mercator-quad-cover.ts')) {
+    if (!gpuMode && id.endsWith('/geo/gpu-web-mercator-quad-cover.ts')) {
         source = `// Isolated experiment source substitution; no public API change.
 import { CpuCover } from '${dir}/cpu-cover.ts'
 const experimentalSelectors = new WeakMap<object, CpuCover>()
@@ -139,7 +190,7 @@ const experimentalSelectors = new WeakMap<object, CpuCover>()
             kind: 'gpu-web-mercator-quad-demand-projection-feedback'`)
         }
     }
-    if (mode !== 'gpu' && mode !== 'shadow' && id.endsWith('/geo/web-mercator-terrain-renderer.ts')) {
+    if (!gpuMode && mode !== 'shadow' && id.endsWith('/geo/web-mercator-terrain-renderer.ts')) {
         source = replace(source, "name: 'cover-map-meta-to-cover-compute',", "name: 'cpu-map-meta-to-terrain-draw',")
         source = replace(source, 'consumerCommandId: coverCommands.generate.id,', 'consumerCommandId: terrainCommand.id,')
         source = replace(source, "selectionPath: 'gpu-camera-inverse-webmercatorquad-cover',", "selectionPath: 'experimental-cpu-camera-cover',")
@@ -147,7 +198,7 @@ const experimentalSelectors = new WeakMap<object, CpuCover>()
         if (mode === 'cpu-all')
             source = source.replaceAll('ready.coverFrame.frameEpoch >= latestIssuedFrameEpoch', 'ready.coverFrame.frameEpoch > latestIssuedFrameEpoch')
     }
-    if (mode !== 'gpu' && mode !== 'shadow' && id.endsWith('/tests/browser/support/underwater-terrain-proof.ts'))
+    if (!gpuMode && mode !== 'shadow' && id.endsWith('/tests/browser/support/underwater-terrain-proof.ts'))
         source = replace(source, "    canvas.dataset.frames = String(submittedFrames)", `    canvas.dataset.cpuSelectionUploadCount = String((globalThis as any).__terrainEval?.cpuSelectionUploadCount ?? 0)
     canvas.dataset.frames = String(submittedFrames)`)
     if (id.endsWith('/geo/virtual-raster-demand.ts'))
@@ -157,6 +208,24 @@ const experimentalSelectors = new WeakMap<object, CpuCover>()
         source = replace(source, '        const demandGeneration = ++generation\n        const normalized = Object.freeze({', `        if((globalThis as any).__terrainEval) (globalThis as any).__terrainEval.lastDemand = demandSet
         const demandGeneration = ++generation
         const normalized = Object.freeze({`)
+    if (id.endsWith('/geo/web-mercator-terrain-renderer.ts')) {
+        source = replace(source, `    function settleConsumedFeedback(
+        ready: PendingFeedback,
+        consumed: ConsumedFeedback
+    ): void {`, `    function settleConsumedFeedback(ready: PendingFeedback, consumed: ConsumedFeedback): void {
+        const started = performance.now()
+        try { applyMeasuredFeedback(ready, consumed) }
+        finally {
+            const rows = (globalThis as any).__terrainEval?.feedbackCpu
+            if (rows && rows.length < 4096) rows.push({started, ms:performance.now()-started, frameEpoch:ready.coverFrame.frameEpoch})
+        }
+    }
+
+    function applyMeasuredFeedback(
+        ready: PendingFeedback,
+        consumed: ConsumedFeedback
+    ): void {`)
+    }
     if (id.endsWith('/geo/gpu-web-mercator-quad-cover.ts') || id.endsWith('/geo/web-mercator-terrain-renderer.ts') || id.endsWith('/examples/underwaterTerrain/application.ts'))
         writeFileSync(outputDirectory + '/' + mode + '-' + id.split('/').at(-1), source)
     return source

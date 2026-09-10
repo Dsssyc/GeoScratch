@@ -18,10 +18,12 @@ const mode = process.argv[2] ?? 'gpu'
 const suite = process.argv[3] ?? 'performance'
 const coordinateBits = Number(process.env.TERRAIN_PLACEMENT_BITS ?? 40)
 const delayMs = Number(process.env.TERRAIN_PLACEMENT_TILE_DELAY_MS ?? 0)
-if (!['gpu', 'shadow', 'cpu-cover', 'cpu-all'].includes(mode) ||
+const feedbackDelayMs = Number(process.env.TERRAIN_PLACEMENT_FEEDBACK_DELAY_MS ?? 0)
+if (!['gpu', 'gpu-eager', 'gpu-observed', 'shadow', 'cpu-cover', 'cpu-all'].includes(mode) ||
     !['performance', 'reveal', 'render', 'streaming'].includes(suite) ||
-    ![40, 52].includes(coordinateBits) || !Number.isInteger(delayMs) || delayMs < 0 || delayMs > 2000) {
-    throw new Error('Usage: node run.mjs [gpu|shadow|cpu-cover|cpu-all] [performance|reveal|render|streaming]; bits 40|52, tile delay 0..2000 ms')
+    ![40, 52].includes(coordinateBits) || !Number.isInteger(delayMs) || delayMs < 0 || delayMs > 2000 ||
+    !Number.isInteger(feedbackDelayMs) || feedbackDelayMs < 0 || feedbackDelayMs > 2000) {
+    throw new Error('Usage: node run.mjs [gpu|gpu-eager|gpu-observed|shadow|cpu-cover|cpu-all] [performance|reveal|render|streaming]; bits 40|52, delays 0..2000 ms')
 }
 const outputDirectory = process.env.TERRAIN_PLACEMENT_OUTPUT
     ? resolve(process.env.TERRAIN_PLACEMENT_OUTPUT)
@@ -55,7 +57,7 @@ try {
             name: 'isolated-terrain-placement', enforce: 'pre',
             transform(code, id) {
                 return transform(code, id.split('?')[0], mode,
-                    { experimentDirectory, outputDirectory, coordinateBits })
+                    { experimentDirectory, outputDirectory, coordinateBits, feedbackDelayMs })
             },
         }],
         server: { host: '127.0.0.1', port: 0, fs: { allow: [root, outputDirectory] } },
@@ -104,7 +106,7 @@ try {
         const runGate = await prepareGate(root, outputDirectory, suite)
         result = await runGate(browser, {
             baseUrl, tileBaseUrl, outputDirectory, coordinateBits,
-            selectionPath: ['gpu', 'shadow'].includes(mode)
+            selectionPath: ['gpu', 'gpu-eager', 'gpu-observed', 'shadow'].includes(mode)
                 ? 'gpu-camera-inverse-webmercatorquad-cover' : 'experimental-cpu-camera-cover',
         })
         if (result.failures.length) throw new Error(`Terrain gate failed: ${result.failures.join('; ')}`)
@@ -145,7 +147,7 @@ const cleanup = {
 const status = error || events.length || cleanupFailures.length || Object.values(cleanup).some(value => !value) ||
     before.sourceHash !== after.sourceHash || before.dataHash !== after.dataHash ||
     before.experimentHash !== after.experimentHash ? 'failed' : 'passed'
-const record = { status, mode, suite, coordinateBits, delayMs, delayedRequestCount,
+const record = { status, mode, suite, coordinateBits, delayMs, feedbackDelayMs, delayedRequestCount,
     browserVersion: browser?.version(), before, after, result, error, events, cleanup, cleanupFailures,
     ...(error ? { serviceLog } : {}), outputDirectory }
 await writeFile(`${outputDirectory}/result.json`, JSON.stringify(record, null, 2) + '\n')

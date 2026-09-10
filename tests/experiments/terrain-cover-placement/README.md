@@ -12,6 +12,7 @@ Run from the repository root, with dependencies, existing Worker artifacts and
 
 ```sh
 node tests/experiments/terrain-cover-placement/run.mjs gpu performance
+node tests/experiments/terrain-cover-placement/run.mjs gpu-eager reveal
 node tests/experiments/terrain-cover-placement/run.mjs cpu-cover performance
 node tests/experiments/terrain-cover-placement/run.mjs cpu-all performance
 node tests/experiments/terrain-cover-placement/run.mjs cpu-all render
@@ -20,6 +21,7 @@ node tests/experiments/terrain-cover-placement/run.mjs gpu reveal
 node tests/experiments/terrain-cover-placement/run.mjs cpu-all reveal
 TERRAIN_PLACEMENT_BITS=52 node tests/experiments/terrain-cover-placement/run.mjs shadow render
 TERRAIN_PLACEMENT_TILE_DELAY_MS=80 node tests/experiments/terrain-cover-placement/run.mjs cpu-all performance
+TERRAIN_PLACEMENT_FEEDBACK_DELAY_MS=40 node tests/experiments/terrain-cover-placement/run.mjs gpu-eager reveal
 ```
 
 Run benchmark processes serially. `TERRAIN_PLACEMENT_OUTPUT` optionally selects an
@@ -32,6 +34,11 @@ It verifies production/Flow source and backend data hashes before/after executio
 Modes:
 
 - `gpu`: current production selection and demand execution.
+- `gpu-eager`: keep GPU selection/demand and all currentness checks, but start
+  asynchronous feedback consumption without waiting for a newer frame submission.
+- `gpu-observed`: additionally reconcile monotonically newer complete source-demand
+  observations with their original view provenance. Old observations cannot update
+  current geometry/readiness, and active retained requests participate in settlement.
 - `cpu-cover`: CPU cover plus fresh Scratch uploads; existing GPU source demand and
   delayed feedback remain. Actual upload-to-draw epochs are validated.
 - `cpu-all`: CPU cover and CPU source intent. Geometry is uploaded through Scratch,
@@ -52,6 +59,8 @@ previously seeing a converged cover is insufficient. Do not sum cross-scope medi
 `render` and `streaming` reuse the repository's existing browser-gate assertions.
 `reveal` starts continuous camera motion before new fine resources have loaded and
 counts source requests issued during motion versus only after the camera stops.
+`TERRAIN_PLACEMENT_FEEDBACK_DELAY_MS` delays GPU feedback consumption before mapping
+for a bounded stress test. It is separate from network delay and is not a GPU timer.
 Adapters remove their backend build/service startup and change only the expected
 producer location, CPU upload count and explicitly selected coordinate bits. The
 owning runner independently checks actual process cleanup. GPU stage names or GPU
