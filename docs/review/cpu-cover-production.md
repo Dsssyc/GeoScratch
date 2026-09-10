@@ -22,7 +22,7 @@ Baseline: `ebb3336`. Decision: [ADR-129](../decisions/ADR-129-cpu-webmercator-co
   proof-only uniform/storage mirrors because reference buffers omit COPY_SRC; their
   original usage flags are unchanged. Full checks pass: 1,763 tests, two opt-in
   pending, typecheck, build and bilingual docs (848 public symbols).
-- CPU terrain integration implemented: the production renderer selects/project on
+- `028246a`: CPU terrain integration implemented: the production renderer selects/project on
   CPU, uploads six parity geometry buffers plus two indexed-argument buffers, and
   runs only its terrain GPU pass. It removes cover/demand readback and compute
   objects, while retaining the frozen terrain shader and existing resource pipeline.
@@ -36,7 +36,12 @@ Baseline: `ebb3336`. Decision: [ADR-129](../decisions/ADR-129-cpu-webmercator-co
 - Native submission observation/readback transaction gate passes against the stable
   completed build (`renderer-native-observation-2`). An earlier overlapping build
   replaced served dist modules and invalidated a probe; that run is excluded.
-- Pending: native high-refresh production/reference comparison, recorded below when complete.
+- Four interleaved 52-bit headless production/reference performance runs pass at
+  `028246a`, in CPU/GPU/CPU/GPU order. The frozen GPU renderer is explicitly replayed
+  from `ebb3336`; current CPU source is never labelled as GPU. Results and limits
+  appear below. The high-refresh secondary-display attempt was blocked before
+  browser launch because no qualifying non-main display was available. It is not
+  counted as a performance result; the existing two-frame policy is unchanged.
 
 ## Contract review
 
@@ -77,3 +82,75 @@ Each completed slice runs focused checks, typecheck, tests, build and matching
 bilingual API/documentation gates before commit. Revert dependent slices in reverse
 order. Frozen Flow Layer, Flow Field execution placement and backend data are outside
 this terrain migration; reference files are enforced by `camera-cover-gpu-reference.test.js`.
+
+## Production/reference performance
+
+The four accepted runs use Chrome 152.0.7977.83, Apple Metal-3 WebGPU, 52-bit
+coordinates, 1280 x 800 reference pixels, DPR 1, existing terrain data and a
+headless host cadence of approximately 16.7 ms. They are `headless-cpu-1`,
+`headless-gpu-1`, `headless-cpu-2`, `headless-gpu-2` under
+`/tmp/geoscratch-cpu-production-`. Each executes 90 shaded and 90 wireframe camera
+moves without timers, then repeats with sampled GPU timestamps. The table gives
+the two **per-run** statistics as ranges, not pooled percentiles. Construction is
+the whole synchronous renderer call in these fixed-size traces; observation runs
+from the controller submitted callback to its observed callback, after construction,
+and includes native completion plus callback/proof scheduling. Neither is isolated cover arithmetic.
+
+| Scope | CPU production | Frozen GPU reference |
+| --- | ---: | ---: |
+| Shaded construction p50 | 1.4 ms | 1.3 ms |
+| Shaded native observation p50 | 6.6–7.0 ms | 8.5–8.6 ms |
+| Shaded native observation p95 | 10.3–10.8 ms | 11.0–11.3 ms |
+| Wireframe construction p50 | 1.2–1.9 ms | 1.2 ms |
+| Wireframe native observation p50 | 8.3–9.7 ms | 8.7–9.3 ms |
+| Wireframe native observation p95 | 11.0–15.3 ms | 11.1–14.1 ms |
+| Submitted frames per 90 moves | 90 | 91, including confirmation |
+| Submitted-camera lag p95 | 0 moves | 0 moves |
+| First executor request after cold move | 10.9–11.4 ms | 20.5–22.7 ms |
+| Acknowledged selected-resource readiness, 20-ms polling | 149.8–170.4 ms | 147.2–168.7 ms |
+
+The CPU path removes GPU cover, source-projection and argument-preparation passes;
+timestamped traces contain only terrain draw. Those diagnostic traces have different
+instrumentation overhead and pass-duration variability; their medians must not be
+added to untimed construction or observation values. All traces retain the two-frame
+in-flight bound, 89 raw lag samples, current-capture convergence, A-B-A equality and
+zero pending controller/query work after draining. Every owned browser, Vite and
+existing-data service closes; source, experiment and backend-data hashes are stable.
+
+These results support earlier resource intent and lower shaded observation latency
+in this tested setup. They do **not** show lower synchronous construction, consistently
+faster wireframe completion, or earlier fully acknowledged resource readiness.
+Whole-scenario page-main-thread task time also varies: CPU 1,216.5–1,583.2 ms versus
+GPU 1,519.2–1,720.1 ms. It includes MapLibre, proof publication, loading, asynchronous
+callbacks and differing frame counts, so it is not isolated terrain CPU cost. No
+universal speedup or 144-Hz production result is claimed. The earlier high-refresh
+prototype comparison remains historical evidence, not a measurement of this new
+production implementation.
+
+At this descriptor (256 patch capacity), production owns 27,936 logical bytes for
+six geometry upload buffers and 40 bytes for two indirect argument buffers. Cover
+facts separately report 14,380 bytes of persistent typed-array CPU workspace; that
+excludes JS objects and temporary products. The renderer owns 13 GPU resources in
+total, including mesh/config/depth, with 5,043,584 logical bytes at 1280 x 800.
+These scoped values exclude borrowed Virtual Raster and Surface resources and are
+not physical driver-memory measurements. The historical renderer's
+`persistentFacts()` counted runtime-wide resources, so its total must not be
+subtracted directly from this new scoped total.
+
+A separate 150-ms delayed-tile moving-reveal run
+(`/tmp/geoscratch-cpu-production-reveal-1/result.json`) issues all 18 new requests
+during 90 continuous camera moves and none only after motion stops. The latest
+capture and demand generation converge without another user camera event; exact
+selected resource readiness is observed 169.2 ms after motion stops. The immediate
+readiness snapshot still has one native frame in flight; later cleanup observes
+zero pending work and no retained actions or failures. Resource readiness is not
+misreported as completion of that last native draw.
+
+## Final rollback
+
+`028246a` is the production integration checkpoint; its full reverse patch passed
+`git apply --reverse --check` immediately after verification. To restore the frozen
+GPU terrain producer, revert this later report commit first, then `git revert 028246a`.
+The independent CPU APIs can remain unused, or be removed by reverting `7974b5b`,
+then `b660d22`. Revert `2fd6d8f` only to remove the reference guard itself. Never reset
+the shared working tree or regenerate backend data as a rollback method.

@@ -2,7 +2,7 @@
 docId: geo.virtual-raster.zh
 canonical: false
 translationOf: ./virtual-raster.md
-canonicalDigest: 630df069126b550f4abfcce0b72a20c22d16bd045c413c5ab6cdbc68a1bc9436
+canonicalDigest: 99878612e8a682eee8518c8c3c645b9f862b3e95829d25cc24ff4c5696b94e3f
 ---
 # Virtual Raster
 
@@ -52,7 +52,7 @@ Demand producer 保留 `desiredSampleLevel` 与 `sourceLevelCeiling`；下落为
 由该 runtime-owned producer 生成的 exact-resident 与 missing page 一起交给 scheduler；
 foreign 或超容量 set 会失败，而不会被静默重排或截断。Scheduler 对 resident page 执行
 mark-used，只请求 missing page。因此紧张 atlas 不会让两个当前 detail page 在一个空闲
-slot 中相互驱逐。完整 cover feedback 不受这项 residency budget 截断。
+slot 中相互驱逐。完整几何 cover 不受这项 residency budget 截断。
 
 `VirtualRasterResidencyFacts.staleResponseCount` 同时包含被拒绝的过时代 staging／failure
 操作，以及原本有效、但被新需求移除的 staged page。撤销 staged page 会在 GPU publication

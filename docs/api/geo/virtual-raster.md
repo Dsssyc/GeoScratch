@@ -65,7 +65,7 @@ therefore be zero. Reconciliation sends both exact-resident and missing selected
 from that runtime-owned producer to the scheduler; foreign or over-capacity sets fail
 instead of being silently reordered or truncated. The scheduler marks resident pages
 used and requests only missing pages, so a tight atlas cannot repeatedly evict two
-current detail pages through one free slot. Complete cover feedback remains independent
+current detail pages through one free slot. The complete geometry cover remains independent
 from this residency budget.
 
 `VirtualRasterResidencyFacts.staleResponseCount` includes both rejected obsolete
