@@ -7,7 +7,15 @@ implemented under ADR-128. Historical measurements below retain their original s
 
 ## Recommendation
 
-**Keep the production GPU selector and repair feedback/resource progress first.**
+**Keep the production GPU selector and the completed feedback/resource correction.**
+The follow-on [host-submission comparison](./terrain-host-submission-comparison.md) now
+includes a bounded diagnostic optimization, 52-bit performance, and native 144 Hz
+non-main-display comparisons. CPU retains lower observed latency in that scene;
+GPU construction uses modestly less synchronous CPU. The production choice in this
+change reflects the existing verified ownership contract, not a GPU performance win.
+CPU production adoption still needs the explicit geometry-product/upload contract
+and construction-failure proofs identified below.
+
 The earlier recommendation of CPU cover plus CPU source intent was too strong: its
 largest advantage was measured against a GPU feedback policy which prevented loading
 during continuous motion. Correcting that policy also restores GPU-path request progress.

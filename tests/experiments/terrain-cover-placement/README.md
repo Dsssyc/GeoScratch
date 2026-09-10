@@ -25,6 +25,8 @@ TERRAIN_PLACEMENT_TILE_DELAY_MS=80 node tests/experiments/terrain-cover-placemen
 TERRAIN_PLACEMENT_FEEDBACK_DELAY_MS=40 node tests/experiments/terrain-cover-placement/run.mjs gpu-eager reveal
 TERRAIN_PLACEMENT_HOST_PROFILE=1 node tests/experiments/terrain-cover-placement/run.mjs gpu performance
 TERRAIN_PLACEMENT_HOST_TIMING=1 node tests/experiments/terrain-cover-placement/run.mjs gpu performance
+TERRAIN_PLACEMENT_SECONDARY_DISPLAY=1 TERRAIN_PLACEMENT_BITS=52 node tests/experiments/terrain-cover-placement/run.mjs gpu performance
+TERRAIN_PLACEMENT_SUBMISSION_BASELINE=006c7d2 TERRAIN_PLACEMENT_BITS=52 node tests/experiments/terrain-cover-placement/run.mjs gpu performance
 ```
 
 Run benchmark processes serially. `TERRAIN_PLACEMENT_OUTPUT` optionally selects an
@@ -78,6 +80,29 @@ for each trace, including its final settlement frames. Parent/child scopes overl
 and must not be summed. Native timings measure synchronous API calls, not GPU work
 or transfer completion. Timer resolution produces zero-duration samples; use the
 aggregate attribution and verify improvements with both host probes disabled.
+
+The performance/reveal suites also record DevTools `TaskDuration` and its script,
+layout and style subsets across the complete scenario. These are page-main-thread
+task times, including MapLibre, proof publication and asynchronous callbacks; they
+exclude Worker CPU and GPU duration. They are not isolated terrain CPU time, and
+the subsets must not be added to `TaskDuration`.
+
+`TERRAIN_PLACEMENT_SECONDARY_DISPLAY=1` runs only the performance suite. On macOS it
+requires a connected non-main display of at least 100 Hz with room for the whole
+window. It launches a dedicated temporary Chrome using `open -g`, verifies window
+bounds and foreground preservation, uses its single existing page, then verifies
+placement again and closes only that owned process/profile. It never changes
+display settings or uses existing Chrome windows. Actual rAF intervals determine
+the observed cadence; a display's advertised refresh rate is not an FPS result.
+Camera lag is measured from the preceding issued pose to the last submitted pose,
+separately from capture-revision lag and the two-frame in-flight bound.
+
+`TERRAIN_PLACEMENT_SUBMISSION_BASELINE=<commit>` substitutes only the three diagnostic
+implementation modules changed by the host optimization, from the explicit Git
+commit. Served baseline hashes are recorded separately from checkout hashes. This
+allows interleaved before/after runs without resetting a shared checkout; the cover,
+renderer, scheduling, shaders and proof instrumentation remain identical. It is
+intentionally bounded to this diagnostic comparison, not a general version switch.
 
 `render` and `streaming` reuse the repository's existing browser-gate assertions.
 `lifecycle` reuses the native terrain construction, provenance, rapid-camera and

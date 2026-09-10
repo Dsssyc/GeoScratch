@@ -53,6 +53,9 @@ export async function scenarios(options) {
             }
             proof.resetFrameTiming()
             const startFrame = audit.graph.state().frame, intervals = []
+            const startSubmitted = Number(canvas.dataset.frames), cameraLags = []
+            const controllerBefore = audit.frameController.snapshot()
+            let maximumInFlight = 0, maximumCaptureLag = 0
             let previous
             const started = performance.now()
             for (let frame = 0; frame < 90; frame++) {
@@ -60,7 +63,19 @@ export async function scenarios(options) {
                 if (previous !== undefined)
                     intervals.push(at - previous)
                 previous = at
+                if (frame > 0) {
+                    const camera = JSON.parse(canvas.dataset.cameraView ?? 'null')
+                    const submittedIndex = Number(canvas.dataset.frames) > startSubmitted && camera
+                        ? Math.round((camera.center[0] - base.center[0]) / .000003) : -1
+                    if (submittedIndex > frame - 1)
+                        throw new Error('Camera lag observation belongs to a different trace')
+                    cameraLags.push(frame - 1 - submittedIndex)
+                }
                 proof.moveCamera({ ...base, center: [base.center[0] + (frame % 90) * .000003, base.center[1] + (frame % 90) * .000001] })
+                const controller = audit.frameController.snapshot()
+                maximumInFlight = Math.max(maximumInFlight, controller.inFlightFrameCount)
+                maximumCaptureLag = Math.max(maximumCaptureLag,
+                    (controller.latestCaptureRevision ?? 0) - (controller.submittedCaptureRevision ?? 0))
                 if (canvas.dataset.status === 'error')
                     throw new Error(canvas.dataset.error)
             }
@@ -77,6 +92,10 @@ export async function scenarios(options) {
                     (byPass[p.label] ??= []).push(p.ms)
             traces.push({
                 presentation, timestamped, started, finished: performance.now(), elapsedMs: elapsed, admittedFrames: audit.graph.state().frame - startFrame, hostFrameIntervalsMs: stats(intervals), timing,
+                controllerBefore, maximumInFlight, maximumCaptureLag,
+                submittedCameraLagFrames: stats(cameraLags),
+                submittedCameraLagSamples: cameraLags,
+                maximumSubmittedCameraLagFrames: Math.max(0, ...cameraLags),
                 gpuPasses: Object.fromEntries(Object.entries(byPass).map(([label, v]) => [label, stats(v)])), gpuRecords: records,
                 feedbackAdoptionCpuMs: stats(adoptionRows.map(row => row.ms)),
                 state: audit.graph.state(), controller: audit.frameController.snapshot()

@@ -12,6 +12,7 @@ import { scenarios } from './scenarios.mjs'
 import { movingReveal } from './reveal.mjs'
 import { prepareGate } from './gate-adapters.mjs'
 import { instrumentHostTiming, installHostTiming, summarizeHostTiming } from './host-timing.mjs'
+import { launchSecondaryBrowser } from './secondary-browser.mjs'
 
 const experimentDirectory = dirname(fileURLToPath(import.meta.url))
 const root = resolve(experimentDirectory, '../../..')
@@ -22,6 +23,8 @@ const delayMs = Number(process.env.TERRAIN_PLACEMENT_TILE_DELAY_MS ?? 0)
 const feedbackDelayMs = Number(process.env.TERRAIN_PLACEMENT_FEEDBACK_DELAY_MS ?? 0)
 const hostProfile = process.env.TERRAIN_PLACEMENT_HOST_PROFILE === '1'
 const hostTiming = process.env.TERRAIN_PLACEMENT_HOST_TIMING === '1'
+const secondaryDisplay = process.env.TERRAIN_PLACEMENT_SECONDARY_DISPLAY === '1'
+const submissionBaseline = process.env.TERRAIN_PLACEMENT_SUBMISSION_BASELINE
 if (!['gpu', 'gpu-original', 'gpu-eager', 'gpu-observed', 'shadow', 'cpu-cover', 'cpu-all'].includes(mode) ||
     !['performance', 'reveal', 'render', 'streaming', 'lifecycle'].includes(suite) ||
     ![40, 52].includes(coordinateBits) || !Number.isInteger(delayMs) || delayMs < 0 || delayMs > 2000 ||
@@ -30,6 +33,16 @@ if (!['gpu', 'gpu-original', 'gpu-eager', 'gpu-observed', 'shadow', 'cpu-cover',
 }
 if ((hostProfile || hostTiming) && !['performance', 'reveal'].includes(suite))
     throw new Error('Host profiling/timing requires the performance or reveal suite')
+if (secondaryDisplay && suite !== 'performance')
+    throw new Error('Secondary-display proof requires the single-page performance suite')
+if (submissionBaseline !== undefined && !/^[a-f0-9]{7,40}$/.test(submissionBaseline))
+    throw new Error('Submission baseline must be an explicit Git commit hash')
+const submissionSources = new Map(submissionBaseline === undefined ? [] : [
+    'gpu-operation.ts', 'runtime-diagnostics.ts', 'submission-native-observation.ts',
+].map(name => {
+    const file = `packages/geoscratch/src/scratch/gpu/${name}`
+    return [`${root}/${file}`, execFileSync('git', ['show', `${submissionBaseline}:${file}`], { cwd: root }).toString()]
+}))
 const rendererBaseline = ['gpu-original', 'gpu-eager', 'gpu-observed'].includes(mode)
     ? execFileSync('git', ['show', '117af0b:packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts'], { cwd: root }).toString()
     : undefined
@@ -40,7 +53,7 @@ await mkdir(outputDirectory, { recursive: true })
 const serverRoot = `${root}/examples/underwaterTerrain/tile-server`
 const before = await provenance()
 const port = await freePort()
-let tile, vite, browser, result, error
+let tile, vite, browser, result, error, secondary
 const events = [], serviceLog = [], cleanupFailures = []
 let delayedRequestCount = 0
 try {
@@ -65,7 +78,7 @@ try {
             name: 'isolated-terrain-placement', enforce: 'pre',
             transform(code, id) {
                 const path = id.split('?')[0]
-                const source = transform(code, path, mode,
+                const source = transform(submissionSources.get(path) ?? code, path, mode,
                     { experimentDirectory, outputDirectory, coordinateBits, feedbackDelayMs, rendererBaseline, hostTiming })
                 return hostTiming ? instrumentHostTiming(source, path) : source
             },
@@ -75,7 +88,8 @@ try {
     await vite.listen()
     const baseUrl = vite.resolvedUrls.local[0].replace(/\/$/, '')
     const tileBaseUrl = `http://127.0.0.1:${port}`
-    browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--enable-unsafe-webgpu'] })
+    secondary = secondaryDisplay ? await launchSecondaryBrowser() : undefined
+    browser = secondary?.browser ?? await chromium.launch({ channel: 'chrome', headless: true, args: ['--enable-unsafe-webgpu'] })
     const newContext = browser.newContext.bind(browser)
     browser.newContext = async options => {
         const context = await newContext(options)
@@ -90,6 +104,7 @@ try {
             await route.continue()
         })
         context.on('page', page => page.on('pageerror', failure => events.push(failure.message)))
+        for (const page of context.pages()) page.on('pageerror', failure => events.push(failure.message))
         return context
     }
     if (suite === 'performance' || suite === 'reveal') {
@@ -106,6 +121,9 @@ try {
         if (hostTiming) await page.addInitScript(installHostTiming)
         await page.goto(`${baseUrl}/underwaterTerrain/?proof=1&cache=none&tileServer=${encodeURIComponent(tileBaseUrl)}`)
         await page.waitForFunction(() => ['ready', 'error'].includes(document.querySelector('#GPUFrame')?.dataset.status), {}, { timeout: 90_000 })
+        const performanceSession = await context.newCDPSession(page)
+        await performanceSession.send('Performance.enable')
+        const taskMetricsBefore = await performanceSession.send('Performance.getMetrics')
         const profiler = hostProfile ? await context.newCDPSession(page) : undefined
         if (profiler) {
             await profiler.send('Profiler.enable')
@@ -114,6 +132,11 @@ try {
         }
         try {
             result = await page.evaluate(suite === 'performance' ? scenarios : movingReveal, { delayMs })
+            const taskMetricsAfter = await performanceSession.send('Performance.getMetrics')
+            result.mainThread = Object.fromEntries(['TaskDuration', 'ScriptDuration', 'LayoutDuration', 'RecalcStyleDuration'].map(name => [
+                name + 'Ms', 1000 * (taskMetricsAfter.metrics.find(m => m.name === name).value -
+                    taskMetricsBefore.metrics.find(m => m.name === name).value),
+            ]))
             if (hostTiming) {
                 result.hostTiming = await page.evaluate(() => window.__terrainHostTiming.frames)
                 for (const trace of result.traces ?? [])
@@ -121,12 +144,14 @@ try {
                         frame.started >= trace.started && frame.started <= trace.finished))
             }
         } finally {
+            await performanceSession.detach()
             if (profiler) {
                 const { profile } = await profiler.send('Profiler.stop')
                 await writeFile(`${outputDirectory}/host.cpuprofile`, JSON.stringify(profile))
                 await profiler.detach()
             }
         }
+        await secondary?.verifyPlacement()
         await page.screenshot({ path: `${outputDirectory}/terrain.png` })
         result.cleanup = await page.evaluate(async() => await window.__UNDERWATER_TERRAIN_PROOF__.dispose())
         if (suite === 'performance' && (!result.independent.sameAState || !result.independent.sameADemands ||
@@ -179,6 +204,9 @@ const status = error || events.length || cleanupFailures.length || Object.values
     before.sourceHash !== after.sourceHash || before.dataHash !== after.dataHash ||
     before.experimentHash !== after.experimentHash ? 'failed' : 'passed'
 const record = { status, mode, suite, coordinateBits, delayMs, feedbackDelayMs, delayedRequestCount, hostProfile, hostTiming,
+    secondaryDisplay: secondary?.evidence,
+    ...(submissionBaseline === undefined ? {} : { submissionBaseline, submissionSourceHashes:
+        Object.fromEntries([...submissionSources].map(([path, source]) => [path.slice(root.length + 1), digest(source)])) }),
     ...(rendererBaseline === undefined ? {} : { rendererBaselineCommit: '117af0b', rendererBaselineHash: digest(rendererBaseline) }),
     browserVersion: browser?.version(), before, after, result, error, events, cleanup, cleanupFailures,
     ...(error ? { serviceLog } : {}), outputDirectory }
