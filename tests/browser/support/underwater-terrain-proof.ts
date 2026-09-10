@@ -12,7 +12,9 @@ import type {
     WebMercatorTerrainRenderer,
     VirtualRasterRuntimeFacts,
     VirtualRasterWorkerExecutorFacts,
+    VirtualRasterResidency,
 } from 'geoscratch/geo'
+import { observeTerrainResidency } from './terrain-residency-audit.ts'
 import type { UnderwaterTerrainMap } from '../../../examples/underwaterTerrain/map.ts'
 import type { DemTileSourceFacts } from '../../../examples/underwaterTerrain/dem-source.ts'
 import type {
@@ -128,6 +130,7 @@ export function createUnderwaterTerrainProof(configuration: ProofConfiguration) 
     let observationDurations: number[] = []
     let latestProvenance: readonly WebMercatorTerrainProvenanceFact[] = []
     let latestCamera: MapLibrePlanarCameraState | undefined
+    let residencyAudit: ReturnType<typeof observeTerrainResidency> | undefined
 
     function assertConfiguration() {
 
@@ -201,6 +204,7 @@ export function createUnderwaterTerrainProof(configuration: ProofConfiguration) 
     function publish() {
 
         if (graphBinding === undefined) return
+        canvas.dataset.residencyAudit = JSON.stringify(residencyAudit?.facts() ?? null)
         publishFrameFacts({
             canvas,
             runtime: graphBinding.runtime,
@@ -237,6 +241,7 @@ export function createUnderwaterTerrainProof(configuration: ProofConfiguration) 
 
     function finalizeFailure(error: unknown, cleanupReport: CleanupReport) {
 
+        residencyAudit?.dispose()
         const proof = finalizeFailureProof({
             configuration,
             primaryFailure: error,
@@ -261,6 +266,7 @@ export function createUnderwaterTerrainProof(configuration: ProofConfiguration) 
 
     function finalizeCleanup(report: CleanupReport) {
 
+        residencyAudit?.dispose()
         const cleanupProof = frozenJson({
             report: serializeCleanupReport(report),
             lifecycle: configuration.lifetime.snapshot(),
@@ -289,7 +295,10 @@ export function createUnderwaterTerrainProof(configuration: ProofConfiguration) 
         finalizeCleanup,
         observeRuntime: (value: GPURuntime) => { runtime = value },
         mapAcquired: () => { mapAcquiredCount++ },
-        rasterAcquired: () => { rasterAcquiredCount++ },
+        rasterAcquired: (residency: VirtualRasterResidency) => {
+            rasterAcquiredCount++
+            residencyAudit = observeTerrainResidency(residency)
+        },
         frameSubmitted(
             provenance: readonly WebMercatorTerrainProvenanceFact[],
             camera: MapLibrePlanarCameraState,

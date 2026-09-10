@@ -1296,6 +1296,7 @@ function validateVirtualRasterFacts(label, facts, failures) {
 
     const virtualRaster = parseJson(facts.virtualRaster, `${label} virtual raster facts`, failures)
     const residency = virtualRaster?.residency
+    const residencyAudit = parseJson(facts.residencyAudit, `${label} residency audit`, failures)
     const gpu = virtualRaster?.gpu
     const maximumPages = Number(facts.maxPhysicalPages)
     if (!Number.isSafeInteger(maximumPages) || maximumPages < 2 || maximumPages > 64) {
@@ -1308,10 +1309,23 @@ function validateVirtualRasterFacts(label, facts, failures) {
         failures.push(`${label} virtual raster precision or failure facts were invalid`)
     }
     if (residency?.residentCount < 1 || residency?.residentCount > maximumPages ||
-        residency?.pinnedCount !== 1 || residency?.cpuBytes > residency?.maxCpuBytes ||
+        residency?.pinnedCount !== 1 || residency?.stagingBytes > residency?.maxStagingBytes ||
         residency?.maxPhysicalPages !== maximumPages || residency?.failedCount !== 0 ||
-        residency?.staleResponseCount !== 0 || residency?.history?.length > 64) {
-        failures.push(`${label} virtual raster residency exceeded its finite contract`)
+        !Number.isSafeInteger(residencyAudit?.retiredStagedPageCount) ||
+        residencyAudit.retiredStagedPageCount < 0 ||
+        residency?.staleResponseCount !== residencyAudit.retiredStagedPageCount ||
+        residencyAudit?.rejectedStaleOperationCount !== 0 ||
+        residencyAudit?.unrequiredUploadCount !== 0 || residency?.history?.length > 64) {
+        failures.push(`${label} virtual raster residency exceeded its finite contract: ${JSON.stringify({
+            maximumPages,
+            residentCount: residency?.residentCount,
+            pinnedCount: residency?.pinnedCount,
+            maxPhysicalPages: residency?.maxPhysicalPages,
+            failedCount: residency?.failedCount,
+            staleResponseCount: residency?.staleResponseCount,
+            residencyAudit,
+            historyLength: residency?.history?.length,
+        })}`)
     }
     if (gpu?.maxPhysicalPages !== maximumPages || gpu?.snapshotEpoch !== residency?.snapshotEpoch ||
         gpu?.pageTableEntryCount < 1 || gpu?.pageTableBytes < 1) {
@@ -1529,6 +1543,7 @@ function summarizeFacts(facts) {
         convergenceState: facts.convergenceState,
         coverFeedback,
         demandFeedback: parseJsonOrUndefined(facts.demandFeedback),
+        residencyAudit: parseJsonOrUndefined(facts.residencyAudit),
         cameraView: parseJsonOrUndefined(facts.cameraView),
         stableIdentityCount: Number(facts.currentStableIdentityCount),
         stableIdentityHash: facts.currentStableIdentityHash,

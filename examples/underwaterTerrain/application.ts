@@ -117,7 +117,7 @@ export async function startUnderwaterTerrainApplication(
             release: value => value.dispose(),
         }
     )
-    proof?.rasterAcquired()
+    proof?.rasterAcquired(virtualRaster.residency)
     lifetime.deferStop({
         label: 'dem-virtual-raster-demand',
         run: virtualRaster.stopDemand,

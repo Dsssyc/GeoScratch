@@ -68,6 +68,13 @@ used and requests only missing pages, so a tight atlas cannot repeatedly evict t
 current detail pages through one free slot. Complete cover feedback remains independent
 from this residency budget.
 
+`VirtualRasterResidencyFacts.staleResponseCount` includes both rejected obsolete
+staging/failure attempts and previously valid staged pages retired when a newer demand
+no longer selects them. Retiring a staged page releases its owned bytes before GPU
+publication; the counter alone does not mean stale data was adopted. Same-page demand
+retention rebases its staged generation instead of discarding it. These retirements
+are cancellation cost and should be distinguished from invalid source adoption in audits.
+
 `VirtualRasterGpuState.encode()` records exact update ownership and appends a staged
 publication before dependent commands in one open submission. After that submission
 has entered the same WebGPU queue, later frames may reference its staged snapshot while
