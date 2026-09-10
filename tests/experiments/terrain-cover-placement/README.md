@@ -6,6 +6,10 @@ Virtual Raster publication, indexed terrain shader and frame controller. The def
 substitution or unused GPU compute allocations. `gpu` replays the frozen historical
 renderer and proof from the commit in `tests/fixtures/camera-cover-gpu-reference.json`.
 The served renderer hash is recorded separately from current checkout provenance.
+The pre-rebase audited history is retained on
+`socu/camera-cover-before-rebase-b9f25bd`. A shallow/single-branch checkout may need
+`git fetch origin socu/camera-cover-before-rebase-b9f25bd` before replaying historical
+commit IDs. The frozen implementation hashes are unchanged by rebase.
 Older CPU variants remain explicitly experimental historical comparisons; their
 original GPU objects stay allocated and their startup memory is not a production
 CPU measurement. No execution mode is added to the production application/API.
