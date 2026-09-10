@@ -132,6 +132,15 @@ fn projectWebMercatorQuadDemands() {
     projectionState.demandCount = 0u;
     projectionState.overflowCount = 0u;
     projectionState.sourceLevelCeiling = demandPolicy.sourceMaximumMatrixLevel;
+    if (coverState.frameEpoch != mapMeta.frameEpoch ||
+        coverState.descriptorOverflowCount != 0u ||
+        coverState.lookupOverflowCount != 0u ||
+        coverState.maximumAdjacentLevelDelta > 1u ||
+        coverState.maximumCellSpanQ8 == 0xffffffffu) {
+        // Preserve failure in feedback without projecting a partial geometry cut.
+        projectionState.overflowCount = 1u;
+        return;
+    }
     for (var patchIndex = 0u; patchIndex < coverState.patchCount; patchIndex += 1u) {
         demandEmit(coverPatches[patchIndex]);
     }

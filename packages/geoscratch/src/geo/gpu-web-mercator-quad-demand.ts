@@ -620,7 +620,7 @@ export class GpuWebMercatorQuadDemandProjection {
 
 Object.freeze(GpuWebMercatorQuadDemandProjection.prototype)
 
-/** Decodes and validates bounded projected source-demand feedback. */
+/** Decodes bounded source-demand feedback and throws GeoDiagnosticError for invalid records. */
 export function decodeGpuWebMercatorQuadDemandProjectionFeedback(
     stateBytes: Uint8Array,
     demandBytes: Uint8Array,
@@ -641,23 +641,33 @@ export function decodeGpuWebMercatorQuadDemandProjectionFeedback(
     const demandStride = gpuWebMercatorQuadDemandCodec.byteLength()
     if (!(stateBytes instanceof Uint8Array) || stateBytes.byteLength !== stateSize ||
         !(demandBytes instanceof Uint8Array) || demandBytes.byteLength % demandStride !== 0) {
-        throw new TypeError('GPU WebMercatorQuad demand feedback byte lengths are invalid')
+        return throwGeoDiagnostic({
+            code: 'GEO_WEB_MERCATOR_DEMAND_FEEDBACK_INVALID',
+            phase: 'demand', subject: { kind: 'web-mercator-quad-demand-projection' },
+            message: 'Demand feedback requires complete state and demand records.',
+            expected: { stateSize, demandStride },
+            actual: { reason: 'byte-length', stateSize: stateBytes?.byteLength,
+                demandSize: demandBytes?.byteLength },
+        })
     }
     const state = new DataView(stateBytes.buffer, stateBytes.byteOffset, stateBytes.byteLength)
     const frameEpoch = state.getUint32(0, true)
     const demandCount = state.getUint32(4, true)
     const overflowCount = state.getUint32(8, true)
     const sourceLevelCeiling = state.getUint32(12, true)
-    if (frameEpoch !== options.expectedFrameEpoch ||
+    const reason = frameEpoch !== options.expectedFrameEpoch ? 'frame-epoch' :
         demandCount > options.maximumDemands ||
-        demandCount > demandBytes.byteLength / demandStride ||
-        overflowCount !== 0 || sourceLevelCeiling !== options.sourceLevelCeiling) {
-        throw new RangeError(`GPU WebMercatorQuad demand feedback is inconsistent: ${JSON.stringify({
-            frameEpoch,
-            demandCount,
-            overflowCount,
-            sourceLevelCeiling,
-        })}`)
+        demandCount > demandBytes.byteLength / demandStride ? 'demand-capacity' :
+        overflowCount !== 0 ? 'overflow' :
+        sourceLevelCeiling !== options.sourceLevelCeiling ? 'source-ceiling' : undefined
+    if (reason !== undefined) {
+        return throwGeoDiagnostic({
+            code: 'GEO_WEB_MERCATOR_DEMAND_FEEDBACK_INVALID',
+            phase: 'demand', subject: { kind: 'web-mercator-quad-demand-projection' },
+            message: 'Demand feedback is stale, incomplete, or inconsistent.',
+            expected: options,
+            actual: { reason, frameEpoch, demandCount, overflowCount, sourceLevelCeiling },
+        })
     }
     const view = new DataView(demandBytes.buffer, demandBytes.byteOffset, demandBytes.byteLength)
     const demands = Array.from({ length: demandCount }, (_, index) => {
@@ -684,10 +694,12 @@ export function decodeGpuWebMercatorQuadDemandProjectionFeedback(
             demand.tileRow >= matrixWidth || demand.tileCol >= matrixWidth ||
             demand.decisionFrameEpoch !== options.expectedFrameEpoch ||
             identities.has(identity)) {
-            throw new RangeError(
-                `GPU WebMercatorQuad demand record ${index} is inconsistent: ` +
-                JSON.stringify(demand)
-            )
+            return throwGeoDiagnostic({
+                code: 'GEO_WEB_MERCATOR_DEMAND_FEEDBACK_INVALID',
+                phase: 'demand', subject: { kind: 'web-mercator-quad-demand-projection' },
+                message: 'A demand record has invalid identity, provenance, or duplicates.',
+                expected: options, actual: { reason: 'record', index, demand },
+            })
         }
         identities.add(identity)
     }

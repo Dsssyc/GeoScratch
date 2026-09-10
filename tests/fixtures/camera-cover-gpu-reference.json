@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "commit": "ebb333612e8041e2b312a880a24e195da27e59ae",
+  "rendererPath": "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts",
+  "files": {
+    "packages/geoscratch/src/geo/gpu-web-mercator-quad-cover-candidates.ts": "e69dd6275227a462d824ac3bcb954d93d29352583699321e4f1e9217270b5528",
+    "packages/geoscratch/src/geo/gpu-web-mercator-quad-cover-layout.ts": "cecf5002aaaa884293bfae669502ec00f15b41c77450759e13f8dc25f6f58f39",
+    "packages/geoscratch/src/geo/gpu-web-mercator-quad-cover-neighbors-wgsl.ts": "de28d2a2b25ed2b3715b3734a9070cff18faf69c5575de848c225e66b9616539",
+    "packages/geoscratch/src/geo/gpu-web-mercator-quad-cover-reference.ts": "9f33ff7fcab4b79ddd8be476c2d58bce35276dd2e28a56567cf9c8d2bf2dcbf0",
+    "packages/geoscratch/src/geo/gpu-web-mercator-quad-cover-vertical-bounds.ts": "21bfcbdb44c20da9ede21daa59fb851daffd0eb0ab03cb2719c7858453035db0",
+    "packages/geoscratch/src/geo/gpu-web-mercator-quad-cover-wgsl.ts": "4fd069b830f9946080e1a10705ef24ae48a3a52e15612ed2a333868b692b827d",
+    "packages/geoscratch/src/geo/gpu-web-mercator-quad-cover.ts": "92a886ed11aa39a2e6f1c0f3b0d0c72c3ac6a1f551e278bb4ac3e744ff2e58c5",
+    "packages/geoscratch/src/geo/gpu-web-mercator-quad-demand-layout.ts": "ea310aa77bb6a8c0432d2ffafbe6755744f980ddbeeef25951a9b746d60d1bc2",
+    "packages/geoscratch/src/geo/gpu-web-mercator-quad-demand-wgsl.ts": "effa2a3b9de90e764ca35b5cfbbdb090391de2c2b3c1fa8fea08aa4fb9031307",
+    "packages/geoscratch/src/geo/gpu-web-mercator-quad-demand.ts": "57d50b02f8d5bfacfd59ebab4dbf4af07fa5415492abde60360c1e8a669b8be1",
+    "packages/geoscratch/src/geo/gpu-web-mercator-quad-patch-draw.ts": "b51863a8a5c6c8e64bc04bcb0744343d578aff76417cec82a62acb1b83674d56",
+    "packages/geoscratch/src/geo/web-mercator-terrain-wgsl.ts": "a4b4f2b4a1953ac933822e531ef099395801dfa1db3ca574f261db012526f839"
+  }
+}

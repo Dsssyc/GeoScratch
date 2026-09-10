@@ -2,7 +2,7 @@
 
 # geoscratch/geo API Reference
 
-Public symbols: 302.
+Public symbols: 322.
 
 ## `packages/geoscratch/src/geo/coordinate-domain.ts`
 
@@ -530,7 +530,7 @@ type GpuWebMercatorQuadCoverReadWgslOptions = Readonly<{ group: number; lookupEn
 
 Kind: `Function`.
 
-Decodes and validates bounded inverse-cover geometry feedback.
+Validates cover feedback, throws GeoDiagnosticError on failure, and omits empty-cut ranges.
 
 ```ts
 Function decodeGpuWebMercatorQuadCoverFeedback
@@ -585,7 +585,7 @@ Members:
 Kind: `Type Alias`.
 
 ```ts
-type GpuWebMercatorQuadCoverCommands = Readonly<{ generate: DispatchCommand; stateFeedback: ReadbackCommand }>
+type GpuWebMercatorQuadCoverCommands = Readonly<{ evaluate: DispatchCommand; generate: DispatchCommand; stateFeedback: ReadbackCommand }>
 ```
 
 ### `GpuWebMercatorQuadCoverDescriptor`
@@ -593,7 +593,7 @@ type GpuWebMercatorQuadCoverCommands = Readonly<{ generate: DispatchCommand; sta
 Kind: `Type Alias`.
 
 ```ts
-type GpuWebMercatorQuadCoverDescriptor = Readonly<{ policy: GpuWebMercatorQuadCoverPolicy; spatialProfile: WebMercatorPlanarTileSpatialProfile; verticalBounds?: readonly WebMercatorTileVerticalBounds[]; verticalRangeMeters: readonly [number, number] }>
+type GpuWebMercatorQuadCoverDescriptor = Readonly<{ maximumCandidates?: number; policy: GpuWebMercatorQuadCoverPolicy; spatialProfile: WebMercatorPlanarTileSpatialProfile; verticalBounds?: readonly WebMercatorTileVerticalBounds[]; verticalRangeMeters: readonly [number, number] }>
 ```
 
 ### `GpuWebMercatorQuadCoverFacts`
@@ -601,7 +601,7 @@ type GpuWebMercatorQuadCoverDescriptor = Readonly<{ policy: GpuWebMercatorQuadCo
 Kind: `Type Alias`.
 
 ```ts
-type GpuWebMercatorQuadCoverFacts = Readonly<{ coverageLimitCount: number; disposed: boolean; id: string; lookupCapacity: number; parity: readonly Readonly<{ commandIds: readonly string[]; lookupBufferId: string; mapMetaBufferId: string; parity: 0 | 1; patchBufferId: string; stateBufferId: string }>[]; policy: GpuWebMercatorQuadCoverPolicy; runtimeId: string; selectionPath: "gpu-camera-inverse-webmercatorquad-cover"; verticalBoundCount: number; verticalBoundsBufferId: string; verticalBoundsMode: "global" | "hierarchy" }>
+type GpuWebMercatorQuadCoverFacts = Readonly<{ candidateCapacity: number; candidateWorkspaceBytes: number; coverageLimitCount: number; disposed: boolean; id: string; lookupCapacity: number; parity: readonly Readonly<{ commandIds: readonly string[]; lookupBufferId: string; mapMetaBufferId: string; parity: 0 | 1; patchBufferId: string; stateBufferId: string }>[]; policy: GpuWebMercatorQuadCoverPolicy; runtimeId: string; selectionPath: "gpu-camera-inverse-webmercatorquad-cover"; verticalBoundCount: number; verticalBoundsBufferId: string; verticalBoundsMode: "global" | "hierarchy" }>
 ```
 
 ### `GpuWebMercatorQuadCoverFeedback`
@@ -690,7 +690,7 @@ type WebMercatorTileVerticalBounds = Readonly<{ matrixLevel: number; maximumVert
 
 Kind: `Function`.
 
-Decodes and validates bounded projected source-demand feedback.
+Decodes bounded source-demand feedback and throws GeoDiagnosticError for invalid records.
 
 ```ts
 Function decodeGpuWebMercatorQuadDemandProjectionFeedback
@@ -798,7 +798,7 @@ type GpuWebMercatorQuadProjectedDemand = Readonly<{ decisionFrameEpoch: number; 
 
 Kind: `Class`.
 
-Prepares indexed- or non-indexed draw-indirect arguments from one GPU cover patch count.
+Owns draw-indirect arguments and suppresses instances when its borrowed GPU cover fails.
 
 ```ts
 class GpuWebMercatorQuadPatchDraw
@@ -2822,6 +2822,247 @@ Kind: `Type Alias`.
 type VirtualRasterTileAddressSpaceDescriptor = Readonly<{ coverage: TileMatrixCoverage; id: string }>
 ```
 
+## `packages/geoscratch/src/geo/web-mercator-quad-cover-upload.ts`
+
+### `WebMercatorQuadCoverUpload`
+
+Kind: `Class`.
+
+Lowers certified CPU selections to owned parity buffers through explicit, revisioned Scratch uploads.
+
+```ts
+class WebMercatorQuadCoverUpload
+```
+
+Members:
+
+- `create`: `Method create` (static)
+  - `create(runtime: GPURuntime, input: WebMercatorQuadCoverUploadDescriptor): Promise<WebMercatorQuadCoverUpload>`
+- `dispose`: `Method dispose`
+  - `dispose(): void`
+- `encode`: `Method encode`
+  - `encode(builder: SubmissionBuilder, frame: WebMercatorQuadCoverUploadFrame): SubmissionBuilder`
+- `facts`: `Method facts`
+  - `facts(): WebMercatorQuadCoverUploadFacts`
+- `id`: `Accessor id`
+  - `id(): string`
+- `isDisposed`: `Accessor isDisposed`
+  - `isDisposed(): boolean`
+- `prepare`: `Method prepare`
+  - `prepare(selection: WebMercatorQuadCoverSelection): WebMercatorQuadCoverUploadFrame`
+- `receipt`: `Method receipt`
+  - `receipt(frame: WebMercatorQuadCoverUploadFrame, submitted: SubmittedWork): WebMercatorQuadCoverUploadReceipt`
+- `resources`: `Method resources`
+  - `resources(): readonly BufferResource[]`
+- `runtime`: `Accessor runtime`
+  - `runtime(): GPURuntime`
+- `templates`: `Method templates`
+  - `templates(): readonly Readonly<{ coverId: string; coverLookup: BufferResource; mapMeta: BufferResource; parity: 0 | 1; patches: BufferResource; uploadId: string }>[]`
+
+### `WebMercatorQuadCoverUploadDescriptor`
+
+Kind: `Type Alias`.
+
+```ts
+type WebMercatorQuadCoverUploadDescriptor = Readonly<{ cover: WebMercatorQuadCover }>
+```
+
+### `WebMercatorQuadCoverUploadFacts`
+
+Kind: `Type Alias`.
+
+```ts
+type WebMercatorQuadCoverUploadFacts = Readonly<{ acceptedReceiptCount: number; coverId: string; disposed: boolean; id: string; parity: readonly Readonly<{ lookupBufferId: string; mapMetaBufferId: string; parity: 0 | 1; patchBufferId: string }>[]; persistentBufferBytes: number; poisoned: boolean; preparedFrameCount: number; runtimeId: string }>
+```
+
+### `WebMercatorQuadCoverUploadFrame`
+
+Kind: `Type Alias`.
+
+Owned prepared upload attempt; disposing unsubmitted work releases its private bytes/commands.
+
+```ts
+type WebMercatorQuadCoverUploadFrame = Readonly<{ coverId: string; frameEpoch: number; isDisposed: boolean; kind: "web-mercator-quad-cover-upload-frame"; parity: 0 | 1; residencySnapshotEpoch: number; selectionId: string; selectionRevision: number; uploadId: string; dispose: any }>
+```
+
+### `WebMercatorQuadCoverUploadReceipt`
+
+Kind: `Type Alias`.
+
+Immutable evidence of queued CPU geometry uploads, never a certificate of native success.
+
+```ts
+type WebMercatorQuadCoverUploadReceipt = Readonly<{ coverId: string; frameEpoch: number; kind: "web-mercator-quad-cover-upload-receipt"; parity: 0 | 1; residencySnapshotEpoch: number; resources: readonly WebMercatorQuadCoverUploadResourceFact[]; runtimeId: string; selectionId: string; selectionRevision: number; submissionId: string; uploadId: string; viewId: string }>
+```
+
+### `WebMercatorQuadCoverUploadResourceFact`
+
+Kind: `Type Alias`.
+
+```ts
+type WebMercatorQuadCoverUploadResourceFact = Readonly<{ allocationVersion: number; commandId: string; contentEpoch: number; name: "mapMeta" | "patches" | "coverLookup"; resourceId: string; stepIndex: number }>
+```
+
+### `WebMercatorQuadCoverUploadTemplate`
+
+Kind: `Type Alias`.
+
+```ts
+type WebMercatorQuadCoverUploadTemplate = Readonly<{ coverId: string; coverLookup: BufferResource; mapMeta: BufferResource; parity: 0 | 1; patches: BufferResource; uploadId: string }>
+```
+
+## `packages/geoscratch/src/geo/web-mercator-quad-cover.ts`
+
+### `WebMercatorQuadCover`
+
+Kind: `Class`.
+
+Computes stateless, certified standard-tile cuts on the CPU and owns only bounded CPU workspace.
+
+```ts
+class WebMercatorQuadCover
+```
+
+Members:
+
+- `constructor`: `Constructor constructor`
+  - `constructor(input: WebMercatorQuadCoverDescriptor): WebMercatorQuadCover`
+- `descriptor`: `Accessor descriptor`
+  - `descriptor(): WebMercatorQuadCoverDescriptor`
+- `dispose`: `Method dispose`
+  - `dispose(): void`
+- `facts`: `Method facts`
+  - `facts(): WebMercatorQuadCoverFacts`
+- `id`: `Accessor id`
+  - `id(): string`
+- `isDisposed`: `Accessor isDisposed`
+  - `isDisposed(): boolean`
+- `select`: `Method select`
+  - `select(input: GeoViewSnapshot): WebMercatorQuadCoverSelection`
+
+### `WebMercatorQuadCoverDescriptor`
+
+Kind: `Type Alias`.
+
+```ts
+type WebMercatorQuadCoverDescriptor = Readonly<{ maximumCandidates?: number; policy: WebMercatorQuadCoverPolicy; spatialProfile: WebMercatorPlanarTileSpatialProfile; verticalBounds?: readonly WebMercatorTileVerticalBounds[]; verticalRangeMeters: readonly [number, number] }>
+```
+
+### `WebMercatorQuadCoverFacts`
+
+Kind: `Type Alias`.
+
+```ts
+type WebMercatorQuadCoverFacts = Readonly<{ candidateCapacity: number; coordinateBits: number; coverageLimitCount: number; disposed: boolean; id: string; lookupCapacity: number; policy: WebMercatorQuadCoverPolicy; selectionPath: "cpu-camera-inverse-webmercatorquad-cover"; verticalBoundCount: number; verticalBoundsMode: "global" | "hierarchy"; workspaceBytes: number }>
+```
+
+### `WebMercatorQuadCoverPatch`
+
+Kind: `Type Alias`.
+
+```ts
+type WebMercatorQuadCoverPatch = Readonly<{ matrixLevel: number; tileCol: number; tileRow: number }>
+```
+
+### `webMercatorQuadCoverPolicy`
+
+Kind: `Function`.
+
+Validates and snapshots reference-pixel geometry quality and hard output capacity.
+
+```ts
+Function webMercatorQuadCoverPolicy
+```
+
+```ts
+webMercatorQuadCoverPolicy(input: WebMercatorQuadCoverPolicy): WebMercatorQuadCoverPolicy
+```
+
+### `WebMercatorQuadCoverPolicy`
+
+Kind: `Type Alias`.
+
+```ts
+type WebMercatorQuadCoverPolicy = Readonly<{ cellsPerPatchEdge: number; maximumCellSpanReferencePixels: number; maximumMatrixLevel: number; maximumPatches: number; minimumMatrixLevel: number; refinementTolerance: number }>
+```
+
+### `WebMercatorQuadCoverSelection`
+
+Kind: `Type Alias`.
+
+Complete immutable CPU geometry, independent of raster availability and later selections.
+
+```ts
+type WebMercatorQuadCoverSelection = Readonly<{ coverId: string; facts: WebMercatorQuadCoverSelectionFacts; id: string; kind: "web-mercator-quad-cover-selection"; patches: readonly WebMercatorQuadCoverPatch[]; revision: number; view: GeoViewSnapshot }>
+```
+
+### `WebMercatorQuadCoverSelectionFacts`
+
+Kind: `Type Alias`.
+
+```ts
+type WebMercatorQuadCoverSelectionFacts = Readonly<{ candidateCount: number; coverId: string; descriptorOverflowCount: number; finestMatrixLevel: number; frameEpoch: number; lookupOverflowCount: number; maximumAdjacentLevelDelta: number; maximumCellSpanReferencePixels?: number; maximumMatrixLevel?: number; minimumCellSpanReferencePixels?: number; minimumMatrixLevel?: number; patchCount: number; selectionId: string; selectionRevision: number }>
+```
+
+## `packages/geoscratch/src/geo/web-mercator-quad-demand.ts`
+
+### `WebMercatorQuadDemandProjection`
+
+Kind: `Class`.
+
+Projects complete CPU geometry into source intent; owns no loading, residency or GPU work.
+
+```ts
+class WebMercatorQuadDemandProjection
+```
+
+Members:
+
+- `constructor`: `Constructor constructor`
+  - `constructor(input: WebMercatorQuadDemandProjectionDescriptor): WebMercatorQuadDemandProjection`
+- `dispose`: `Method dispose`
+  - `dispose(): void`
+- `facts`: `Method facts`
+  - `facts(): WebMercatorQuadDemandProjectionFacts`
+- `id`: `Accessor id`
+  - `id(): string`
+- `isDisposed`: `Accessor isDisposed`
+  - `isDisposed(): boolean`
+- `project`: `Method project`
+  - `project(selection: WebMercatorQuadCoverSelection): WebMercatorQuadProjectedDemands`
+
+### `WebMercatorQuadDemandProjectionDescriptor`
+
+Kind: `Type Alias`.
+
+```ts
+type WebMercatorQuadDemandProjectionDescriptor = Readonly<{ cover: WebMercatorQuadCover; maximumDemands: number; sourceCoverage: TileMatrixCoverage }>
+```
+
+### `WebMercatorQuadDemandProjectionFacts`
+
+Kind: `Type Alias`.
+
+```ts
+type WebMercatorQuadDemandProjectionFacts = Readonly<{ coverId: string; disposed: boolean; id: string; maximumDemands: number; minimumSourceMatrixLevel: number; sourceLimitCount: number; sourceMaximumMatrixLevel: number }>
+```
+
+### `WebMercatorQuadProjectedDemand`
+
+Kind: `Type Alias`.
+
+```ts
+type WebMercatorQuadProjectedDemand = Readonly<{ decisionFrameEpoch: number; desiredSampleLevel: number; priority: number; requestMatrixLevel: number; residencySnapshotEpoch: number; sourceLevelCeiling: number; tileCol: number; tileRow: number }>
+```
+
+### `WebMercatorQuadProjectedDemands`
+
+Kind: `Type Alias`.
+
+```ts
+type WebMercatorQuadProjectedDemands = Readonly<{ coverId: string; demandCount: number; demands: readonly WebMercatorQuadProjectedDemand[]; frameEpoch: number; kind: "web-mercator-quad-projected-demands"; overflowCount: number; projectionId: string; selectionId: string; selectionRevision: number; sourceLevelCeiling: number; view: GeoViewSnapshot }>
+```
+
 ## `packages/geoscratch/src/geo/web-mercator-quad.ts`
 
 ### `GeographicPosition2D`
@@ -2997,7 +3238,7 @@ type WebMercatorTileSampleAddress = Readonly<{ compactIndex?: number; covered: b
 
 Kind: `Function`.
 
-Assembles a WebMercatorQuad Virtual Raster terrain renderer with GPU-driven selection, precision-aware vertex generation, mesh stitching, and explicit lifetime.
+Composes certified CPU cover/source intent, explicit geometry uploads and indexed terrain drawing. Owns its renderer resources; borrows Surface and Virtual Raster. Native success and raster publication acknowledgement remain asynchronous.
 
 ```ts
 Function createWebMercatorTerrainRenderer
@@ -3012,7 +3253,7 @@ createWebMercatorTerrainRenderer<ViewInput, Presentation extends string>(__named
 Kind: `Type Alias`.
 
 ```ts
-type WebMercatorTerrainContractFacts = Readonly<{ commandIds: Readonly<{ cover: readonly (readonly string[])[]; demandProjection: readonly (readonly string[])[]; drawTerrain: Readonly<Record<string, readonly string[]>>; patchDraw: readonly string[] }>; countPath: "gpu-produced-indirect-arguments"; cover: ReturnType<GpuWebMercatorQuadCover["facts"]>; coverMaximumMatrixLevel: number; demandProjection: ReturnType<GpuWebMercatorQuadDemandProjection["facts"]>; fieldLayer: Readonly<{ demandProducerId: string; fieldId: string; id: string; representationId: string; spatialProfileId: string; viewAdapterId: string }>; passIds: Readonly<{ cover: string; demandProjection: string; patchDraw: string; terrain: string }>; patchDraw: ReturnType<GpuWebMercatorQuadPatchDraw["facts"]>; persistentIdentityCount: number; selectionPath: "gpu-camera-inverse-webmercatorquad-cover"; sourceMaximumMatrixLevel: number; stageOrder: readonly string[]; terrainElementCount: number; virtualRaster: Readonly<{ completeImageUpload: false; coordinateEncoding: WebMercatorVirtualRasterField["addressCodec"]["positionCodec"]["facts"]["encoding"]; crossPageFiltering: "logical-bilinear"; levelCount: number; maxPhysicalPages: number; pageSize: readonly number[]; sourceRevision: string }> }>
+type WebMercatorTerrainContractFacts = Readonly<{ commandIds: Readonly<{ drawTerrain: Readonly<Record<string, readonly string[]>> }>; countPath: "cpu-produced-indirect-arguments"; cover: ReturnType<WebMercatorQuadCover["facts"]>; coverMaximumMatrixLevel: number; coverUpload: ReturnType<WebMercatorQuadCoverUpload["facts"]>; demandProjection: ReturnType<WebMercatorQuadDemandProjection["facts"]>; fieldLayer: Readonly<{ demandProducerId: string; fieldId: string; id: string; representationId: string; spatialProfileId: string; viewAdapterId: string }>; passIds: Readonly<{ terrain: string }>; patchDraw: Readonly<{ argumentByteLength: 20; bufferIds: readonly string[]; elementCount: number }>; persistentIdentityCount: number; selectionPath: "cpu-camera-inverse-webmercatorquad-cover"; sourceMaximumMatrixLevel: number; stageOrder: readonly string[]; terrainElementCount: number; virtualRaster: Readonly<{ completeImageUpload: false; coordinateEncoding: WebMercatorVirtualRasterField["addressCodec"]["positionCodec"]["facts"]["encoding"]; crossPageFiltering: "logical-bilinear"; levelCount: number; maxPhysicalPages: number; pageSize: readonly number[]; sourceRevision: string }> }>
 ```
 
 ### `WebMercatorTerrainElevationBounds`
@@ -3032,17 +3273,17 @@ Kind: `Type Alias`.
 Immediate identity and provenance facts for one submitted terrain frame.
 
 ```ts
-type WebMercatorTerrainFrame<Presentation extends string = string> = Readonly<{ provenance: readonly WebMercatorTerrainProvenanceFact[]; submitted: SubmittedWork; terrainPresentation: Presentation }>
+type WebMercatorTerrainFrame<Presentation extends string = string> = Readonly<{ provenance: readonly WebMercatorTerrainProvenanceFact[]; submitted: SubmittedWork; terrainPresentation: Presentation; uploadReceipt?: WebMercatorQuadCoverUploadReceipt }>
 ```
 
 ### `WebMercatorTerrainFrameSettlement`
 
 Kind: `Type Alias`.
 
-Delayed inverse-cover feedback, residency work, and convergence state for one terrain frame.
+Current CPU selection/source intent with independent asynchronous resource progress.
 
 ```ts
-type WebMercatorTerrainFrameSettlement = GeoFrameSettlement & Readonly<{ coverFeedback?: GpuWebMercatorQuadCoverFeedback; demandFeedback?: GpuWebMercatorQuadDemandProjectionFeedback; reconciliation?: VirtualRasterFeedbackReconciliation; residencySettlement: Promise<unknown>; residencyWorkCount: number; superseded: boolean }>
+type WebMercatorTerrainFrameSettlement = GeoFrameSettlement & Readonly<{ coverSelection?: WebMercatorQuadCoverSelectionFacts; projectedDemands?: WebMercatorQuadProjectedDemands; reconciliation?: VirtualRasterFeedbackReconciliation; residencySettlement: Promise<unknown>; residencyWorkCount: number }>
 ```
 
 ### `WebMercatorTerrainFrameValue`
@@ -3116,7 +3357,7 @@ type WebMercatorTerrainRendererDescriptor<ViewInput, Presentation extends string
 Kind: `Type Alias`.
 
 ```ts
-type WebMercatorTerrainRendererState<Presentation extends string = string> = Readonly<{ convergenceState: "converged" | "transitioning"; coverCandidateCount: number; coverDescriptorOverflowCount: number; coverFeedback?: GpuWebMercatorQuadCoverFeedback; coverFinestMatrixLevel?: number; coverFrameEpoch?: number; coverLevelRange: readonly [number | undefined, number | undefined]; coverLookupOverflowCount: number; coverMaximumAdjacentLevelDelta: number; coverPatchCount: number; demandFeedback?: GpuWebMercatorQuadDemandProjectionFeedback; disposed: boolean; frame: number; initialized: boolean; lastResizeFacts?: WebMercatorTerrainResizeFacts; readbackInFlightCount: number; resizeGeneration: number; size: SurfaceSize; sourceDemandCount: number; sourceDemandOverflowCount: number; sourceLevelCeiling?: number; staleBindSetPreparationCount: number; staleFeedbackCount: number; supersededFeedbackCount: number; terrainPresentation: Presentation; virtualRequestedPageCount: number; virtualSnapshotEpoch: number }>
+type WebMercatorTerrainRendererState<Presentation extends string = string> = Readonly<{ convergenceState: "converged" | "transitioning" | "failed"; coverCandidateCount: number; coverDescriptorOverflowCount: number; coverFinestMatrixLevel?: number; coverFrameEpoch?: number; coverLevelRange: readonly [number | undefined, number | undefined]; coverLookupOverflowCount: number; coverMaximumAdjacentLevelDelta: number; coverPatchCount: number; coverSelection?: WebMercatorQuadCoverSelectionFacts; disposed: boolean; frame: number; initialized: boolean; lastResizeFacts?: WebMercatorTerrainResizeFacts; projectedDemands?: WebMercatorQuadProjectedDemands; resizeGeneration: number; size: SurfaceSize; sourceDemandCount: number; sourceDemandOverflowCount: number; sourceLevelCeiling?: number; staleBindSetPreparationCount: number; terrainPresentation: Presentation; virtualRequestedPageCount: number; virtualSnapshotEpoch: number }>
 ```
 
 ### `WebMercatorTerrainResizeFacts`

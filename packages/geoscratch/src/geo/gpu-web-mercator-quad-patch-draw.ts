@@ -43,10 +43,16 @@ var<storage, read_write> drawArguments: array<u32>;
 @compute @workgroup_size(1)
 fn prepareWebMercatorQuadPatchDraw() {
     drawArguments[0] = patchDrawPolicy.elementCount;
-    drawArguments[1] = coverState.patchCount;
+    drawArguments[1] = 0u;
     drawArguments[2] = 0u;
     drawArguments[3] = 0u;
     drawArguments[4] = 0u;
+    if (coverState.descriptorOverflowCount == 0u &&
+        coverState.lookupOverflowCount == 0u &&
+        coverState.maximumAdjacentLevelDelta <= 1u &&
+        coverState.maximumCellSpanQ8 != 0xffffffffu) {
+        drawArguments[1] = coverState.patchCount;
+    }
 }
 `
 
@@ -118,7 +124,7 @@ const frameRecords = new WeakMap<GpuWebMercatorQuadPatchDrawFrame, FrameRecord>(
 const encodedBuilders = new WeakMap<SubmissionBuilder, GpuWebMercatorQuadPatchDrawFrame>()
 let nextPatchDrawId = 1
 
-/** Prepares indexed- or non-indexed draw-indirect arguments from one GPU cover patch count. */
+/** Owns draw-indirect arguments and suppresses instances when its borrowed GPU cover fails. */
 export class GpuWebMercatorQuadPatchDraw {
 
     readonly runtime: GPURuntime

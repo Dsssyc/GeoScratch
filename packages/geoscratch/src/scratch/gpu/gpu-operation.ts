@@ -1446,7 +1446,8 @@ function assertSubmissionNativeOutcomeContents(
     }
 }
 
-function assertReadbackNativeStage(stage: GPUReadbackNativeStage): void {
+/** @internal Validates a planned readback stage without constructing an outcome. */
+export function assertReadbackNativeStage(stage: GPUReadbackNativeStage): void {
 
     if (
         stage !== 'encoder-create' &&
@@ -1458,6 +1459,31 @@ function assertReadbackNativeStage(stage: GPUReadbackNativeStage): void {
     ) {
         throw new TypeError(`Unsupported readback native stage: ${String(stage)}`)
     }
+}
+
+/** @internal Validates planned native issue facts before any observation is reserved. */
+export function assertSubmissionNativeIssue(
+    submissionId: string,
+    stage: GPUSubmissionNativeStage,
+    location: GPUSubmissionNativeLocation
+): void {
+
+    assertSubmissionNativeStage(stage)
+    assertSubmissionNativeLocation(location, submissionId)
+    // Preserve evidence cycle rejection without cloning/freezing a discarded
+    // hypothetical failure. Actual outcomes still own their immutable JSON copy.
+    assertEvidenceAcyclic(location)
+}
+
+function assertEvidenceAcyclic(value: unknown, ancestors = new Set<object>()): void {
+
+    if (value === null || typeof value !== 'object') return
+    if (ancestors.has(value)) throw new TypeError('Diagnostic evidence cannot contain cycles.')
+    ancestors.add(value)
+    for (const item of Array.isArray(value) ? value : Object.values(value)) {
+        assertEvidenceAcyclic(item, ancestors)
+    }
+    ancestors.delete(value)
 }
 
 function assertSubmissionNativeLocation(

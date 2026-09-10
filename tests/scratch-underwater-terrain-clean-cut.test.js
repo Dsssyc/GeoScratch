@@ -2,12 +2,15 @@ import { expect } from 'chai'
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
+import { mat4 } from 'wgpu-matrix'
 import { GPURuntime, plane } from 'geoscratch/scratch'
 import {
     ViewDemandProducer,
+    WebMercatorQuad,
     VirtualRasterResidency,
     WEB_MERCATOR_TERRAIN_TILE_WIREFRAME_FRAGMENT_ENTRY_POINT,
     createVirtualRasterGpuState,
+    createGeoFrameController,
     createWebMercatorTerrainRenderer,
     mapFieldLayer,
     ownedVirtualRasterPagePayload,
@@ -34,7 +37,7 @@ function sha256(value) {
     return crypto.createHash('sha256').update(value).digest('hex')
 }
 
-async function createTestVirtualRaster(runtime) {
+async function createTestVirtualRaster(runtime, options = {}) {
 
     const model = demSource.model
     const residency = new VirtualRasterResidency({
@@ -57,6 +60,8 @@ async function createTestVirtualRaster(runtime) {
 
     function publish() {
 
+        if (activePublication !== undefined) throw new Error('Test publication already pending')
+        options.events?.push('publish')
         const publication = residency.publish()
         const update = gpu.stage(publication)
         activePublication = publication
@@ -78,7 +83,7 @@ async function createTestVirtualRaster(runtime) {
         scheduler: Object.freeze({
             maxRequests: 18,
             inspect: () => Object.freeze({
-                activeRequestCount: 0,
+                activeRequestCount: options.activeRequestCount?.() ?? 0,
                 queuedRequestCount: 0,
             }),
         }),
@@ -88,6 +93,8 @@ async function createTestVirtualRaster(runtime) {
         }),
         async initialize() {
 
+            options.events?.push('initialize')
+            await options.beforeInitialize?.()
             generation++
             residency.reconcileGeneration(generation, [ safetyPage ])
             residency.stage(ownedVirtualRasterPagePayload({
@@ -100,13 +107,14 @@ async function createTestVirtualRaster(runtime) {
             }), { generation })
             return publish()
         },
-        reconcileViewDemands() {
+        reconcileViewDemands(demands) {
 
             generation++
             residency.reconcileGeneration(generation, [ safetyPage ])
+            const override = options.onReconcile?.(demands, { residency, generation, safetyPage })
             return Object.freeze({
-                requestedCount: 0,
-                settlement: Promise.resolve(Object.freeze({
+                requestedCount: override?.requestedCount ?? 0,
+                settlement: override?.settlement ?? Promise.resolve(Object.freeze({
                     generation,
                     stagedCount: 0,
                     residentCount: 1,
@@ -114,7 +122,7 @@ async function createTestVirtualRaster(runtime) {
                     failedCount: 0,
                 })),
                 generation,
-                retainedCount: 0,
+                retainedCount: override?.retainedCount ?? 0,
                 retiredCount: 0,
             })
         },
@@ -124,6 +132,8 @@ async function createTestVirtualRaster(runtime) {
             if (activePublication !== wrapped.publication) {
                 throw new Error('Test DEM publication authority mismatch')
             }
+            options.events?.push('acknowledge')
+            await options.beforeAcknowledge?.()
             await gpu.acknowledge(wrapped.publication, submitted)
             activePublication = undefined
         },
@@ -148,7 +158,7 @@ async function createTestVirtualRaster(runtime) {
     })
 }
 
-function createTestTerrainRenderer({ runtime, surface, virtualRaster, size, observeProvenance }) {
+function createTestTerrainRenderer({ runtime, surface, virtualRaster, size, observeProvenance, viewAdapter = underwaterTerrainViewAdapter }) {
 
     return createWebMercatorTerrainRenderer({
         runtime,
@@ -158,7 +168,7 @@ function createTestTerrainRenderer({ runtime, surface, virtualRaster, size, obse
             field: virtualRaster.field,
             representation: virtualRaster.representation,
             spatialProfile: virtualRaster.spatialProfile,
-            viewAdapter: underwaterTerrainViewAdapter,
+            viewAdapter,
             demandProducer: virtualRaster.viewDemandProducer,
         }),
         virtualRaster,
@@ -287,14 +297,14 @@ describe('Underwater Terrain clean cut', () => {
             'packages', 'geoscratch', 'src', 'geo', 'web-mercator-terrain-wgsl.ts'
         )
 
-        expect(renderer).to.include('GpuWebMercatorQuadCover.create(runtime')
-        expect(renderer).to.include('cover.encode(builder, frame)')
-        expect(renderer).to.include('cover.capture(builder, frame)')
-        expect(renderer).to.include('demandProjection.encode(builder, demandFrame)')
-        expect(renderer).to.include('patchDraw.encode(builder, patchDrawFrame)')
-        expect(renderer).to.include("'inverse-cover-compute'")
-        expect(renderer).to.include("'source-demand-compute'")
-        expect(renderer).to.include("'patch-draw-compute'")
+        expect(renderer).to.include('new WebMercatorQuadCover({')
+        expect(renderer).to.include('coverUpload.encode(builder, uploadFrame)')
+        expect(renderer).to.include('coverUpload.receipt(uploadFrame, submitted)')
+        expect(renderer).to.include('demandProjection.project(selection)')
+        expect(renderer).to.include('builder.upload(argumentsUpload)')
+        expect(renderer).to.include("'cpu-cover-selection'")
+        expect(renderer).to.include("'cpu-source-demand'")
+        expect(renderer).to.include("'patch-draw-upload'")
         expect(renderer).to.include('virtualRaster.reconcileViewDemands(')
         expect(cover).to.include('export class GpuWebMercatorQuadCover')
         expect(cover).not.to.include('desiredSampleLevel')
@@ -317,17 +327,21 @@ describe('Underwater Terrain clean cut', () => {
         expect(terrain).not.to.include('diagonalDistance')
         expect(terrain).not.to.include('fwidth(edgeDistance)')
         expect(terrain).not.to.include('@builtin(primitive_index)')
-        expect(wgsl).to.include('fn generateWebMercatorQuadCover()')
-        expect(wgsl).to.include('coverCameraTileIndex')
+        expect(wgsl).to.include('fn generateWebMercatorQuadCover(')
+        expect(wgsl).to.include('fn evaluateWebMercatorQuadCandidates(')
+        expect(wgsl).to.include('@workgroup_size(64)')
+        expect(wgsl).to.include('coverCandidateWindow')
+        expect(wgsl).not.to.include('coverProjectedSearchRadiusTiles')
         expect(wgsl).to.include('fn coverProjectedCellSpanPixels(')
-        expect(wgsl).to.include('fn coverProjectedCellMaximumStretchPixels(')
+        expect(wgsl).to.include('fn coverMaximumStretch(')
         expect(wgsl).to.include('(xx - yy) * (xx - yy) + 4.0f * xy * xy')
         expect(wgsl).not.to.include('fn coverProjectedCellAreaScalePixels(')
         expect(wgsl).to.include('fn coverMarkSparseRefinements(')
         expect(wgsl).to.include('fn coverRefinementContains(')
         expect(wgsl).to.include('fn coverMaterializeSparseRefinements(')
         expect(wgsl).to.include('fn coverCompactVisiblePatches(')
-        expect(wgsl).to.include('coverBalancePatches')
+        expect(wgsl).to.include('coverBalanceIndexedPatches')
+        expect(wgsl).not.to.include('coverMaximumFinerNeighborDelta')
         expect(wgsl).not.to.include('fn coverVariableRefinementWindow(')
         expect(wgsl).not.to.include('fn coverUnionWindow(')
         expect(wgsl).not.to.include('fn coverFullyCoveredByFiner(')
@@ -463,7 +477,7 @@ describe('Underwater Terrain clean cut', () => {
             'packages', 'geoscratch', 'src', 'geo', 'web-mercator-terrain-renderer.ts'
         )
         const frame = renderer.slice(
-            renderer.indexOf('async function submitFrame(input: ViewInput)'),
+            renderer.indexOf('function submitFrame(input: ViewInput)'),
             renderer.indexOf('async function resize(nextSize: SurfaceSize)')
         )
 
@@ -480,10 +494,10 @@ describe('Underwater Terrain clean cut', () => {
             expect(renderer).to.include(call)
             expect(frame).not.to.include(call)
         }
-        expect(frame).to.include('cover.writeView(view)')
-        expect(frame).to.include('cover.encode(builder, frame)')
-        expect(frame).to.include('demandProjection.encode(builder, demandFrame)')
-        expect(frame).to.include('patchDraw.encode(builder, patchDrawFrame)')
+        expect(frame).to.include('cover.select(view)')
+        expect(frame).to.include('coverUpload.encode(builder, uploadFrame)')
+        expect(frame).to.include('demandProjection.project(selection)')
+        expect(frame).to.include('builder.upload(argumentsUpload)')
         expect(frame).to.include('.render(passes.terrain')
         expect(renderer).to.include("contentEpoch: 'current-at-step'")
         expect(renderer.match(/count: \{ indirect:/g)).to.have.length(1)
@@ -551,6 +565,7 @@ describe('Underwater Terrain clean cut', () => {
         const initialized = await graph.initialize()
         await initialized.observation
         const result = await graph.render(terrainCapture())
+        void result.settlement.catch(() => undefined)
         let observedFailure
         try {
             await result.observation
@@ -560,10 +575,10 @@ describe('Underwater Terrain clean cut', () => {
 
         expect(observedFailure).to.equal(provenanceFailure)
         expect(result.value.frame.provenance.map(fact => fact.name)).to.deep.equal([
-            'cover-map-meta-to-cover-compute',
-            'cover-patches-to-terrain-draw',
-            'cover-lookup-to-terrain-draw',
-            'patch-draw-indirect-to-terrain-draw',
+            'cpu-cover-map-meta-to-terrain-draw',
+            'cpu-cover-patches-to-terrain-draw',
+            'cpu-cover-lookup-to-terrain-draw',
+            'cpu-patch-draw-arguments-to-terrain-draw',
         ])
         expect(fake.calls.queueSubmissions.length).to.be.greaterThan(0)
 
@@ -572,66 +587,363 @@ describe('Underwater Terrain clean cut', () => {
         await runtime.dispose()
     })
 
-    it('keeps same-decision feedback convergence live when a newer host frame wins', async() => {
-
-        const fake = createFakeGpu()
-        const runtime = await GPURuntime.create({ gpu: fake.gpu })
-        const fakeCanvas = createFakeCanvas()
-        const surface = runtime.createSurface(fakeCanvas.canvas, {
-            label: 'Underwater Terrain feedback-convergence surface',
-            format: 'rgba8unorm',
-            alphaMode: 'premultiplied',
-            size: { width: 320, height: 180 },
-        })
-        const virtualRaster = await createTestVirtualRaster(runtime)
-        const graph = await createTestTerrainRenderer({
-            runtime,
-            surface,
-            virtualRaster,
-            size: { width: 320, height: 180 },
-        })
-        const initialized = await graph.initialize()
-        await initialized.observation
-        const capture = terrainCapture()
-        let first
-        let second
+    it('reconciles current CPU intent before any GPU completion or readback', async() => {
+        const observed = []
+        const fixture = await createCpuFixture({ onReconcile: value => { observed.push(value) } })
         try {
-            first = await graph.render(capture)
-            second = await graph.render(capture)
+            const frame = await fixture.render()
+            const progress = await frame.settlement
+            expect(observed).to.have.length(1)
+            expect(observed[0].demands.length).to.be.greaterThan(0)
+            expect(observed[0].demands.every(d => d.source.frameEpoch === 1)).to.equal(true)
+            expect(progress.coverSelection.frameEpoch).to.equal(1)
+            expect(progress.projectedDemands.frameEpoch).to.equal(1)
+            expect(frame.value.frame.uploadReceipt.kind).to.equal('web-mercator-quad-cover-upload-receipt')
+            expect(fixture.fake.readbacks.mapRequests).to.have.length(0)
+            expect(frame.needsFollowUp).to.equal(false)
+            expect(progress.needsFollowUp).to.equal(false)
+            expect(fixture.graph.state().convergenceState).to.equal('converged')
+            expect(fixture.graph.contractFacts().countPath).to.equal('cpu-produced-indirect-arguments')
+            expect(Object.keys(fixture.graph.contractFacts().passIds)).to.deep.equal(['terrain'])
+        } finally { await fixture.dispose() }
+    })
 
-            expect(first.needsFollowUp).to.equal(true)
-            expect(second.needsFollowUp).to.equal(true)
-        } finally {
-            await Promise.allSettled([
-                first?.observation,
-                second?.observation,
-            ].filter(Boolean))
-            graph.dispose()
-            await virtualRaster.dispose()
-            await runtime.dispose()
+    it('retains active request completion in every newer same-selection settlement', async() => {
+        const request = deferred()
+        let count = 0
+        const fixture = await createCpuFixture({ activeRequestCount: () => 1,
+            onReconcile: () => ({ requestedCount: ++count === 1 ? 1 : 0,
+                retainedCount: count === 1 ? 0 : 1, settlement: request.promise }) })
+        try {
+            const first = await fixture.render()
+            const second = await fixture.render()
+            const progress = await second.settlement
+            expect(progress.reconciliation.retainedCount).to.equal(1)
+            expect(progress.residencyWorkCount).to.equal(1)
+            let resourceReady = false
+            void progress.residencySettlement.then(() => { resourceReady = true })
+            await nextTurn()
+            expect(resourceReady).to.equal(false)
+            expect(progress.coverSelection.frameEpoch).to.equal(2)
+            expect((await first.settlement).coverSelection.frameEpoch).to.equal(1)
+            expect(fixture.fake.readbacks.mapRequests).to.have.length(0)
+            request.resolve()
+            await progress.residencySettlement
+        } finally { request.resolve(); await fixture.dispose() }
+    })
+
+    it('keeps A-B-A decisions deterministic with fresh provenance while publication acknowledgement is delayed', async() => {
+        const ack = deferred(), events = [], observed = []
+        let delay = false
+        const fixture = await createCpuFixture({ events,
+            beforeAcknowledge: () => delay ? ack.promise : undefined,
+            onReconcile: value => { observed.push(value) } })
+        try {
+            delay = true
+            const first = await fixture.render(terrainCapture())
+            await nextTurn()
+            const a = await first.settlement
+            const second = await fixture.render(terrainCapture({ offset: 15000, pitch: 35 }))
+            const last = await fixture.render(terrainCapture())
+            const returned = await last.settlement
+            expect(events.filter(x => x === 'publish')).to.have.length(2) // initialization + one pending publication
+            expect(events.filter(x => x === 'acknowledge')).to.have.length(2)
+            expect(returned.coverSelection.frameEpoch).to.equal(3)
+            expect(returned.coverSelection.selectionId).not.to.equal(a.coverSelection.selectionId)
+            const keys = p => p.projectedDemands.demands.map(d =>
+                [d.requestMatrixLevel, d.tileRow, d.tileCol, d.desiredSampleLevel])
+            expect(keys(returned)).to.deep.equal(keys(a))
+            expect(observed.map(value => value.generation)).to.deep.equal([1, 2, 3])
+            expect(observed.map(value => value.demands[0].source.frameEpoch)).to.deep.equal([1, 2, 3])
+            ack.resolve()
+            await Promise.all([first.observation, second.observation, last.observation])
+            expect(fixture.graph.state().coverFrameEpoch).to.equal(3)
+            expect(fixture.graph.state().projectedDemands).to.equal(returned.projectedDemands)
+        } finally { ack.resolve(); await fixture.dispose() }
+    })
+
+    for (const phase of ['initialize', 'frame']) {
+        it(`retries a pre-queue ${phase} failure with the same pending publication`, async() => {
+            const events = []
+            const fixture = await createCpuFixture({ events, initialize: phase !== 'initialize' })
+            const original = fixture.runtime.createSubmission.bind(fixture.runtime)
+            const injected = new Error('injected before queue issue')
+            let fail = true
+            fixture.runtime.createSubmission = options => {
+                const builder = original(options)
+                if (fail) { builder.submit = () => { fail = false; throw injected } }
+                return builder
+            }
+            try {
+                const action = phase === 'initialize' ? () => fixture.graph.initialize() : () => fixture.render()
+                expect(await action().then(() => undefined, error => error)).to.equal(injected)
+                const retry = await action()
+                await retry.observation
+                expect(events.filter(x => x === 'publish')).to.have.length(phase === 'initialize' ? 1 : 2)
+                expect(events.filter(x => x === 'initialize')).to.have.length(1)
+                expect(fixture.graph.state().convergenceState).not.to.equal('failed')
+            } finally { await fixture.dispose() }
+        })
+    }
+
+    for (const phase of ['view', 'arguments', 'render-encoding']) {
+        it(`preserves the pending publication when ${phase} construction fails`, async() => {
+            const events = [], injected = new Error(`injected ${phase}`)
+            let failView = false
+            const fixture = await createCpuFixture({ events,
+                viewAdapter: { ...underwaterTerrainViewAdapter, read(...args) {
+                    if (failView) { failView = false; throw injected }
+                    return underwaterTerrainViewAdapter.read(...args)
+                } } })
+            try {
+                if (phase === 'view') failView = true
+                if (phase === 'arguments') {
+                    const create = fixture.runtime.createUploadCommand.bind(fixture.runtime)
+                    let once = true
+                    fixture.runtime.createUploadCommand = descriptor => {
+                        if (once && descriptor.label.startsWith('Upload indexed terrain arguments')) {
+                            once = false; throw injected
+                        }
+                        return create(descriptor)
+                    }
+                }
+                if (phase === 'render-encoding') {
+                    const create = fixture.runtime.createSubmission.bind(fixture.runtime)
+                    let once = true
+                    fixture.runtime.createSubmission = options => {
+                        const builder = create(options)
+                        if (once) { once = false; builder.render = () => { throw injected } }
+                        return builder
+                    }
+                }
+                expect(await fixture.render().then(() => undefined, error => error)).to.equal(injected)
+                const frame = await fixture.render()
+                await frame.observation
+                expect(events.filter(x => x === 'publish')).to.have.length(2)
+                expect((await frame.settlement).coverSelection.frameEpoch).to.equal(1)
+            } finally { await fixture.dispose() }
+        })
+    }
+
+    it('rejects an uncertified CPU cut before drawing or admitting resource intent and can retry', async() => {
+        const observed = [], events = []
+        const fixture = await createCpuFixture({ events, onReconcile: value => { observed.push(value) } })
+        try {
+            const before = fixture.fake.calls.queueSubmissions.length
+            const capture = terrainCapture()
+            const invalid = { ...capture, view: { ...capture.view, clipFromRelativeWorld: Array(16).fill(0) } }
+            const error = await fixture.render(invalid).then(() => undefined, error => error)
+            expect(error?.diagnostic?.code).to.equal('GEO_WEB_MERCATOR_COVER_CANDIDATE_CAPACITY_EXCEEDED')
+            expect(fixture.fake.calls.queueSubmissions).to.have.length(before)
+            expect(observed).to.have.length(0)
+            expect(fixture.graph.state().coverSelection).to.equal(undefined)
+            const frame = await fixture.render()
+            await frame.observation
+            expect(events.filter(x => x === 'publish')).to.have.length(2)
+            expect(observed).to.have.length(1)
+        } finally { await fixture.dispose() }
+    })
+
+    it('returns issued work when resource reconciliation fails and blocks subsequent frames', async() => {
+        const injected = new Error('injected reconciliation failure')
+        const fixture = await createCpuFixture({ onReconcile() { throw injected } })
+        try {
+            const before = fixture.fake.calls.queueSubmissions.length
+            const frame = await fixture.render()
+            expect(fixture.fake.calls.queueSubmissions.length).to.be.greaterThan(before)
+            expect(frame.value.frame.uploadReceipt.kind).to.equal('web-mercator-quad-cover-upload-receipt')
+            expect(await frame.observation.then(() => undefined, error => error)).to.equal(injected)
+            expect(await fixture.render().then(() => undefined, error => error)).to.equal(injected)
+            expect(fixture.graph.state().convergenceState).to.equal('failed')
+        } finally { await fixture.dispose() }
+    })
+
+    it('keeps queued receipts separate from native submission success', async() => {
+        const fixture = await createCpuFixture()
+        try {
+            fixture.fake.readbacks.rejectNextQueueCompletion(new Error('injected queue completion failure'))
+            const frame = await fixture.render()
+            expect(frame.value.frame.uploadReceipt.kind).to.equal('web-mercator-quad-cover-upload-receipt')
+            expect(await frame.observation.then(() => false, () => true)).to.equal(true)
+            expect(fixture.graph.state().convergenceState).to.equal('failed')
+            expect(await fixture.render().then(() => false, () => true)).to.equal(true)
+        } finally { await fixture.dispose() }
+    })
+
+    it('releases all owned renderer objects while keeping borrowed runtime, Surface and raster alive', async() => {
+        const fixture = await createCpuFixture()
+        try {
+            const frame = await fixture.render()
+            await frame.observation
+            const extra = await fixture.runtime.createBuffer({ size: 16, usage: 8 })
+            await (await fixture.render()).observation // unrelated resources cannot invalidate renderer ownership
+            extra.dispose()
+            fixture.graph.dispose()
+            expect(fixture.graph.persistentFacts()).to.deep.equal({ resources: 0, bindLayouts: 0,
+                bindSets: 0, pipelines: 0, logicalFootprintBytes: 0 })
+            expect(fixture.runtime.diagnostics.snapshot().resources.map(r => r.id).sort()).to.deep.equal(fixture.borrowedIds)
+            expect(fixture.surface.isDisposed).to.equal(false)
+            expect(fixture.virtualRaster.gpu.atlas.isDisposed).to.equal(false)
+            expect(fixture.virtualRaster.inspect().stopped).to.equal(false)
+            expect(fixture.runtime.isDisposed).to.equal(false)
+            fixture.graph.dispose()
+        } finally { await fixture.dispose() }
+    })
+
+    for (const method of ['createBuffer', 'createBindSet', 'createRenderPipeline', 'createDrawCommand']) {
+        it(`unwinds partial renderer construction at ${method} without disposing borrowed resources`, async() => {
+            const fixture = await createCpuFixture({ create: false })
+            const original = fixture.runtime[method].bind(fixture.runtime)
+            const injected = new Error(`injected ${method}`)
+            let count = 0
+            fixture.runtime[method] = (...args) => {
+                if (++count === 2) throw injected
+                return original(...args)
+            }
+            try {
+                const failure = await fixture.create().then(() => undefined, error => error)
+                expect(failure).to.equal(injected)
+                expect(fixture.runtime.diagnostics.snapshot().resources.map(r => r.id).sort()).to.deep.equal(fixture.borrowedIds)
+                expect(fixture.surface.isDisposed).to.equal(false)
+                expect(fixture.virtualRaster.gpu.atlas.isDisposed).to.equal(false)
+            } finally { await fixture.dispose() }
+        })
+    }
+
+    it('preserves the original terminal cause when borrowed raster initialization fails', async() => {
+        const events = [], injected = new Error('safety cover did not complete')
+        const fixture = await createCpuFixture({ events, initialize: false,
+            beforeInitialize() { throw injected } })
+        try {
+            for (let i = 0; i < 2; i++)
+                expect(await fixture.graph.initialize().then(() => undefined, error => error)).to.equal(injected)
+            expect(events.filter(value => value === 'initialize')).to.have.length(1)
+            expect(fixture.virtualRaster.inspect().stopped).to.equal(false)
+            expect(fixture.graph.state().convergenceState).to.equal('failed')
+        } finally { await fixture.dispose() }
+    })
+
+    it('waits for publication acknowledgement before scheduling one staged-page follow-up', async() => {
+        const ack = deferred()
+        let delay = false, staged = false
+        const errors = [], callbacks = new Map()
+        let handle = 0
+        const fixture = await createCpuFixture({
+            beforeAcknowledge: () => delay ? ack.promise : undefined,
+            onReconcile(demands, { residency, generation, safetyPage }) {
+                if (staged) return
+                staged = true
+                const page = demands.demands.find(d => d.page.key !== safetyPage.key).page
+                residency.reconcileGeneration(generation, [safetyPage, page])
+                residency.stage(ownedVirtualRasterPagePayload({ page, width: 256, height: 256,
+                    channels: 1, data: new Uint8Array(256 * 256).fill(128),
+                    contentVersion: demManifest.contentVersion }), { generation })
+            },
+        })
+        const controller = createGeoFrameController({ maximumInFlightFrames: 2,
+            render: () => fixture.render(), onError: error => errors.push(error),
+            scheduler: { request(callback) { callbacks.set(++handle, callback); return handle },
+                cancel(id) { callbacks.delete(id) } },
+        })
+        async function runScheduled() {
+            const [id, callback] = callbacks.entries().next().value
+            callbacks.delete(id); callback(); await nextTurn()
         }
+        try {
+            delay = true
+            controller.invalidate()
+            await runScheduled()
+            await nextTurn()
+            expect(controller.snapshot().submittedFrameCount).to.equal(1)
+            expect(callbacks.size).to.equal(0)
+            expect(fixture.virtualRaster.residency.inspect().stagedCount).to.equal(1)
+            ack.resolve()
+            await nextTurn()
+            expect(callbacks.size).to.equal(1)
+            await runScheduled()
+            await nextTurn()
+            expect(controller.snapshot().submittedFrameCount).to.equal(2)
+            expect(controller.snapshot().followUpFrameCount).to.equal(1)
+            expect(callbacks.size).to.equal(0)
+            expect(errors).to.deep.equal([])
+        } finally { controller.stop(); ack.resolve(); await fixture.dispose() }
+    })
+
+    it('does not submit initialization which completes after renderer disposal', async() => {
+        const ready = deferred()
+        const fixture = await createCpuFixture({ initialize: false, beforeInitialize: () => ready.promise })
+        try {
+            const initialization = fixture.graph.initialize()
+            fixture.graph.dispose()
+            const count = fixture.fake.calls.queueSubmissions.length
+            ready.resolve()
+            expect(await initialization.then(() => false, () => true)).to.equal(true)
+            expect(fixture.fake.calls.queueSubmissions).to.have.length(count)
+            expect(fixture.graph.state().initialized).to.equal(false)
+        } finally { ready.resolve(); await fixture.dispose() }
     })
 })
 
-function terrainCapture() {
+async function createCpuFixture(options = {}) {
+    const fake = createFakeGpu({ deferMaps: true })
+    const runtime = await GPURuntime.create({ gpu: fake.gpu })
+    const surface = runtime.createSurface(createFakeCanvas().canvas, {
+        format: 'rgba8unorm', alphaMode: 'premultiplied', size: { width: 320, height: 180 },
+    })
+    const virtualRaster = await createTestVirtualRaster(runtime, options)
+    const borrowedIds = runtime.diagnostics.snapshot().resources.map(r => r.id).sort()
+    let graph
+    const frames = []
+    async function create() {
+        graph = await createTestTerrainRenderer({ runtime, surface, virtualRaster,
+            size: { width: 320, height: 180 }, viewAdapter: options.viewAdapter })
+        return graph
+    }
+    if (options.create !== false) {
+        await create()
+        if (options.initialize !== false) await (await graph.initialize()).observation
+    }
+    return {
+        fake, runtime, surface, virtualRaster, borrowedIds, create,
+        get graph() { return graph },
+        async render(capture = terrainCapture()) {
+            const frame = await graph.render(capture)
+            void frame.observation.catch(() => undefined)
+            void frame.settlement.catch(() => undefined)
+            frames.push(frame)
+            return frame
+        },
+        async dispose() {
+            await Promise.allSettled(frames.flatMap(frame => [frame.observation, frame.settlement]))
+            graph?.dispose()
+            await virtualRaster.dispose()
+            surface.dispose()
+            await runtime.dispose()
+        },
+    }
+}
 
+function deferred() {
+    let resolve
+    const promise = new Promise(done => { resolve = done })
+    return { promise, resolve }
+}
+
+function nextTurn() { return new Promise(resolve => setImmediate(resolve)) }
+
+function terrainCapture({ offset = 0, pitch = 0 } = {}) {
+    const altitude = 70_000
+    const [x, y] = WebMercatorQuad.project([120.980697, 31.684162])
+    const camera = [x + offset, y, altitude]
+    const matrix = mat4.perspective(Math.PI / 3, 320 / 180, 1, altitude * 16, new Float64Array(16))
+    mat4.rotateX(matrix, pitch * Math.PI / 180, matrix)
     return Object.freeze({
         view: Object.freeze({
-            far: 1000,
-            near: 1,
-            clipFromRelativeWorld: [
-                1, 0, 0, 0,
-                0, 1, 0, 0,
-                0, 0, 1, 0,
-                0, 0, 0, 1,
-            ],
-            cameraLow: [ 0, 0, 0 ],
-            cameraHigh: [ 0, 0, 100 ],
-            referenceViewport: [ 320, 180 ],
-            verticalFovRadians: Math.PI / 3,
+            far: altitude * 16, near: 1, clipFromRelativeWorld: matrix,
+            cameraLow: camera.map(v => v - Math.fround(v)), cameraHigh: camera.map(Math.fround),
+            referenceViewport: [320, 180], verticalFovRadians: Math.PI / 3,
             cameraLatitudeRadians: 31.684162 * Math.PI / 180,
-            cameraPitchRadians: 0,
-            zoomHint: 9,
+            cameraPitchRadians: pitch * Math.PI / 180, zoomHint: 9,
         }),
         presentationSize: { width: 320, height: 180 },
     })

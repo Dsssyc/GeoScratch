@@ -270,7 +270,7 @@ async function verifyReadbackTransactions(browser) {
                     rejected: true,
                     scratchDiagnostic: error instanceof ErrorType,
                     diagnostic: error?.diagnostic,
-                    incident: error?.incident,
+                    incident: error?.context?.domain === 'gpu' ? error.context.incident : undefined,
                 }
             }
         }

@@ -35,16 +35,17 @@ const tilePort = process.env.UNDERWATER_TERRAIN_TILE_PORT === undefined
     : positiveInteger(process.env.UNDERWATER_TERRAIN_TILE_PORT)
 const tileBaseUrl = `http://127.0.0.1:${tilePort}`
 const expectedStageOrder = Object.freeze([
-    'inverse-cover-compute',
-    'source-demand-compute',
-    'patch-draw-compute',
+    'cpu-cover-selection',
+    'cpu-source-demand',
+    'cover-upload',
+    'patch-draw-upload',
     'terrain',
 ])
 const requiredProvenanceNames = Object.freeze([
-    'cover-map-meta-to-cover-compute',
-    'cover-patches-to-terrain-draw',
-    'cover-lookup-to-terrain-draw',
-    'patch-draw-indirect-to-terrain-draw',
+    'cpu-cover-map-meta-to-terrain-draw',
+    'cpu-cover-patches-to-terrain-draw',
+    'cpu-cover-lookup-to-terrain-draw',
+    'cpu-patch-draw-arguments-to-terrain-draw',
 ])
 const cameraCenter = Object.freeze([ 120.980697, 31.684162 ])
 const cameraScenarios = Object.freeze([
@@ -52,6 +53,8 @@ const cameraScenarios = Object.freeze([
     scenario('flat-z10', 10, 0, 0),
     scenario('flat-z12', 12, 0, 0),
     scenario('flat-z14', 14, 0, 0),
+    scenario('max-zoom-pitch45', 18, 45, 0),
+    scenario('max-zoom-pitch85', 18, 85, 90),
     scenario('pitch45-bearing90-z9', 9, 45, 90),
     scenario('pitch45-bearing225-z10', 10, 45, 225),
     scenario('pitch70-bearing0-z9', 9, 70, 0),
@@ -446,8 +449,8 @@ async function captureConvergedCamera(page, definition) {
 async function waitForConvergedFacts(page, additional = () => true) {
 
     return await waitForUnderwaterTerrainFacts(page, facts => {
-        const cover = parseJsonOrUndefined(facts.coverFeedback)
-        const demand = parseJsonOrUndefined(facts.demandFeedback)
+        const cover = parseJsonOrUndefined(facts.coverSelection)
+        const demand = parseJsonOrUndefined(facts.projectedDemands)
         const virtualRaster = parseJsonOrUndefined(facts.virtualRaster)
         return facts.status === 'ready' &&
             facts.coverConverged === 'true' &&
@@ -497,8 +500,8 @@ function bearingDistance(left, right) {
 
 function coverSignature(facts) {
 
-    const cover = parseJsonOrUndefined(facts.coverFeedback)
-    const demand = parseJsonOrUndefined(facts.demandFeedback)
+    const cover = parseJsonOrUndefined(facts.coverSelection)
+    const demand = parseJsonOrUndefined(facts.projectedDemands)
     const camera = parseJsonOrUndefined(facts.cameraView)
     return JSON.stringify({
         candidateCount: cover?.candidateCount,
@@ -638,7 +641,7 @@ async function waitForUnderwaterTerrainFacts(page, predicate) {
 function waitFacts(facts) {
 
     if (facts === undefined) return undefined
-    const cover = parseJsonOrUndefined(facts.coverFeedback)
+    const cover = parseJsonOrUndefined(facts.coverSelection)
     const virtualRaster = parseJsonOrUndefined(facts.virtualRaster)
     return {
         status: facts.status,
@@ -1054,7 +1057,7 @@ function validateNormalProof(proof, failures) {
         }
     }
     const coverProofs = scenarios.flatMap(result => result.facts.map(facts => (
-        parseJsonOrUndefined(facts.coverFeedback)
+        parseJsonOrUndefined(facts.coverSelection)
     )))
     const pitchedMultiLevelProofs = coverProofs.filter(feedback => (
         feedback?.minimumMatrixLevel < feedback?.maximumMatrixLevel &&
@@ -1181,10 +1184,10 @@ function validateUnderwaterTerrainFacts(label, facts, failures, expectedStatus =
     if (!Number.isSafeInteger(count) || count < 1 || count > 5_000) {
         failures.push(`${label} cover patch count was outside 1..5000`)
     }
-    if (facts.selectionPath !== 'gpu-camera-inverse-webmercatorquad-cover' ||
-        facts.countPath !== 'gpu-produced-indirect-arguments' ||
-        facts.cpuSelectionUploadCount !== '0') {
-        failures.push(`${label} did not use the clean GPU selection/count path`)
+    if (facts.selectionPath !== 'cpu-camera-inverse-webmercatorquad-cover' ||
+        facts.countPath !== 'cpu-produced-indirect-arguments' ||
+        !(Number(facts.cpuSelectionUploadCount) > 0)) {
+        failures.push(`${label} did not use the CPU selection and indexed indirect count path`)
     }
     if (facts.diagnosticsBounded !== 'true') failures.push(`${label} diagnostics were not bounded`)
     if (facts.diagnosticIncidents !== '0') failures.push(`${label} retained a diagnostic incident`)
@@ -1220,12 +1223,12 @@ function validateUnderwaterTerrainFacts(label, facts, failures, expectedStatus =
         }
     }
     const contract = parseJson(facts.graphContract, `${label} graph contract`, failures)
-    if (contract?.countPath !== 'gpu-produced-indirect-arguments' ||
-        contract?.selectionPath !== 'gpu-camera-inverse-webmercatorquad-cover' ||
+    if (contract?.countPath !== 'cpu-produced-indirect-arguments' ||
+        contract?.selectionPath !== 'cpu-camera-inverse-webmercatorquad-cover' ||
         contract?.sourceMaximumMatrixLevel !== 10 ||
         contract?.coverMaximumMatrixLevel !== 14 ||
         contract?.cover?.selectionPath !==
-            'gpu-camera-inverse-webmercatorquad-cover' ||
+            'cpu-camera-inverse-webmercatorquad-cover' ||
         contract?.cover?.policy?.maximumMatrixLevel !== 14 ||
         contract?.cover?.policy?.cellsPerPatchEdge !== 128 ||
         contract?.cover?.policy?.maximumCellSpanReferencePixels !== 5 ||
@@ -1243,9 +1246,9 @@ function validateUnderwaterTerrainFacts(label, facts, failures, expectedStatus =
         failures.push(`${label} persistent graph contract drifted`)
     }
     parseJson(facts.cameraView, `${label} camera view`, failures)
-    const cover = parseJson(facts.coverFeedback, `${label} cover feedback`, failures)
-    const demandFeedback = parseJson(
-        facts.demandFeedback,
+    const cover = parseJson(facts.coverSelection, `${label} cover feedback`, failures)
+    const projectedDemands = parseJson(
+        facts.projectedDemands,
         `${label} demand feedback`,
         failures
     )
@@ -1254,13 +1257,13 @@ function validateUnderwaterTerrainFacts(label, facts, failures, expectedStatus =
         `${label} cover level range`,
         failures
     )
-    const demandLevelsAreValid = Array.isArray(demandFeedback?.demands) &&
-        demandFeedback.demands.every(
+    const demandLevelsAreValid = Array.isArray(projectedDemands?.demands) &&
+        projectedDemands.demands.every(
         demand => demand?.sourceLevelCeiling === 10 &&
             demand?.requestMatrixLevel <= demand.sourceLevelCeiling &&
             demand?.desiredSampleLevel >= demand.requestMatrixLevel &&
             demand?.desiredSampleLevel <= 14 &&
-            demand?.decisionFrameEpoch === demandFeedback.frameEpoch
+            demand?.decisionFrameEpoch === projectedDemands.frameEpoch
     )
     if (cover?.patchCount !== count ||
         cover?.candidateCount < cover?.patchCount ||
@@ -1272,11 +1275,11 @@ function validateUnderwaterTerrainFacts(label, facts, failures, expectedStatus =
         !Array.isArray(coverLevelRange) ||
         coverLevelRange[0] !== cover?.minimumMatrixLevel ||
         coverLevelRange[1] !== cover?.maximumMatrixLevel ||
-        demandFeedback?.demandCount !== Number(facts.sourceDemandCount) ||
-        demandFeedback?.demands?.length !== demandFeedback?.demandCount ||
-        demandFeedback?.overflowCount !== 0 ||
-        demandFeedback?.sourceLevelCeiling !== 10 ||
-        demandFeedback?.frameEpoch !== cover?.frameEpoch ||
+        projectedDemands?.demandCount !== Number(facts.sourceDemandCount) ||
+        projectedDemands?.demands?.length !== projectedDemands?.demandCount ||
+        projectedDemands?.overflowCount !== 0 ||
+        projectedDemands?.sourceLevelCeiling !== 10 ||
+        projectedDemands?.frameEpoch !== cover?.frameEpoch ||
         !demandLevelsAreValid) {
         failures.push(`${label} inverse-cover feedback was inconsistent`)
     }
@@ -1296,6 +1299,7 @@ function validateVirtualRasterFacts(label, facts, failures) {
 
     const virtualRaster = parseJson(facts.virtualRaster, `${label} virtual raster facts`, failures)
     const residency = virtualRaster?.residency
+    const residencyAudit = parseJson(facts.residencyAudit, `${label} residency audit`, failures)
     const gpu = virtualRaster?.gpu
     const maximumPages = Number(facts.maxPhysicalPages)
     if (!Number.isSafeInteger(maximumPages) || maximumPages < 2 || maximumPages > 64) {
@@ -1308,10 +1312,23 @@ function validateVirtualRasterFacts(label, facts, failures) {
         failures.push(`${label} virtual raster precision or failure facts were invalid`)
     }
     if (residency?.residentCount < 1 || residency?.residentCount > maximumPages ||
-        residency?.pinnedCount !== 1 || residency?.cpuBytes > residency?.maxCpuBytes ||
+        residency?.pinnedCount !== 1 || residency?.stagingBytes > residency?.maxStagingBytes ||
         residency?.maxPhysicalPages !== maximumPages || residency?.failedCount !== 0 ||
-        residency?.staleResponseCount !== 0 || residency?.history?.length > 64) {
-        failures.push(`${label} virtual raster residency exceeded its finite contract`)
+        !Number.isSafeInteger(residencyAudit?.retiredStagedPageCount) ||
+        residencyAudit.retiredStagedPageCount < 0 ||
+        residency?.staleResponseCount !== residencyAudit.retiredStagedPageCount ||
+        residencyAudit?.rejectedStaleOperationCount !== 0 ||
+        residencyAudit?.unrequiredUploadCount !== 0 || residency?.history?.length > 64) {
+        failures.push(`${label} virtual raster residency exceeded its finite contract: ${JSON.stringify({
+            maximumPages,
+            residentCount: residency?.residentCount,
+            pinnedCount: residency?.pinnedCount,
+            maxPhysicalPages: residency?.maxPhysicalPages,
+            failedCount: residency?.failedCount,
+            staleResponseCount: residency?.staleResponseCount,
+            residencyAudit,
+            historyLength: residency?.history?.length,
+        })}`)
     }
     if (gpu?.maxPhysicalPages !== maximumPages || gpu?.snapshotEpoch !== residency?.snapshotEpoch ||
         gpu?.pageTableEntryCount < 1 || gpu?.pageTableBytes < 1) {
@@ -1517,7 +1534,7 @@ function summarizeNormalProof(proof) {
 
 function summarizeFacts(facts) {
 
-    const coverFeedback = parseJsonOrUndefined(facts.coverFeedback)
+    const coverSelection = parseJsonOrUndefined(facts.coverSelection)
     return {
         status: facts.status,
         frames: Number(facts.frames),
@@ -1527,8 +1544,9 @@ function summarizeFacts(facts) {
         sourceDemandCount: Number(facts.sourceDemandCount),
         coverLevelRange: parseJsonOrUndefined(facts.coverLevelRange),
         convergenceState: facts.convergenceState,
-        coverFeedback,
-        demandFeedback: parseJsonOrUndefined(facts.demandFeedback),
+        coverSelection,
+        projectedDemands: parseJsonOrUndefined(facts.projectedDemands),
+        residencyAudit: parseJsonOrUndefined(facts.residencyAudit),
         cameraView: parseJsonOrUndefined(facts.cameraView),
         stableIdentityCount: Number(facts.currentStableIdentityCount),
         stableIdentityHash: facts.currentStableIdentityHash,

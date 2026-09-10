@@ -265,12 +265,19 @@ async function runProof(activeBrowser) {
                 patchCount: previous.coverPatchCount,
                 levelRange: previous.coverLevelRange,
                 descriptorOverflowCount:
-                    previous.coverFeedback?.descriptorOverflowCount,
-                lookupOverflowCount: previous.coverFeedback?.lookupOverflowCount,
+                    previous.coverSelection?.descriptorOverflowCount,
+                lookupOverflowCount: previous.coverSelection?.lookupOverflowCount,
                 maximumAdjacentLevelDelta:
-                    previous.coverFeedback?.maximumAdjacentLevelDelta,
+                    previous.coverSelection?.maximumAdjacentLevelDelta,
             }))
         }
+        const maximumZoomPitchSweep = []
+        for (let pitch = 0; pitch <= 85; pitch++) {
+            previous = await settle(page, 'tile-wireframe', previous.observedFrames,
+                Object.freeze({ ...camera, zoom: 18, pitch }))
+            maximumZoomPitchSweep.push(Object.freeze({ pitch, ...previous }))
+        }
+        const maximumZoomCapture = await capture(page, 'maximum-zoom-pitch85')
         previous = await settle(
             page,
             'tile-wireframe',
@@ -331,6 +338,8 @@ async function runProof(activeBrowser) {
             zoomSamples: Object.freeze(zoomSamples),
             pitchSweep: Object.freeze(pitchSweep),
             continuousPitchSweep: Object.freeze(continuousPitchSweep),
+            maximumZoomPitchSweep: Object.freeze(maximumZoomPitchSweep),
+            maximumZoomCapture,
             oddParityTopDown,
             shadedTracking,
             wireframeTracking,
@@ -378,8 +387,8 @@ async function runDprInvariance(activeBrowser) {
                     presentation: [ canvas.width, canvas.height ],
                 }
             })
-            const feedback = settled.coverFeedback
-            const demandFeedback = settled.demandFeedback
+            const feedback = settled.coverSelection
+            const projectedDemands = settled.projectedDemands
             samples.push(Object.freeze({
                 requestedDeviceScaleFactor: deviceScaleFactor,
                 ...dimensions,
@@ -391,7 +400,7 @@ async function runDprInvariance(activeBrowser) {
                     maximumMatrixLevel: feedback?.maximumMatrixLevel,
                     finestMatrixLevel: feedback?.finestMatrixLevel,
                     maximumAdjacentLevelDelta: feedback?.maximumAdjacentLevelDelta,
-                    demands: demandFeedback?.demands?.map(demand => [
+                    demands: projectedDemands?.demands?.map(demand => [
                         demand.desiredSampleLevel,
                         demand.requestMatrixLevel,
                         demand.tileRow,
@@ -420,8 +429,8 @@ async function settle(page, presentation, afterObservedFrames, nextCamera) {
         const parse = value => {
             try { return JSON.parse(value ?? 'null') } catch { return null }
         }
-        const cover = parse(data.coverFeedback)
-        const demand = parse(data.demandFeedback)
+        const cover = parse(data.coverSelection)
+        const demand = parse(data.projectedDemands)
         const raster = parse(data.virtualRaster)
         const observedCamera = parse(data.cameraView)
         const cameraMatches = observedCamera !== null &&
@@ -478,8 +487,8 @@ async function readFacts(page) {
             identityFacts: parse(data.currentIdentityFacts),
             persistentFacts: parse(data.persistentFacts),
             graphContract: parse(data.graphContract),
-            coverFeedback: parse(data.coverFeedback),
-            demandFeedback: parse(data.demandFeedback),
+            coverSelection: parse(data.coverSelection),
+            projectedDemands: parse(data.projectedDemands),
             coverLevelRange: parse(data.coverLevelRange),
             coverPatchCount: Number(data.coverPatchCount),
             sourceDemandCount: Number(data.sourceDemandCount),
@@ -676,6 +685,7 @@ function validateProof(value, processState) {
         zoomSamples = [],
         pitchSweep,
         continuousPitchSweep = [],
+        maximumZoomPitchSweep = [],
         oddParityTopDown,
         shadedTracking,
         wireframeTracking,
@@ -696,14 +706,15 @@ function validateProof(value, processState) {
     'presentation switching changed persistent graph identity')
     expect(failures,
         baseline?.graphContract?.selectionPath ===
-            'gpu-camera-inverse-webmercatorquad-cover' &&
+            'cpu-camera-inverse-webmercatorquad-cover' &&
         baseline.graphContract.sourceMaximumMatrixLevel === 10 &&
         baseline.graphContract.coverMaximumMatrixLevel === 14 &&
-        baseline.graphContract.commandIds?.cover?.length === 2 &&
-        baseline.graphContract.commandIds.cover.every(ids => ids.length === 2) &&
-        baseline.graphContract.commandIds?.demandProjection?.length === 2 &&
-        baseline.graphContract.commandIds.demandProjection.every(ids => ids.length === 3) &&
-        baseline.graphContract.commandIds?.patchDraw?.length === 2,
+        Object.keys(baseline.graphContract.passIds).join() === 'terrain' &&
+        baseline.graphContract.coverUpload.parity.length === 2 &&
+        baseline.graphContract.patchDraw.bufferIds.length === 2 &&
+        baseline.graphContract.patchDraw.argumentByteLength === 20 &&
+        baseline.graphContract.commandIds.drawTerrain.shaded.length === 2 &&
+        baseline.graphContract.commandIds.drawTerrain['tile-wireframe'].length === 2,
     'graph contract does not expose the inverse-cover authority')
 
     const samples = [
@@ -712,6 +723,7 @@ function validateProof(value, processState) {
         wireframe,
         ...canonical,
         ...zoomSamples,
+        ...maximumZoomPitchSweep,
         ...Object.values(pitchSweep ?? {}),
         oddParityTopDown?.bearingZero,
         oddParityTopDown?.direct,
@@ -719,19 +731,19 @@ function validateProof(value, processState) {
         restored,
     ]
     for (const [ index, sample ] of samples.entries()) {
-        const feedback = sample?.coverFeedback
-        const demandFeedback = sample?.demandFeedback
+        const feedback = sample?.coverSelection
+        const projectedDemands = sample?.projectedDemands
         expect(failures,
             feedback?.patchCount > 0 &&
             feedback.patchCount === sample.coverPatchCount &&
             feedback.descriptorOverflowCount === 0 &&
             feedback.lookupOverflowCount === 0 &&
             feedback.maximumAdjacentLevelDelta <= 1 &&
-            demandFeedback?.overflowCount === 0 &&
-            demandFeedback.sourceLevelCeiling === 10 &&
-            demandFeedback.frameEpoch === feedback.frameEpoch &&
-            demandFeedback.demandCount === sample.sourceDemandCount &&
-            demandFeedback.demands.every(demand =>
+            projectedDemands?.overflowCount === 0 &&
+            projectedDemands.sourceLevelCeiling === 10 &&
+            projectedDemands.frameEpoch === feedback.frameEpoch &&
+            projectedDemands.demandCount === sample.sourceDemandCount &&
+            projectedDemands.demands.every(demand =>
                 demand.requestMatrixLevel <= demand.sourceLevelCeiling
             ),
         `cover sample ${index} violated bounded standard-cover facts`)
@@ -743,13 +755,19 @@ function validateProof(value, processState) {
         `cover sample ${index} retained a WebGPU diagnostic failure`)
     }
 
+    expect(failures,
+        maximumZoomPitchSweep.length === 86 && maximumZoomPitchSweep.every(sample =>
+            sample.coverSelection?.maximumMatrixLevel === 14 &&
+            Number.isFinite(sample.coverSelection?.maximumCellSpanReferencePixels)),
+    'maximum zoom pitch sweep lost a finite visible-domain quality certificate')
+
     const signatures = canonical.map(sample => JSON.stringify({
-        patchCount: sample.coverFeedback?.patchCount,
-        candidateCount: sample.coverFeedback?.candidateCount,
-        minimumMatrixLevel: sample.coverFeedback?.minimumMatrixLevel,
-        maximumMatrixLevel: sample.coverFeedback?.maximumMatrixLevel,
-        finestMatrixLevel: sample.coverFeedback?.finestMatrixLevel,
-        maximumAdjacentLevelDelta: sample.coverFeedback?.maximumAdjacentLevelDelta,
+        patchCount: sample.coverSelection?.patchCount,
+        candidateCount: sample.coverSelection?.candidateCount,
+        minimumMatrixLevel: sample.coverSelection?.minimumMatrixLevel,
+        maximumMatrixLevel: sample.coverSelection?.maximumMatrixLevel,
+        finestMatrixLevel: sample.coverSelection?.finestMatrixLevel,
+        maximumAdjacentLevelDelta: sample.coverSelection?.maximumAdjacentLevelDelta,
         canvasHash: sample.capture?.canvas?.sha256,
     }))
     expect(failures,
@@ -777,8 +795,8 @@ function validateProof(value, processState) {
     const maximumNearSixtyCount = Math.max(...nearSixtyCounts)
     expect(failures,
         nearSixty.every(sample =>
-            sample?.coverFeedback?.selectionMode === undefined &&
-            sample?.coverFeedback?.maximumAdjacentLevelDelta <= 1
+            sample?.coverSelection?.selectionMode === undefined &&
+            sample?.coverSelection?.maximumAdjacentLevelDelta <= 1
         ) &&
         maximumNearSixtyCount - minimumNearSixtyCount <=
             Math.max(8, Math.ceil(minimumNearSixtyCount * 0.5)),
@@ -807,12 +825,12 @@ function validateProof(value, processState) {
     const oddDirect = oddParityTopDown?.direct
     const oddReturned = oddParityTopDown?.returned
     const oddSignature = sample => JSON.stringify({
-        patchCount: sample?.coverFeedback?.patchCount,
-        candidateCount: sample?.coverFeedback?.candidateCount,
-        minimumMatrixLevel: sample?.coverFeedback?.minimumMatrixLevel,
-        maximumMatrixLevel: sample?.coverFeedback?.maximumMatrixLevel,
-        finestMatrixLevel: sample?.coverFeedback?.finestMatrixLevel,
-        maximumAdjacentLevelDelta: sample?.coverFeedback?.maximumAdjacentLevelDelta,
+        patchCount: sample?.coverSelection?.patchCount,
+        candidateCount: sample?.coverSelection?.candidateCount,
+        minimumMatrixLevel: sample?.coverSelection?.minimumMatrixLevel,
+        maximumMatrixLevel: sample?.coverSelection?.maximumMatrixLevel,
+        finestMatrixLevel: sample?.coverSelection?.finestMatrixLevel,
+        maximumAdjacentLevelDelta: sample?.coverSelection?.maximumAdjacentLevelDelta,
     })
     expect(failures,
         oddSignature(oddBearingZero) === oddSignature(oddDirect),
@@ -823,7 +841,7 @@ function validateProof(value, processState) {
     'odd-parity top-down cover depended on navigation history')
     expect(failures,
         oddDirect?.coverPatchCount > 0 && oddDirect.coverPatchCount <= 96 &&
-        oddDirect.coverFeedback?.maximumAdjacentLevelDelta <= 1,
+        oddDirect.coverSelection?.maximumAdjacentLevelDelta <= 1,
     'odd-parity top-down cover exceeded density or adjacency gates')
     expect(failures,
         pitchedShaded?.coverPatchCount <= 96 &&

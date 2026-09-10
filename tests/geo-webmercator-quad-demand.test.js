@@ -199,7 +199,11 @@ describe('GPU WebMercatorQuad demand projection', () => {
         setup.projection.capture(builder, demandFrame)
         const submitted = builder.submit()
 
-        expect(setup.calls.dispatchCalls).to.have.length(2)
+        expect(setup.calls.dispatchCalls).to.have.length(3)
+        expect(setup.calls.dispatchCalls[0].type).to.equal('dispatchWorkgroupsIndirect')
+        expect(setup.calls.dispatchCalls.slice(1)).to.deep.equal([
+            { x: 1, y: 1, z: 1 }, { x: 1, y: 1, z: 1 },
+        ])
         expect(submitted.readbacks).to.have.length(3)
         expect(setup.projection.facts()).to.deep.include({
             coverId: setup.cover.id,

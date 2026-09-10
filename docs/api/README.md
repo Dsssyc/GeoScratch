@@ -18,7 +18,7 @@ present-tense API contract.
 - [Scratch](./scratch/README.md) is the domain-neutral foundation for diagnostics,
   lifetime, cache, geometry, Worker execution, and explicit WebGPU resources and work.
 - [Geo](./geo/README.md) adapts Scratch into coordinate, view, tile, field, Virtual
-  Raster, GPU-driven view cover, and terrain semantics. Geo may depend on Scratch;
+  Raster, CPU/GPU view cover, and terrain semantics. Geo may depend on Scratch;
   Scratch never depends on Geo.
 
 Generated references enumerate all exports from the real entrypoints:

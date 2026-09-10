@@ -526,8 +526,8 @@ function cameraMatches(facts, camera) {
 
 function coverSignature(facts) {
 
-    const cover = parseJson(facts.coverFeedback)
-    const demand = parseJson(facts.demandFeedback)
+    const cover = parseJson(facts.coverSelection)
+    const demand = parseJson(facts.projectedDemands)
     return JSON.stringify({
         candidateCount: cover?.candidateCount,
         patchCount: cover?.patchCount,
@@ -559,8 +559,8 @@ async function waitForStableFacts(page, additional = () => true) {
             throw new Error(facts.error ?? 'Underwater Terrain page failed')
         }
         const virtualRaster = parseJson(facts.virtualRaster)
-        const cover = parseJson(facts.coverFeedback)
-        const demand = parseJson(facts.demandFeedback)
+        const cover = parseJson(facts.coverSelection)
+        const demand = parseJson(facts.projectedDemands)
         if (facts.status === 'ready' && Number(facts.frames) === Number(facts.observedFrames) &&
             facts.coverConverged === 'true' && facts.convergenceState === 'converged' &&
             cover?.patchCount > 0 && cover?.descriptorOverflowCount === 0 &&
@@ -588,8 +588,8 @@ async function waitForStableFacts(page, additional = () => true) {
         frames: lastFacts?.frames,
         observedFrames: lastFacts?.observedFrames,
         virtualRequestedPageCount: lastFacts?.virtualRequestedPageCount,
-        cover: parseJson(lastFacts?.coverFeedback),
-        demand: parseJson(lastFacts?.demandFeedback),
+        cover: parseJson(lastFacts?.coverSelection),
+        demand: parseJson(lastFacts?.projectedDemands),
         residency: virtualRaster?.residency,
         scheduler: virtualRaster?.scheduler,
         worker: virtualRaster?.worker,
@@ -737,11 +737,11 @@ function validateProof(value, processState) {
         const worker = virtualRaster?.worker
         const phaseBudget = worker?.phaseBudget
         const gpu = virtualRaster?.gpu
-        const cover = parseJson(facts.coverFeedback)
-        const demand = parseJson(facts.demandFeedback)
-        if (facts.selectionPath !== 'gpu-camera-inverse-webmercatorquad-cover' ||
-            facts.countPath !== 'gpu-produced-indirect-arguments' ||
-            facts.cpuSelectionUploadCount !== '0' ||
+        const cover = parseJson(facts.coverSelection)
+        const demand = parseJson(facts.projectedDemands)
+        if (facts.selectionPath !== 'cpu-camera-inverse-webmercatorquad-cover' ||
+            facts.countPath !== 'cpu-produced-indirect-arguments' ||
+            !(Number(facts.cpuSelectionUploadCount) > 0) ||
             facts.coverConverged !== 'true' || facts.convergenceState !== 'converged' ||
             cover?.patchCount !== Number(facts.coverPatchCount) ||
             cover?.candidateCount < cover?.patchCount ||
@@ -812,8 +812,8 @@ function validateProof(value, processState) {
 
     const budgetFirst = value.budget?.first
     const budgetRepeated = value.budget?.repeated
-    const budgetCover = parseJson(budgetFirst?.coverFeedback)
-    const budgetDemand = parseJson(budgetFirst?.demandFeedback)
+    const budgetCover = parseJson(budgetFirst?.coverSelection)
+    const budgetDemand = parseJson(budgetFirst?.projectedDemands)
     const budgetVirtual = parseJson(budgetFirst?.virtualRaster)
     const prioritizedDemand = [ ...(budgetDemand?.demands ?? []) ].sort((left, right) =>
         right.priority - left.priority ||
@@ -850,8 +850,8 @@ function validateProof(value, processState) {
     }
 
     const terminalFacts = value.terminalFailure?.facts
-    const terminalCover = parseJson(terminalFacts?.coverFeedback)
-    const terminalDemand = parseJson(terminalFacts?.demandFeedback)
+    const terminalCover = parseJson(terminalFacts?.coverSelection)
+    const terminalDemand = parseJson(terminalFacts?.projectedDemands)
     const failedVirtual = parseJson(terminalFacts?.virtualRaster)
     const terminalHistory = failedVirtual?.scheduler?.history ?? []
     const failedRequestOccurrences = value.terminalFailure?.events?.tileRequests?.filter(url => (
@@ -1178,8 +1178,8 @@ function summarizeProof(value) {
     const terminal = value.cleanupPair.reports?.[0]?.virtualRaster
     const summarizeFacts = facts => {
         const virtualRaster = parseJson(facts.virtualRaster)
-        const cover = parseJson(facts.coverFeedback)
-        const demand = parseJson(facts.demandFeedback)
+        const cover = parseJson(facts.coverSelection)
+        const demand = parseJson(facts.projectedDemands)
         const camera = parseJson(facts.cameraView)
         return {
             status: facts.status,

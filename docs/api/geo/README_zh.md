@@ -2,7 +2,7 @@
 docId: geo.zh
 canonical: false
 translationOf: ./README.md
-canonicalDigest: 19a54a2d282d5670064f6c9c40e88dd465251d7d35d6a89db254bc1d12b1d1ff
+canonicalDigest: 806c2843958c99cac8984c68bec8b0275d95f9fef31099f9e0608ddbafd5b4a6
 ---
 # Geo
 
@@ -10,7 +10,7 @@ canonicalDigest: 19a54a2d282d5670064f6c9c40e88dd465251d7d35d6a89db254bc1d12b1d1f
 
 Geo 是 `geoscratch/geo` 中的地理适配层。它把 Scratch 原语组合成 coordinate domain、
 precision encoding、view snapshot、field model、tile demand、Virtual Raster residency、
-GPU-driven view cover 与 terrain rendering。Geo 拥有地理语义并可依赖 Scratch；它不会
+CPU／GPU view cover 与 terrain rendering。Geo 拥有地理语义并可依赖 Scratch；它不会
 隐藏 Scratch runtime，也不会创建全局 GPU 状态。
 
 Geo 诊断遵循与 Scratch 相同的机器可读规范，但保留独立 domain、code、phase 与

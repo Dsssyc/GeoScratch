@@ -40,6 +40,10 @@ var<storage, read_write> coverPatches: array<GpuWebMercatorQuadCoverPatch>;
 var<storage, read_write> coverLookup: array<GpuWebMercatorQuadCoverLookupEntry>;
 @group(0) @binding(6)
 var<storage, read_write> coverState: GpuWebMercatorQuadCoverState;
+@group(0) @binding(7)
+var<storage, read_write> coverCandidates: array<u32>;
+var<workgroup> coverMinimumSpan: atomic<u32>;
+var<workgroup> coverMaximumSpan: atomic<u32>;
 const WEB_MERCATOR_WORLD_WIDTH_METERS: f32 = 40075016.0f;
 
 fn coverEffectiveCellSpanThreshold() -> f32 {
@@ -128,17 +132,26 @@ fn coverPatchVerticalBounds(
             coverPolicy.maximumVerticalMeters,
         );
     }
-    let boundsLevel = min(matrixLevel, coverPolicy.boundsMaximumMatrixLevel);
-    let shift = matrixLevel - boundsLevel;
-    let boundsRow = row >> shift;
-    let boundsColumn = column >> shift;
-    let limit = coverLimit(boundsLevel);
-    let width = limit.maxTileCol - limit.minTileCol + 1u;
-    let index = limit.verticalBoundsOffset +
-        (boundsRow - limit.minTileRow) * width +
-        (boundsColumn - limit.minTileCol);
-    let bounds = verticalBounds[index];
-    return vec2f(bounds.minimumVerticalMeters, bounds.maximumVerticalMeters);
+    var boundsLevel = min(matrixLevel, coverPolicy.boundsMaximumMatrixLevel);
+    loop {
+        let shift = matrixLevel - boundsLevel;
+        let boundsRow = row >> shift;
+        let boundsColumn = column >> shift;
+        let limit = coverLimit(boundsLevel);
+        if (boundsRow >= limit.minTileRow && boundsRow <= limit.maxTileRow &&
+            boundsColumn >= limit.minTileCol && boundsColumn <= limit.maxTileCol) {
+            let width = limit.maxTileCol - limit.minTileCol + 1u;
+            let index = limit.verticalBoundsOffset +
+                (boundsRow - limit.minTileRow) * width +
+                (boundsColumn - limit.minTileCol);
+            let bounds = verticalBounds[index];
+            return vec2f(bounds.minimumVerticalMeters, bounds.maximumVerticalMeters);
+        }
+        if (boundsLevel == coverPolicy.minimumMatrixLevel) { break; }
+        boundsLevel -= 1u;
+    }
+    // Validated geometry is contained in the complete minimum-level domain.
+    return vec2f(coverPolicy.minimumVerticalMeters, coverPolicy.maximumVerticalMeters);
 }
 
 fn coverPatchBounds(
@@ -221,13 +234,20 @@ fn coverPatchVisible(bounds: GpuWebMercatorQuadCoverBounds) -> bool {
 }
 
 fn coverClipPlaneDistance(point: vec4f, plane: u32) -> f32 {
+    // Combine the plane before projection. Subtracting two large clip coordinates
+    // loses the near/far depth constant on coarse patches at high pitch.
+    let matrix = mapMeta.clipFromRelativeWorld;
+    let row0 = vec4f(matrix[0].x, matrix[1].x, matrix[2].x, matrix[3].x);
+    let row1 = vec4f(matrix[0].y, matrix[1].y, matrix[2].y, matrix[3].y);
+    let row2 = vec4f(matrix[0].z, matrix[1].z, matrix[2].z, matrix[3].z);
+    let row3 = vec4f(matrix[0].w, matrix[1].w, matrix[2].w, matrix[3].w);
     switch plane {
-        case 0u: { return point.z; }
-        case 1u: { return point.w - point.z; }
-        case 2u: { return point.x + point.w; }
-        case 3u: { return point.w - point.x; }
-        case 4u: { return point.y + point.w; }
-        default: { return point.w - point.y; }
+        case 0u: { return dot(row2, point); }
+        case 1u: { return dot(row3 - row2, point); }
+        case 2u: { return dot(row3 + row0, point); }
+        case 3u: { return dot(row3 - row0, point); }
+        case 4u: { return dot(row3 + row1, point); }
+        default: { return dot(row3 - row1, point); }
     }
 }
 
@@ -245,8 +265,12 @@ fn coverClipPolygonToPlane(
         let startInside = startDistance >= 0.0f;
         let endInside = endDistance >= 0.0f;
         if (startInside != endInside) {
-            let ratio = startDistance / (startDistance - endDistance);
-            output.vertices[output.count] = mix(start, end, ratio);
+            let denominator = startDistance - endDistance;
+            var ratio = 0.5f;
+            if (abs(denominator) >= 0x1p-120f) {
+                ratio = clamp(startDistance / denominator, 0.0f, 1.0f);
+            }
+            output.vertices[output.count] = vec4f(mix(start.xyz, end.xyz, ratio), 1.0f);
             output.count += 1u;
         }
         if (endInside) {
@@ -259,39 +283,33 @@ fn coverClipPolygonToPlane(
     return output;
 }
 
-fn coverProjectedAxisCellDeltaPixels(clip: vec4f, delta: vec4f) -> vec2f {
-    let reciprocalW = 1.0f / clip.w;
-    let ndcDelta = (
-        delta.xy - clip.xy * reciprocalW * delta.w
-    ) * reciprocalW;
-    return ndcDelta * mapMeta.referenceViewport * 0.5f;
+// Scaling avoids overflow in the Gram discriminant without changing sigma_max.
+fn coverMaximumStretch(xPixels: vec2f, yPixels: vec2f) -> f32 {
+    let scale = max(max(abs(xPixels.x), abs(xPixels.y)), max(abs(yPixels.x), abs(yPixels.y)));
+    if (scale == 0.0f) { return 0.0f; }
+    if (!(scale < 0x1p110f)) { return 0x1p120f; }
+    let x = xPixels / scale;
+    let y = yPixels / scale;
+    let xx = dot(x, x);
+    let xy = dot(x, y);
+    let yy = dot(y, y);
+    let discriminant = sqrt(max(0.0f, (xx - yy) * (xx - yy) + 4.0f * xy * xy));
+    return scale * sqrt(max(0.0f, 0.5f * (xx + yy + discriminant)));
 }
 
-fn coverProjectedCellMaximumStretchPixels(
-    clip: vec4f,
-    xDelta: vec4f,
-    yDelta: vec4f,
-) -> f32 {
-    let minimumCellW = clip.w - 0.5f * (
-        abs(xDelta.w) + abs(yDelta.w)
-    );
-    if (minimumCellW <= 1e-5f) {
-        return max(mapMeta.referenceViewport.x, mapMeta.referenceViewport.y);
-    }
-    let xPixels = coverProjectedAxisCellDeltaPixels(clip, xDelta);
-    let yPixels = coverProjectedAxisCellDeltaPixels(clip, yDelta);
-    let xx = dot(xPixels, xPixels);
-    let xy = dot(xPixels, yPixels);
-    let yy = dot(yPixels, yPixels);
-    let discriminant = sqrt(max(
-        0.0f,
-        (xx - yy) * (xx - yy) + 4.0f * xy * xy,
-    ));
-    let maximumStretch = sqrt(max(
-        0.0f,
-        0.5f * (xx + yy + discriminant),
-    ));
-    return maximumStretch;
+fn coverProjectedNumeratorStretch(ndc: vec2f, xDelta: vec4f, yDelta: vec4f) -> f32 {
+    let pixels = mapMeta.referenceViewport * 0.5f;
+    return coverMaximumStretch((xDelta.xy - ndc * xDelta.w) * pixels,
+        (yDelta.xy - ndc * yDelta.w) * pixels);
+}
+
+fn coverNumeratorRoundoff(xDelta: vec4f, yDelta: vec4f) -> f32 {
+    let pixels = mapMeta.referenceViewport * 0.5f;
+    // An absolute Frobenius envelope covers cancelling derivatives and singular
+    // directions; a relative error in their possibly zero norm would not suffice.
+    let x = (abs(xDelta.xy) + vec2f(abs(xDelta.w))) * pixels;
+    let y = (abs(yDelta.xy) + vec2f(abs(yDelta.w))) * pixels;
+    return 2e-5f * (x.x + x.y + y.x + y.y) + 1e-20f;
 }
 
 fn coverProjectedPlaneCellSpanPixels(
@@ -310,7 +328,7 @@ fn coverProjectedPlaneCellSpanPixels(
             select(bounds.minimum.y, bounds.maximum.y, index >= 2u),
             elevation,
         );
-        polygon.vertices[index] = mapMeta.clipFromRelativeWorld * vec4f(point, 1.0f);
+        polygon.vertices[index] = vec4f(point, 1.0f);
     }
     for (var plane = 0u; plane < 6u; plane += 1u) {
         polygon = coverClipPolygonToPlane(polygon, plane);
@@ -323,28 +341,91 @@ fn coverProjectedPlaneCellSpanPixels(
     ) / f32(coverPolicy.cellsPerPatchEdge);
     let xDelta = mapMeta.clipFromRelativeWorld[0] * cellMeters;
     let yDelta = mapMeta.clipFromRelativeWorld[1] * cellMeters;
-    var maximumSpan = 0.0f;
+    var maximumNumerator = 0.0f;
+    var minimumW = 0x1p120f;
     for (var index = 0u; index < polygon.count; index += 1u) {
-        maximumSpan = max(
-            maximumSpan,
-            coverProjectedCellMaximumStretchPixels(
-                polygon.vertices[index],
-                xDelta,
-                yDelta,
-            ),
-        );
+        let clip = mapMeta.clipFromRelativeWorld * polygon.vertices[index];
+        minimumW = min(minimumW, clip.w);
+        if (clip.w <= 1e-5f) { return 0x1p120f; }
+        maximumNumerator = max(maximumNumerator, coverProjectedNumeratorStretch(
+            clamp(clip.xy / clip.w, vec2f(-1.0f), vec2f(1.0f)), xDelta, yDelta));
     }
-    return maximumSpan;
+    if (minimumW - 0.5f * (abs(xDelta.w) + abs(yDelta.w)) <= 1e-5f) { return 0x1p120f; }
+    // Positive-w projective images are convex; the numerator's spectral norm
+    // is convex, so its vertex maximum bounds every point in the polygon.
+    return (maximumNumerator + coverNumeratorRoundoff(xDelta, yDelta)) / minimumW;
+}
+
+fn coverProjectedVolumeCellSpanPixels(bounds: GpuWebMercatorQuadCoverBounds) -> f32 {
+    let matrix = mapMeta.clipFromRelativeWorld;
+    let magnitude = max(abs(bounds.minimum), abs(bounds.maximum));
+    let clipError = (abs(matrix[0]) * magnitude.x + abs(matrix[1]) * magnitude.y +
+        abs(matrix[2]) * magnitude.z + abs(matrix[3])) * 4e-6f + vec4f(1e-30f);
+    var minimumBoxW = 0x1p120f;
+    for (var corner = 0u; corner < 8u; corner += 1u) {
+        let point = select(bounds.minimum, bounds.maximum,
+            vec3<bool>((corner & 1u) != 0u, (corner & 2u) != 0u, (corner & 4u) != 0u));
+        minimumBoxW = min(minimumBoxW, (matrix * vec4f(point, 1.0f)).w - clipError.w);
+    }
+    var ndcMinimum = vec2f(-1.0f);
+    var ndcMaximum = vec2f(1.0f);
+    if (minimumBoxW > 1e-5f) {
+        var low = vec2f(0x1p120f);
+        var high = vec2f(-0x1p120f);
+        for (var corner = 0u; corner < 8u; corner += 1u) {
+            let point = select(bounds.minimum, bounds.maximum,
+                vec3<bool>((corner & 1u) != 0u, (corner & 2u) != 0u, (corner & 4u) != 0u));
+            let clip = matrix * vec4f(point, 1.0f);
+            let ndc = clip.xy / clip.w;
+            let error = (clipError.xy + abs(ndc) * clipError.w) / minimumBoxW +
+                abs(ndc) * 2e-6f + vec2f(1e-20f);
+            low = min(low, ndc - error);
+            high = max(high, ndc + error);
+        }
+        ndcMinimum = max(ndcMinimum, low);
+        ndcMaximum = min(ndcMaximum, high);
+        if (any(ndcMinimum > ndcMaximum)) { return 0.0f; }
+    }
+    var frustumMinimumW = 0.0f;
+    let lower = vec4f(bounds.minimum, 1.0f);
+    let upper = vec4f(bounds.maximum, 1.0f);
+    for (var axis = 0u; axis < 4u; axis += 1u) {
+        let residual = dot(mapMeta.clipWResidual[axis], vec4f(magnitude, 1.0f)) * 1.000002f;
+        let error = residual + 2e-6f * max(abs(lower[axis]), abs(upper[axis])) + 1e-30f;
+        if (mapMeta.clipWPositive[axis] > 0.0f) {
+            frustumMinimumW = max(frustumMinimumW, max(0.0f, lower[axis] - error) /
+                mapMeta.clipWPositive[axis] * 0.999998f);
+        }
+        if (mapMeta.clipWNegative[axis] > 0.0f) {
+            frustumMinimumW = max(frustumMinimumW, max(0.0f, -upper[axis] - error) /
+                mapMeta.clipWNegative[axis] * 0.999998f);
+        }
+    }
+    let minimumW = max(minimumBoxW, frustumMinimumW);
+    let cellMeters = max(bounds.maximum.x - bounds.minimum.x,
+        bounds.maximum.y - bounds.minimum.y) / f32(coverPolicy.cellsPerPatchEdge);
+    let xDelta = matrix[0] * cellMeters;
+    let yDelta = matrix[1] * cellMeters;
+    if (minimumW - 0.5f * (abs(xDelta.w) + abs(yDelta.w)) <= 1e-5f) { return 0x1p120f; }
+    var maximumNumerator = 0.0f;
+    for (var corner = 0u; corner < 4u; corner += 1u) {
+        let ndc = select(ndcMinimum, ndcMaximum,
+            vec2<bool>((corner & 1u) != 0u, (corner & 2u) != 0u));
+        maximumNumerator = max(maximumNumerator, coverProjectedNumeratorStretch(ndc, xDelta, yDelta));
+    }
+    // Encloses every allowed height and horizontal point, not just endpoint samples.
+    return (maximumNumerator + coverNumeratorRoundoff(xDelta, yDelta)) / minimumW * 1.000002f;
 }
 
 fn coverProjectedCellSpanPixels(bounds: GpuWebMercatorQuadCoverBounds) -> f32 {
-    return max(
-        coverProjectedPlaneCellSpanPixels(bounds, bounds.minimum.z),
-        coverProjectedPlaneCellSpanPixels(bounds, bounds.maximum.z),
-    );
+    if (bounds.minimum.z == bounds.maximum.z) {
+        return coverProjectedPlaneCellSpanPixels(bounds, bounds.minimum.z);
+    }
+    return coverProjectedVolumeCellSpanPixels(bounds);
 }
 
 fn coverCellSpanQ8(value: f32) -> u32 {
+    if (!(value >= 0.0f && value < 0x1p120f)) { return 0xffffffffu; }
     return u32(round(clamp(value, 0.0f, 65535.0f) * 256.0f));
 }
 
@@ -372,60 +453,16 @@ fn coverGeometryWindow(matrixLevel: u32) -> GpuWebMercatorQuadCoverWindow {
     );
 }
 
-fn coverFitStart(value: i32, span: i32, minimum: i32, maximum: i32) -> i32 {
-    return clamp(value, minimum, maximum - span + 1i);
-}
-
-fn coverFitWindow(
-    value: GpuWebMercatorQuadCoverWindow,
-    limit: GpuWebMercatorQuadCoverWindow,
-) -> GpuWebMercatorQuadCoverWindow {
-    let height = min(
-        value.maxTileRow - value.minTileRow + 1i,
-        limit.maxTileRow - limit.minTileRow + 1i,
-    );
-    let width = min(
-        value.maxTileCol - value.minTileCol + 1i,
-        limit.maxTileCol - limit.minTileCol + 1i,
-    );
-    let minRow = coverFitStart(
-        value.minTileRow,
-        height,
-        limit.minTileRow,
-        limit.maxTileRow,
-    );
-    let minCol = coverFitStart(
-        value.minTileCol,
-        width,
-        limit.minTileCol,
-        limit.maxTileCol,
-    );
+fn coverCandidateWindow(matrixLevel: u32) -> GpuWebMercatorQuadCoverWindow {
+    let window = mapMeta.candidateWindows[matrixLevel];
+    var start = 0u;
+    if (matrixLevel > 0u) { start = mapMeta.candidateWindows[matrixLevel - 1u].w; }
+    let count = window.w - start;
+    if (count == 0u) { return GpuWebMercatorQuadCoverWindow(0, -1, 0, -1); }
     return GpuWebMercatorQuadCoverWindow(
-        minRow,
-        minRow + height - 1i,
-        minCol,
-        minCol + width - 1i,
+        i32(window.x), i32(window.x + count / window.z - 1u),
+        i32(window.y), i32(window.y + window.z - 1u),
     );
-}
-
-fn coverCameraTileIndex(low: u32, high: u32, matrixLevel: u32) -> u32 {
-    let shift = coverPolicy.coordinateBits - matrixLevel;
-    if (shift >= 32u) {
-        return high >> (shift - 32u);
-    }
-    if (shift == 0u) {
-        return low;
-    }
-    return (high << (32u - shift)) | (low >> shift);
-}
-
-fn coverProjectedSearchRadiusTiles() -> i32 {
-    let focalPixels = mapMeta.referenceViewport.y * 0.5f /
-        tan(mapMeta.verticalFovRadians * 0.5f);
-    return max(2i, i32(ceil(
-        focalPixels /
-        (f32(coverPolicy.cellsPerPatchEdge) * coverEffectiveCellSpanThreshold())
-    )) + 2i);
 }
 
 fn coverClearLookup() {
@@ -503,26 +540,10 @@ fn coverRefinementContains(
 fn coverMarkSparseRefinements() {
     coverClearLookup();
     coverState.finestMatrixLevel = coverPolicy.minimumMatrixLevel;
-    let radius = coverProjectedSearchRadiusTiles();
     for (var parentLevel = coverPolicy.minimumMatrixLevel;
         parentLevel < coverPolicy.maximumMatrixLevel;
         parentLevel += 1u) {
-        let parentRow = i32(coverCameraTileIndex(
-            mapMeta.cameraFixedLow.y,
-            mapMeta.cameraFixedHigh.y,
-            parentLevel,
-        ));
-        let parentCol = i32(coverCameraTileIndex(
-            mapMeta.cameraFixedLow.x,
-            mapMeta.cameraFixedHigh.x,
-            parentLevel,
-        ));
-        let search = coverFitWindow(GpuWebMercatorQuadCoverWindow(
-            parentRow - radius,
-            parentRow + radius,
-            parentCol - radius,
-            parentCol + radius,
-        ), coverGeometryWindow(parentLevel));
+        let search = coverCandidateWindow(parentLevel);
         for (var tileRow = search.minTileRow;
             tileRow <= search.maxTileRow;
             tileRow += 1i) {
@@ -530,22 +551,18 @@ fn coverMarkSparseRefinements() {
                 tileCol <= search.maxTileCol;
                 tileCol += 1i) {
                 coverState.candidateCount += 1u;
+                var start = 0u;
+                if (parentLevel > 0u) { start = mapMeta.candidateWindows[parentLevel - 1u].w; }
+                let width = u32(search.maxTileCol - search.minTileCol + 1i);
+                let index = start + u32(tileRow - search.minTileRow) * width +
+                    u32(tileCol - search.minTileCol);
+                if (coverCandidates[index] == 0u) { continue; }
                 if (parentLevel > coverPolicy.minimumMatrixLevel &&
                     !coverRefinementContains(
                         parentLevel - 1u,
                         u32(tileRow) >> 1u,
                         u32(tileCol) >> 1u,
                     )) {
-                    continue;
-                }
-                let bounds = coverPatchBounds(
-                    parentLevel,
-                    u32(tileRow),
-                    u32(tileCol),
-                );
-                if (!coverPatchVisible(bounds) ||
-                    coverProjectedCellSpanPixels(bounds) <=
-                        coverEffectiveCellSpanThreshold()) {
                     continue;
                 }
                 if (!coverLookupInsertIdentity(
@@ -555,7 +572,7 @@ fn coverMarkSparseRefinements() {
                     0xffffffffu,
                 )) {
                     coverState.lookupOverflowCount += 1u;
-                    continue;
+                    return;
                 }
                 coverState.finestMatrixLevel = max(
                     coverState.finestMatrixLevel,
@@ -588,46 +605,6 @@ fn coverEmitPatch(matrixLevel: u32, tileRow: u32, tileCol: u32) {
     let candidate = GpuWebMercatorQuadCoverPatch(matrixLevel, tileRow, tileCol);
     coverPatches[patchIndex] = candidate;
     coverState.patchCount += 1u;
-}
-
-fn coverScaledBounds(
-    candidate: GpuWebMercatorQuadCoverPatch,
-) -> vec4u {
-    let scale = 1u << (coverPolicy.maximumMatrixLevel - candidate.matrixLevel);
-    return vec4u(
-        candidate.tileCol * scale,
-        candidate.tileRow * scale,
-        (candidate.tileCol + 1u) * scale,
-        (candidate.tileRow + 1u) * scale,
-    );
-}
-
-fn coverEdgeAdjacent(left: vec4u, right: vec4u) -> bool {
-    let horizontal = (left.z == right.x || right.z == left.x) &&
-        max(left.y, right.y) < min(left.w, right.w);
-    let vertical = (left.w == right.y || right.w == left.y) &&
-        max(left.x, right.x) < min(left.z, right.z);
-    return horizontal || vertical;
-}
-
-fn coverMaximumFinerNeighborDelta(
-    candidateIndex: u32,
-) -> u32 {
-    let candidate = coverPatches[candidateIndex];
-    let candidateBounds = coverScaledBounds(candidate);
-    var maximumDelta = 0u;
-    for (var otherIndex = 0u; otherIndex < coverState.patchCount; otherIndex += 1u) {
-        if (otherIndex == candidateIndex) { continue; }
-        let other = coverPatches[otherIndex];
-        if (other.matrixLevel <= candidate.matrixLevel + 1u) { continue; }
-        if (coverEdgeAdjacent(candidateBounds, coverScaledBounds(other))) {
-            maximumDelta = max(
-                maximumDelta,
-                other.matrixLevel - candidate.matrixLevel,
-            );
-        }
-    }
-    return maximumDelta;
 }
 
 fn coverSplitPatch(patchIndex: u32) -> bool {
@@ -702,7 +679,7 @@ fn coverSeedMinimumPatches() {
 
 fn coverMaterializeSparseRefinements() {
     for (var matrixLevel = coverPolicy.minimumMatrixLevel;
-        matrixLevel < coverPolicy.maximumMatrixLevel;
+        matrixLevel < coverState.finestMatrixLevel;
         matrixLevel += 1u) {
         let inputCount = coverState.patchCount;
         for (var patchIndex = 0u; patchIndex < inputCount; patchIndex += 1u) {
@@ -720,27 +697,12 @@ fn coverMaterializeSparseRefinements() {
     }
 }
 
-fn coverBalancePatches() {
-    for (var iteration = 0u; iteration < 24u; iteration += 1u) {
-        let inputCount = coverState.patchCount;
-        var changed = false;
-        for (var patchIndex = 0u; patchIndex < inputCount; patchIndex += 1u) {
-            if (coverMaximumFinerNeighborDelta(patchIndex) > 1u &&
-                coverSplitPatch(patchIndex)) {
-                changed = true;
-            }
-        }
-        if (!changed) { break; }
-    }
-}
-
-fn coverFinalizeLookup() {
+fn coverFinalizeLookup(rebuild: bool) {
     coverState.minimumMatrixLevel = 0xffffffffu;
     coverState.maximumMatrixLevel = 0u;
-    coverState.maximumAdjacentLevelDelta = 0u;
     coverState.minimumCellSpanQ8 = 0xffffffffu;
     coverState.maximumCellSpanQ8 = 0u;
-    coverClearLookup();
+    if (rebuild) { coverClearLookup(); }
     for (var patchIndex = 0u; patchIndex < coverState.patchCount; patchIndex += 1u) {
         let candidate = coverPatches[patchIndex];
         coverState.minimumMatrixLevel = min(
@@ -751,60 +713,96 @@ fn coverFinalizeLookup() {
             coverState.maximumMatrixLevel,
             candidate.matrixLevel,
         );
-        let cellSpan = coverCellSpanQ8(coverProjectedCellSpanPixels(
-            coverPatchBounds(
-                candidate.matrixLevel,
-                candidate.tileRow,
-                candidate.tileCol,
-            ),
-        ));
-        coverState.minimumCellSpanQ8 = min(
-            coverState.minimumCellSpanQ8,
-            cellSpan,
-        );
-        coverState.maximumCellSpanQ8 = max(
-            coverState.maximumCellSpanQ8,
-            cellSpan,
-        );
-        if (!coverLookupInsert(patchIndex)) {
+        if (rebuild && !coverLookupInsert(patchIndex)) {
             coverState.lookupOverflowCount += 1u;
         }
     }
-    for (var leftIndex = 0u; leftIndex < coverState.patchCount; leftIndex += 1u) {
-        let left = coverPatches[leftIndex];
-        let leftBounds = coverScaledBounds(left);
-        for (var rightIndex = leftIndex + 1u;
-            rightIndex < coverState.patchCount;
-            rightIndex += 1u) {
-            let right = coverPatches[rightIndex];
-            if (coverEdgeAdjacent(leftBounds, coverScaledBounds(right))) {
-                coverState.maximumAdjacentLevelDelta = max(
-                    coverState.maximumAdjacentLevelDelta,
-                    u32(abs(i32(left.matrixLevel) - i32(right.matrixLevel))),
-                );
-            }
-        }
-    }
+    if (rebuild) { coverFinalizeAdjacentLevelDelta(); }
 }
 
-@compute @workgroup_size(1)
-fn generateWebMercatorQuadCover() {
-    coverState.frameEpoch = mapMeta.frameEpoch;
-    coverState.candidateCount = 0u;
-    coverState.patchCount = 0u;
-    coverState.descriptorOverflowCount = 0u;
-    coverState.lookupOverflowCount = 0u;
-    coverState.minimumMatrixLevel = 0xffffffffu;
-    coverState.maximumMatrixLevel = 0u;
-    coverState.maximumAdjacentLevelDelta = 0u;
-    coverState.minimumCellSpanQ8 = 0xffffffffu;
-    coverState.maximumCellSpanQ8 = 0u;
+@compute @workgroup_size(64)
+fn evaluateWebMercatorQuadCandidates(
+    @builtin(workgroup_id) group: vec3u,
+    @builtin(num_workgroups) groups: vec3u,
+    @builtin(local_invocation_index) lane: u32,
+) {
+    if (mapMeta.refinementCandidateCount == 0u) { return; }
+    let groupIndex = group.y * groups.x + group.x;
+    if (groupIndex >= (mapMeta.refinementCandidateCount - 1u) / 64u + 1u) { return; }
+    let index = groupIndex * 64u + lane;
+    if (index >= mapMeta.refinementCandidateCount) { return; }
+    var matrixLevel = coverPolicy.minimumMatrixLevel;
+    var start = 0u;
+    loop {
+        if (index < mapMeta.candidateWindows[matrixLevel].w) { break; }
+        start = mapMeta.candidateWindows[matrixLevel].w;
+        matrixLevel += 1u;
+    }
+    let window = mapMeta.candidateWindows[matrixLevel];
+    let candidateOffset = index - start;
+    let bounds = coverPatchBounds(matrixLevel, window.x + candidateOffset / window.z,
+        window.y + candidateOffset % window.z);
+    var refine = false;
+    if (coverPatchVisible(bounds)) {
+        refine = coverProjectedCellSpanPixels(bounds) > coverEffectiveCellSpanThreshold();
+    }
+    coverCandidates[index] = select(0u, 1u, refine);
+}
 
-    coverMarkSparseRefinements();
-    coverSeedMinimumPatches();
-    coverMaterializeSparseRefinements();
-    coverBalancePatches();
-    coverCompactVisiblePatches();
-    coverFinalizeLookup();
+@compute @workgroup_size(64)
+fn generateWebMercatorQuadCover(@builtin(local_invocation_index) lane: u32) {
+    if (lane == 0u) {
+        atomicStore(&coverMinimumSpan, 0xffffffffu);
+        atomicStore(&coverMaximumSpan, 0u);
+        coverState.frameEpoch = mapMeta.frameEpoch;
+        coverState.candidateCount = 0u;
+        coverState.patchCount = 0u;
+        coverState.descriptorOverflowCount = 0u;
+        coverState.lookupOverflowCount = 0u;
+        coverState.minimumMatrixLevel = 0xffffffffu;
+        coverState.maximumMatrixLevel = 0u;
+        coverState.maximumAdjacentLevelDelta = 0u;
+        coverState.minimumCellSpanQ8 = 0xffffffffu;
+        coverState.maximumCellSpanQ8 = 0u;
+
+        coverMarkSparseRefinements();
+        coverSeedMinimumPatches();
+        coverMaterializeSparseRefinements();
+        let balanced = coverBalanceIndexedPatches();
+        // A successful fixed point already owns the final visible index/delta.
+        // Failure keeps the complete final recheck and its diagnostic counts.
+        let rebuild = !balanced || coverState.descriptorOverflowCount != 0u ||
+            coverState.lookupOverflowCount != 0u;
+        if (rebuild) { coverCompactVisiblePatches(); }
+        coverFinalizeLookup(rebuild);
+        if (coverState.descriptorOverflowCount != 0u ||
+            coverState.lookupOverflowCount != 0u ||
+            coverState.maximumAdjacentLevelDelta > 1u) {
+            // Preserve failure feedback, but revoke the partial cut before any consumer.
+            coverState.patchCount = 0u;
+            coverClearLookup();
+        }
+    }
+    // All cross-workgroup work finished in the preceding ordered dispatch.
+    // This one workgroup publishes topology once and measures its leaves in parallel.
+    storageBarrier();
+    workgroupBarrier();
+    for (var index = lane; index < coverState.patchCount; index += 64u) {
+        let measuredPatch = coverPatches[index];
+        let span = coverCellSpanQ8(coverProjectedCellSpanPixels(
+            coverPatchBounds(measuredPatch.matrixLevel, measuredPatch.tileRow, measuredPatch.tileCol)));
+        atomicMin(&coverMinimumSpan, span);
+        atomicMax(&coverMaximumSpan, span);
+    }
+    workgroupBarrier();
+    if (lane == 0u) {
+        coverState.minimumCellSpanQ8 = atomicLoad(&coverMinimumSpan);
+        coverState.maximumCellSpanQ8 = atomicLoad(&coverMaximumSpan);
+        if (coverState.maximumCellSpanQ8 == 0xffffffffu) {
+            coverState.patchCount = 0u;
+            coverClearLookup();
+        }
+    }
+
 }
 `

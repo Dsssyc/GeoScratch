@@ -1,3 +1,5 @@
+import { coverClipWCertificate, gpuWebMercatorQuadCoverCandidates } from './gpu-web-mercator-quad-cover-candidates.js'
+import { snapshotWebMercatorCoverVerticalBounds } from './gpu-web-mercator-quad-cover-vertical-bounds.js'
 import { throwGeoDiagnostic } from './diagnostics.js'
 import type { GeoViewSnapshot } from './geo-view.js'
 import type { GpuWebMercatorQuadCoverPolicy } from './gpu-web-mercator-quad-cover.js'
@@ -63,7 +65,7 @@ export function evaluateGpuWebMercatorQuadCoverReference(
 ): GpuWebMercatorQuadCoverReferenceResult {
 
     validateInput(input)
-    const generated = generateVariable(input, cameraFixedPosition(input))
+    const generated = generateVariable(input)
     if (generated.patches.length > input.policy.maximumPatches) {
         return invalidCover(
             'The minimum standard cover exceeds its declared patch capacity.',
@@ -73,6 +75,10 @@ export function evaluateGpuWebMercatorQuadCoverReference(
             },
             { patchCount: generated.patches.length }
         )
+    }
+    if (generated.cellSpans.some(value => !Number.isFinite(value))) {
+        return invalidCover('The final cover has no finite projected quality bound.',
+            { quality: 'finite' }, { reason: 'unbounded-quality' })
     }
     return Object.freeze({
         patches: Object.freeze(generated.patches),
@@ -96,11 +102,11 @@ export function evaluateGpuWebMercatorQuadCoverReference(
 }
 
 function generateVariable(
-    input: GpuWebMercatorQuadCoverReferenceInput,
-    fixedCamera: readonly [bigint, bigint]
+    input: GpuWebMercatorQuadCoverReferenceInput
 ) {
 
-    const refinements = sparseRefinements(input, fixedCamera)
+    const clipW = coverClipWCertificate(input.view.clipFromRelativeWorld)
+    const refinements = sparseRefinements(input, clipW)
     let candidateCount = refinements.candidateCount
     const seeded = seedMinimumPatches(input)
     candidateCount += seeded.candidateCount
@@ -136,14 +142,14 @@ function generateVariable(
     return {
         patches: patchesOutput,
         candidateCount,
-        cellSpans: patchesOutput.map(patch => projectedCellSpanPixels(input, patch)),
+        cellSpans: patchesOutput.map(patch => projectedCellSpanPixels(input, patch, clipW)),
         finestMatrixLevel: refinements.finestMatrixLevel,
     }
 }
 
 function sparseRefinements(
     input: GpuWebMercatorQuadCoverReferenceInput,
-    fixedCamera: readonly [bigint, bigint]
+    clipW: ReturnType<typeof coverClipWCertificate>
 ): Readonly<{
     parents: ReadonlySet<string>
     candidateCount: number
@@ -151,29 +157,13 @@ function sparseRefinements(
 }> {
 
     const parents = new Set<string>()
-    const radius = projectedSearchRadius(input)
+    const candidates = gpuWebMercatorQuadCoverCandidates(input, input.view)
     let candidateCount = 0
     let finestMatrixLevel = input.policy.minimumMatrixLevel
     for (let parentLevel = input.policy.minimumMatrixLevel;
         parentLevel < input.policy.maximumMatrixLevel;
         parentLevel++) {
-        const parentLimit = geometryLimit(input, parentLevel)
-        const cameraRow = cameraTileIndex(
-            fixedCamera[1],
-            parentLevel,
-            input.spatialProfile.coordinateBits
-        )
-        const cameraCol = cameraTileIndex(
-            fixedCamera[0],
-            parentLevel,
-            input.spatialProfile.coordinateBits
-        )
-        const search = fitWindow({
-            minTileRow: cameraRow - radius,
-            maxTileRow: cameraRow + radius,
-            minTileCol: cameraCol - radius,
-            maxTileCol: cameraCol + radius,
-        }, parentLimit)
+        const search = candidates.windows[parentLevel - input.policy.minimumMatrixLevel]!
         for (let tileRow = search.minTileRow; tileRow <= search.maxTileRow; tileRow++) {
             for (let tileCol = search.minTileCol; tileCol <= search.maxTileCol; tileCol++) {
                 candidateCount++
@@ -182,7 +172,7 @@ function sparseRefinements(
                 )) continue
                 const parent = referencePatch(parentLevel, tileRow, tileCol)
                 if (!intersectsVisible(parent, input.visibleBounds) ||
-                    projectedCellSpanPixels(input, parent) <=
+                    projectedCellSpanPixels(input, parent, clipW) <=
                         effectiveCellSpanThreshold(input)) continue
                 parents.add(parent.key)
                 finestMatrixLevel = Math.max(finestMatrixLevel, parentLevel + 1)
@@ -228,26 +218,44 @@ function childPatches(
     ])
 }
 
-function balancePatches(
+/**
+ * Balances an explicit reference cut with independent pairwise edge checks.
+ * The input is the already-visible cut produced by materialization.
+ * Each round marks its immutable input before replacing parents and removing
+ * invisible children, so traversal order cannot propagate transient geometry.
+ * The optional visibility predicate supports independent non-rectangular proofs.
+ * @internal
+ */
+export function balancePatches(
     input: GpuWebMercatorQuadCoverReferenceInput,
-    patches: GpuWebMercatorQuadCoverReferencePatch[]
+    patches: GpuWebMercatorQuadCoverReferencePatch[],
+    isVisible: (patch: GpuWebMercatorQuadCoverReferencePatch) => boolean = patch =>
+        intersectsVisible(patch, input.visibleBounds)
 ): number {
 
     let candidateCount = 0
-    for (let iteration = 0; iteration < 24; iteration++) {
+    const maximumRounds = input.policy.maximumPatches * (
+        input.policy.maximumMatrixLevel - input.policy.minimumMatrixLevel + 1
+    )
+    if (!Number.isSafeInteger(maximumRounds) || maximumRounds <= 0 || maximumRounds > 0xffff_ffff) {
+        return invalidCover(
+            'The balanced standard cover requires a finite u32 closure work budget.',
+            { maximumRounds: 'positive u32' },
+            { maximumRounds }
+        )
+    }
+    const marks = () => patches.map((candidate, patchIndex) => patches.some((other, otherIndex) =>
+        otherIndex !== patchIndex &&
+        other.matrixLevel > candidate.matrixLevel + 1 &&
+        edgeAdjacentAtLevel(candidate, other, input.policy.maximumMatrixLevel)
+    ))
+    for (let iteration = 0; iteration < maximumRounds; iteration++) {
         const inputCount = patches.length
-        let changed = false
+        const marked = marks()
+        if (!marked.some(Boolean)) return candidateCount
         for (let patchIndex = 0; patchIndex < inputCount; patchIndex++) {
+            if (!marked[patchIndex]) continue
             const candidate = patches[patchIndex]!
-            if (!patches.some((other, otherIndex) =>
-                otherIndex !== patchIndex &&
-                other.matrixLevel > candidate.matrixLevel + 1 &&
-                edgeAdjacentAtLevel(
-                    candidate,
-                    other,
-                    input.policy.maximumMatrixLevel
-                )
-            )) continue
             const children = childPatches(candidate)
             const patchCount = patches.length + 3
             if (patchCount > input.policy.maximumPatches) {
@@ -258,17 +266,19 @@ function balancePatches(
                 )
             }
             candidateCount += 4
-            if (children.length === 0) continue
             patches[patchIndex] = children[0]!
             patches.push(...children.slice(1))
-            changed = true
         }
-        if (!changed) break
+        const visible = patches.filter(isVisible)
+        patches.splice(0, patches.length, ...visible)
     }
-    const visible = patches.filter(patch =>
-        intersectsVisible(patch, input.visibleBounds)
-    )
-    patches.splice(0, patches.length, ...visible)
+    if (marks().some(Boolean)) {
+        return invalidCover(
+            'The balanced standard cover did not close within its declared work budget.',
+            { maximumAdjacentLevelDelta: 1, maximumRounds },
+            { patchCount: patches.length }
+        )
+    }
     return candidateCount
 }
 
@@ -294,40 +304,6 @@ function edgeAdjacentAtLevel(
     const vertical = (a.south === b.north || b.south === a.north) &&
         Math.max(a.west, b.west) < Math.min(a.east, b.east)
     return horizontal || vertical
-}
-
-function cameraFixedPosition(
-    input: GpuWebMercatorQuadCoverReferenceInput
-): readonly [bigint, bigint] {
-
-    const encoded = input.spatialProfile.encodeCamera([
-        input.view.cameraHigh[0] + input.view.cameraLow[0],
-        input.view.cameraHigh[1] + input.view.cameraLow[1],
-    ])
-    return Object.freeze([
-        (BigInt(encoded.high[0]) << 32n) | BigInt(encoded.low[0]),
-        (BigInt(encoded.high[1]) << 32n) | BigInt(encoded.low[1]),
-    ]) as readonly [bigint, bigint]
-}
-
-function cameraTileIndex(
-    fixed: bigint,
-    matrixLevel: number,
-    coordinateBits: number
-): number {
-
-    const fractionalBits = BigInt(coordinateBits - matrixLevel)
-    return Number(fixed >> fractionalBits)
-}
-
-function projectedSearchRadius(input: GpuWebMercatorQuadCoverReferenceInput): number {
-
-    const focalPixels = input.view.referenceViewport[1] /
-        (2 * Math.tan(input.view.verticalFovRadians / 2))
-    return Math.max(2, Math.ceil(
-        focalPixels /
-        (input.policy.cellsPerPatchEdge * effectiveCellSpanThreshold(input))
-    ) + 2)
 }
 
 function effectiveCellSpanThreshold(
@@ -383,41 +359,6 @@ function referencePatch(
     })
 }
 
-function fitWindow(bounds: IntegerBounds, limit: IntegerBounds): IntegerBounds {
-
-    const height = Math.min(
-        bounds.maxTileRow - bounds.minTileRow + 1,
-        limit.maxTileRow - limit.minTileRow + 1
-    )
-    const width = Math.min(
-        bounds.maxTileCol - bounds.minTileCol + 1,
-        limit.maxTileCol - limit.minTileCol + 1
-    )
-    const minTileRow = fitStart(
-        bounds.minTileRow,
-        height,
-        limit.minTileRow,
-        limit.maxTileRow
-    )
-    const minTileCol = fitStart(
-        bounds.minTileCol,
-        width,
-        limit.minTileCol,
-        limit.maxTileCol
-    )
-    return Object.freeze({
-        minTileRow,
-        maxTileRow: minTileRow + height - 1,
-        minTileCol,
-        maxTileCol: minTileCol + width - 1,
-    })
-}
-
-function fitStart(value: number, span: number, minimum: number, maximum: number): number {
-
-    return clamp(value, minimum, maximum - span + 1)
-}
-
 function intersectsVisible(
     patch: GpuWebMercatorQuadCoverReferencePatch,
     visible: GpuWebMercatorQuadCoverReferenceBounds
@@ -434,7 +375,8 @@ type ClipPoint = readonly [number, number, number, number]
 
 function projectedCellSpanPixels(
     input: GpuWebMercatorQuadCoverReferenceInput,
-    patch: GpuWebMercatorQuadCoverReferencePatch
+    patch: GpuWebMercatorQuadCoverReferencePatch,
+    clipW: ReturnType<typeof coverClipWCertificate>
 ): number {
 
     const bounds = WebMercatorQuad.tileBounds(WebMercatorQuad.tile({
@@ -451,13 +393,41 @@ function projectedCellSpanPixels(
         minimumY: bounds.south - cameraY,
         maximumY: bounds.north - cameraY,
     }
-    return Math.max(...verticalRangeForPatch(input, patch).map(vertical =>
-        projectedPlaneCellSpanPixels(
-            input,
-            relative,
-            vertical - cameraZ
-        )
-    ))
+    const vertical = verticalRangeForPatch(input, patch).map(value => value - cameraZ)
+    if (vertical[0] === vertical[1]) return projectedPlaneCellSpanPixels(input, relative, vertical[0]!)
+    const matrix = input.view.clipFromRelativeWorld
+    const corners: ClipPoint[] = []
+    for (const z of vertical) for (const x of [relative.minimumX, relative.maximumX]) {
+        for (const y of [relative.minimumY, relative.maximumY]) corners.push([x, y, z, 1])
+    }
+    const clips = corners.map(point => multiplyClip(matrix, point))
+    const minimumBoxW = Math.min(...clips.map(clip => clip[3]))
+    const magnitude = [Math.max(Math.abs(relative.minimumX), Math.abs(relative.maximumX)),
+        Math.max(Math.abs(relative.minimumY), Math.abs(relative.maximumY)),
+        Math.max(...vertical.map(Math.abs)), 1]
+    const boxMinimum = [relative.minimumX, relative.minimumY, vertical[0]!, 1]
+    const boxMaximum = [relative.maximumX, relative.maximumY, vertical[1]!, 1]
+    let minimumW = minimumBoxW
+    for (let axis = 0; axis < 4; axis++) {
+        const residual = clipW.clipWResidual[axis]!.reduce((sum, value, index) => sum + value * magnitude[index]!, 0)
+        if (clipW.clipWPositive[axis]! > 0) minimumW = Math.max(minimumW,
+            Math.max(0, boxMinimum[axis]! - residual) / clipW.clipWPositive[axis]!)
+        if (clipW.clipWNegative[axis]! > 0) minimumW = Math.max(minimumW,
+            Math.max(0, -boxMaximum[axis]! - residual) / clipW.clipWNegative[axis]!)
+    }
+    const lower = [0, 1].map(axis => minimumBoxW > 0 ?
+        Math.max(-1, Math.min(...clips.map(clip => clip[axis]! / clip[3]))) : -1)
+    const upper = [0, 1].map(axis => minimumBoxW > 0 ?
+        Math.min(1, Math.max(...clips.map(clip => clip[axis]! / clip[3]))) : 1)
+    if (lower.some((value, axis) => value > upper[axis]!)) return 0
+    const h = (relative.maximumX - relative.minimumX) / input.policy.cellsPerPatchEdge
+    if (minimumW - 0.5 * h * (Math.abs(matrix[3]!) + Math.abs(matrix[7]!)) <= 1e-5) return Infinity
+    const numerators = []
+    for (const x of [lower[0]!, upper[0]!]) for (const y of [lower[1]!, upper[1]!]) {
+        numerators.push(projectedNumeratorStretch(input.view.referenceViewport, [x, y],
+            matrix.slice(0, 4).map(value => value * h), matrix.slice(4, 8).map(value => value * h)))
+    }
+    return Math.max(...numerators) / minimumW
 }
 
 function verticalRangeForPatch(
@@ -470,18 +440,21 @@ function verticalRangeForPatch(
     const boundsMaximumMatrixLevel = Number(
         input.spatialProfile.coverage.limits.at(-1)!.matrixId
     )
-    const matrixLevel = Math.min(
+    const maximumLevel = Math.min(
         patch.matrixLevel,
         boundsMaximumMatrixLevel
     )
-    const shift = patch.matrixLevel - matrixLevel
-    const tileRow = patch.tileRow >> shift
-    const tileCol = patch.tileCol >> shift
-    const bounds = hierarchy.find(entry =>
-        entry.matrixLevel === matrixLevel &&
-        entry.tileRow === tileRow && entry.tileCol === tileCol
-    )!
-    return [ bounds.minimumVerticalMeters, bounds.maximumVerticalMeters ]
+    for (let matrixLevel = maximumLevel; matrixLevel >= input.policy.minimumMatrixLevel; matrixLevel--) {
+        const shift = patch.matrixLevel - matrixLevel
+        const tileRow = patch.tileRow >> shift
+        const tileCol = patch.tileCol >> shift
+        const bounds = hierarchy.find(entry =>
+            entry.matrixLevel === matrixLevel &&
+            entry.tileRow === tileRow && entry.tileCol === tileCol
+        )
+        if (bounds !== undefined) return [ bounds.minimumVerticalMeters, bounds.maximumVerticalMeters ]
+    }
+    return input.verticalRangeMeters
 }
 
 function projectedPlaneCellSpanPixels(
@@ -497,13 +470,13 @@ function projectedPlaneCellSpanPixels(
 
     const matrix = input.view.clipFromRelativeWorld
     let polygon: ClipPoint[] = [
-        multiplyClip(matrix, [ bounds.minimumX, bounds.minimumY, vertical, 1 ]),
-        multiplyClip(matrix, [ bounds.maximumX, bounds.minimumY, vertical, 1 ]),
-        multiplyClip(matrix, [ bounds.maximumX, bounds.maximumY, vertical, 1 ]),
-        multiplyClip(matrix, [ bounds.minimumX, bounds.maximumY, vertical, 1 ]),
+        [ bounds.minimumX, bounds.minimumY, vertical, 1 ],
+        [ bounds.maximumX, bounds.minimumY, vertical, 1 ],
+        [ bounds.maximumX, bounds.maximumY, vertical, 1 ],
+        [ bounds.minimumX, bounds.maximumY, vertical, 1 ],
     ]
     for (let plane = 0; plane < 6 && polygon.length > 0; plane++) {
-        polygon = clipPolygonToPlane(polygon, plane)
+        polygon = clipPolygonToPlane(polygon, plane, matrix)
     }
     if (polygon.length === 0) return 0
 
@@ -521,12 +494,23 @@ function projectedPlaneCellSpanPixels(
         matrix[6]! * cellMeters,
         matrix[7]! * cellMeters,
     ]
-    return Math.max(...polygon.map(point => projectedCellMaximumStretchPixels(
-        input.view.referenceViewport,
-        point,
-        xDelta,
-        yDelta
-    )))
+    const clips = polygon.map(point => multiplyClip(matrix, point))
+    const minimumW = Math.min(...clips.map(clip => clip[3]))
+    if (minimumW - 0.5 * (Math.abs(xDelta[3]) + Math.abs(yDelta[3])) <= 1e-5) return Infinity
+    return Math.max(...clips.map(clip => projectedNumeratorStretch(input.view.referenceViewport,
+        [clamp(clip[0] / clip[3], -1, 1), clamp(clip[1] / clip[3], -1, 1)],
+        xDelta, yDelta))) / minimumW
+}
+
+function projectedNumeratorStretch(
+    viewport: readonly [number, number], ndc: readonly number[],
+    xDelta: readonly number[], yDelta: readonly number[]
+): number {
+    const x = [0, 1].map(axis => (xDelta[axis]! - ndc[axis]! * xDelta[3]!) * viewport[axis]! * 0.5)
+    const y = [0, 1].map(axis => (yDelta[axis]! - ndc[axis]! * yDelta[3]!) * viewport[axis]! * 0.5)
+    const xx = x[0]! ** 2 + x[1]! ** 2, yy = y[0]! ** 2 + y[1]! ** 2
+    const xy = x[0]! * y[0]! + x[1]! * y[1]!
+    return Math.sqrt(0.5 * (xx + yy + Math.hypot(xx - yy, 2 * xy)))
 }
 
 function multiplyClip(matrix: readonly number[], point: ClipPoint): ClipPoint {
@@ -539,20 +523,24 @@ function multiplyClip(matrix: readonly number[], point: ClipPoint): ClipPoint {
     )) as unknown as ClipPoint
 }
 
-function clipPolygonToPlane(input: readonly ClipPoint[], plane: number): ClipPoint[] {
+function clipPolygonToPlane(
+    input: readonly ClipPoint[], plane: number, matrix: readonly number[]
+): ClipPoint[] {
 
     if (input.length === 0) return []
     const output: ClipPoint[] = []
     let start = input.at(-1)!
-    let startDistance = clipPlaneDistance(start, plane)
+    let startDistance = clipPlaneDistance(start, plane, matrix)
     for (const end of input) {
-        const endDistance = clipPlaneDistance(end, plane)
+        const endDistance = clipPlaneDistance(end, plane, matrix)
         const startInside = startDistance >= 0
         const endInside = endDistance >= 0
         if (startInside !== endInside) {
-            const ratio = startDistance / (startDistance - endDistance)
+            const denominator = startDistance - endDistance
+            const ratio = Math.abs(denominator) < 2 ** -120 ? 0.5 :
+                clamp(startDistance / denominator, 0, 1)
             output.push(Object.freeze(start.map((value, index) =>
-                value + (end[index]! - value) * ratio
+                index === 3 ? 1 : value + (end[index]! - value) * ratio
             )) as unknown as ClipPoint)
         }
         if (endInside) output.push(end)
@@ -562,54 +550,14 @@ function clipPolygonToPlane(input: readonly ClipPoint[], plane: number): ClipPoi
     return output
 }
 
-function clipPlaneDistance(point: ClipPoint, plane: number): number {
+function clipPlaneDistance(point: ClipPoint, plane: number, matrix: readonly number[]): number {
 
-    switch (plane) {
-        case 0: return point[2]
-        case 1: return point[3] - point[2]
-        case 2: return point[0] + point[3]
-        case 3: return point[3] - point[0]
-        case 4: return point[1] + point[3]
-        default: return point[3] - point[1]
-    }
-}
-
-function projectedCellMaximumStretchPixels(
-    viewport: readonly [number, number],
-    clip: ClipPoint,
-    xDelta: ClipPoint,
-    yDelta: ClipPoint
-): number {
-
-    const minimumCellW = clip[3] - 0.5 * (Math.abs(xDelta[3]) + Math.abs(yDelta[3]))
-    if (minimumCellW <= 1e-5) return Math.max(...viewport)
-    const xPixels = projectedAxisCellDeltaPixels(viewport, clip, xDelta)
-    const yPixels = projectedAxisCellDeltaPixels(viewport, clip, yDelta)
-    const xx = xPixels[0] ** 2 + xPixels[1] ** 2
-    const xy = xPixels[0] * yPixels[0] + xPixels[1] * yPixels[1]
-    const yy = yPixels[0] ** 2 + yPixels[1] ** 2
-    const discriminant = Math.sqrt(Math.max(
-        0,
-        (xx - yy) ** 2 + 4 * xy ** 2
-    ))
-    const maximumStretch = Math.sqrt(Math.max(
-        0,
-        0.5 * (xx + yy + discriminant)
-    ))
-    return maximumStretch
-}
-
-function projectedAxisCellDeltaPixels(
-    viewport: readonly [number, number],
-    clip: ClipPoint,
-    delta: ClipPoint
-): readonly [number, number] {
-
-    const reciprocalW = 1 / clip[3]
-    return Object.freeze([
-        (delta[0] - clip[0] * reciprocalW * delta[3]) * reciprocalW * viewport[0] * 0.5,
-        (delta[1] - clip[1] * reciprocalW * delta[3]) * reciprocalW * viewport[1] * 0.5,
-    ])
+    const row = (index: number) => [0, 1, 2, 3].map(column => matrix[column * 4 + index]!)
+    const row3 = row(3)
+    const other = row(plane < 2 ? 2 : plane < 4 ? 0 : 1)
+    const equation = plane === 0 ? other : row3.map((value, index) =>
+        value + (plane === 2 || plane === 4 ? other[index]! : -other[index]!))
+    return equation.reduce((sum, value, index) => sum + value * point[index]!, 0)
 }
 
 function comparePatch(
@@ -659,38 +607,8 @@ function validateInput(input: GpuWebMercatorQuadCoverReferenceInput): void {
             input
         )
     }
-    validateVerticalBounds(input)
-}
-
-function validateVerticalBounds(input: GpuWebMercatorQuadCoverReferenceInput): void {
-
-    const hierarchy = input.verticalBounds
-    if (hierarchy === undefined) return
-    const expected = input.spatialProfile.coverage.limits.flatMap(limit =>
-        Array.from(
-            { length: limit.maxTileRow - limit.minTileRow + 1 },
-            (_, rowOffset) => Array.from(
-                { length: limit.maxTileCol - limit.minTileCol + 1 },
-                (_, colOffset) => `${limit.matrixId}/` +
-                    `${limit.minTileRow + rowOffset}/${limit.minTileCol + colOffset}`
-            )
-        ).flat()
-    )
-    const valid = hierarchy.length === expected.length && hierarchy.every((entry, index) =>
-        Number.isSafeInteger(entry?.matrixLevel) &&
-        Number.isSafeInteger(entry?.tileRow) && Number.isSafeInteger(entry?.tileCol) &&
-        `${entry.matrixLevel}/${entry.tileRow}/${entry.tileCol}` === expected[index] &&
-        Number.isFinite(entry.minimumVerticalMeters) &&
-        Number.isFinite(entry.maximumVerticalMeters) &&
-        entry.minimumVerticalMeters <= entry.maximumVerticalMeters
-    )
-    if (!valid) {
-        invalidCover(
-            'The inverse-cover vertical hierarchy must exactly match declared coverage.',
-            { tileKeys: expected },
-            hierarchy
-        )
-    }
+    snapshotWebMercatorCoverVerticalBounds(input.verticalBounds,
+        input.spatialProfile.coverage.limits, input.verticalRangeMeters)
 }
 
 function clamp(value: number, minimum: number, maximum: number): number {

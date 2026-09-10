@@ -135,6 +135,22 @@ export {
     decodeGpuWebMercatorQuadDemandProjectionFeedback,
 } from './gpu-web-mercator-quad-demand.js'
 export { GpuWebMercatorQuadPatchDraw } from './gpu-web-mercator-quad-patch-draw.js'
+export { WebMercatorQuadCover, webMercatorQuadCoverPolicy } from './web-mercator-quad-cover.js'
+export type {
+    WebMercatorQuadCoverDescriptor, WebMercatorQuadCoverFacts, WebMercatorQuadCoverPatch,
+    WebMercatorQuadCoverPolicy, WebMercatorQuadCoverSelection, WebMercatorQuadCoverSelectionFacts,
+} from './web-mercator-quad-cover.js'
+export { WebMercatorQuadDemandProjection } from './web-mercator-quad-demand.js'
+export { WebMercatorQuadCoverUpload } from './web-mercator-quad-cover-upload.js'
+export type {
+    WebMercatorQuadCoverUploadDescriptor, WebMercatorQuadCoverUploadTemplate,
+    WebMercatorQuadCoverUploadFrame, WebMercatorQuadCoverUploadReceipt,
+    WebMercatorQuadCoverUploadResourceFact, WebMercatorQuadCoverUploadFacts,
+} from './web-mercator-quad-cover-upload.js'
+export type {
+    WebMercatorQuadDemandProjectionDescriptor, WebMercatorQuadDemandProjectionFacts,
+    WebMercatorQuadProjectedDemand, WebMercatorQuadProjectedDemands,
+} from './web-mercator-quad-demand.js'
 export type {
     GpuWebMercatorQuadPatchDrawDescriptor,
     GpuWebMercatorQuadPatchDrawFacts,

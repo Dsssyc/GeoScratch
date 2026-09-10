@@ -1,3 +1,4 @@
+import { terrainCoverVerticalBounds } from '../packages/geoscratch/dist/geo/web-mercator-terrain-renderer.js'
 import { expect } from 'chai'
 import { GPURuntime } from 'geoscratch/scratch'
 import { mat4 } from 'wgpu-matrix'
@@ -680,7 +681,7 @@ describe('GPU WebMercatorQuad inverse cover lowering', () => {
         })
         expect(cover.facts().parity).to.have.length(2)
         expect(cover.facts().parity.every(parity =>
-            parity.commandIds.length === 2
+            parity.commandIds.length === 3 && new Set(parity.commandIds).size === 3
         )).to.equal(true)
         expect(cover.facts().parity.every(parity =>
             !('demandBufferId' in parity) && !('drawArgumentBufferId' in parity)
@@ -706,11 +707,84 @@ describe('GPU WebMercatorQuad inverse cover lowering', () => {
         cover.capture(builder, frame)
         const submitted = builder.submit()
         expect(submitted.readbacks.map(link => link.commandId)).to.have.length(1)
-        expect(fake.calls.dispatchCalls).to.have.length(1)
+        expect(fake.calls.dispatchCalls).to.have.length(2)
 
         token.dispose()
         cover.dispose()
         await runtime.dispose()
+    })
+
+    it('encloses source-level elevation extrema in geometry ancestors without editing metadata', () => {
+        const source = Object.freeze([
+            Object.freeze({ matrixLevel: 0, tileRow: 0, tileCol: 0,
+                minimumElevationMeters: -1000, maximumElevationMeters: 200 }),
+            Object.freeze({ matrixLevel: 1, tileRow: 0, tileCol: 0,
+                minimumElevationMeters: -2600, maximumElevationMeters: 100 }),
+            Object.freeze({ matrixLevel: 2, tileRow: 0, tileCol: 0,
+                minimumElevationMeters: -3200, maximumElevationMeters: 50 }),
+        ])
+        for (const exaggeration of [1, -2]) {
+            const result = terrainCoverVerticalBounds(source, exaggeration)
+            expect(result[0].minimumVerticalMeters).to.equal(exaggeration > 0 ? -3200 : -400)
+            expect(result[0].maximumVerticalMeters).to.equal(exaggeration > 0 ? 200 : 6400)
+            expect(result[1].minimumVerticalMeters).to.equal(exaggeration > 0 ? -3200 : -200)
+            expect(result.every(Object.isFrozen)).to.equal(true)
+        }
+        expect(source[0].minimumElevationMeters).to.equal(-1000)
+    })
+
+    it('uses enclosing ancestors outside a narrower finer metadata domain', async() => {
+        const base = fixture({ coverageMaximumMatrixLevel: 1, maximumMatrixLevel: 2,
+            maximumCellSpanReferencePixels: 1, verticalRangeMeters: [0, 0] })
+        const coverage = tileMatrixCoverage({ tileMatrixSet: WebMercatorQuad, limits: [
+            { matrixId: '0', minTileRow: 0, maxTileRow: 0, minTileCol: 0, maxTileCol: 0 },
+            { matrixId: '1', minTileRow: 0, maxTileRow: 0, minTileCol: 0, maxTileCol: 0 },
+        ] })
+        const spatialProfile = webMercatorPlanarTileSpatialProfile({
+            addressCodec: webMercatorQuadAddressCodec({ coverage, coordinateBits: 52 }),
+        })
+        const descriptor = { spatialProfile, policy: base.policy, verticalRangeMeters: [0, 0],
+            verticalBounds: [0, 1].map(matrixLevel => ({ matrixLevel, tileRow: 0, tileCol: 0,
+                minimumVerticalMeters: 0, maximumVerticalMeters: 0 })) }
+        const input = { ...descriptor, view: base.view({ zoom: 2 }),
+            visibleBounds: { west: 0, north: 0, east: 1, south: 1 } }
+        const hierarchical = evaluateGpuWebMercatorQuadCoverReference(input)
+        const global = evaluateGpuWebMercatorQuadCoverReference({ ...input, verticalBounds: undefined })
+        expect(hierarchical.patches).to.deep.equal(global.patches)
+        expect(hierarchical.patches.some(patch => patch.tileRow > 1 || patch.tileCol > 1)).to.equal(true)
+        const runtime = await GPURuntime.create({ gpu: createFakeGpu().gpu })
+        const cover = await GpuWebMercatorQuadCover.create(runtime, descriptor)
+        cover.dispose()
+        await runtime.dispose()
+    })
+
+    it('rejects non-enclosing child bounds before allocating GPU resources', async() => {
+        const base = fixture({ coverageMaximumMatrixLevel: 2, maximumMatrixLevel: 2 })
+        const verticalBounds = flatVerticalBounds(base)
+        verticalBounds[1] = { ...verticalBounds[1], maximumVerticalMeters: 1 }
+        let allocations = 0
+        const runtime = { createBuffer() { allocations++; throw new Error('unexpected allocation') } }
+        let failure
+        try {
+            await GpuWebMercatorQuadCover.create(runtime, { ...base, verticalBounds })
+        } catch (error) { failure = error }
+        expect(failure.diagnostic.code).to.equal('GEO_WEB_MERCATOR_COVER_VERTICAL_BOUNDS_INVALID')
+        expect(failure.diagnostic.actual.reason).to.equal('ancestor-enclosure')
+        expect(allocations).to.equal(0)
+        expect(() => evaluateGpuWebMercatorQuadCoverReference({ ...base, verticalBounds,
+            view: base.view(), visibleBounds: { west: 0, north: 0, east: 1, south: 1 } }))
+            .to.throw('enclosing ancestors')
+    })
+
+    it('rejects huge incomplete metadata by count without enumerating its tile domain', async() => {
+        const base = fixture({ coverageMaximumMatrixLevel: 15, maximumMatrixLevel: 24 })
+        let allocations = 0, failure
+        try {
+            await GpuWebMercatorQuadCover.create({ createBuffer() { allocations++ } },
+                { ...base, verticalBounds: [] })
+        } catch (error) { failure = error }
+        expect(failure.diagnostic.actual.reason).to.equal('record-count')
+        expect(allocations).to.equal(0)
     })
 
     it('owns one complete immutable vertical hierarchy and rejects partial metadata', async() => {
