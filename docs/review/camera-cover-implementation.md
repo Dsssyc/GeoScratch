@@ -3,6 +3,12 @@
 Branch: `camera-cover`. Baseline: `071d82ba6c990fd824ac7beba40eca6254225387`.
 Design authority: [ADR-125](../decisions/ADR-125-camera-cover-parallel-execution.md).
 
+Feedback scheduling was subsequently corrected by
+[ADR-128](../decisions/ADR-128-terrain-feedback-and-resource-progress.md).
+The [CPU/resource evaluation](./camera-cover-cpu-resource-evaluation.md) records the
+matched comparison and current event-driven GPU feedback behavior. Earlier timing
+and one-frame-delay descriptions below refer to their recorded implementation stage.
+
 ## Scope and Existing Resource Contracts
 
 This work optimizes the geometry cover and its failure boundary. Worker/System/Pool,

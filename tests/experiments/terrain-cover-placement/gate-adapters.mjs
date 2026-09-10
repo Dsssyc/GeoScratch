@@ -9,6 +9,7 @@ function substitute(source, before, after) {
 // Reuse the real browser gates without their backend rebuild or service launch.
 // Only the asserted producer location/upload count changes for CPU variants.
 export async function prepareGate(root, outputDirectory, suite) {
+    if (suite === 'lifecycle') return prepareLifecycleGate(root, outputDirectory)
     const streaming = suite === 'streaming'
     const name = streaming ? 'underwater-terrain-streaming' : 'underwater-terrain-tile-wireframe'
     let source = await readFile(`${root}/tests/browser/${name}.mjs`, 'utf8')
@@ -42,6 +43,41 @@ export async function prepareGate(root, outputDirectory, suite) {
             'baseline?.graphContract?.selectionPath === expectedSelectionPath')
     }
     const file = `${outputDirectory}/${name}-adapter.mjs`
+    await writeFile(file, source)
+    return (await import(pathToFileURL(file).href)).runGate
+}
+
+async function prepareLifecycleGate(root, outputDirectory) {
+    let source = await readFile(`${root}/tests/browser/scratch-underwater-terrain.mjs`, 'utf8')
+    source = substitute(source, "from 'playwright'", `from '${pathToFileURL(`${root}/node_modules/playwright/index.mjs`).href}'`)
+    source = substitute(source,
+        "const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..')",
+        `const repositoryRoot = ${JSON.stringify(root)}`)
+    source = substitute(source, 'const outputDirectory = resolve(', 'let outputDirectory = resolve(')
+    const portsStart = source.indexOf('const port = process.env.UNDERWATER_TERRAIN_BROWSER_PORT')
+    const expectationsStart = source.indexOf('const expectedStageOrder', portsStart)
+    const launchStart = source.indexOf('await mkdir(outputDirectory')
+    const functionsStart = source.indexOf('async function verifyUnderwaterTerrain(activeBrowser)')
+    if ([portsStart, expectationsStart, launchStart, functionsStart].some(index => index < 0)) throw new Error('Lifecycle gate boundaries changed')
+    source = source.slice(0, portsStart) + 'let baseUrl, tileBaseUrl, port, tilePort\n' +
+        source.slice(expectationsStart, launchStart) + `
+export async function runGate(activeBrowser, options) {
+    baseUrl = options.baseUrl
+    tileBaseUrl = options.tileBaseUrl
+    port = Number(new URL(baseUrl).port)
+    tilePort = Number(new URL(tileBaseUrl).port)
+    outputDirectory = options.outputDirectory
+    await mkdir(outputDirectory, { recursive: true })
+    const verified = await verifyUnderwaterTerrain(activeBrowser)
+    const failuresOfConstruction = []
+    for (const scenario of failureScenarios) failuresOfConstruction.push(await verifyFailureScenario(activeBrowser, scenario))
+    const failures = validateResult({ adapter: verified.adapter, normalProof: verified.proof,
+        failureProofs: failuresOfConstruction, browserClosed: true, serverClosed: true, tileServerClosed: true })
+    return { failures, adapter: verified.adapter, normalProof: summarizeNormalProof(verified.proof),
+        failureProofs: failuresOfConstruction.map(summarizeFailureProof) }
+}
+\n` + source.slice(functionsStart)
+    const file = `${outputDirectory}/terrain-lifecycle-adapter.mjs`
     await writeFile(file, source)
     return (await import(pathToFileURL(file).href)).runGate
 }

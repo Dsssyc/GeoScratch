@@ -3,10 +3,11 @@ function replace(source, from, to) {
     if (!source.includes(from))
         throw new Error('Experiment patch anchor missing: ' + from.slice(0, 90)); return source.replace(from, to)
 }
-export function transform(source, id, mode, { experimentDirectory: dir, outputDirectory, coordinateBits, feedbackDelayMs = 0 }) {
-    if (!['gpu', 'gpu-eager', 'gpu-observed', 'shadow', 'cpu-cover', 'cpu-all'].includes(mode))
+export function transform(source, id, mode, { experimentDirectory: dir, outputDirectory, coordinateBits, feedbackDelayMs = 0, rendererBaseline }) {
+    if (!['gpu', 'gpu-original', 'gpu-eager', 'gpu-observed', 'shadow', 'cpu-cover', 'cpu-all'].includes(mode))
         throw new Error('Invalid experimental execution mode')
-    const gpuMode = mode === 'gpu' || mode === 'gpu-eager' || mode === 'gpu-observed'
+    const gpuMode = mode.startsWith('gpu')
+    if (rendererBaseline !== undefined && id.endsWith('/geo/web-mercator-terrain-renderer.ts')) source = rendererBaseline
     if ((mode === 'gpu-eager' || mode === 'gpu-observed') && id.endsWith('/geo/web-mercator-terrain-renderer.ts')) {
         const heldFrame = 'ready.coverFrame.frameEpoch >= latestIssuedFrameEpoch'
         if (source.split(heldFrame).length !== 3) throw new Error('Expected both delayed-feedback guards')

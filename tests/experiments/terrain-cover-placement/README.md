@@ -17,6 +17,7 @@ node tests/experiments/terrain-cover-placement/run.mjs cpu-cover performance
 node tests/experiments/terrain-cover-placement/run.mjs cpu-all performance
 node tests/experiments/terrain-cover-placement/run.mjs cpu-all render
 node tests/experiments/terrain-cover-placement/run.mjs cpu-all streaming
+node tests/experiments/terrain-cover-placement/run.mjs gpu lifecycle
 node tests/experiments/terrain-cover-placement/run.mjs gpu reveal
 node tests/experiments/terrain-cover-placement/run.mjs cpu-all reveal
 TERRAIN_PLACEMENT_BITS=52 node tests/experiments/terrain-cover-placement/run.mjs shadow render
@@ -34,9 +35,11 @@ It verifies production/Flow source and backend data hashes before/after executio
 Modes:
 
 - `gpu`: current production selection and demand execution.
-- `gpu-eager`: keep GPU selection/demand and all currentness checks, but start
+- `gpu-original`: replay renderer source from `117af0b` to retain the original
+  comparison after production scheduling changes. This requires that Git object.
+- `gpu-eager`: against the same pinned renderer, keep all currentness checks but start
   asynchronous feedback consumption without waiting for a newer frame submission.
-- `gpu-observed`: additionally reconcile monotonically newer complete source-demand
+- `gpu-observed`: against that renderer, additionally reconcile monotonically newer complete source-demand
   observations with their original view provenance. Old observations cannot update
   current geometry/readiness, and active retained requests participate in settlement.
 - `cpu-cover`: CPU cover plus fresh Scratch uploads; existing GPU source demand and
@@ -52,11 +55,16 @@ Modes:
 instrumentation and then with GPU pass timestamps on every seventh frame. CPU
 construction, asynchronous native observation, GPU pass duration, first executor
 request and acknowledged selected-resource readiness are separate measurements.
+`feedbackAdoptionCpuMs` times synchronous reconciliation/state adoption separately;
+it excludes GPU waits, mapping/decoding and Worker work, and is not total main-thread CPU.
 The readiness poll is every 20 ms. It must observe the **current** converged cover,
 selected resident demands, acknowledged publication, and drained scheduling/staging;
 previously seeing a converged cover is insufficient. Do not sum cross-scope medians.
 
 `render` and `streaming` reuse the repository's existing browser-gate assertions.
+`lifecycle` reuses the native terrain construction, provenance, rapid-camera and
+failure-cleanup gate. Its residency audit requires exact accounting of retired
+staged pages, zero rejected stale staging/failure attempts, and zero unrequired uploads.
 `reveal` starts continuous camera motion before new fine resources have loaded and
 counts source requests issued during motion versus only after the camera stops.
 `TERRAIN_PLACEMENT_FEEDBACK_DELAY_MS` delays GPU feedback consumption before mapping

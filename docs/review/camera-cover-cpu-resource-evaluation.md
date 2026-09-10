@@ -1,18 +1,17 @@
 # Camera cover execution and asynchronous resource observation
 
-Date: 2026-09-09; integrated evaluation updated 2026-09-10. Production source
-reviewed at `d6e2e9e`; integration experiments start from `e318dc6`.
-The production source remained unchanged throughout the experiments. This review records
-experimental alternatives; it does not supersede the canonical API or ADR-125.
+Date: 2026-09-09; integrated evaluation and GPU-feedback correction updated 2026-09-10.
+Initial production source was `d6e2e9e`; integration experiments started from `e318dc6`.
+The first experiments left production unchanged. The subsequent feedback correction is
+implemented under ADR-128. Historical measurements below retain their original scopes.
 
 ## Recommendation
 
-The integrated evaluation supports **one CPU geometry selector plus CPU source-demand projection, with the
-existing persistent GPU atlas/page tables and existing Worker/Virtual Raster
-publication pipeline** as the preferred implementation direction. The decisive
-result is request progress during continuous camera motion. Merely moving cover
-computation to CPU while retaining the old demand feedback delay is not a compelling
-change. This remains an evaluation recommendation, not an accepted public API switch.
+**Keep the production GPU selector and repair feedback/resource progress first.**
+The earlier recommendation of CPU cover plus CPU source intent was too strong: its
+largest advantage was measured against a GPU feedback policy which prevented loading
+during continuous motion. Correcting that policy also restores GPU-path request progress.
+The CPU alternative remains useful for performance comparison, not a proven optimum.
 
 GPU-origin usage, missing-page observations and procedural results can feed bounded
 asynchronous CPU reconciliation. CPU-owned allocation and upload decisions need not
@@ -25,6 +24,92 @@ a universal frame-time winner: the CPU prototype has numerical and integration l
 individual-call timings vary substantially. MapLibre's hot-loop timings cannot be
 promised for GeoScratch's stronger geometry contract. Optimizing Scratch's repeated
 host bookkeeping is useful independently of the cover placement decision.
+
+## GPU feedback correction, 2026-09-10
+
+The new experiments separate three changes rather than attributing every improvement
+to CPU selection:
+
+| GPU strategy | Normal continuous motion | With 40 ms feedback-consumer delay |
+| --- | --- | --- |
+| Original newer-frame wait + current-view-only resource adoption | 0 new detail requests during motion | original policy |
+| Begin mapping after its own submission, retain old adoption rule | 18 requests during motion; first about 36 ms | 0 during motion; first about 1,604 ms |
+| Independently accept newer complete resource observations | request progress retained | 18 during motion; first about 66 ms |
+
+The synthetic consumer delay is not a GPU kernel timer. Source/coverage and output
+validation remain intact; only complete observations advance the monotonic resource
+target. Current geometry and current-view readiness still require matching decisions.
+Retained active requests carry their actual completion promise into frame settlement.
+
+The first resource-observation experiment still polled when readback capture capacity
+was full. A 1,000 ms delayed-consumer run eventually converged but rendered 40 additional
+frames after motion stopped. The production correction replaces that waiting with one
+latest-frame settlement, awakened by released capture capacity. Replaced waiters settle
+without retaining history; errors/disposal reject or release the current waiter. A
+current observation requests one confirmation/publication frame, and resource completion
+uses its existing asynchronous wakeup. The same long-delay test then needed four extra
+frames, with all 18 requests started during motion and successful final cleanup. No frame
+budget was increased and no generic frame-controller or Worker API was introduced.
+
+Rapid motion has a measurable cost: some successfully decoded pages become irrelevant
+before publication. An initial lifecycle gate incorrectly treated every increment of
+`staleResponseCount` as invalid staging. The existing counter also includes valid staged
+retirement, as demonstrated by the existing residency implementation and focused tests.
+The native proof now independently observes stage, generation and publication boundaries.
+It requires zero rejected stale staging/failure operations, zero uploads outside the
+resource target, exact accounting of retired stages, and the real staging-byte budget.
+It does not zero the production counter or merely ignore it.
+
+In the final lifecycle run, A-B-A retired one staged page (64 KiB); the following rapid
+84-step sequence brought the total to 17 pages (1,114,112 bytes). All retired bytes were
+released before publication. Rejected stale operations and unrequired uploads stayed
+zero. Earlier runs retired 4 and 20 cumulative pages respectively, showing the timing
+dependence of this cancellation cost. The full lifecycle, render and streaming gates
+pass with these stronger distinctions.
+
+The accepted behavior and ownership rules are recorded in
+[ADR-128](../decisions/ADR-128-terrain-feedback-and-resource-progress.md), the bilingual
+terrain API, and AGENTS.md. The generic Virtual Raster documentation clarifies its
+existing stale-counter meaning. GPU geometry/quality, source data, atlas ownership,
+Worker protocol and frozen Flow Layer are unchanged.
+
+New evidence is under `/tmp/geoscratch-feedback-timing/`: `eager-reveal/`,
+`eager-delay40/`, `observed-delay40/`, `observed-streaming/`, `observed-delay1000/`,
+`production-delay1000/`, `production-render/`, `production-streaming/`,
+`lifecycle-final/`, and the final paired performance runs. The experiment runner can
+replay renderer source from `117af0b` as `gpu-original`, `gpu-eager` and `gpu-observed`
+to preserve the comparisons after production changes.
+
+Focused regressions cover first-frame mapping, A-B-A provenance, retained work,
+invalid feedback, bounded latest waiting and disposal. The native cover proof also
+passes at DPR 1/2, including overflow/quality failure and complete-cut checks.
+Typecheck, build and the full test suite pass: 1,734 tests, two opt-in pending.
+
+Final paired 90-move traces used the same current scheduling and proof instrumentation
+for production GPU versus the CPU experiment:
+
+| Scope, p50 | Corrected GPU | CPU cover + CPU source intent |
+| --- | ---: | ---: |
+| Shaded CPU construction | 1.8 ms | 2.2 ms |
+| Shaded synchronous feedback adoption | 0.1 ms | 0.1 ms |
+| Shaded native observation | 7.2 ms | 6.5 ms |
+| Wireframe CPU construction | 1.9 ms | 1.9 ms |
+| Wireframe synchronous feedback adoption | 0.1 ms | 0.1 ms |
+| Wireframe native observation | 8.1 ms | 7.4 ms |
+
+The single cold move issued its first request at about 24 versus 12 ms, but selected
+resources were acknowledged at about 148 versus 150 ms, within the 20 ms polling
+resolution. These are separate scopes, not additive medians or an FPS prediction.
+Feedback adoption timing excludes mapping/decoding/Worker work. CPU retains some
+measured latency advantage while GPU avoids additional CPU geometry work; neither
+is a universal optimum. The immediate production benefit is the feedback correction,
+which does not require replacing the geometry authority or resource infrastructure.
+
+Checkpoints: `295893e` adds the feedback-strategy comparisons, `286097d` adds explicit
+retirement auditing, and `610fe13` implements ADR-128. To undo this correction, first
+revert the later comparison/review update, then revert `610fe13`, `286097d`, and
+`295893e` in that order. Do not reset a shared checkout. The earlier CPU experiment
+commits remain independently removable after their review links are reverted.
 
 ## Integrated terrain results, 2026-09-10
 
