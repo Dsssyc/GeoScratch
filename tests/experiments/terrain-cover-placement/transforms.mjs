@@ -3,7 +3,7 @@ function replace(source, from, to) {
     if (!source.includes(from))
         throw new Error('Experiment patch anchor missing: ' + from.slice(0, 90)); return source.replace(from, to)
 }
-export function transform(source, id, mode, { experimentDirectory: dir, outputDirectory, coordinateBits, feedbackDelayMs = 0, rendererBaseline }) {
+export function transform(source, id, mode, { experimentDirectory: dir, outputDirectory, coordinateBits, feedbackDelayMs = 0, rendererBaseline, hostTiming = false }) {
     if (!['gpu', 'gpu-original', 'gpu-eager', 'gpu-observed', 'shadow', 'cpu-cover', 'cpu-all'].includes(mode))
         throw new Error('Invalid experimental execution mode')
     const gpuMode = mode.startsWith('gpu')
@@ -61,6 +61,12 @@ export function transform(source, id, mode, { experimentDirectory: dir, outputDi
     if (coordinateBits === 52 && id.endsWith('/examples/underwaterTerrain/dem-source.ts'))
         source = replace(source, 'export const DEM_WEB_MERCATOR_COORDINATE_BITS = 40', 'export const DEM_WEB_MERCATOR_COORDINATE_BITS = 52')
     if (id.endsWith('/examples/underwaterTerrain/application.ts')) {
+        if (hostTiming) {
+            source = replace(source, '            const startedAt = performance.now()',
+                '            ;(globalThis as any).__terrainHostTiming.begin(frameNumber)\n            const startedAt = performance.now()')
+            source = replace(source, '            proof.frameConstructed(frameNumber, performance.now() - startedAt)',
+                '            proof.frameConstructed(frameNumber, performance.now() - startedAt)\n            ;(globalThis as any).__terrainHostTiming.end()')
+        }
         source = replace(source, '    proof?.observeRuntime(runtime)', `    ;(globalThis as any).__terrainEval = { runtime, source, events: [], feedbackCpu: [], mode: '${mode}' }
     proof?.observeRuntime(runtime)`)
         source = replace(source, '    const initialized = await graph.initialize()', `    Object.assign((globalThis as any).__terrainEval, { graph, virtualRaster })

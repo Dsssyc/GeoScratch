@@ -23,6 +23,8 @@ node tests/experiments/terrain-cover-placement/run.mjs cpu-all reveal
 TERRAIN_PLACEMENT_BITS=52 node tests/experiments/terrain-cover-placement/run.mjs shadow render
 TERRAIN_PLACEMENT_TILE_DELAY_MS=80 node tests/experiments/terrain-cover-placement/run.mjs cpu-all performance
 TERRAIN_PLACEMENT_FEEDBACK_DELAY_MS=40 node tests/experiments/terrain-cover-placement/run.mjs gpu-eager reveal
+TERRAIN_PLACEMENT_HOST_PROFILE=1 node tests/experiments/terrain-cover-placement/run.mjs gpu performance
+TERRAIN_PLACEMENT_HOST_TIMING=1 node tests/experiments/terrain-cover-placement/run.mjs gpu performance
 ```
 
 Run benchmark processes serially. `TERRAIN_PLACEMENT_OUTPUT` optionally selects an
@@ -60,6 +62,22 @@ it excludes GPU waits, mapping/decoding and Worker work, and is not total main-t
 The readiness poll is every 20 ms. It must observe the **current** converged cover,
 selected resident demands, acknowledged publication, and drained scheduling/staging;
 previously seeing a converged cover is insufficient. Do not sum cross-scope medians.
+
+`TERRAIN_PLACEMENT_HOST_PROFILE=1` records a DevTools CPU sampling profile at a
+requested 100 microsecond interval in `host.cpuprofile`, after initial application
+readiness and through the scenario. It includes page-side camera, submission,
+feedback and proof work, but not Worker CPU or native GPU execution. Use it to
+attribute main-thread work; compare latency using separate runs with profiling
+disabled. Sampling and timestamp instrumentation can change scheduling and costs.
+
+`TERRAIN_PLACEMENT_HOST_TIMING=1` adds inclusive function and native-call timers
+only in the isolated source transforms. The frame boundary is the synchronous
+`graph.render()` call, matching the construction metric; later callbacks and proof
+DOM publication are excluded. `hostScopes` reports per-frame sums and call counts
+for each trace, including its final settlement frames. Parent/child scopes overlap
+and must not be summed. Native timings measure synchronous API calls, not GPU work
+or transfer completion. Timer resolution produces zero-duration samples; use the
+aggregate attribution and verify improvements with both host probes disabled.
 
 `render` and `streaming` reuse the repository's existing browser-gate assertions.
 `lifecycle` reuses the native terrain construction, provenance, rapid-camera and

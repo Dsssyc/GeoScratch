@@ -76,7 +76,7 @@ export async function scenarios(options) {
                 for (const p of r.passes)
                     (byPass[p.label] ??= []).push(p.ms)
             traces.push({
-                presentation, timestamped, elapsedMs: elapsed, admittedFrames: audit.graph.state().frame - startFrame, hostFrameIntervalsMs: stats(intervals), timing,
+                presentation, timestamped, started, finished: performance.now(), elapsedMs: elapsed, admittedFrames: audit.graph.state().frame - startFrame, hostFrameIntervalsMs: stats(intervals), timing,
                 gpuPasses: Object.fromEntries(Object.entries(byPass).map(([label, v]) => [label, stats(v)])), gpuRecords: records,
                 feedbackAdoptionCpuMs: stats(adoptionRows.map(row => row.ms)),
                 state: audit.graph.state(), controller: audit.frameController.snapshot()
