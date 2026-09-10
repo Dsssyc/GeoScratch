@@ -20,7 +20,9 @@ const preparedControlPanel = prepareUnderwaterTerrainControlPanel({
 })
 const parameters = preparedControlPanel.parameters
 const proofMode = parameters.get('proof') === '1'
-const tileServerUrl = parameters.get('tileServer') ?? 'http://127.0.0.1:8787'
+const tileServerUrl = new URL(
+    parameters.get('tileServer') ?? '/api/dem/', window.location.href
+).href
 const cachePolicy = readUnderwaterTerrainCachePolicy(parameters)
 const maxPhysicalPages = boundedIntegerParameter(parameters.get('atlasPages'), 64, 2, 64)
 let tileWireframeEnabled = preparedControlPanel.renderingPreference.tileWireframe

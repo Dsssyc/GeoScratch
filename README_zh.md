@@ -14,20 +14,29 @@ GeoScratch 是一个基于 WebGPU 的 ES module 图形库，面向地理可视�
 
 ```bash
 npm install
+npm run backend:setup
 npm run dev
 ```
 
 打开 Vite 输出的本地地址即可浏览示例。渲染示例需要支持 WebGPU 的浏览器。
+
+后端初始化需要 Python 3.12–3.14，只需执行一次。`npm run dev` 同时启动前端和
+共享数据后端，切换示例无需重启服务。缺失的数据集按[后端指南](./examples/backend/README.md)
+单独准备。仅运行前端示例时，可使用 `npm run dev:frontend`，无需安装 Python 依赖。
 
 ## 常用命令
 
 | 命令 | 说明 |
 | --- | --- |
 | `npm install` | 根据 `package-lock.json` 安装依赖。 |
-| `npm run dev` | 先构建库包，再从 `examples/` 启动 Vite 示例浏览器。 |
+| `npm run backend:setup` | 安装示例数据服务的共享 Python 环境。 |
+| `npm run dev` | 构建库与 Worker，同时启动 Vite 和共享后端。 |
+| `npm run dev:frontend` | 构建库与 Worker，仅启动 Vite。 |
+| `npm run dev:backend` | 仅启动共享示例数据后端。 |
+| `npm run test:backend` | 运行共享后端与各数据模块的 Python 测试。 |
 | `npm test` | 先构建库包，再运行 `tests/` 中的 Mocha 测试。 |
 | `npm run build` | 构建库包，并将示例浏览器和独立示例页面构建到 `dist/examples/`。 |
-| `npm run serve` | 本地预览构建后的示例。 |
+| `npm run serve` | 启动共享数据后端并预览构建后的示例。 |
 | `npm run docs:generate` | 根据 TypeScript 入口重新生成并提交 API 事实与参考。 |
 | `npm run docs:translations` | 确认已审阅的中文译文对应当前英文正文。 |
 | `npm run docs:check` | 只读校验 API 事实、覆盖、链接与译文新鲜度。 |

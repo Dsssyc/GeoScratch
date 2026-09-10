@@ -18,6 +18,15 @@ Before changing Worker, tile-matrix, virtual-raster, cache, or DEM streaming beh
 
 Scratch is domain-neutral and must not depend on Geo, examples, maps, tiles, DEM, or application policy. Geo may compose Scratch into geographic semantics. Examples demonstrate source-specific assembly; they are evidence of a possibly missing primitive, not permission to move an example-shaped abstraction unchanged into Scratch or Geo. Prefer explicit ownership, lifetime, revisions, invalidation, scheduling, diagnostics, and WebGPU-native work over hidden global authority or implicit CPU round trips.
 
+Example backend source, Python dependency pins and the shared virtual environment
+live under `examples/backend/`. DEM and Flow modules have independent data admission
+and are mounted at `/api/dem` and `/api/flow`. Keep existing example-owned data
+directories and construction identities stable when moving tooling. Serving must
+never build, replace or hot-reload datasets. Root `npm run dev` owns Vite and the
+shared backend; its cleanup may signal only its own child process groups. Keep dev
+and preview proxies aligned with `examples/backend/config.json` and the explicit
+`EXAMPLES_BACKEND_PORT` override. Use `npm run test:backend` for Python verification.
+
 The active terrain example is `examples/underwaterTerrain/`, titled `Underwater Terrain`.
 Use that name for its route, page, controls, runtime labels, tests, and current documentation.
 Application-owned cache controls and full-example browser proofs also use the
@@ -113,9 +122,12 @@ current CPU renderer as GPU.
 ## Build, Test, and Development Commands
 
 - `npm install`: install dependencies from `package-lock.json`.
-- `npm run dev`: delegate to the `examples` workspace and start the Vite examples browser.
+- `npm run backend:setup`: install the shared Python environment for example data services.
+- `npm run dev`: build the library and Workers, then own Vite and one shared examples backend.
+- `npm run dev:frontend` / `npm run dev:backend`: start only the selected development side.
+- `npm run test:backend`: run the shared composition and existing dataset Python suites.
 - `npm run build`: build the `geoscratch` package into `packages/geoscratch/dist/`, then build standalone example pages into `dist/examples/`.
-- `npm run serve`: preview the built Vite output locally.
+- `npm run serve`: preview built Vite output alongside the shared backend and API proxy.
 - `npm run docs:generate`: regenerate committed API facts from the public TypeScript entrypoints.
 - `npm run docs:translations`: update reviewed Chinese translation revision digests.
 - `npm run docs:check`: verify generated facts, API coverage, links, and translation freshness without modifying files.

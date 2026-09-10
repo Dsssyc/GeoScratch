@@ -1,5 +1,9 @@
 # DEM COG tile server
 
+Source and dependencies now live in [the shared backend](../../backend/README.md).
+This directory retains DEM data and its focused tests. Ordinary browsing uses
+`npm run dev`, which serves DEM at `/api/dem/` alongside Flow Field.
+
 This temporary example-owned adapter turns the repository DEM PNG into a
 georeferenced Cloud Optimized GeoTIFF and exposes its finite coverage through
 the OGC `WebMercatorQuad` tile matrix set. It is not part of the `geoscratch`
@@ -25,6 +29,8 @@ ignored by Git. Rebuilding from the unchanged source produces the same pixel and
 metadata semantics.
 
 ## Serve
+
+For isolated backend tests or an explicit `?tileServer=` URL:
 
 ```bash
 examples/backend/.venv/bin/dem-tile-serve --port 8787

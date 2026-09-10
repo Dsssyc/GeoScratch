@@ -74,7 +74,7 @@ describe('Flow Field application shell', () => {
         expect(main).to.include('__FLOW_FIELD_PROOF__')
         expect(main).to.include('let terminalFlush: Promise<FlowFieldApplicationFacts')
         expect(main).to.include('if (terminalFlush !== undefined) return await terminalFlush')
-        expect(main).to.include("tileServer') ?? 'http://127.0.0.1:8788'")
+        expect(main).to.include("tileServer') ?? '/api/flow/'")
         expect(main).to.include("parameters.get('rate')")
         expect(main).to.include('performance.now()')
         expect(main).to.not.include('framesPerTime')

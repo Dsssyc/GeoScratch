@@ -37,7 +37,7 @@ and HTTP contracts remain governed by their existing ADRs. Historical data and
 the frozen Flow Layer example are outside this change.
 
 Standalone module serving commands remain in the shared environment for tests
-and explicit endpoint overrides. The npm development entrypoint will own Vite
+and explicit endpoint overrides. The npm development entrypoint owns Vite
 and one shared backend, with relative browser API URLs proxied through Vite.
 Shutdown and failed startup must clean only children owned by that invocation.
 Installing dependencies and generating datasets remain separate commands.

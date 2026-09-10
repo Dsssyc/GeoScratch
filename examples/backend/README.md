@@ -11,7 +11,7 @@ From the repository root, with Python 3.12–3.14:
 
 ```sh
 npm run backend:setup
-npm run dev:backend
+npm run dev
 ```
 
 The shared service defaults to `http://127.0.0.1:8790`. Both datasets are available
@@ -21,6 +21,27 @@ in the same process:
 | --- | --- | --- |
 | `/api/dem/` | Underwater Terrain elevation | `manifest.json`, `tiles/WebMercatorQuad/{matrix}/{row}/{col}.png`, `health`, `stats` |
 | `/api/flow/` | Flow Field velocity | `manifest.json`, `tiles/WebMercatorQuad/{sampleKey}/{matrix}/{row}/{col}.rg32f`, `health`, `stats` |
+
+`npm run dev` builds the library and Worker modules, starts the backend, waits
+for its own process's liveness response, then starts Vite. Browser defaults use
+same-origin API paths through Vite. `Ctrl+C`/SIGTERM/SIGHUP and a service exit clean up
+the invocation's owned process groups on macOS/Linux, including npm children.
+An occupied backend port fails with guidance and leaves existing services alone.
+
+Use `npm run dev:backend` or `npm run dev:frontend` to run only one side.
+`npm run serve` starts the backend alongside Vite preview after `npm run build`.
+Static deployments must provide equivalent `/api` routing or explicit
+`?tileServer=` URLs; Vite's proxy is a development/preview facility.
+
+`config.json` defines the shared default host and port. Set `EXAMPLES_BACKEND_PORT`
+in the launching shell to override the port; separate frontend/backend terminals
+must use the same value. `EXAMPLES_DEM_OUTPUT` and `EXAMPLES_FLOW_OUTPUT` optionally
+select existing data directories, resolved from the repository root:
+
+```sh
+EXAMPLES_BACKEND_PORT=8791 npm run dev
+npm run dev -- --host 127.0.0.1 --port 5174
+```
 
 `GET /api/health` returns process liveness with HTTP 200 and `Cache-Control:
 no-store`. Its `modules` describe dataset admission at startup; `status` is `ok`
@@ -77,9 +98,18 @@ service. Custom shared inputs can be selected with `--dem-output` and
 
 ```sh
 npm run test:backend
+node tests/browser/examples-backend.mjs
+EXAMPLES_PROOF_PREVIEW=1 node tests/browser/examples-backend.mjs
 ```
 
 The shared pytest configuration collects composition tests here and the existing
 DEM/Flow suites beside their datasets, using importlib mode for duplicate test
 filenames. Backend source and dependencies live here exclusively. Old local
 per-example virtual environments are unused and are not automatically deleted.
+
+The browser proof requires both existing datasets, installed Chrome with headless
+WebGPU support, and built examples for preview mode. It switches the normal
+examples browser from Underwater Terrain to Flow Field and back, verifies tile
+responses, exact Flow page SHA and conditional requests, retains the same backend
+PID, and verifies both service ports close. External basemap imagery is supplied
+by a deterministic image fixture; actual DEM/Flow requests use the shared backend.

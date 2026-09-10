@@ -8,7 +8,7 @@ import { chromium } from 'playwright'
 // The shared source owner is index 4 of a row-major 3x3 neighborhood. No extra
 // center-lattice support multiplier is applied to this already owner-gated basis.
 // Real-data cases use only two z10 spatial pages at five times, never the full COG.
-const base = process.env.FLOW_BOUNDARY_TIME_BASE ?? 'http://127.0.0.1:8788'
+const base = process.env.FLOW_BOUNDARY_TIME_BASE ?? 'http://127.0.0.1:5173/api/flow'
 const tolerance = 5e-5
 const widths = [0.05,0.25,0.35]
 const probes = [], sharedEdges = [], sharedCorners = [], exchanges = [], joins = [], sweeps = []

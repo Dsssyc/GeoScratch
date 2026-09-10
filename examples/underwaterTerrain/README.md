@@ -6,9 +6,11 @@ semi-transparent WebGPU terrain canvas over the basemap; it does not claim depth
 ground translucency or reduce the example to bathymetry data alone.
 
 Standard `WebMercatorQuad` DEM tiles stream through Workers into a bounded GPU
-virtual-raster atlas. Start the local tile service as documented in
-[`tile-server/README.md`](./tile-server/README.md), then run `npm run dev` from the
-repository root.
+virtual-raster atlas. Run `npm run backend:setup` once, prepare missing DEM data
+with `npm run data:dem:build`, then run `npm run dev` from the repository root.
+The shared backend serves DEM at `/api/dem/` alongside Flow Field, so switching
+examples requires no restart. See the [backend guide](../backend/README.md) and
+[DEM data documentation](./tile-server/README.md).
 
 The WebGPU overlay permits two native frames in flight. This bounded double-flight policy keeps
 120 Hz camera tracking from collapsing to half-rate while latest-only pending capture prevents

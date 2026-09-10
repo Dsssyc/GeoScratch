@@ -14,20 +14,31 @@ The library is designed for developers who want direct control over WebGPU resou
 
 ```bash
 npm install
+npm run backend:setup
 npm run dev
 ```
 
 Open the Vite URL to browse examples. A WebGPU-capable browser is required for rendering examples.
+
+Backend setup requires Python 3.12–3.14 and is needed only once. `npm run dev`
+starts both the frontend and shared data backend; switching examples needs no
+service restart. Prepare missing datasets separately using the
+[backend guide](./examples/backend/README.md). Use `npm run dev:frontend` for
+frontend-only examples without installing Python dependencies.
 
 ## Commands
 
 | Command | Description |
 | --- | --- |
 | `npm install` | Install dependencies from `package-lock.json`. |
-| `npm run dev` | Build the library package, then start the Vite examples browser from `examples/`. |
+| `npm run backend:setup` | Install the shared Python environment for example data services. |
+| `npm run dev` | Build library and Workers, then start Vite and the shared backend together. |
+| `npm run dev:frontend` | Build library and Workers, then start only Vite. |
+| `npm run dev:backend` | Start only the shared example data backend. |
+| `npm run test:backend` | Run shared backend and dataset Python tests. |
 | `npm test` | Build the library package, then run Mocha tests in `tests/`. |
 | `npm run build` | Build the library package and standalone example pages into `dist/examples/`. |
-| `npm run serve` | Preview the built examples locally. |
+| `npm run serve` | Preview built examples with the shared data backend. |
 | `npm run docs:generate` | Regenerate committed API facts and references from TypeScript entrypoints. |
 | `npm run docs:translations` | Confirm reviewed Chinese translations against current English bodies. |
 | `npm run docs:check` | Read-only verification of API facts, coverage, links, and translation freshness. |

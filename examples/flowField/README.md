@@ -1,11 +1,10 @@
 # Flow Field
 
-Run `npm run dev` from the repository root and open `/flowField/index.html`.
-Start the COG service with:
-
-```sh
-examples/flowField/tile-server/.venv/bin/flow-field-tile-serve --port 8788
-```
+Run `npm run backend:setup` once, then `npm run dev` from the repository root and
+open `/flowField/index.html`. The shared backend serves the existing COG
+collection at `/api/flow/` alongside Underwater Terrain; switching examples
+requires no restart. Missing collections require explicit preparation as
+described in the [backend guide](../backend/README.md#prepare-flow-data).
 
 The default is Flow Layer-style colored particle trails over MapLibre. The bottom
 timeline controls play/pause, continuous model-time seeking, signed playback rate,

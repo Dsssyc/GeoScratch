@@ -2,11 +2,17 @@ import { defineConfig, type Plugin } from 'vite'
 import { existsSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import backendConfig from './backend/config.json'
 
 const examplesRoot = path.dirname(fileURLToPath(import.meta.url))
 const projectRoot = path.resolve(examplesRoot, '..')
 const examplesPublic = path.resolve(examplesRoot, 'public')
 const packageSource = path.resolve(projectRoot, 'packages/geoscratch/src')
+const backendPort = Number(process.env.EXAMPLES_BACKEND_PORT ?? backendConfig.port)
+if (!Number.isInteger(backendPort) || backendPort < 1 || backendPort > 65535) {
+  throw new Error('EXAMPLES_BACKEND_PORT must be an integer from 1 to 65535')
+}
+const apiProxy = { '/api': `http://${backendConfig.host}:${backendPort}` }
 
 function sourceRuntimeUrlPlugin(): Plugin {
   return {
@@ -100,8 +106,10 @@ export default defineConfig(({ command }) => ({
   },
   server: {
     host: '0.0.0.0',
+    proxy: apiProxy,
     fs: {
       allow: [projectRoot],
     },
-  }
+  },
+  preview: { proxy: apiProxy },
 }))

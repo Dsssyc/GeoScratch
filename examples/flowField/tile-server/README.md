@@ -516,6 +516,13 @@ verify_velocity_cog_collection(result.output_directory)
 
 ## RG32F service
 
+Ordinary browsing uses `npm run dev`, which serves the collection at `/api/flow/`
+alongside DEM through [the shared backend](../../backend/README.md). Source,
+dependencies, and CLI tools live in `examples/backend/`; this directory retains
+Flow descriptors, generated data, proofs, and focused tests.
+
+For isolated backend tests or an explicit `?tileServer=` URL:
+
 ```bash
 # Current temporal COG collection. This is also the command's default output.
 examples/backend/.venv/bin/flow-field-tile-serve --port 8788
