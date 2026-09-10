@@ -2,7 +2,7 @@
 docId: geo.terrain-rendering.zh
 canonical: false
 translationOf: ./terrain-rendering.md
-canonicalDigest: 4f577664997823ede0a6781e908b4bc6fc2feb5c18c753afa575fd9a94880477
+canonicalDigest: b90b01a3c73cce89ffeb8cf1771811c8927f242c17ae8352f353761729bd0c3c
 ---
 # 地形渲染
 
@@ -59,9 +59,23 @@ post-stitch 线段，不在 fragment 中猜测拓扑；应用只提供 fragment 
 `presentationSize` 调整物理 attachment，并返回
 `GeoFrameResult<WebMercatorTerrainFrameValue>`。submission/native observation、cover
 feedback、demand feedback、raster settlement 和后续 publication 保持不同 promise
-与 fact。被 supersede 的反馈不能 reconcile demand 或覆盖当前状态。最新相机决策
-完成两个有限 readback 前，同决策帧保持 `needsFollowUp`，避免 latest-only admission
-遗失收敛。
+与 fact。反馈在自身 submission 发出后即开始异步消费，不要求额外渲染一帧。
+只有匹配当前相机决策的反馈才能更新当前几何与选择事实。资源侧独立接受帧号单调
+更新的完整 source-demand 观察：它基于 renderer 生命周期内不可变的 source/coverage，
+保留原始 frame 与 residency provenance，并包含选中的已驻留页。旧观察不能证明
+当前视角就绪、倒退更新过的资源目标，或改变几何 cut。
+
+`WebMercatorTerrainFrameSettlement.superseded` 表示几何观察已经过时；这类 settlement
+仍可报告资源 reconciliation 与工作。除新请求外，仍在执行的保留请求也计入
+`residencyWorkCount`，以便实际完成时唤醒后续 publication。几何和源选择已知时，
+资源加载仍可能在进行，不能将其当成 exact-resource-ready 证明。
+
+帧通过显式 settlement 等待，避免额外渲染来轮询 readback。同决策帧共享已捕获反馈的
+settlement；若捕获容量占满，renderer 只保留最新帧的一个等待者，并释放被替换的等待者。
+反馈槽释放时，等待者获得重新捕获当前视角的 follow-up 与适用的资源工作，但不附加旧
+几何事实。当前反馈请求一次确认／publication 帧；未变化且已确定的决策不再捕获反馈。
+释放 renderer 会结束等待，反馈失败会拒绝该等待。frame controller 的 latest-only
+admission 以及既有 in-flight／follow-up 上限保持不变。
 
 Renderer 在三个组合 GPU component 中分别拥有两套 parity resource。Underwater
 Terrain 使用测量得到的双 in-flight bound。Renderer 不拥有 map host、controller、
@@ -74,4 +88,5 @@ source manifest、URL policy、Worker system、decoder 或 persistent-cache 选�
 相关决策：ADR-074 分配 terrain WGSL 权限；ADR-083 定义 inverse cover 与被动
 Virtual Raster；ADR-084 定义 reference pixel；ADR-086 统一 selector，并分开几何、
 source demand 与 draw-count 权限；ADR-087 与 ADR-088 分别定义稀疏 parent 细分和
-投影最大拉伸；ADR-089 定义 indexed terrain execution。
+投影最大拉伸；ADR-089 定义 indexed terrain execution；ADR-128 定义异步反馈消费与
+独立的资源观察进度。

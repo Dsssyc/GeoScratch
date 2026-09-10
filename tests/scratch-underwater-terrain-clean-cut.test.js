@@ -34,7 +34,7 @@ function sha256(value) {
     return crypto.createHash('sha256').update(value).digest('hex')
 }
 
-async function createTestVirtualRaster(runtime) {
+async function createTestVirtualRaster(runtime, options = {}) {
 
     const model = demSource.model
     const residency = new VirtualRasterResidency({
@@ -78,7 +78,7 @@ async function createTestVirtualRaster(runtime) {
         scheduler: Object.freeze({
             maxRequests: 18,
             inspect: () => Object.freeze({
-                activeRequestCount: 0,
+                activeRequestCount: options.activeRequestCount?.() ?? 0,
                 queuedRequestCount: 0,
             }),
         }),
@@ -100,13 +100,14 @@ async function createTestVirtualRaster(runtime) {
             }), { generation })
             return publish()
         },
-        reconcileViewDemands() {
+        reconcileViewDemands(demands) {
 
             generation++
             residency.reconcileGeneration(generation, [ safetyPage ])
+            const override = options.onReconcile?.(demands)
             return Object.freeze({
-                requestedCount: 0,
-                settlement: Promise.resolve(Object.freeze({
+                requestedCount: override?.requestedCount ?? 0,
+                settlement: override?.settlement ?? Promise.resolve(Object.freeze({
                     generation,
                     stagedCount: 0,
                     residentCount: 1,
@@ -114,7 +115,7 @@ async function createTestVirtualRaster(runtime) {
                     failedCount: 0,
                 })),
                 generation,
-                retainedCount: 0,
+                retainedCount: override?.retainedCount ?? 0,
                 retiredCount: 0,
             })
         },
@@ -555,6 +556,7 @@ describe('Underwater Terrain clean cut', () => {
         const initialized = await graph.initialize()
         await initialized.observation
         const result = await graph.render(terrainCapture())
+        void result.settlement.catch(() => undefined)
         let observedFailure
         try {
             await result.observation
@@ -576,9 +578,9 @@ describe('Underwater Terrain clean cut', () => {
         await runtime.dispose()
     })
 
-    it('keeps same-decision feedback convergence live when a newer host frame wins', async() => {
+    it('shares pending same-decision feedback without polling through newer frames', async() => {
 
-        const fake = createFakeGpu()
+        const fake = createFakeGpu({ deferMaps: true })
         const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const fakeCanvas = createFakeCanvas()
         const surface = runtime.createSurface(fakeCanvas.canvas, {
@@ -601,21 +603,255 @@ describe('Underwater Terrain clean cut', () => {
         let second
         try {
             first = await graph.render(capture)
+            void first.settlement.catch(() => undefined)
             second = await graph.render(capture)
+            void second.settlement.catch(() => undefined)
 
-            expect(first.needsFollowUp).to.equal(true)
-            expect(second.needsFollowUp).to.equal(true)
+            expect(first.needsFollowUp).to.equal(false)
+            expect(second.needsFollowUp).to.equal(false)
+            expect(second.settlement).to.equal(first.settlement)
         } finally {
             await Promise.allSettled([
                 first?.observation,
                 second?.observation,
             ].filter(Boolean))
             graph.dispose()
+            resolveFeedbackMaps(fake)
             await virtualRaster.dispose()
             await runtime.dispose()
         }
     })
+
+    it('starts feedback mapping for the first frame without submitting another frame', async() => {
+
+        const observed = []
+        const fixture = await createFeedbackFixture({ onReconcile: value => { observed.push(value) } })
+        try {
+            const frame = await fixture.render()
+            await nextFeedbackTurn()
+            expect(fixture.fake.readbacks.mapRequests).to.have.length(3)
+            expect(observed).to.have.length(0)
+            resolveFeedbackMaps(fixture.fake)
+            const settled = await frame.settlement
+            expect(settled.superseded).to.equal(false)
+            expect(settled.coverFeedback.frameEpoch).to.equal(1)
+            expect(observed.map(value => value.generation)).to.deep.equal([1])
+            expect(fixture.graph.state().frame).to.equal(1)
+        } finally { await fixture.dispose() }
+    })
+
+    it('uses an older complete demand observation without adopting its geometry as current', async() => {
+
+        const observed = []
+        let finishRequest
+        const pending = new Promise(resolve => { finishRequest = resolve })
+        const fixture = await createFeedbackFixture({
+            activeRequestCount: () => 1,
+            onReconcile(value) {
+                observed.push(value)
+                return { requestedCount: observed.length === 1 ? 1 : 0,
+                    retainedCount: observed.length === 1 ? 0 : 1, settlement: pending }
+            },
+        })
+        try {
+            const first = await fixture.render()
+            await nextFeedbackTurn()
+            const capture = terrainCapture()
+            const second = await fixture.render({ ...capture, view: { ...capture.view, cameraHigh: [1, 0, 100] } })
+            resolveFeedbackMaps(fixture.fake)
+            const older = await first.settlement
+            expect(older.superseded).to.equal(true)
+            expect(observed.map(value => value.generation)).to.deep.equal([1])
+            expect(observed[0].demands[0].source.frameEpoch).to.equal(1)
+            expect(fixture.graph.state().coverFeedback).to.equal(undefined)
+            await nextFeedbackTurn()
+            resolveFeedbackMaps(fixture.fake)
+            const current = await second.settlement
+            expect(current.superseded).to.equal(false)
+            expect(observed.map(value => value.generation)).to.deep.equal([1, 2])
+            expect(current.reconciliation.requestedCount).to.equal(0)
+            expect(current.residencyWorkCount).to.equal(1)
+            expect(current.residencySettlement).to.equal(pending)
+            expect(fixture.graph.state().coverFrameEpoch).to.equal(2)
+        } finally { finishRequest(); await fixture.dispose() }
+    })
+
+    it('does not reconcile feedback which completes after renderer disposal', async() => {
+
+        const observed = []
+        const fixture = await createFeedbackFixture({ onReconcile: value => { observed.push(value) } })
+        try {
+            const frame = await fixture.render()
+            await nextFeedbackTurn()
+            fixture.graph.dispose()
+            resolveFeedbackMaps(fixture.fake)
+            await frame.settlement
+            await nextFeedbackTurn()
+            expect(observed).to.have.length(0)
+            expect(fixture.graph.state().disposed).to.equal(true)
+        } finally { await fixture.dispose() }
+    })
+
+    it('bounds capture-capacity waiting to the latest frame and wakes it when a slot is released', async() => {
+
+        const fixture = await createFeedbackFixture()
+        const captureAt = x => {
+            const capture = terrainCapture()
+            return { ...capture, view: { ...capture.view, cameraHigh: [x, 0, 100] } }
+        }
+        try {
+            const first = await fixture.render(captureAt(0))
+            await nextFeedbackTurn()
+            await fixture.render(captureAt(1))
+            let previousWaiter
+            for (let x = 2; x < 12; x++) {
+                const current = await fixture.render(captureAt(x))
+                expect(current.needsFollowUp).to.equal(false)
+                if (previousWaiter) {
+                    const retired = await previousWaiter.settlement
+                    expect(retired.residencyWorkCount).to.equal(0)
+                    expect(retired.needsFollowUp).to.equal(false)
+                }
+                previousWaiter = current
+            }
+            let waitingResolved = false
+            void previousWaiter.settlement.then(() => { waitingResolved = true })
+            await nextFeedbackTurn()
+            expect(waitingResolved).to.equal(false)
+            expect(fixture.graph.state().readbackInFlightCount).to.equal(2)
+            resolveFeedbackMaps(fixture.fake)
+            await first.settlement
+            const wake = await previousWaiter.settlement
+            expect(wake.needsFollowUp).to.equal(true)
+            expect(wake.coverFeedback).to.equal(undefined)
+            expect(wake.demandFeedback).to.equal(undefined)
+            expect(fixture.graph.state().coverFeedback).to.equal(undefined)
+        } finally { await fixture.dispose() }
+    })
+
+    it('does not certify a returned A view with the earlier A observation', async() => {
+
+        const observed = []
+        const fixture = await createFeedbackFixture({ onReconcile: value => { observed.push(value) } })
+        try {
+            const capture = terrainCapture()
+            const firstA = await fixture.render(capture)
+            await nextFeedbackTurn()
+            await fixture.render({ ...capture, view: { ...capture.view, cameraHigh: [1, 0, 100] } })
+            const returnedA = await fixture.render(capture)
+            resolveFeedbackMaps(fixture.fake)
+            expect((await firstA.settlement).superseded).to.equal(true)
+            const progress = await returnedA.settlement
+            expect(progress.coverFeedback).to.equal(undefined)
+            expect(fixture.graph.state().coverFeedback).to.equal(undefined)
+            expect(observed.map(value => value.generation)).to.deep.equal([1])
+            expect(observed[0].demands[0].source.frameEpoch).to.equal(1)
+        } finally { await fixture.dispose() }
+    })
+
+    for (const stop of ['dispose', 'invalid-feedback']) {
+        it(`settles the capture waiter on ${stop}`, async() => {
+
+            const fixture = await createFeedbackFixture({ invalid: stop === 'invalid-feedback' ? 'demand' : undefined })
+            const capture = terrainCapture()
+            try {
+                await fixture.render(capture)
+                await nextFeedbackTurn()
+                await fixture.render({ ...capture, view: { ...capture.view, cameraHigh: [1, 0, 100] } })
+                const waiting = await fixture.render({ ...capture, view: { ...capture.view, cameraHigh: [2, 0, 100] } })
+                if (stop === 'dispose') fixture.graph.dispose()
+                resolveFeedbackMaps(fixture.fake)
+                if (stop === 'dispose') {
+                    expect((await waiting.settlement).residencyWorkCount).to.equal(0)
+                } else {
+                    const failure = await waiting.settlement.then(() => undefined, error => error)
+                    expect(failure?.diagnostic?.code).to.equal('GEO_WEB_MERCATOR_DEMAND_FEEDBACK_INVALID')
+                }
+            } finally { await fixture.dispose() }
+        })
+    }
+
+    for (const invalid of ['cover', 'demand']) {
+        it(`rejects invalid ${invalid} feedback before admitting resource intent`, async() => {
+
+            const observed = []
+            const fixture = await createFeedbackFixture({ invalid,
+                onReconcile: value => { observed.push(value) } })
+            try {
+                const frame = await fixture.render()
+                await nextFeedbackTurn()
+                expect(fixture.fake.readbacks.mapRequests).to.have.length(3)
+                resolveFeedbackMaps(fixture.fake)
+                const failure = await frame.settlement.then(() => undefined, error => error)
+                expect(failure?.diagnostic?.code).to.equal(invalid === 'cover'
+                    ? 'GEO_WEB_MERCATOR_COVER_FEEDBACK_INVALID'
+                    : 'GEO_WEB_MERCATOR_DEMAND_FEEDBACK_INVALID')
+                expect(observed).to.have.length(0)
+            } finally { await fixture.dispose() }
+        })
+    }
 })
+
+async function createFeedbackFixture(options = {}) {
+
+    const fake = createFakeGpu({ deferMaps: true })
+    // These bytes emulate transport output only; native browser gates validate LoD.
+    const submit = fake.device.queue.submit.bind(fake.device.queue)
+    fake.device.queue.submit = commandBuffers => {
+        for (const parity of [0, 1]) {
+            const find = name => fake.calls.buffers.find(buffer =>
+                buffer.descriptor.label?.includes(`${name} ${parity}`))
+            const meta = find('GPU WebMercatorQuad cover map metadata')
+            if (!meta) continue
+            const view = new DataView(meta.data.buffer)
+            const epoch = view.getUint32(124, true)
+            const residencyEpoch = view.getUint32(128, true)
+            const write = (name, words) => find(name).data.set(new Uint8Array(new Uint32Array(words).buffer))
+            write('GPU WebMercatorQuad cover state', [options.invalid === 'cover' ? 0 : epoch,
+                1, 1, 0, 0, 5, 5, 0, 5, 256, 256])
+            write('GPU WebMercatorQuad demand state', [options.invalid === 'demand' ? 0 : epoch, 1, 0, 10])
+            write('GPU WebMercatorQuad projected demands', [5, 10, 5, 12, 26, 1, epoch, residencyEpoch])
+        }
+        return submit(commandBuffers)
+    }
+    const runtime = await GPURuntime.create({ gpu: fake.gpu })
+    const surface = runtime.createSurface(createFakeCanvas().canvas, {
+        format: 'rgba8unorm', alphaMode: 'premultiplied', size: { width: 320, height: 180 },
+    })
+    const virtualRaster = await createTestVirtualRaster(runtime, options)
+    const graph = await createTestTerrainRenderer({ runtime, surface, virtualRaster,
+        size: { width: 320, height: 180 } })
+    await (await graph.initialize()).observation
+    const frames = []
+    return {
+        fake, graph,
+        async render(capture = terrainCapture()) {
+            const frame = await graph.render(capture)
+            void frame.settlement.catch(() => undefined)
+            frames.push(frame)
+            return frame
+        },
+        async dispose() {
+            graph.dispose()
+            for (let turn = 0; turn < 3; turn++) {
+                resolveFeedbackMaps(fake)
+                await nextFeedbackTurn()
+            }
+            await Promise.allSettled(frames.flatMap(frame => [frame.observation, frame.settlement]))
+            await virtualRaster.dispose()
+            await runtime.dispose()
+        },
+    }
+}
+
+function resolveFeedbackMaps(fake) {
+
+    for (const [index, request] of fake.readbacks.mapRequests.entries()) {
+        if (!request.settled) fake.readbacks.resolveMap(index)
+    }
+}
+
+function nextFeedbackTurn() { return new Promise(resolve => setImmediate(resolve)) }
 
 function terrainCapture() {
 

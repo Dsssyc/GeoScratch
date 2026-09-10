@@ -2997,7 +2997,7 @@ type WebMercatorTileSampleAddress = Readonly<{ compactIndex?: number; covered: b
 
 Kind: `Function`.
 
-Assembles a WebMercatorQuad Virtual Raster terrain renderer with GPU-driven selection, conservative ancestor elevation envelopes, mesh stitching, and explicit lifetime.
+Assembles a WebMercatorQuad Virtual Raster terrain renderer with GPU-driven selection, conservative ancestor elevation envelopes, mesh stitching, and explicit lifetime. Keeps current geometry certification separate from monotonic resource observations and drives feedback/publication progress through bounded asynchronous settlement.
 
 ```ts
 Function createWebMercatorTerrainRenderer
@@ -3039,7 +3039,7 @@ type WebMercatorTerrainFrame<Presentation extends string = string> = Readonly<{ 
 
 Kind: `Type Alias`.
 
-Delayed inverse-cover feedback, residency work, and convergence state for one terrain frame.
+Async cover observations and resource progress; superseded observations never certify the current view.
 
 ```ts
 type WebMercatorTerrainFrameSettlement = GeoFrameSettlement & Readonly<{ coverFeedback?: GpuWebMercatorQuadCoverFeedback; demandFeedback?: GpuWebMercatorQuadDemandProjectionFeedback; reconciliation?: VirtualRasterFeedbackReconciliation; residencySettlement: Promise<unknown>; residencyWorkCount: number; superseded: boolean }>

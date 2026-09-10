@@ -80,9 +80,14 @@ logical vertex reuse, and the equal-count renderer-owned
 triangle-list/line-list index buffers. Wireframe must draw native line topology; do not restore
 fragment-inferred grid edges, unindexed triangle-corner sampling, or an experimental fragment
 `primitive_index` extension.
-Until a camera decision has settled its delayed cover feedback, every newer same-decision
-terrain frame must retain bounded `needsFollowUp`; latest-only frame admission must not strand
-the final one-frame-lagged readback.
+Terrain consumes feedback after its own submission without waiting for a newer frame.
+Pending same-decision frames share feedback settlement; capture backpressure retains at most
+one latest-frame waiter, awakened by released feedback capacity. Do not poll readback by
+rendering extra frames or use an empty settlement to repeatedly reset the follow-up budget.
+Only current-decision feedback certifies geometry; monotonically newer complete source-demand
+observations may independently advance resources with their original provenance. Preserve
+selected resident pages and completion wakeups for retained active requests. Never reinterpret
+an older resource observation as current-view readiness or geometry authority.
 Any change to this path
 must run wide top-down symmetry, continuous pitch sweeps, shaded and wireframe 90-frame pitched
 benchmarks, zoom monotonicity, A-B-A identity, standard/source-level demand, 2:1,

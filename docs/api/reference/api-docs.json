@@ -18197,9 +18197,9 @@
             "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:381"
+            "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:383"
           ],
-          "summary": "Assembles a WebMercatorQuad Virtual Raster terrain renderer with GPU-driven selection, conservative ancestor elevation envelopes, mesh stitching, and explicit lifetime.",
+          "summary": "Assembles a WebMercatorQuad Virtual Raster terrain renderer with GPU-driven selection, conservative ancestor elevation envelopes, mesh stitching, and explicit lifetime. Keeps current geometry certification separate from monotonic resource observations and drives feedback/publication progress through bounded asynchronous settlement.",
           "declaration": "Function createWebMercatorTerrainRenderer",
           "signatures": [
             "createWebMercatorTerrainRenderer<ViewInput, Presentation extends string>(__namedParameters: WebMercatorTerrainRendererDescriptor<ViewInput, Presentation>): Promise<Readonly<{ stableIdentities: readonly string[]; stableIdentityFacts: WebMercatorTerrainIdentityFacts; stableIdentityHash: string; contractFacts: any; currentIdentityFacts: any; dispose: any; initialize: any; persistentFacts: any; render: any; setPresentation: any; state: any; virtualRasterFacts: any }>>"
@@ -23560,7 +23560,7 @@
           "locations": [
             "packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts:111"
           ],
-          "summary": "Delayed inverse-cover feedback, residency work, and convergence state for one terrain frame.",
+          "summary": "Async cover observations and resource progress; superseded observations never certify the current view.",
           "declaration": "type WebMercatorTerrainFrameSettlement = GeoFrameSettlement & Readonly<{ coverFeedback?: GpuWebMercatorQuadCoverFeedback; demandFeedback?: GpuWebMercatorQuadDemandProjectionFeedback; reconciliation?: VirtualRasterFeedbackReconciliation; residencySettlement: Promise<unknown>; residencyWorkCount: number; superseded: boolean }>"
         },
         {

@@ -70,9 +70,28 @@ presentation WGSL supplies fragment shading only.
 attachments from `presentationSize`, and returns
 `GeoFrameResult<WebMercatorTerrainFrameValue>`. Submission/native observation, cover
 feedback, demand feedback, raster settlement, and later publication remain distinct
-promises and facts. Superseded feedback cannot reconcile demand or overwrite current
-state. Until the newest camera decision settles both bounded readbacks, same-decision
-frames retain `needsFollowUp` so latest-only admission cannot strand convergence.
+promises and facts. Feedback consumption starts after its own submission; it never
+requires another rendered frame. Only feedback matching the current camera decision
+updates current geometry/selection facts. Independently, each monotonically newer
+complete source-demand observation may reconcile resources for the renderer's immutable
+source/coverage, preserving its original frame and residency provenance. This includes
+selected resident pages. An older observation never certifies current-view readiness,
+rewinds a newer resource target, or changes the geometric cut.
+
+`WebMercatorTerrainFrameSettlement.superseded` identifies obsolete geometry observation;
+such a settlement may still report resource reconciliation and work. Active retained
+requests contribute to `residencyWorkCount`, as well as newly requested work, so their
+actual settlement can wake later publication. Known geometry/source selection can settle
+while source loading remains pending; it is not an exact-resource-ready certificate.
+
+Frames await explicit settlement rather than polling readback with extra renders.
+Same-decision frames share their captured feedback settlement. If capture capacity is
+occupied, the renderer retains one latest-frame waiter and releases any replaced waiter;
+a freed feedback slot resolves it with a fresh-capture follow-up and applicable resource
+work, without attaching old geometry facts. Current feedback requests one confirmation/
+publication frame; an unchanged settled decision captures no additional feedback.
+Disposal settles the waiter, and feedback failure rejects it. The frame controller's
+latest-only admission and configured in-flight/follow-up bounds remain unchanged.
 
 The renderer owns two parity sets in each composed GPU component. Underwater Terrain
 uses a measured two-frame in-flight bound. The renderer does not own a map host,
@@ -87,4 +106,5 @@ Related decisions: ADR-074 assigns terrain WGSL ownership; ADR-083 defines inver
 cover and passive Virtual Raster; ADR-084 defines reference pixels; ADR-086 unifies the
 selector and separates geometry, source demand, and draw-count ownership; ADR-087 and
 ADR-088 define sparse parent refinement and maximum projected stretch; ADR-089 defines
-indexed terrain execution.
+indexed terrain execution. ADR-128 defines asynchronous feedback consumption and
+independent resource-observation progress.

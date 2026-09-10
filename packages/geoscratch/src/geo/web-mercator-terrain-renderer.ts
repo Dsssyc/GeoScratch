@@ -107,7 +107,7 @@ export type WebMercatorTerrainInitialization = Readonly<{
     observation: Promise<WebMercatorTerrainSubmissionObservation>
 }>
 
-/** Delayed inverse-cover feedback, residency work, and convergence state for one terrain frame. */
+/** Async cover observations and resource progress; superseded observations never certify the current view. */
 export type WebMercatorTerrainFrameSettlement = GeoFrameSettlement & Readonly<{
     coverFeedback?: GpuWebMercatorQuadCoverFeedback
     demandFeedback?: GpuWebMercatorQuadDemandProjectionFeedback
@@ -377,6 +377,8 @@ const TEXTURE_RENDER_ATTACHMENT = 0x10
 /**
  * Assembles a WebMercatorQuad Virtual Raster terrain renderer with GPU-driven
  * selection, conservative ancestor elevation envelopes, mesh stitching, and explicit lifetime.
+ * Keeps current geometry certification separate from monotonic resource observations
+ * and drives feedback/publication progress through bounded asynchronous settlement.
  */
 export async function createWebMercatorTerrainRenderer<
     ViewInput,
@@ -535,6 +537,8 @@ export async function createWebMercatorTerrainRenderer<
     let latestDecisionSerial = 0
     let latestSettledDecisionKey: string | undefined
     let latestIssuedFrameEpoch = 0
+    let latestResourceObservationFrameEpoch = 0
+    let feedbackWaiter: Deferred<WebMercatorTerrainFrameSettlement> | undefined
 
     function initialize() {
 
@@ -697,21 +701,30 @@ export async function createWebMercatorTerrainRenderer<
             pendingFeedback.push(feedbackEntry)
             feedbackByDecision.set(decisionSerial, feedbackEntry)
         }
+        // Only the newest frame may wait for capture capacity. Replacing it releases
+        // the older frame's host task without changing the owned GPU observations.
+        if (feedbackWaiter !== undefined) {
+            settleDeferred(feedbackWaiter, emptyFrameSettlement())
+            feedbackWaiter = undefined
+        }
+        let settlement = feedbackEntry?.settlement.promise
+        if (settlement === undefined && latestSettledDecisionKey !== decisionKey) {
+            feedbackWaiter = deferred<WebMercatorTerrainFrameSettlement>()
+            settlement = feedbackWaiter.promise
+        }
         latestIssuedFrameEpoch = frame!.frameEpoch
         startFeedbackPump()
 
         state.frame++
         state.virtualSnapshotEpoch = residencySnapshotEpoch
-        const decisionNeedsFeedback = latestSettledDecisionKey !== decisionKey
-        const needsFollowUp = decisionNeedsFeedback
-
         return Object.freeze({
             submitted: submitted!,
             observation,
-            settlement: feedbackEntry?.settlement.promise ??
-                Promise.resolve(emptyFrameSettlement()),
+            settlement: settlement ?? Promise.resolve(emptyFrameSettlement()),
             provenance,
-            needsFollowUp,
+            // Completion/capacity settlements drive the next frame. Rendering more
+            // frames while a readback is pending cannot make that readback ready.
+            needsFollowUp: false,
             terrainPresentation: frameTerrainPresentation,
         }) satisfies WebMercatorTerrainFrame<Presentation>
     }
@@ -720,7 +733,7 @@ export async function createWebMercatorTerrainRenderer<
 
         const ready = pendingFeedback[0]
         if (feedbackPump !== undefined || state.disposed || ready === undefined ||
-            ready.coverFrame.frameEpoch >= latestIssuedFrameEpoch) return
+            ready.coverFrame.frameEpoch > latestIssuedFrameEpoch) return
         feedbackPump = drainReadyFeedback().finally(() => {
             feedbackPump = undefined
             startFeedbackPump()
@@ -733,7 +746,7 @@ export async function createWebMercatorTerrainRenderer<
         while (!state.disposed) {
             const ready = pendingFeedback[0]
             if (ready === undefined ||
-                ready.coverFrame.frameEpoch >= latestIssuedFrameEpoch) return
+                ready.coverFrame.frameEpoch > latestIssuedFrameEpoch) return
             pendingFeedback.shift()
             try {
                 const consumed = await consumeFeedback(graph, ready)
@@ -744,7 +757,13 @@ export async function createWebMercatorTerrainRenderer<
                 }
             } catch (error) {
                 if (state.disposed) settleDeferred(ready.settlement, emptyFrameSettlement())
-                else rejectDeferred(ready.settlement, error)
+                else {
+                    rejectDeferred(ready.settlement, error)
+                    if (feedbackWaiter !== undefined) {
+                        rejectDeferred(feedbackWaiter, error)
+                        feedbackWaiter = undefined
+                    }
+                }
             } finally {
                 if (feedbackByDecision.get(ready.decisionSerial) === ready) {
                     feedbackByDecision.delete(ready.decisionSerial)
@@ -758,6 +777,28 @@ export async function createWebMercatorTerrainRenderer<
         consumed: ConsumedFeedback
     ): void {
 
+        // Projection reads geometry and immutable source coverage, not atlas slots.
+        // Its original view/residency provenance remains intact while the newest
+        // complete observation advances the independent resource target.
+        const observedDemand = consumed.demandFeedback
+        const reconciliation = observedDemand !== undefined &&
+            ready.coverFrame.frameEpoch > latestResourceObservationFrameEpoch
+            ? virtualRaster.reconcileViewDemands(coverViewDemands(
+                virtualRaster, terrainFieldLayer, observedDemand, consumed.view
+            ))
+            : undefined
+        if (reconciliation !== undefined) {
+            latestResourceObservationFrameEpoch = ready.coverFrame.frameEpoch
+            state.virtualRequestedPageCount += reconciliation.requestedCount
+        }
+        const scheduler = virtualRaster.scheduler.inspect()
+        const resourceProgress = Object.freeze({
+            ...(reconciliation === undefined ? {} : { reconciliation }),
+            residencySettlement: reconciliation?.settlement ?? Promise.resolve(undefined),
+            // Retained active requests need the same completion wakeup as new ones.
+            residencyWorkCount: reconciliation === undefined ? 0 : scheduler.activeRequestCount,
+        })
+
         if (ready.decisionSerial !== latestDecisionSerial) {
             if (consumed.coverFeedback !== undefined ||
                 consumed.demandFeedback !== undefined) {
@@ -770,11 +811,11 @@ export async function createWebMercatorTerrainRenderer<
                 ...(consumed.demandFeedback === undefined
                     ? {}
                     : { demandFeedback: consumed.demandFeedback }),
-                residencySettlement: Promise.resolve(undefined),
-                residencyWorkCount: 0,
+                ...resourceProgress,
                 needsFollowUp: false,
                 superseded: true,
             }))
+            wakeFeedbackWaiter(resourceProgress)
             return
         }
 
@@ -784,31 +825,37 @@ export async function createWebMercatorTerrainRenderer<
         else state.latestCoverFeedback = feedback
         if (demandFeedback === undefined) delete state.latestDemandFeedback
         else state.latestDemandFeedback = demandFeedback
-        const reconciliation = demandFeedback === undefined
-            ? undefined
-            : virtualRaster.reconcileViewDemands(coverViewDemands(
-                virtualRaster,
-                terrainFieldLayer,
-                demandFeedback,
-                consumed.view
-            ))
-        if (reconciliation !== undefined) {
-            state.virtualRequestedPageCount += reconciliation.requestedCount
+        // Geometry/source selection can settle while loading is still pending.
+        // Real request completion drives later publication through its own promise.
+        if (feedback !== undefined && demandFeedback !== undefined) {
+            latestSettledDecisionKey = ready.decisionKey
         }
-        const scheduler = virtualRaster.scheduler.inspect()
-        const needsFollowUp = feedback === undefined || demandFeedback === undefined ||
-            (reconciliation?.requestedCount ?? 0) > 0 ||
-            scheduler.activeRequestCount > 0 ||
-            scheduler.queuedRequestCount > 0
-        if (!needsFollowUp) latestSettledDecisionKey = ready.decisionKey
         settleDeferred(ready.settlement, Object.freeze({
             ...(feedback === undefined ? {} : { coverFeedback: feedback }),
             ...(demandFeedback === undefined ? {} : { demandFeedback }),
-            ...(reconciliation === undefined ? {} : { reconciliation }),
-            residencySettlement: reconciliation?.settlement ?? Promise.resolve(undefined),
-            residencyWorkCount: reconciliation?.requestedCount ?? 0,
-            needsFollowUp,
+            ...resourceProgress,
+            // One confirmation/publication frame sees the new observed state. If
+            // the decision is unchanged it captures no further feedback.
+            needsFollowUp: true,
             superseded: false,
+        }))
+        wakeFeedbackWaiter(resourceProgress)
+    }
+
+    function wakeFeedbackWaiter(
+        progress: Pick<WebMercatorTerrainFrameSettlement,
+            'residencySettlement' | 'residencyWorkCount' | 'reconciliation'>
+    ): void {
+
+        if (feedbackWaiter === undefined) return
+        const waiter = feedbackWaiter
+        feedbackWaiter = undefined
+        // This signals available capture capacity and actual resource work only;
+        // it supplies no old geometry/readiness certificate to the newest frame.
+        settleDeferred(waiter, Object.freeze({
+            ...progress,
+            needsFollowUp: latestSettledDecisionKey !== latestDecisionKey,
+            superseded: true,
         }))
     }
 
@@ -856,6 +903,10 @@ export async function createWebMercatorTerrainRenderer<
 
         if (state.disposed) return
         state.disposed = true
+        if (feedbackWaiter !== undefined) {
+            settleDeferred(feedbackWaiter, emptyFrameSettlement())
+            feedbackWaiter = undefined
+        }
         for (const entry of feedbackByDecision.values()) {
             settleDeferred(entry.settlement, emptyFrameSettlement())
         }
