@@ -529,7 +529,7 @@ async function verifySubmissionTransactions(browser) {
                 name: error?.name ?? 'unknown',
                 message: error?.message ?? String(error),
                 diagnostic: error?.diagnostic,
-                incident: error?.incident,
+                incident: error?.context?.domain === 'gpu' ? error.context.incident : undefined,
             }
         }
 

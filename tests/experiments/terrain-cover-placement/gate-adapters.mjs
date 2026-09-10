@@ -59,13 +59,14 @@ async function prepareLifecycleGate(root, outputDirectory) {
     const launchStart = source.indexOf('await mkdir(outputDirectory')
     const functionsStart = source.indexOf('async function verifyUnderwaterTerrain(activeBrowser)')
     if ([portsStart, expectationsStart, launchStart, functionsStart].some(index => index < 0)) throw new Error('Lifecycle gate boundaries changed')
-    source = source.slice(0, portsStart) + 'let baseUrl, tileBaseUrl, port, tilePort\n' +
+    source = source.slice(0, portsStart) + 'let baseUrl, tileBaseUrl, port, tilePort, expectedCoordinateBits\n' +
         source.slice(expectationsStart, launchStart) + `
 export async function runGate(activeBrowser, options) {
     baseUrl = options.baseUrl
     tileBaseUrl = options.tileBaseUrl
     port = Number(new URL(baseUrl).port)
     tilePort = Number(new URL(tileBaseUrl).port)
+    expectedCoordinateBits = options.coordinateBits
     outputDirectory = options.outputDirectory
     await mkdir(outputDirectory, { recursive: true })
     const verified = await verifyUnderwaterTerrain(activeBrowser)
@@ -77,6 +78,8 @@ export async function runGate(activeBrowser, options) {
         failureProofs: failuresOfConstruction.map(summarizeFailureProof) }
 }
 \n` + source.slice(functionsStart)
+    source = substitute(source, 'virtualRaster?.coordinateBits !== 40',
+        'virtualRaster?.coordinateBits !== expectedCoordinateBits')
     const file = `${outputDirectory}/terrain-lifecycle-adapter.mjs`
     await writeFile(file, source)
     return (await import(pathToFileURL(file).href)).runGate
