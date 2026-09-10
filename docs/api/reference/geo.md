@@ -2,7 +2,7 @@
 
 # geoscratch/geo API Reference
 
-Public symbols: 302.
+Public symbols: 315.
 
 ## `packages/geoscratch/src/geo/coordinate-domain.ts`
 
@@ -2820,6 +2820,158 @@ Kind: `Type Alias`.
 
 ```ts
 type VirtualRasterTileAddressSpaceDescriptor = Readonly<{ coverage: TileMatrixCoverage; id: string }>
+```
+
+## `packages/geoscratch/src/geo/web-mercator-quad-cover.ts`
+
+### `WebMercatorQuadCover`
+
+Kind: `Class`.
+
+Computes stateless, certified standard-tile cuts on the CPU and owns only bounded CPU workspace.
+
+```ts
+class WebMercatorQuadCover
+```
+
+Members:
+
+- `constructor`: `Constructor constructor`
+  - `constructor(input: WebMercatorQuadCoverDescriptor): WebMercatorQuadCover`
+- `descriptor`: `Accessor descriptor`
+  - `descriptor(): WebMercatorQuadCoverDescriptor`
+- `dispose`: `Method dispose`
+  - `dispose(): void`
+- `facts`: `Method facts`
+  - `facts(): WebMercatorQuadCoverFacts`
+- `id`: `Accessor id`
+  - `id(): string`
+- `isDisposed`: `Accessor isDisposed`
+  - `isDisposed(): boolean`
+- `select`: `Method select`
+  - `select(input: GeoViewSnapshot): WebMercatorQuadCoverSelection`
+
+### `WebMercatorQuadCoverDescriptor`
+
+Kind: `Type Alias`.
+
+```ts
+type WebMercatorQuadCoverDescriptor = Readonly<{ maximumCandidates?: number; policy: WebMercatorQuadCoverPolicy; spatialProfile: WebMercatorPlanarTileSpatialProfile; verticalBounds?: readonly WebMercatorTileVerticalBounds[]; verticalRangeMeters: readonly [number, number] }>
+```
+
+### `WebMercatorQuadCoverFacts`
+
+Kind: `Type Alias`.
+
+```ts
+type WebMercatorQuadCoverFacts = Readonly<{ candidateCapacity: number; coordinateBits: number; coverageLimitCount: number; disposed: boolean; id: string; lookupCapacity: number; policy: WebMercatorQuadCoverPolicy; selectionPath: "cpu-camera-inverse-webmercatorquad-cover"; verticalBoundCount: number; verticalBoundsMode: "global" | "hierarchy"; workspaceBytes: number }>
+```
+
+### `WebMercatorQuadCoverPatch`
+
+Kind: `Type Alias`.
+
+```ts
+type WebMercatorQuadCoverPatch = Readonly<{ matrixLevel: number; tileCol: number; tileRow: number }>
+```
+
+### `webMercatorQuadCoverPolicy`
+
+Kind: `Function`.
+
+Validates and snapshots reference-pixel geometry quality and hard output capacity.
+
+```ts
+Function webMercatorQuadCoverPolicy
+```
+
+```ts
+webMercatorQuadCoverPolicy(input: WebMercatorQuadCoverPolicy): WebMercatorQuadCoverPolicy
+```
+
+### `WebMercatorQuadCoverPolicy`
+
+Kind: `Type Alias`.
+
+```ts
+type WebMercatorQuadCoverPolicy = Readonly<{ cellsPerPatchEdge: number; maximumCellSpanReferencePixels: number; maximumMatrixLevel: number; maximumPatches: number; minimumMatrixLevel: number; refinementTolerance: number }>
+```
+
+### `WebMercatorQuadCoverSelection`
+
+Kind: `Type Alias`.
+
+Complete immutable CPU geometry, independent of raster availability and later selections.
+
+```ts
+type WebMercatorQuadCoverSelection = Readonly<{ coverId: string; facts: WebMercatorQuadCoverSelectionFacts; id: string; kind: "web-mercator-quad-cover-selection"; patches: readonly WebMercatorQuadCoverPatch[]; revision: number; view: GeoViewSnapshot }>
+```
+
+### `WebMercatorQuadCoverSelectionFacts`
+
+Kind: `Type Alias`.
+
+```ts
+type WebMercatorQuadCoverSelectionFacts = Readonly<{ candidateCount: number; coverId: string; descriptorOverflowCount: number; finestMatrixLevel: number; frameEpoch: number; lookupOverflowCount: number; maximumAdjacentLevelDelta: number; maximumCellSpanReferencePixels?: number; maximumMatrixLevel?: number; minimumCellSpanReferencePixels?: number; minimumMatrixLevel?: number; patchCount: number; selectionId: string; selectionRevision: number }>
+```
+
+## `packages/geoscratch/src/geo/web-mercator-quad-demand.ts`
+
+### `WebMercatorQuadDemandProjection`
+
+Kind: `Class`.
+
+Projects complete CPU geometry into source intent; owns no loading, residency or GPU work.
+
+```ts
+class WebMercatorQuadDemandProjection
+```
+
+Members:
+
+- `constructor`: `Constructor constructor`
+  - `constructor(input: WebMercatorQuadDemandProjectionDescriptor): WebMercatorQuadDemandProjection`
+- `dispose`: `Method dispose`
+  - `dispose(): void`
+- `facts`: `Method facts`
+  - `facts(): WebMercatorQuadDemandProjectionFacts`
+- `id`: `Accessor id`
+  - `id(): string`
+- `isDisposed`: `Accessor isDisposed`
+  - `isDisposed(): boolean`
+- `project`: `Method project`
+  - `project(selection: WebMercatorQuadCoverSelection): WebMercatorQuadProjectedDemands`
+
+### `WebMercatorQuadDemandProjectionDescriptor`
+
+Kind: `Type Alias`.
+
+```ts
+type WebMercatorQuadDemandProjectionDescriptor = Readonly<{ cover: WebMercatorQuadCover; maximumDemands: number; sourceCoverage: TileMatrixCoverage }>
+```
+
+### `WebMercatorQuadDemandProjectionFacts`
+
+Kind: `Type Alias`.
+
+```ts
+type WebMercatorQuadDemandProjectionFacts = Readonly<{ coverId: string; disposed: boolean; id: string; maximumDemands: number; minimumSourceMatrixLevel: number; sourceLimitCount: number; sourceMaximumMatrixLevel: number }>
+```
+
+### `WebMercatorQuadProjectedDemand`
+
+Kind: `Type Alias`.
+
+```ts
+type WebMercatorQuadProjectedDemand = Readonly<{ decisionFrameEpoch: number; desiredSampleLevel: number; priority: number; requestMatrixLevel: number; residencySnapshotEpoch: number; sourceLevelCeiling: number; tileCol: number; tileRow: number }>
+```
+
+### `WebMercatorQuadProjectedDemands`
+
+Kind: `Type Alias`.
+
+```ts
+type WebMercatorQuadProjectedDemands = Readonly<{ coverId: string; demandCount: number; demands: readonly WebMercatorQuadProjectedDemand[]; frameEpoch: number; kind: "web-mercator-quad-projected-demands"; overflowCount: number; projectionId: string; selectionId: string; selectionRevision: number; sourceLevelCeiling: number; view: GeoViewSnapshot }>
 ```
 
 ## `packages/geoscratch/src/geo/web-mercator-quad.ts`

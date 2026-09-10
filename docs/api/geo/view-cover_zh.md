@@ -2,11 +2,58 @@
 docId: geo.view-cover.zh
 canonical: false
 translationOf: ./view-cover.md
-canonicalDigest: 040d44932898067fef9def7e1cefe96468f4b6167de18902429e88bceeee0dbc
+canonicalDigest: f964db17030afb964554a330048cdda222dc4d5d545db6348dccab6cc890d89a
 ---
 # WebMercatorQuad 视图覆盖
 
 [English](./view-cover.md) | [Geo 概览](./README_zh.md)
+
+## CPU 几何与源需求
+
+`new WebMercatorQuadCover(descriptor)` 拥有有界 CPU 工作空间、不可变 WebMercator
+平面 profile、`WebMercatorQuadCoverPolicy` 和保守垂向界。
+`webMercatorQuadCoverPolicy()` 无需 GPU runtime 即可验证并快照策略。
+`select(view)` 同步返回完整、不可变的 `WebMercatorQuadCoverSelection`，包括标准
+`patches`、经过验证的精确视图快照、selector 身份、单调 selection revision 和几何
+`facts`。它不上传、不回读、不请求资源，也不查询驻留状态。
+
+CPU selector 保留下述候选包围、独立父瓦片决定、确定顺序、prefix-free、2:1 闭包
+和质量合同。它基于与地形顶点 ABI 相同的 f32 相机／误差输入及补偿的 40／52 位
+整数地址差，使用 JS f64 运算。有限 GPU／CPU 一致性测试不承诺所有浮点阈值处
+逐位相同。候选域准备和垂向层级验证复用冻结的纯函数；二者都不依赖历史拓扑或驻留。
+
+输入通过 `createGeoViewSnapshot` 验证并复制。每个成功产物从可复用工作空间复制
+私有的 metadata、patch 和 lookup 数组；公开 patches 与 facts 深度不可变。
+后续视角不能改写此前产物，调用方负责其持有产物的内存。
+`dispose()` 释放工作空间并禁止继续 `select()`；已经返回的快照仍可读取和消费。
+`facts().workspaceBytes` 只统计持久 typed-array 工作空间（lookup、patch、闭包标记
+与数值状态），不包括临时投影对象和调用方保留的不可变产物。
+
+输入／descriptor 失败沿用下述几何诊断 code。CPU 构造失败抛出
+`GEO_WEB_MERCATOR_COVER_SELECTION_INVALID`，`actual.reason` 可为
+`descriptor-overflow`、`lookup-overflow`、`adjacency` 或 `unbounded-quality`；
+绝不返回半成品几何。相同 code 还拒绝 disposed selector（`disposed`）和伪造／外部
+产物（`foreign-selection`）。工作空间分配失败使用
+`GEO_WEB_MERCATOR_COVER_WORKSPACE_ALLOCATION_FAILED` 并保留原始 cause。
+合法空 cut 省略层级／span 范围；到达显式最高级后，超过目标的有限误差仍如实报告。
+
+`new WebMercatorQuadDemandProjection({ cover, sourceCoverage, maximumDemands })`
+借用 cover 的不可变合同并快照已验证的源 limits。源层级必须连续，最粗级不细于
+最粗几何级，且适配地址精度；容量是正整数且不超过 cover patch 容量。
+`project(selection)` 只接受该 cover 的真实产物，返回不可变
+`WebMercatorQuadProjectedDemands`，保留 selection 身份／revision 和原始
+view／frame／residency provenance。它确定性去重源身份，分别保留 desired level、
+source ceiling、request level 和环绕相机距离优先级。容量不足以
+`GEO_WEB_MERCATOR_DEMAND_PROJECTION_INVALID`、reason `demand-capacity` 失败，
+不暴露部分需求。projector 不拥有 scheduler、Worker、payload 或 GPU 状态。
+selector 释放后，仍可投影此前的真实产物；projector 自身释放后禁止继续投影。
+下游 `ViewDemandProducer` 和 Virtual Raster 继续拥有既有预算选择及资源生命周期。
+
+ADR-129 记录 CPU 生产迁移。CPU 产物现已可独立使用，地形集成属于后续独立验证阶段。
+以下 GPU API 冻结于 `ebb3336`，作为一致性参考，并继续供显式 GPU 消费者使用；
+当前地形 renderer 在其迁移阶段完成前仍使用该 GPU 路径。
+
+## 冻结的 GPU 参考
 
 `GpuWebMercatorQuadCover` 是平面 `WebMercatorQuad` patch 渲染的 geometry LoD
 权威。它消费一个不可变 `GeoViewSnapshot`，输出有限标准瓦片 cut、完整身份邻接

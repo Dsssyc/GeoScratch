@@ -2,7 +2,7 @@
 docId: api.zh
 canonical: false
 translationOf: ./README.md
-canonicalDigest: 49d92201959facc7e269e63a5fd2247b607219734c0a307c91b2357237277d99
+canonicalDigest: d40233ec07e56f20d594e26abaabb047d3bff8840306955c620b598941850191
 ---
 # GeoScratch API
 
@@ -17,7 +17,7 @@ canonicalDigest: 49d92201959facc7e269e63a5fd2247b607219734c0a307c91b2357237277d9
 - [Scratch](./scratch/README_zh.md) 是领域无关基础层，提供诊断、生命周期、缓存、
   几何、Worker 执行以及显式 WebGPU 资源与工作模型。
 - [Geo](./geo/README_zh.md) 在 Scratch 之上适配坐标、视图、瓦片、场、Virtual Raster、
-  GPU 驱动的视图覆盖与地形语义。Geo 可以依赖 Scratch；Scratch 永不依赖 Geo。
+  CPU／GPU 视图覆盖与地形语义。Geo 可以依赖 Scratch；Scratch 永不依赖 Geo。
 
 自动生成的参考完整列举真实入口导出：[Scratch reference](./reference/scratch.md)、
 [Geo reference](./reference/geo.md) 与[机器可读事实](./reference/api-docs.json)。

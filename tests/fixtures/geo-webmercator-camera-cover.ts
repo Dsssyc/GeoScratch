@@ -1,9 +1,9 @@
 import { gpuWebMercatorQuadCoverMapMetaCodec } from '../../packages/geoscratch/src/geo/gpu-web-mercator-quad-cover-layout.js'
-import { GPURuntime, type BufferResource } from 'geoscratch/scratch'
+import { GPURuntime, type BufferResource, type SubmissionBuilder, type SubmittedWork } from 'geoscratch/scratch'
 import {
     GeoDiagnosticError, GpuWebMercatorQuadCover, WebMercatorQuad, createGeoViewSnapshot, createGeoViewSource,
     gpuWebMercatorQuadCoverPolicy, tileMatrixCoverage, webMercatorPlanarTileSpatialProfile,
-    webMercatorQuadAddressCodec, type GeoViewSnapshot,
+    webMercatorQuadAddressCodec, type GeoViewSnapshot, type GpuWebMercatorQuadCoverFrame,
 } from 'geoscratch/geo'
 
 const WORLD = 40_075_016.6855784
@@ -23,7 +23,16 @@ type Scenario = { name: string, zoom: number, pitch: number, x?: number, y?: num
 const world: Domain = { minLevel: 0, maxLevel: MAX_LEVEL, row: 0, col: 0,
     width: 1, height: 1, maximumPatches: 2048, elevation: 0 }
 
-export async function runCameraCoverProof() {
+export type CameraCoverComparison = {
+    initialize(builder: SubmissionBuilder): void
+    encode(builder: SubmissionBuilder, frame: GpuWebMercatorQuadCoverFrame): void
+    check(view: GeoViewSnapshot, words: Uint32Array, submitted: SubmittedWork): Promise<void>
+    dispose(): void
+}
+
+export async function runCameraCoverProof(
+    createComparison?: (runtime: GPURuntime, cover: GpuWebMercatorQuadCover) => Promise<CameraCoverComparison>
+) {
 
     const runtime = await GPURuntime.create({ label: 'Independent native camera cover proof' })
     const uncaptured: string[] = []
@@ -152,6 +161,7 @@ export async function runCameraCoverProof() {
                 maximumVerticalMeters: domain.elevation,
             })) } : {}),
         })
+        const comparison = await createComparison?.(runtime, cover)
         const candidateOverrides = domain.fullCandidates ? cover.templates().map(template => {
             const fields = gpuWebMercatorQuadCoverMapMetaCodec.artifact.fields
             const offset = (name: string) => fields.find(field => field.name === name)!.offset
@@ -175,6 +185,7 @@ export async function runCameraCoverProof() {
             runtime, template.state, template.patches, domain.maximumPatches)))
         const initialization = runtime.submission()
         cover.initialize(initialization)
+        comparison?.initialize(initialization)
         for (const observer of observers) initialization.clear(observer.clear)
         const initialized = initialization.submit()
         await initialized.done
@@ -206,6 +217,7 @@ export async function runCameraCoverProof() {
                         const commands = cover.commandsFor(frame)
                         builder.compute(cover.identityObjects().passes[0]!, [commands.evaluate, commands.generate])
                     }
+                    comparison?.encode(builder, frame)
                     builder.compute(observer.pass, [observer.command]).readback(observer.readback)
                     cover.capture(builder, frame)
                     const submitted = builder.submit()
@@ -224,6 +236,7 @@ export async function runCameraCoverProof() {
                     const native = await submitted.nativeOutcome
                     assert(native.status === 'observed-succeeded', `${scenario.name}: native failure`, native)
                     assert(words[0] === view.frameEpoch, `${scenario.name}: stale frame epoch`)
+                    await comparison?.check(view, words, submitted)
                     const failed = words[3]! > 0 || words[4]! > 0 || words[7]! > 1 || words[10] === 0xffff_ffff
                     if (scenario.expect === 'overflow' || scenario.expect === 'unbounded' || (scenario.expect === 'bounded' && failed)) {
                         if (scenario.expect === 'unbounded') assert(words[10] === 0xffff_ffff, 'Missing quality failure marker')
@@ -271,7 +284,7 @@ export async function runCameraCoverProof() {
                     document.documentElement.dataset.cameraCoverStage = 'validated'
                 } finally { token.dispose() }
             }
-        } finally { for (const upload of candidateOverrides) upload.dispose(); cover.dispose() }
+        } finally { comparison?.dispose(); for (const upload of candidateOverrides) upload.dispose(); cover.dispose() }
     }
 }
 

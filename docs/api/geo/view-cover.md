@@ -2,6 +2,8 @@
 docId: geo.view-cover
 canonical: true
 apiSources:
+  - packages/geoscratch/src/geo/web-mercator-quad-cover.ts
+  - packages/geoscratch/src/geo/web-mercator-quad-demand.ts
   - packages/geoscratch/src/geo/gpu-web-mercator-quad-cover-layout.ts
   - packages/geoscratch/src/geo/gpu-web-mercator-quad-cover.ts
   - packages/geoscratch/src/geo/gpu-web-mercator-quad-demand.ts
@@ -10,6 +12,66 @@ apiSources:
 # WebMercatorQuad View Cover
 
 [简体中文](./view-cover_zh.md) | [Geo overview](./README.md)
+
+## CPU geometry and source intent
+
+`new WebMercatorQuadCover(descriptor)` owns bounded CPU workspace, an immutable
+WebMercator planar profile, `WebMercatorQuadCoverPolicy` and conservative vertical
+bounds. `webMercatorQuadCoverPolicy()` validates and snapshots policy without a GPU
+runtime. `select(view)` returns one complete immutable
+`WebMercatorQuadCoverSelection`: standard `patches`, an exact validated view snapshot,
+selector identity, monotonic selection revision and geometry `facts`. It performs
+no upload, readback, resource request or residency query.
+
+The CPU selector preserves the candidate enclosure, independent parent decisions,
+deterministic order, prefix freedom, 2:1 closure and quality contract below. It uses
+JS f64 arithmetic over the same f32 camera/metric inputs and compensated 40/52-bit
+integer address subtraction as the terrain vertex ABI. Finite GPU/CPU consistency
+tests do not claim bit-identical decisions at every floating-point threshold.
+Candidate preparation and vertical-hierarchy validation reuse the frozen pure
+helpers; neither depends on prior topology or resource availability.
+
+The input is copied/validated through `createGeoViewSnapshot`. Each successful
+selection copies its private packed metadata, patch and lookup arrays out of the
+reusable workspace. Public patches and facts are deeply immutable. Later views
+cannot mutate earlier selections; retaining those products is the caller's memory
+responsibility. `dispose()` releases workspace and prohibits further `select()`;
+existing snapshots remain readable and usable by independent consumers.
+`facts().workspaceBytes` counts the persistent typed-array workspace (lookup,
+patches, closure marks and numeric state), excluding transient projection objects
+and caller-retained immutable selections.
+
+Input/descriptor failures retain the geometry diagnostic codes below. A failed
+CPU result throws `GEO_WEB_MERCATOR_COVER_SELECTION_INVALID` with
+`actual.reason` such as `descriptor-overflow`, `lookup-overflow`, `adjacency` or
+`unbounded-quality`; it never returns partial geometry. The same code rejects
+disposed selector use (`disposed`) and forged/foreign products (`foreign-selection`).
+Workspace allocation failure is `GEO_WEB_MERCATOR_COVER_WORKSPACE_ALLOCATION_FAILED`
+with its original cause. A valid empty cut omits level/span ranges. At the explicit
+maximum level, finite error above the requested quality remains reported.
+
+`new WebMercatorQuadDemandProjection({ cover, sourceCoverage, maximumDemands })`
+borrows the cover's immutable contract and snapshots validated source limits. Source
+levels must be contiguous, start no finer than the minimum geometry level, and fit
+the coordinate precision. Capacity is a positive integer no greater than the cover
+patch capacity. `project(selection)` accepts only genuine products of that cover
+and returns immutable `WebMercatorQuadProjectedDemands`, preserving selection
+identity/revision and the original view/frame/residency provenance. It deterministically
+deduplicates source identities while keeping desired level, source ceiling, request
+level and wrapped camera-distance priority separate. Capacity exhaustion throws
+`GEO_WEB_MERCATOR_DEMAND_PROJECTION_INVALID` with reason `demand-capacity`, without
+exposing a partial set. The projector owns no scheduler, Worker, payload or GPU state.
+It remains usable with retained products after selector disposal; its own disposal
+prohibits further projection. `ViewDemandProducer` and Virtual Raster still own
+their existing downstream budget selection and resource lifecycle.
+
+ADR-129 records the CPU production migration. The CPU products are independently
+usable now; terrain integration is a separate verified slice. The following GPU
+APIs are frozen at `ebb3336` as the consistency reference and remain available for
+explicit GPU consumers. The current terrain renderer still uses that reference
+until its migration slice lands.
+
+## Frozen GPU reference
 
 `GpuWebMercatorQuadCover` is Geo's geometry-LoD authority for planar
 `WebMercatorQuad` patch rendering. It consumes one immutable `GeoViewSnapshot` and

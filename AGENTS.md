@@ -93,6 +93,15 @@ must run wide top-down symmetry, continuous pitch sweeps, shaded and wireframe 9
 benchmarks, zoom monotonicity, A-B-A identity, standard/source-level demand, 2:1,
 overflow, construction, and native-observation gates.
 
+The CPU production migration is governed by ADR-129. GPU cover, demand, patch-draw,
+layout/helper and terrain shader files listed in
+`tests/fixtures/camera-cover-gpu-reference.json` are frozen consistency references;
+do not update their hashes to hide a behavioral change. CPU geometry and source-intent
+products have independent immutable ownership and must not reuse GPU feedback tags.
+Until the renderer migration slice lands, the terrain execution rule above remains
+current. Every new public CPU slice requires paired API documentation and native
+consistency checks against the frozen reference.
+
 ## Build, Test, and Development Commands
 
 - `npm install`: install dependencies from `package-lock.json`.

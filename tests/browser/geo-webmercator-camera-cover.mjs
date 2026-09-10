@@ -8,13 +8,14 @@ import { chromium } from 'playwright'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const sourceRoot = resolve(process.env.GEO_CAMERA_COVER_SOURCE_ROOT ?? root)
+const compareCpu = process.env.GEO_CAMERA_COVER_COMPARE_CPU === '1'
 const temporary = await mkdtemp(join(tmpdir(), 'geoscratch-camera-cover-browser-'))
 const bundle = join(temporary, 'proof.js')
 const failures = [], proofs = [], events = []
 let browser, server, browserVersion, proofTimeout
 try {
     await build({
-        entryPoints: [resolve(root, 'tests/fixtures/geo-webmercator-camera-cover.ts')],
+        entryPoints: [resolve(root, compareCpu ? 'tests/fixtures/geo-cpu-webmercator-cover.ts' : 'tests/fixtures/geo-webmercator-camera-cover.ts')],
         outfile: bundle, bundle: true, format: 'esm', platform: 'browser',
         alias: { 'geoscratch/scratch': resolve(sourceRoot, 'packages/geoscratch/src/scratch.ts'),
             'geoscratch/geo': resolve(sourceRoot, 'packages/geoscratch/src/geo/index.ts') },
@@ -75,5 +76,5 @@ finally {
 const cleanup = { browserClosed: browser === undefined || !browser.isConnected(), serverClosed: server === undefined || !server.listening }
 if (!cleanup.browserClosed || !cleanup.serverClosed) failures.push('Owned browser or HTTP server remains live')
 process.stdout.write(`${JSON.stringify({ schemaVersion: 1, status: failures.length ? 'failed' : 'passed', browserVersion,
-    headless: true, sourceRoot, proofs, cleanup, failures }, null, 2)}\n`)
+    headless: true, sourceRoot, compareCpu, proofs, cleanup, failures }, null, 2)}\n`)
 if (failures.length) process.exitCode = 1
