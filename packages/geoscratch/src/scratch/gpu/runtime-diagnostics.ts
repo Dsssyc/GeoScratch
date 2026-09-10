@@ -1350,7 +1350,11 @@ export class GPURuntimeDiagnosticsController {
         if (previous === undefined) return
         const next = resourceFact(resource, previous)
         this.#resourceFacts.set(resource.id, next)
-        this.#recalculatePressure()
+        if (isContentRuntimeResourceFact(next) &&
+            (!isContentRuntimeResourceFact(previous) ||
+                next.logicalFootprintBytes !== previous.logicalFootprintBytes)) {
+            this.#recalculatePressure()
+        }
     }
 
     unregisterResource(resource: Resource): void {
@@ -2580,11 +2584,16 @@ function resourceFact(
     previous?: GPURuntimeResourceFact
 ): GPURuntimeResourceFact {
 
-    const descriptor = createGpuDescriptorEvidence(resourceDescriptorSummary(resource))
+    // Allocation descriptors are immutable until allocationVersion advances.
+    // Content epochs/state and allocation-operation provenance remain fresh.
+    const sameAllocation = previous?.allocationVersion === resource.allocationVersion
+    const descriptorHash = sameAllocation
+        ? previous.descriptorHash
+        : createGpuDescriptorEvidence(resourceDescriptorSummary(resource)).hash
     const common = {
         id: resource.id,
         ...(resource.label !== undefined ? { label: boundedLabel(resource.label) } : {}),
-        descriptorHash: descriptor.hash,
+        descriptorHash,
         allocationVersion: resource.allocationVersion,
         ...(previous?.lastAllocationOperationId !== undefined
             ? { lastAllocationOperationId: previous.lastAllocationOperationId }
@@ -2598,7 +2607,9 @@ function resourceFact(
         if (resource.resourceKind !== 'BufferResource' && resource.resourceKind !== 'TextureResource') {
             throw new TypeError('Only BufferResource and TextureResource may carry scalar content facts.')
         }
-        const footprint = logicalResourceFootprint(resource)
+        const footprint = sameAllocation && isContentRuntimeResourceFact(previous)
+            ? { bytes: previous.logicalFootprintBytes, known: previous.logicalFootprintKnown }
+            : logicalResourceFootprint(resource)
         return Object.freeze({
             ...common,
             resourceKind: resource.resourceKind,

@@ -68,3 +68,39 @@ settlement. Typecheck, the full test suite (1,734 passing, two opt-in pending), 
 validation and production build pass. No production source or public API changed
 in this checkpoint. Reverting its commit removes only experiment instrumentation
 and this audit.
+
+## Diagnostic work reduction
+
+The implementation now validates planned native stages/locations directly, retaining
+cycle and duplicate rejection before observation reservation. Actual public outcomes
+still validate, copy and deeply freeze their evidence. Resource diagnostic updates
+reuse descriptor hashes and logical footprints only within the same allocation
+version; content state/epochs, query slots and allocation-operation IDs remain fresh.
+Pressure is recomputed when footprints change and at registration/disposal. There is
+no new public symbol, readiness cache, validation switch or submission contract.
+
+The paired instrumented run reduces observation input validation from about 0.12 ms
+to 0.04–0.05 ms per moving frame, and resource fact work from 0.08–0.10 ms to
+0.03–0.04 ms. These are overlapping/instrumented attribution scopes, not claimed
+end-to-end savings. Two uninstrumented 52-bit rounds on each side do **not** yet
+establish an overall speedup: GPU construction p50 ranges from 1.4–1.6 ms shaded /
+1.5–2.1 ms wireframe before, and 1.6 / 1.8 ms after. CPU construction ranges from
+1.6 / 1.4–1.5 ms before to 1.8–2.0 / 1.6–1.8 ms after. Retain this variability
+rather than selecting only the favorable attribution run. Evidence directories are
+`before-52-*`, `after-52-*` and `optimized-timing/` under the audit directory.
+
+Five new regressions cover immutable old snapshots, current epochs, pending and
+committed replacement provenance/footprints, native-plan identity and malformed,
+duplicate/cyclic plan rejection without native work. The full suite passes with
+1,739 tests and two opt-in pending; typecheck, build and all documentation commands
+pass. Generated public facts and translation digests remain unchanged.
+
+Native 52-bit rendering, streaming and lifecycle gates, DPR 1/2 camera-cover checks
+(including overflow/quality revocation), and the real native-submission/readback
+failure probes pass with owned-process cleanup. Two pre-existing proof assumptions
+were corrected independently: the lifecycle experiment now asserts the requested
+coordinate precision instead of hardcoded 40 bits, and the native probes use the
+current GPU `ScratchDiagnosticError.context.incident` contract instead of the removed
+top-level `incident`. The incident identity/attribution/failure-stage assertions are
+unchanged. The production geometry selector, shaders and Worker/resource contracts
+are unchanged.

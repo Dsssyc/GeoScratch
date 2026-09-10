@@ -1,4 +1,6 @@
 import {
+    assertReadbackNativeStage,
+    assertSubmissionNativeIssue,
     createReadbackNativeOutcome,
     createSubmissionNativeOutcome,
     serializeNativeGpuError,
@@ -786,16 +788,7 @@ function assertObservationInput(input: BeginSubmissionNativeObservationInput): v
 
     const keys = new Set<string>()
     for (const issue of input.plan) {
-        createSubmissionNativeOutcome(input.submissionId, {
-            mode: 'detailed',
-            status: 'observed-failed',
-            locations: [ issue.location ],
-            outcomes: [ {
-                stage: issue.stage,
-                location: issue.location,
-                nativeErrorCategory: 'scope-failure',
-            } ],
-        })
+        assertSubmissionNativeIssue(input.submissionId, issue.stage, issue.location)
         const key = issueKey(issue)
         if (keys.has(key)) {
             throw new TypeError('Submission native observation plan contains a duplicate issue.')
@@ -819,15 +812,7 @@ function assertReadbackObservationInput(input: BeginReadbackNativeObservationInp
     }
     const stages = new Set<GPUReadbackNativeStage>()
     for (const stage of input.plan) {
-        createReadbackNativeOutcome(input.target.readbackId, {
-            mode: 'detailed',
-            status: 'observed-failed',
-            locations: [],
-            outcomes: [ {
-                stage,
-                nativeErrorCategory: 'scope-failure',
-            } ],
-        })
+        assertReadbackNativeStage(stage)
         if (stages.has(stage)) {
             throw new TypeError('Readback native observation plan contains a duplicate stage.')
         }
