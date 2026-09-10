@@ -6,6 +6,10 @@ Accepted. Extends ADR-088's maximum-singular-stretch metric from endpoint sample
 to a conservative spatial bound. Preserves ADR-087's independent parent decisions
 and ADR-125's execution/resource boundaries.
 
+ADR-130 corrects the additional unclipped half-cell depth guard for the production
+CPU selector. This ADR records the historical GPU guard, which remains frozen;
+the visible-domain Jacobian/denominator proof below is retained.
+
 ## Date
 
 2026-09-09

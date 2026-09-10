@@ -1,11 +1,13 @@
+import nearPlaneView from './terrain-near-plane-view.json'
 import {
-    GeoDiagnosticError, GpuWebMercatorQuadDemandProjection,
+    GeoDiagnosticError, GpuWebMercatorQuadCover, GpuWebMercatorQuadDemandProjection,
+    WebMercatorQuad, createGeoViewSnapshot, tileMatrixCoverage, webMercatorPlanarTileSpatialProfile, webMercatorQuadAddressCodec,
     WebMercatorQuadCover, WebMercatorQuadDemandProjection, WebMercatorQuadCoverUpload,
     type GpuWebMercatorQuadDemandProjectionFrame,
     type WebMercatorQuadCoverSelection, type WebMercatorQuadCoverUploadFrame,
 } from 'geoscratch/geo'
 import { runCameraCoverProof as runReferenceProof } from './geo-webmercator-camera-cover.js'
-import type { BufferResource, GPURuntime, SubmissionBuilder, SubmittedWork } from 'geoscratch/scratch'
+import { GPURuntime, type BufferResource, type SubmissionBuilder, type SubmittedWork } from 'geoscratch/scratch'
 
 export async function runCameraCoverProof() {
     let matched = 0, failuresMatched = 0, uploadsMatched = 0
@@ -106,7 +108,8 @@ export async function runCameraCoverProof() {
             },
         }
     })
-    return { ...result, cpuConsistency: { matched, failuresMatched, uploadsMatched } }
+    const nearPlaneCorrections = await verifyNearPlaneCorrection()
+    return { ...result, nearPlaneCorrections, cpuConsistency: { matched, failuresMatched, uploadsMatched } }
 }
 
 async function mirror(runtime: GPURuntime, source: BufferResource, uniform: boolean) {
@@ -142,4 +145,50 @@ struct RawWords { words: array<vec4u, ${words / 4}>, }
         read(submitted: SubmittedWork) { return readback.result({ after: submitted }).toBytes() },
         dispose() { for (const value of [readback, command, clear, pass, pipeline, program, bindings, layout, shader, output]) value.dispose() },
     }
+}
+
+// The frozen guard is intentionally retained as a failing counterexample (ADR-130).
+// Its previous successful samples above remain exact consistency checks.
+async function verifyNearPlaneCorrection() {
+    const runtime = await GPURuntime.create({ label: 'CPU visible near-plane correction' })
+    const records = []
+    try {
+        for (const bits of [40, 52]) for (const flat of [false, true]) {
+            const coverage = tileMatrixCoverage({ tileMatrixSet: WebMercatorQuad, limits: nearPlaneView.domain.limits })
+            const descriptor = { spatialProfile: webMercatorPlanarTileSpatialProfile({
+                addressCodec: webMercatorQuadAddressCodec({ coverage, coordinateBits: bits }),
+            }), policy: nearPlaneView.policy,
+                verticalRangeMeters: (flat ? [0, 0] : nearPlaneView.domain.verticalRange) as [number, number],
+                ...(flat ? {} : { verticalBounds: nearPlaneView.domain.verticalBounds }) }
+            const view = createGeoViewSnapshot({ ...nearPlaneView.view,
+                cameraHigh: (flat ? [...nearPlaneView.view.cameraHigh.slice(0, 2), 3] : nearPlaneView.view.cameraHigh) as [number, number, number],
+                cameraLow: (flat ? [...nearPlaneView.view.cameraLow.slice(0, 2), 0] : nearPlaneView.view.cameraLow) as [number, number, number],
+                referenceViewport: nearPlaneView.view.referenceViewport as [number, number] })
+            const cpu = new WebMercatorQuadCover(descriptor)
+            let gpu: GpuWebMercatorQuadCover | undefined
+            let token: ReturnType<GpuWebMercatorQuadCover['writeView']> | undefined
+            try {
+                const selection = cpu.select(view)
+                if (!selection.patches.length || !Number.isFinite(selection.facts.maximumCellSpanReferencePixels) ||
+                    selection.facts.maximumAdjacentLevelDelta > 1) throw new Error('CPU near-plane cut is uncertified')
+                gpu = await GpuWebMercatorQuadCover.create(runtime, descriptor)
+                token = gpu.writeView(view)
+                const frame = gpu.frame(token), builder = runtime.createSubmission()
+                gpu.initialize(builder); gpu.encode(builder, frame); gpu.capture(builder, frame)
+                const submitted = builder.submit()
+                if ((await submitted.nativeOutcome).status !== 'observed-succeeded') throw new Error('Frozen near-plane native work failed')
+                let failure: unknown
+                try { await gpu.feedback(frame, submitted) } catch (error) { failure = error }
+                if (!(failure instanceof GeoDiagnosticError) ||
+                    (failure.diagnostic.actual as { reason?: string })?.reason !== 'unbounded-quality')
+                    throw new Error('Frozen near-plane counterexample changed')
+                records.push({ bits, flat, cpuPatchCount: selection.patches.length,
+                    maximumCellSpanReferencePixels: selection.facts.maximumCellSpanReferencePixels,
+                    frozenGpuFailure: 'unbounded-quality', correction: 'visible-domain-depth' })
+            } finally { token?.dispose(); gpu?.dispose(); cpu.dispose() }
+        }
+    } finally { runtime.dispose() }
+    if (runtime.diagnostics.snapshot().resources.length || runtime.diagnostics.snapshot().readbacks.length)
+        throw new Error('Near-plane comparison leaked resources')
+    return records
 }

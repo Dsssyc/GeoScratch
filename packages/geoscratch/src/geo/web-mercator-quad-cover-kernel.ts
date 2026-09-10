@@ -373,7 +373,9 @@ export class WebMercatorQuadCoverKernel {
                 return HUGE
             maxN = Math.max(maxN, this.numerator(clamp(c[0] / c[3], -1, 1), clamp(c[1] / c[3], -1, 1), dx, dy))
         }
-        return minW - .5 * (Math.abs(dx[3]) + Math.abs(dy[3])) <= 1e-5 ? HUGE : (maxN + error) / minW
+        // The Jacobian is bounded on the clipped polygon. Extending a half-cell
+        // beyond its visible near-plane edge is not part of that domain.
+        return (maxN + error) / minW
     }
     volumeMetric(b: Bounds) {
         const m = this.m, mag = b.min.map((v, i) => Math.max(Math.abs(v), Math.abs(b.max[i]))), error = [0, 1, 2, 3].map(a => (Math.abs(m[a]) * mag[0] + Math.abs(m[a + 4]) * mag[1] + Math.abs(m[a + 8]) * mag[2] + Math.abs(m[a + 12])) * 4e-6 + 1e-30)
@@ -408,7 +410,10 @@ export class WebMercatorQuadCoverKernel {
                 frustum = Math.max(frustum, Math.max(0, -max[a] - err) / this.meta.negative[a] * .999998)
         }
         const minW = Math.max(minBox, frustum), { dx, dy, error: round } = this.deltas(b)
-        if (minW - .5 * (Math.abs(dx[3]) + Math.abs(dy[3])) <= 1e-5)
+        // Box/slab certificates bound every visible point of the height prism;
+        // requiring the unclipped cell around each point to stay in front of the
+        // camera would reject finite near-plane intersections at the LoD ceiling.
+        if (!(minW > 1e-5))
             return HUGE
         let maxN = 0
         for (let c = 0; c < 4; c++)

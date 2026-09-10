@@ -53,6 +53,8 @@ const cameraScenarios = Object.freeze([
     scenario('flat-z10', 10, 0, 0),
     scenario('flat-z12', 12, 0, 0),
     scenario('flat-z14', 14, 0, 0),
+    scenario('max-zoom-pitch45', 18, 45, 0),
+    scenario('max-zoom-pitch85', 18, 85, 90),
     scenario('pitch45-bearing90-z9', 9, 45, 90),
     scenario('pitch45-bearing225-z10', 10, 45, 225),
     scenario('pitch70-bearing0-z9', 9, 70, 0),

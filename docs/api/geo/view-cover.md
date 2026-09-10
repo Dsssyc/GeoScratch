@@ -32,6 +32,17 @@ tests do not claim bit-identical decisions at every floating-point threshold.
 Candidate preparation and vertical-hierarchy validation reuse the frozen pure
 helpers; neither depends on prior topology or resource availability.
 
+CPU quality is certified on the visible clipped domain (ADR-130). Flat polygons
+retain positive-w vertex checks; height prisms retain their box/slab denominator
+certificate and `1e-5` numerical floor. A cell extending behind the near clipping
+plane does not invalidate a finite local Jacobian on its visible part. The CPU
+selector does not subtract an unclipped half-cell depth radius from that certificate.
+The frozen GPU implementation still has that extra guard and can report
+`unbounded-quality` for otherwise certifiable near-plane cuts, including the recorded
+terrain zoom-18/pitch-45 case. This is a documented reference difference; ordinary
+successful reference cases remain consistency controls. Candidate windows stay
+conservative, and genuinely uncertifiable or over-capacity results still fail.
+
 The input is copied/validated through `createGeoViewSnapshot`. Each successful
 selection copies its private packed metadata, patch and lookup arrays out of the
 reusable workspace. Public patches and facts are deeply immutable. Later views

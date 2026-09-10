@@ -271,6 +271,13 @@ async function runProof(activeBrowser) {
                     previous.coverSelection?.maximumAdjacentLevelDelta,
             }))
         }
+        const maximumZoomPitchSweep = []
+        for (let pitch = 0; pitch <= 85; pitch++) {
+            previous = await settle(page, 'tile-wireframe', previous.observedFrames,
+                Object.freeze({ ...camera, zoom: 18, pitch }))
+            maximumZoomPitchSweep.push(Object.freeze({ pitch, ...previous }))
+        }
+        const maximumZoomCapture = await capture(page, 'maximum-zoom-pitch85')
         previous = await settle(
             page,
             'tile-wireframe',
@@ -331,6 +338,8 @@ async function runProof(activeBrowser) {
             zoomSamples: Object.freeze(zoomSamples),
             pitchSweep: Object.freeze(pitchSweep),
             continuousPitchSweep: Object.freeze(continuousPitchSweep),
+            maximumZoomPitchSweep: Object.freeze(maximumZoomPitchSweep),
+            maximumZoomCapture,
             oddParityTopDown,
             shadedTracking,
             wireframeTracking,
@@ -676,6 +685,7 @@ function validateProof(value, processState) {
         zoomSamples = [],
         pitchSweep,
         continuousPitchSweep = [],
+        maximumZoomPitchSweep = [],
         oddParityTopDown,
         shadedTracking,
         wireframeTracking,
@@ -713,6 +723,7 @@ function validateProof(value, processState) {
         wireframe,
         ...canonical,
         ...zoomSamples,
+        ...maximumZoomPitchSweep,
         ...Object.values(pitchSweep ?? {}),
         oddParityTopDown?.bearingZero,
         oddParityTopDown?.direct,
@@ -743,6 +754,12 @@ function validateProof(value, processState) {
             sample?.diagnostics?.bounded,
         `cover sample ${index} retained a WebGPU diagnostic failure`)
     }
+
+    expect(failures,
+        maximumZoomPitchSweep.length === 86 && maximumZoomPitchSweep.every(sample =>
+            sample.coverSelection?.maximumMatrixLevel === 14 &&
+            Number.isFinite(sample.coverSelection?.maximumCellSpanReferencePixels)),
+    'maximum zoom pitch sweep lost a finite visible-domain quality certificate')
 
     const signatures = canonical.map(sample => JSON.stringify({
         patchCount: sample.coverSelection?.patchCount,

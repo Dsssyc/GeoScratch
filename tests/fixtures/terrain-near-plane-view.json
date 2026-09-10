@@ -1,0 +1,459 @@
+{
+  "view": {
+    "kind": "geo-view-snapshot",
+    "id": "terrain-near-plane-z18-p45",
+    "clipFromRelativeWorld": [
+      6.279678821563721,
+      0,
+      0,
+      0,
+      0,
+      7.104645729064941,
+      2.369279623031616,
+      2.368215322494507,
+      0,
+      8.358180046081543,
+      -2.7873122692108154,
+      -2.786060094833374,
+      3.91155481338501e-07,
+      -0.037553075700998306,
+      -15.994668006896973,
+      0.012517787516117096
+    ],
+    "cameraHigh": [
+      13467510,
+      3721669.75,
+      215.3533935546875
+    ],
+    "cameraLow": [
+      -0.41414463706314564,
+      -0.09331419132649899,
+      -3.8194100113742024e-06
+    ],
+    "referenceViewport": [
+      1280,
+      800
+    ],
+    "verticalFovRadians": 0.6435011087932844,
+    "cameraLatitudeRadians": 0.5529591451962884,
+    "cameraPitchRadians": 0.7853981633974483,
+    "zoomHint": 18,
+    "frameEpoch": 1,
+    "residencySnapshotEpoch": 1
+  },
+  "domain": {
+    "coordinateBits": 40,
+    "row": 6,
+    "col": 13,
+    "width": 1,
+    "height": 1,
+    "limits": [
+      {
+        "matrixId": "4",
+        "maxTileCol": 13,
+        "maxTileRow": 6,
+        "minTileCol": 13,
+        "minTileRow": 6
+      },
+      {
+        "matrixId": "5",
+        "maxTileCol": 26,
+        "maxTileRow": 13,
+        "minTileCol": 26,
+        "minTileRow": 12
+      },
+      {
+        "matrixId": "6",
+        "maxTileCol": 53,
+        "maxTileRow": 26,
+        "minTileCol": 53,
+        "minTileRow": 25
+      },
+      {
+        "matrixId": "7",
+        "maxTileCol": 107,
+        "maxTileRow": 52,
+        "minTileCol": 106,
+        "minTileRow": 51
+      },
+      {
+        "matrixId": "8",
+        "maxTileCol": 214,
+        "maxTileRow": 104,
+        "minTileCol": 213,
+        "minTileRow": 103
+      },
+      {
+        "matrixId": "9",
+        "maxTileCol": 429,
+        "maxTileRow": 209,
+        "minTileCol": 426,
+        "minTileRow": 207
+      },
+      {
+        "matrixId": "10",
+        "maxTileCol": 858,
+        "maxTileRow": 418,
+        "minTileCol": 853,
+        "minTileRow": 415
+      }
+    ],
+    "verticalRange": [
+      -4003.4499999999994,
+      218.72499999999988
+    ],
+    "verticalBounds": [
+      {
+        "matrixLevel": 4,
+        "tileRow": 6,
+        "tileCol": 13,
+        "minimumVerticalMeters": -3324.5904901960776,
+        "maximumVerticalMeters": 218.72499999999988
+      },
+      {
+        "matrixLevel": 5,
+        "tileRow": 12,
+        "tileCol": 26,
+        "minimumVerticalMeters": -3324.5904901960776,
+        "maximumVerticalMeters": 218.72499999999988
+      },
+      {
+        "matrixLevel": 5,
+        "tileRow": 13,
+        "tileCol": 26,
+        "minimumVerticalMeters": -3009.997058823529,
+        "maximumVerticalMeters": 218.72499999999988
+      },
+      {
+        "matrixLevel": 6,
+        "tileRow": 25,
+        "tileCol": 53,
+        "minimumVerticalMeters": -3324.5904901960776,
+        "maximumVerticalMeters": 218.72499999999988
+      },
+      {
+        "matrixLevel": 6,
+        "tileRow": 26,
+        "tileCol": 53,
+        "minimumVerticalMeters": -3009.997058823529,
+        "maximumVerticalMeters": 218.72499999999988
+      },
+      {
+        "matrixLevel": 7,
+        "tileRow": 51,
+        "tileCol": 106,
+        "minimumVerticalMeters": -3324.5904901960776,
+        "maximumVerticalMeters": 218.72499999999988
+      },
+      {
+        "matrixLevel": 7,
+        "tileRow": 51,
+        "tileCol": 107,
+        "minimumVerticalMeters": -625.7100000000002,
+        "maximumVerticalMeters": 218.72499999999988
+      },
+      {
+        "matrixLevel": 7,
+        "tileRow": 52,
+        "tileCol": 106,
+        "minimumVerticalMeters": -2662.2885294117646,
+        "maximumVerticalMeters": 218.72499999999988
+      },
+      {
+        "matrixLevel": 7,
+        "tileRow": 52,
+        "tileCol": 107,
+        "minimumVerticalMeters": -3009.997058823529,
+        "maximumVerticalMeters": 218.72499999999988
+      },
+      {
+        "matrixLevel": 8,
+        "tileRow": 103,
+        "tileCol": 213,
+        "minimumVerticalMeters": -3324.5904901960776,
+        "maximumVerticalMeters": 218.72499999999988
+      },
+      {
+        "matrixLevel": 8,
+        "tileRow": 103,
+        "tileCol": 214,
+        "minimumVerticalMeters": -625.7100000000002,
+        "maximumVerticalMeters": 218.72499999999988
+      },
+      {
+        "matrixLevel": 8,
+        "tileRow": 104,
+        "tileCol": 213,
+        "minimumVerticalMeters": -2662.2885294117646,
+        "maximumVerticalMeters": 218.72499999999988
+      },
+      {
+        "matrixLevel": 8,
+        "tileRow": 104,
+        "tileCol": 214,
+        "minimumVerticalMeters": -3009.997058823529,
+        "maximumVerticalMeters": 218.72499999999988
+      },
+      {
+        "matrixLevel": 9,
+        "tileRow": 207,
+        "tileCol": 426,
+        "minimumVerticalMeters": -1337.6846078431374,
+        "maximumVerticalMeters": 218.72499999999988
+      },
+      {
+        "matrixLevel": 9,
+        "tileRow": 207,
+        "tileCol": 427,
+        "minimumVerticalMeters": -3324.5904901960776,
+        "maximumVerticalMeters": 218.72499999999988
+      },
+      {
+        "matrixLevel": 9,
+        "tileRow": 207,
+        "tileCol": 428,
+        "minimumVerticalMeters": 218.72499999999988,
+        "maximumVerticalMeters": 218.72499999999988
+      },
+      {
+        "matrixLevel": 9,
+        "tileRow": 207,
+        "tileCol": 429,
+        "minimumVerticalMeters": -625.7100000000002,
+        "maximumVerticalMeters": 218.72499999999988
+      },
+      {
+        "matrixLevel": 9,
+        "tileRow": 208,
+        "tileCol": 426,
+        "minimumVerticalMeters": -1652.278039215686,
+        "maximumVerticalMeters": 218.72499999999988
+      },
+      {
+        "matrixLevel": 9,
+        "tileRow": 208,
+        "tileCol": 427,
+        "minimumVerticalMeters": -2662.2885294117646,
+        "maximumVerticalMeters": 218.72499999999988
+      },
+      {
+        "matrixLevel": 9,
+        "tileRow": 208,
+        "tileCol": 428,
+        "minimumVerticalMeters": -3009.997058823529,
+        "maximumVerticalMeters": 218.72499999999988
+      },
+      {
+        "matrixLevel": 9,
+        "tileRow": 208,
+        "tileCol": 429,
+        "minimumVerticalMeters": -1056.206274509804,
+        "maximumVerticalMeters": 218.72499999999988
+      },
+      {
+        "matrixLevel": 9,
+        "tileRow": 209,
+        "tileCol": 426,
+        "minimumVerticalMeters": 218.72499999999988,
+        "maximumVerticalMeters": 218.72499999999988
+      },
+      {
+        "matrixLevel": 9,
+        "tileRow": 209,
+        "tileCol": 427,
+        "minimumVerticalMeters": 218.72499999999988,
+        "maximumVerticalMeters": 218.72499999999988
+      },
+      {
+        "matrixLevel": 9,
+        "tileRow": 209,
+        "tileCol": 428,
+        "minimumVerticalMeters": -625.7100000000002,
+        "maximumVerticalMeters": 218.72499999999988
+      },
+      {
+        "matrixLevel": 9,
+        "tileRow": 209,
+        "tileCol": 429,
+        "minimumVerticalMeters": -940.3034313725492,
+        "maximumVerticalMeters": 218.72499999999988
+      },
+      {
+        "matrixLevel": 10,
+        "tileRow": 415,
+        "tileCol": 853,
+        "minimumVerticalMeters": -1337.6846078431374,
+        "maximumVerticalMeters": 218.72499999999988
+      },
+      {
+        "matrixLevel": 10,
+        "tileRow": 415,
+        "tileCol": 854,
+        "minimumVerticalMeters": -2033.1016666666667,
+        "maximumVerticalMeters": 218.72499999999988
+      },
+      {
+        "matrixLevel": 10,
+        "tileRow": 415,
+        "tileCol": 855,
+        "minimumVerticalMeters": -3324.5904901960776,
+        "maximumVerticalMeters": 218.72499999999988
+      },
+      {
+        "matrixLevel": 10,
+        "tileRow": 415,
+        "tileCol": 856,
+        "minimumVerticalMeters": 218.72499999999988,
+        "maximumVerticalMeters": 218.72499999999988
+      },
+      {
+        "matrixLevel": 10,
+        "tileRow": 415,
+        "tileCol": 857,
+        "minimumVerticalMeters": 218.72499999999988,
+        "maximumVerticalMeters": 218.72499999999988
+      },
+      {
+        "matrixLevel": 10,
+        "tileRow": 415,
+        "tileCol": 858,
+        "minimumVerticalMeters": -625.7100000000002,
+        "maximumVerticalMeters": 218.72499999999988
+      },
+      {
+        "matrixLevel": 10,
+        "tileRow": 416,
+        "tileCol": 853,
+        "minimumVerticalMeters": -1652.278039215686,
+        "maximumVerticalMeters": 218.72499999999988
+      },
+      {
+        "matrixLevel": 10,
+        "tileRow": 416,
+        "tileCol": 854,
+        "minimumVerticalMeters": -2662.2885294117646,
+        "maximumVerticalMeters": 218.72499999999988
+      },
+      {
+        "matrixLevel": 10,
+        "tileRow": 416,
+        "tileCol": 855,
+        "minimumVerticalMeters": -2529.828137254902,
+        "maximumVerticalMeters": 218.72499999999988
+      },
+      {
+        "matrixLevel": 10,
+        "tileRow": 416,
+        "tileCol": 856,
+        "minimumVerticalMeters": -3009.997058823529,
+        "maximumVerticalMeters": 218.72499999999988
+      },
+      {
+        "matrixLevel": 10,
+        "tileRow": 416,
+        "tileCol": 857,
+        "minimumVerticalMeters": -625.7100000000002,
+        "maximumVerticalMeters": 218.72499999999988
+      },
+      {
+        "matrixLevel": 10,
+        "tileRow": 416,
+        "tileCol": 858,
+        "minimumVerticalMeters": -642.2675490196077,
+        "maximumVerticalMeters": 218.72499999999988
+      },
+      {
+        "matrixLevel": 10,
+        "tileRow": 417,
+        "tileCol": 853,
+        "minimumVerticalMeters": 218.72499999999988,
+        "maximumVerticalMeters": 218.72499999999988
+      },
+      {
+        "matrixLevel": 10,
+        "tileRow": 417,
+        "tileCol": 854,
+        "minimumVerticalMeters": 218.72499999999988,
+        "maximumVerticalMeters": 218.72499999999988
+      },
+      {
+        "matrixLevel": 10,
+        "tileRow": 417,
+        "tileCol": 855,
+        "minimumVerticalMeters": 218.72499999999988,
+        "maximumVerticalMeters": 218.72499999999988
+      },
+      {
+        "matrixLevel": 10,
+        "tileRow": 417,
+        "tileCol": 856,
+        "minimumVerticalMeters": -2149.0045098039213,
+        "maximumVerticalMeters": 218.72499999999988
+      },
+      {
+        "matrixLevel": 10,
+        "tileRow": 417,
+        "tileCol": 857,
+        "minimumVerticalMeters": -1437.0299019607842,
+        "maximumVerticalMeters": 218.72499999999988
+      },
+      {
+        "matrixLevel": 10,
+        "tileRow": 417,
+        "tileCol": 858,
+        "minimumVerticalMeters": -1056.206274509804,
+        "maximumVerticalMeters": 218.72499999999988
+      },
+      {
+        "matrixLevel": 10,
+        "tileRow": 418,
+        "tileCol": 853,
+        "minimumVerticalMeters": 218.72499999999988,
+        "maximumVerticalMeters": 218.72499999999988
+      },
+      {
+        "matrixLevel": 10,
+        "tileRow": 418,
+        "tileCol": 854,
+        "minimumVerticalMeters": 218.72499999999988,
+        "maximumVerticalMeters": 218.72499999999988
+      },
+      {
+        "matrixLevel": 10,
+        "tileRow": 418,
+        "tileCol": 855,
+        "minimumVerticalMeters": 218.72499999999988,
+        "maximumVerticalMeters": 218.72499999999988
+      },
+      {
+        "matrixLevel": 10,
+        "tileRow": 418,
+        "tileCol": 856,
+        "minimumVerticalMeters": 218.72499999999988,
+        "maximumVerticalMeters": 218.72499999999988
+      },
+      {
+        "matrixLevel": 10,
+        "tileRow": 418,
+        "tileCol": 857,
+        "minimumVerticalMeters": -625.7100000000002,
+        "maximumVerticalMeters": 218.72499999999988
+      },
+      {
+        "matrixLevel": 10,
+        "tileRow": 418,
+        "tileCol": 858,
+        "minimumVerticalMeters": -940.3034313725492,
+        "maximumVerticalMeters": 218.72499999999988
+      }
+    ]
+  },
+  "policy": {
+    "minimumMatrixLevel": 4,
+    "maximumMatrixLevel": 14,
+    "maximumPatches": 256,
+    "cellsPerPatchEdge": 128,
+    "maximumCellSpanReferencePixels": 5,
+    "refinementTolerance": 0.005
+  }
+}

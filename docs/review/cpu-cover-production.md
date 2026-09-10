@@ -146,11 +146,48 @@ readiness snapshot still has one native frame in flight; later cleanup observes
 zero pending work and no retained actions or failures. Resource readiness is not
 misreported as completion of that last native draw.
 
+## Near-plane regression follow-up
+
+The user found a missed production case after the initial migration: maximum map
+zoom 18 followed by camera pitch caused a black screen. The original terrain browser
+zoom sweep ended at 14 even though the example permits 18. At `0b6b9c5`, the default
+centre already fails at pitch 45 with `unbounded-quality`, 362 checked candidates
+and no overflow. The frozen GPU reference fails the same captured view; matching
+failure was evidence of shared behavior, not correctness.
+
+[ADR-130](../decisions/ADR-130-certify-visible-near-plane-cover.md) removes only the
+extra unclipped half-cell depth guard in CPU quality evaluation. The visible-domain
+positive denominator and numerical floor, complete candidates, LoD ceiling and
+quality threshold remain. The captured example returns 14 patches with finite
+maximum bound 5665.4765625; this conservative ceiling-limited bound is not a claim
+that actual image error reaches that value or that the five-pixel target is met.
+
+Ten focused tests cover flat/volume clipping, 40/52 bits, independent visible-point
+ownership/Jacobians, bounded/full candidates and both sides of the positive-w floor.
+The four captured flat/volume tests were red against the old implementation and green
+after the fix. Native DPR 1/2 retains all prior 71 successful cuts, 71 uploads and
+three failed controls, and separately records four corrected CPU/failing frozen-GPU
+near-plane cases per DPR. The GPU source-hash guard remains unchanged.
+
+The updated 52-bit native render gate adds zoom 18 at every pitch 0..85; the final
+85-degree view draws 94 patches and has non-dark terrain pixels. The 40-bit lifecycle
+gate also renders shaded zoom-18/pitch-45 and pitch-85 views, then continues to other
+captures. Existing wide top-down, pitch/zoom, 90-frame shaded/wireframe, A-B-A, 2:1,
+DPR, construction and native-observation gates pass. The 52-bit streaming gate with
+150-ms tile delay also passes, including cancellation, budget, reload and teardown.
+Full typecheck, build and all
+1,782 tests pass (two opt-in pending); paired API docs pass with 848 public symbols.
+
+Evidence: `/tmp/geoscratch-near-plane-{unit-red.log,unit-green-2.log,
+native-consistency-1.json,render-52/result.json,lifecycle-40/result.json,
+native-observation.log,streaming-52/result.json,all-tests.log}`. The updated dev frontend and existing-data
+backend stay available on ports 5173 and 8787 for user inspection.
+
 ## Final rollback
 
 `028246a` is the production integration checkpoint; its full reverse patch passed
 `git apply --reverse --check` immediately after verification. To restore the frozen
-GPU terrain producer, revert this later report commit first, then `git revert 028246a`.
+GPU terrain producer, revert later repair/report commits first, then `git revert 028246a`.
 The independent CPU APIs can remain unused, or be removed by reverting `7974b5b`,
 then `b660d22`. Revert `2fd6d8f` only to remove the reference guard itself. Never reset
 the shared working tree or regenerate backend data as a rollback method.

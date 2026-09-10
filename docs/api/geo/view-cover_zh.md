@@ -2,7 +2,7 @@
 docId: geo.view-cover.zh
 canonical: false
 translationOf: ./view-cover.md
-canonicalDigest: a9dfbbe645f537c04f63bab444902635137f22700dff90661e45b839eee4d331
+canonicalDigest: 2d44b1a6ae9bd1c59cbefb50239f01a4701fbfdf4cd4f79f6835009c9125c267
 ---
 # WebMercatorQuad 视图覆盖
 
@@ -21,6 +21,14 @@ CPU selector 保留下述候选包围、独立父瓦片决定、确定顺序、p
 和质量合同。它基于与地形顶点 ABI 相同的 f32 相机／误差输入及补偿的 40／52 位
 整数地址差，使用 JS f64 运算。有限 GPU／CPU 一致性测试不承诺所有浮点阈值处
 逐位相同。候选域准备和垂向层级验证复用冻结的纯函数；二者都不依赖历史拓扑或驻留。
+
+CPU 在裁剪后的可见域上认证质量（ADR-130）：平面多边形保留逐顶点正 w 检查；
+高度棱柱保留 box／slab 分母证书及 `1e-5` 数值下限。单元延伸到近裁剪面之后，
+不意味着其可见部分的局部 Jacobian 无界。CPU 不再从证书中扣除未裁剪半格的深度
+跨度。冻结 GPU 仍保留这项额外检查，可能对本可认证的近裁剪面 cut 报告
+`unbounded-quality`，包括已记录的地形 zoom 18／pitch 45 场景。这是明确记录的参考
+差异；原先成功的参考场景继续用于一致性校验。候选窗口仍保持保守；真正不可认证
+或超容量的结果仍然失败。
 
 输入通过 `createGeoViewSnapshot` 验证并复制。每个成功产物从可复用工作空间复制
 私有的 metadata、patch 和 lookup 数组；公开 patches 与 facts 深度不可变。
