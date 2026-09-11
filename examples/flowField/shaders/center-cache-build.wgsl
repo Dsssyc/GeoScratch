@@ -13,16 +13,16 @@ struct FlowCenterCacheConfig {
 // The low nibble stores 4*d*d: axis=1, diagonal=2, truncated interior=9.
 fn FlowCenterCache_support(global: vec2i, level: u32, wanted: vec2<bool>) -> vec2u {
     var bits = vec2u(32u);
-    if (wanted.x && all(global >= vec2i(FlowVelocityCurrent_minimum_texel[level])) &&
-        all(global <= vec2i(FlowVelocityCurrent_maximum_texel[level]))) {
+    if (wanted.x && all(global >= vec2i(FlowVelocityCurrent_minimum_texel_at(level))) &&
+        all(global <= vec2i(FlowVelocityCurrent_maximum_texel_at(level)))) {
         let sample = FlowVelocityCurrent_load_global(global, level);
         if (sample.status == 1u && sample.resolved_level == level) {
             let speed = length(sample.value.xy);
             bits.x = select(0u, 1u, speed > 0.0 && speed >= flowCenterCacheBuildConfig.kill);
         }
     }
-    if (wanted.y && all(global >= vec2i(FlowVelocityNext_minimum_texel[level])) &&
-        all(global <= vec2i(FlowVelocityNext_maximum_texel[level]))) {
+    if (wanted.y && all(global >= vec2i(FlowVelocityNext_minimum_texel_at(level))) &&
+        all(global <= vec2i(FlowVelocityNext_maximum_texel_at(level)))) {
         let sample = FlowVelocityNext_load_global(global, level);
         if (sample.status == 1u && sample.resolved_level == level) {
             let speed = length(sample.value.xy);
@@ -37,7 +37,7 @@ fn FlowCenterCache_build(@builtin(global_invocation_id) id: vec3u) {
     if (id.x >= 257u || id.y >= 257u || id.z >= flowCenterCacheBuildConfig.pageCount ||
         id.z >= arrayLength(&flowCenterCacheJobs)) { return; }
     let level = flowCenterCacheBuildConfig.level;
-    if (level >= FlowVelocityCurrent_level_count || level >= FlowVelocityNext_level_count) { return; }
+    if (level >= FlowVelocityCurrent_level_count_value() || level >= FlowVelocityNext_level_count_value()) { return; }
     let job = flowCenterCacheJobs[id.z];
     if (job.z >= flowCenterCacheBuildConfig.pageCount) { return; }
     let outputIndex = job.z * 66049u + id.y * 257u + id.x;
@@ -56,7 +56,7 @@ fn FlowCenterCache_build(@builtin(global_invocation_id) id: vec3u) {
         flowCenterCacheOutput[outputIndex] = previous.x | (previous.y << 8u);
         return;
     }
-    let global = vec2i(job.xy * FlowVelocityCurrent_page_size + id.xy);
+    let global = vec2i(job.xy * FlowVelocityCurrent_page_size_value() + id.xy);
     let owner = FlowCenterCache_support(global, level, wanted);
     var squared = vec2u(9u);
     var haloUnknown = vec2u(0u);

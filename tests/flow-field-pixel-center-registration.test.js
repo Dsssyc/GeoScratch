@@ -29,10 +29,9 @@ describe('Flow Field pixel-center registration', () => {
             { level: 0, matrixId: '9', halfTexelQuanta: { low: 4_194_304, high: 0 } },
             { level: 1, matrixId: '8', halfTexelQuanta: { low: 8_388_608, high: 0 } },
         ])
-        expect(module.code).to.include(
-            'ProofAddressFixedAxis(4194304u, 0u), ' +
-            'ProofAddressFixedAxis(8388608u, 0u)'
-        )
+        expect(module.code).to.include('ProofCurrent_half_texel_at(level)')
+        expect(module.code).to.not.include('4194304u')
+        expect(module.code).to.include('ProofAddressFixedAxis(half.x, half.y)')
         expect(module.code).to.include('ProofAddressFixed_subtract_axis(value, delta)')
         expect(module.code).to.include('return ProofAddressFixedAxis(0u, 0u)')
         expect(module.code).to.include(
@@ -67,7 +66,7 @@ describe('Flow Field pixel-center registration', () => {
         expect(module.levels).to.deep.equal([
             { level: 0, matrixId: '4', halfTexelQuanta: { low: 0, high: 128 } },
         ])
-        expect(module.code).to.include('WideAddressFixedAxis(0u, 128u)')
+        expect(module.code).to.include('WideAddressFixedAxis(half.x, half.y)')
     })
 
     it('aligns both sides of a page seam to the declared pixel-center lattice', () => {

@@ -19,10 +19,10 @@ fn FlowBoundary_hard_coverage(position: FlowVelocityAddressFixedPosition, level:
 
 fn FlowBoundary_weight(global: vec2i, level: u32) -> f32 {
     // A clamped edge value or a missing page must not become invented dry data.
-    if (any(global < vec2i(FlowVelocityCurrent_minimum_texel[level])) ||
-        any(global > vec2i(FlowVelocityCurrent_maximum_texel[level])) ||
-        any(global < vec2i(FlowVelocityNext_minimum_texel[level])) ||
-        any(global > vec2i(FlowVelocityNext_maximum_texel[level]))) { return -1.0; }
+    if (any(global < vec2i(FlowVelocityCurrent_minimum_texel_at(level))) ||
+        any(global > vec2i(FlowVelocityCurrent_maximum_texel_at(level))) ||
+        any(global < vec2i(FlowVelocityNext_minimum_texel_at(level))) ||
+        any(global > vec2i(FlowVelocityNext_maximum_texel_at(level)))) { return -1.0; }
     let current = FlowVelocityCurrent_load_global(global, level);
     let next = FlowVelocityNext_load_global(global, level);
     if (current.status != 1u || next.status != 1u ||
@@ -36,29 +36,29 @@ fn FlowBoundary_weight(global: vec2i, level: u32) -> f32 {
 // velocities merely to learn whether both endpoints resolve at this level.
 fn FlowBoundary_exact_residency(position: FlowVelocityAddressFixedPosition, level: u32) -> bool {
     let registered = FlowVelocityRegistration_position(position, level);
-    let address = FlowVelocityAddress_address(registered, FlowVelocityCurrent_matrix[level]);
-    let base = vec2i(address.tile * FlowVelocityCurrent_page_size + address.texel);
+    let address = FlowVelocityAddress_address(registered, FlowVelocityCurrent_matrix_at(level));
+    let base = vec2i(address.tile * FlowVelocityCurrent_page_size_value() + address.texel);
     for (var i = 0u; i < 4u; i++) {
         let global = base + vec2i(i32(i % 2u), i32(i / 2u));
         if (any(FlowVelocityCurrent_resolution_global(global, level) != vec2u(1u, level)) ||
             any(FlowVelocityNext_resolution_global(global, level) != vec2u(1u, level))) { return false; }
     }
-    if (level + 1u < FlowVelocityCurrent_level_count &&
+    if (level + 1u < FlowVelocityCurrent_level_count_value() &&
         FlowVelocityCurrent_edge_blend_weight(registered, level) < 1.0) { return false; }
-    if (level + 1u < FlowVelocityNext_level_count &&
+    if (level + 1u < FlowVelocityNext_level_count_value() &&
         FlowVelocityNext_edge_blend_weight(registered, level) < 1.0) { return false; }
     return true;
 }
 
 fn FlowBoundary_coverage(position: FlowVelocityAddressFixedPosition) -> f32 {
     let level = boundaryUniform.requestedLevel;
-    if (!FlowVelocity_nearest_zero_gate || level >= FlowVelocityCurrent_level_count ||
+    if (!FlowVelocity_nearest_zero_gate || level >= FlowVelocityCurrent_level_count_value() ||
         !FlowVelocity_source_contains(position)) { return FlowBoundary_hard_coverage(position, level); }
     // Honor the temporal sampler's common-level/transition decision before a
     // fine texel is allowed to define a boundary. Missing/fallback is not dry.
     if (!FlowBoundary_exact_residency(position, level)) { return FlowBoundary_hard_coverage(position, level); }
-    let address = FlowVelocityAddress_address(position, FlowVelocityCurrent_matrix[level]);
-    let owner = vec2i(address.tile * FlowVelocityCurrent_page_size + address.texel);
+    let address = FlowVelocityAddress_address(position, FlowVelocityCurrent_matrix_at(level));
+    let owner = vec2i(address.tile * FlowVelocityCurrent_page_size_value() + address.texel);
     let p = address.sub_texel;
     let weight = FlowBoundary_weight(owner, level);
     if (weight < 0.0) { return FlowBoundary_hard_coverage(position, level); }

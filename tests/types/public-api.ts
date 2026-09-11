@@ -42,6 +42,8 @@ import {
     webMercatorQuadAddressCodec,
     webMercatorVirtualRasterField,
     webMercatorVirtualRasterWgslModule,
+    prepareWebMercatorVirtualRasterSampler,
+    createWebMercatorVirtualRasterSamplerBinding,
     type CellLocalPosition,
     type CoordinateDomain,
     type GeoField,
@@ -317,6 +319,11 @@ const typedWebMercatorFieldDescriptor: WebMercatorVirtualRasterFieldDescriptor =
 }
 const typedWebMercatorField: WebMercatorVirtualRasterField =
     webMercatorVirtualRasterField(typedWebMercatorFieldDescriptor)
+const typedSamplerPreparation = prepareWebMercatorVirtualRasterSampler(typedWebMercatorField)
+const typedSamplerBytes: Uint8Array = typedSamplerPreparation.pack()
+const typedSamplerBinding = createWebMercatorVirtualRasterSamplerBinding(typedWebMercatorField, typedRasterGpuState)
+void typedSamplerBytes
+void typedSamplerBinding
 const typedWebMercatorFieldWgsl: WebMercatorVirtualRasterWgslModule =
     webMercatorVirtualRasterWgslModule(typedWebMercatorField, {
         group: 2,

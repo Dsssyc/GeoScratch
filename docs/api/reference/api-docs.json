@@ -18206,6 +18206,23 @@
           ]
         },
         {
+          "id": "geoscratch/geo#createWebMercatorVirtualRasterSamplerBinding",
+          "name": "createWebMercatorVirtualRasterSamplerBinding",
+          "kind": "Function",
+          "source": "packages/geoscratch/src/geo/web-mercator-virtual-raster-sampler-binding.ts",
+          "sources": [
+            "packages/geoscratch/src/geo/web-mercator-virtual-raster-sampler-binding.ts"
+          ],
+          "locations": [
+            "packages/geoscratch/src/geo/web-mercator-virtual-raster-sampler-binding.ts:20"
+          ],
+          "summary": "Owns immutable uniform metadata and borrows one matching raster; replacement never mutates an older binding.",
+          "declaration": "Function createWebMercatorVirtualRasterSamplerBinding",
+          "signatures": [
+            "createWebMercatorVirtualRasterSamplerBinding(model: WebMercatorVirtualRasterField, gpu: VirtualRasterGpuState): Promise<Readonly<{ atlas: TextureViewSpec; gpu: VirtualRasterGpuState; kind: \"web-mercator-virtual-raster-sampler-binding\"; metadata: BufferRegion; model: WebMercatorVirtualRasterField; pageTable: BufferRegion; resources: readonly (TextureResource | BufferResource)[]; dispose: any }>>"
+          ]
+        },
+        {
           "id": "geoscratch/geo#decodeGpuWebMercatorQuadCoverFeedback",
           "name": "decodeGpuWebMercatorQuadCoverFeedback",
           "kind": "Function",
@@ -20173,6 +20190,20 @@
           "declaration": "type PreparedVirtualRasterPageTransfer = Readonly<{ transferables: readonly [ArrayBuffer]; value: VirtualRasterPageTransfer }>"
         },
         {
+          "id": "geoscratch/geo#PreparedWebMercatorVirtualRasterSampler",
+          "name": "PreparedWebMercatorVirtualRasterSampler",
+          "kind": "Type Alias",
+          "source": "packages/geoscratch/src/geo/web-mercator-virtual-raster-sampler-metadata.ts",
+          "sources": [
+            "packages/geoscratch/src/geo/web-mercator-virtual-raster-sampler-metadata.ts"
+          ],
+          "locations": [
+            "packages/geoscratch/src/geo/web-mercator-virtual-raster-sampler-metadata.ts:32"
+          ],
+          "summary": "",
+          "declaration": "type PreparedWebMercatorVirtualRasterSampler = Readonly<{ kind: \"prepared-web-mercator-virtual-raster-sampler\"; layout: LayoutCodec; model: WebMercatorVirtualRasterField; pack: any }>"
+        },
+        {
           "id": "geoscratch/geo#prepareVirtualRasterPageTransfer",
           "name": "prepareVirtualRasterPageTransfer",
           "kind": "Function",
@@ -20187,6 +20218,23 @@
           "declaration": "Function prepareVirtualRasterPageTransfer",
           "signatures": [
             "prepareVirtualRasterPageTransfer(descriptor: VirtualRasterPagePayloadDescriptor): PreparedVirtualRasterPageTransfer"
+          ]
+        },
+        {
+          "id": "geoscratch/geo#prepareWebMercatorVirtualRasterSampler",
+          "name": "prepareWebMercatorVirtualRasterSampler",
+          "kind": "Function",
+          "source": "packages/geoscratch/src/geo/web-mercator-virtual-raster-sampler-metadata.ts",
+          "sources": [
+            "packages/geoscratch/src/geo/web-mercator-virtual-raster-sampler-metadata.ts"
+          ],
+          "locations": [
+            "packages/geoscratch/src/geo/web-mercator-virtual-raster-sampler-metadata.ts:41"
+          ],
+          "summary": "Prepares one immutable source interpretation; packing owns no GPU resources or residency.",
+          "declaration": "Function prepareWebMercatorVirtualRasterSampler",
+          "signatures": [
+            "prepareWebMercatorVirtualRasterSampler(model: WebMercatorVirtualRasterField): PreparedWebMercatorVirtualRasterSampler"
           ]
         },
         {
@@ -24381,6 +24429,20 @@
           "declaration": "type WebMercatorVirtualRasterFieldDescriptor = Readonly<{ addressSpaceId: string; auxiliaryAxes?: readonly Readonly<{ name: string; value: string | number }>[]; channels: 1 | 2 | 3 | 4; coordinateBits?: number; coverage: TileMatrixCoverage; fieldKind: VirtualRasterFieldKind; geographicBounds: readonly [number, number, number, number]; gpuFormat: GPUTextureFormat; id: string; interpolation: GeoFieldInterpolation; label?: string; noData?: number; offset?: number | readonly number[]; sampleType: VirtualRasterSampleType; scale?: number | readonly number[]; sourceRevision: string; unit?: string }>"
         },
         {
+          "id": "geoscratch/geo#WebMercatorVirtualRasterSamplerBinding",
+          "name": "WebMercatorVirtualRasterSamplerBinding",
+          "kind": "Type Alias",
+          "source": "packages/geoscratch/src/geo/web-mercator-virtual-raster-sampler-binding.ts",
+          "sources": [
+            "packages/geoscratch/src/geo/web-mercator-virtual-raster-sampler-binding.ts"
+          ],
+          "locations": [
+            "packages/geoscratch/src/geo/web-mercator-virtual-raster-sampler-binding.ts:7"
+          ],
+          "summary": "",
+          "declaration": "type WebMercatorVirtualRasterSamplerBinding = Readonly<{ atlas: TextureViewSpec; gpu: VirtualRasterGpuState; kind: \"web-mercator-virtual-raster-sampler-binding\"; metadata: BufferRegion; model: WebMercatorVirtualRasterField; pageTable: BufferRegion; resources: readonly (BufferResource | TextureResource)[]; dispose: any }>"
+        },
+        {
           "id": "geoscratch/geo#webMercatorVirtualRasterWgslModule",
           "name": "webMercatorVirtualRasterWgslModule",
           "kind": "Function",
@@ -24389,7 +24451,7 @@
             "packages/geoscratch/src/geo/web-mercator-virtual-raster-wgsl.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/web-mercator-virtual-raster-wgsl.ts:30"
+            "packages/geoscratch/src/geo/web-mercator-virtual-raster-wgsl.ts:39"
           ],
           "summary": "Generates precision-aware WGSL for logical Web Mercator raster sampling in any shader stage.",
           "declaration": "Function webMercatorVirtualRasterWgslModule",
@@ -24406,10 +24468,10 @@
             "packages/geoscratch/src/geo/web-mercator-virtual-raster-wgsl.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/web-mercator-virtual-raster-wgsl.ts:17"
+            "packages/geoscratch/src/geo/web-mercator-virtual-raster-wgsl.ts:23"
           ],
           "summary": "",
-          "declaration": "type WebMercatorVirtualRasterWgslModule = Readonly<{ addressNamespace: string; bindings: Readonly<{ atlas: number; group: number; pageTable: number }>; code: string; kind: \"web-mercator-virtual-raster-wgsl-module\"; namespace: string }>"
+          "declaration": "type WebMercatorVirtualRasterWgslModule = Readonly<{ addressCode: string; addressNamespace: string; bindings: Readonly<{ atlas: number; group: number; metadata?: number; pageTable: number }>; code: string; kind: \"web-mercator-virtual-raster-wgsl-module\"; namespace: string; samplingCode: string }>"
         },
         {
           "id": "geoscratch/geo#WebMercatorVirtualRasterWgslOptions",
@@ -24420,10 +24482,10 @@
             "packages/geoscratch/src/geo/web-mercator-virtual-raster-wgsl.ts"
           ],
           "locations": [
-            "packages/geoscratch/src/geo/web-mercator-virtual-raster-wgsl.ts:8"
+            "packages/geoscratch/src/geo/web-mercator-virtual-raster-wgsl.ts:10"
           ],
           "summary": "",
-          "declaration": "type WebMercatorVirtualRasterWgslOptions = Readonly<{ addressNamespace?: string; atlasBinding: number; group: number; namespace?: string; pageTableBinding: number; transitionTexels?: number }>"
+          "declaration": "type WebMercatorVirtualRasterWgslOptions = Readonly<{ addressNamespace?: string; atlasBinding: number; group: number; metadataBinding?: number; namespace?: string; pageTableBinding: number; parameterAccessors?: boolean; transitionTexels?: number }>"
         },
         {
           "id": "geoscratch/geo#WideFixedAxis",

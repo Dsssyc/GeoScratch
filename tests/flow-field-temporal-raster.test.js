@@ -117,7 +117,8 @@ describe('Flow Field temporal velocity WGSL', () => {
         })
 
         expect(module.sampleRegistration).to.equal('pixel-center')
-        expect(module.code).to.include('const FlowVelocityRegistration_half_texel')
+        expect(module.code).to.include('FlowVelocityCurrent_half_texel_at(level)')
+        expect(module.code).to.not.include('const FlowVelocityRegistration_half_texel')
         expect(module.code).to.include('FlowVelocityAddressFixed_subtract_axis(value, delta)')
         expect(module.code).to.not.include('fn FlowVelocityRegistration_current_resolution(')
         expect(module.code).to.not.include('fn FlowVelocityRegistration_next_resolution(')
@@ -129,9 +130,7 @@ describe('Flow Field temporal velocity WGSL', () => {
         expect(module.code).to.not.include(
             'FlowVelocityAddress_advance_i32(position, vec2i(-half_texel))'
         )
-        const loop = module.code.slice(module.code.lastIndexOf(
-            'for (var iteration = 0u; iteration < FlowVelocityCurrent_level_count; iteration++)'
-        ))
+        const loop = module.code.slice(module.code.indexOf('fn FlowVelocity_sample_support('))
         expect(loop.indexOf('FlowVelocityRegistration_position(position, common_level)'))
             .to.be.lessThan(loop.indexOf('FlowVelocityRegistration_sample_current('))
         expect(loop.indexOf('FlowVelocityRegistration_sample_current('))

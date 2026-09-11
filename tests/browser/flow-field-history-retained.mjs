@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict'
 import { chromium } from 'playwright'
+import { readFile } from 'node:fs/promises'
 
 // Exercise the real example-owned graph, not a reimplementation of its pass
 // order. The only synthetic input is a uniform temporal field and fresh ink.
 const base = process.env.FLOW_HISTORY_RETAINED_BASE ?? 'http://127.0.0.1:5173'
+const samplerParameters = await readFile(new URL('./support/flow-single-level-stub.wgsl',import.meta.url),'utf8')
 async function facadeFrom(module, exportedName) {
     const response = await fetch(`${base}${module}`)
     assert.ok(response.ok, `Vite must serve ${module}`)
@@ -25,7 +27,7 @@ try {
         contentType:'text/html',body:'<!doctype html><title>Flow history retained proof</title><canvas id="proof" width="32" height="8"></canvas>',
     }))
     await page.goto(`${base}/__flow_history_retained_proof.html`)
-    const proof = await page.evaluate(async ({scratchUrl,geoUrl}) => {
+    const proof = await page.evaluate(async ({scratchUrl,geoUrl,samplerParameters}) => {
         const {GPURuntime,layoutCodec} = await import(scratchUrl)
         const {WebMercatorQuad,tileMatrixCoverage,webMercatorVirtualRasterField} = await import(geoUrl)
         const {createFlowHistory} = await import('/flowField/flow-history.ts')
@@ -72,7 +74,7 @@ try {
             // shader compiles. B's reconstruction is disabled for this graph
             // ownership proof; the B mathematics has its own native tests.
             const temporal = model.addressCodec.wgslModule({namespace:'FlowVelocityAddress'}) +
-                '\n'+registrationModule.code.slice(0,registrationEnd)+`
+                '\n'+registrationModule.code.slice(0,registrationEnd)+'\n'+samplerParameters+`
 struct FlowVelocityTemporal { progress:f32, activityKill:f32, }
 struct FlowVelocitySample { status:u32, velocity:vec2f, speed:f32, advectable:bool, resolved_level:u32, }
 struct FixtureTexel { status:u32, value:vec4f, resolved_level:u32, }
@@ -398,7 +400,7 @@ fn FlowVelocity_sample(p:FlowVelocityAddressFixedPosition,l:u32,t:FlowVelocityTe
             for(const resource of owned.reverse()) resource.dispose()
             runtime.dispose()
         }
-    },{scratchUrl,geoUrl})
+    },{scratchUrl,geoUrl,samplerParameters})
     assert.deepEqual(errors,[])
     console.log(JSON.stringify({status:'passed',proof,errors},null,2))
 } finally { await browser.close() }

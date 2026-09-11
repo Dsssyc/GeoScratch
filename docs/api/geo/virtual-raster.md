@@ -10,6 +10,9 @@ apiSources:
   - packages/geoscratch/src/geo/virtual-raster-transfer.ts
   - packages/geoscratch/src/geo/virtual-raster-worker-executor.ts
   - packages/geoscratch/src/geo/virtual-raster.ts
+  - packages/geoscratch/src/geo/web-mercator-virtual-raster-sampler-metadata.ts
+  - packages/geoscratch/src/geo/web-mercator-virtual-raster-sampler-binding.ts
+  - packages/geoscratch/src/geo/web-mercator-virtual-raster-wgsl.ts
 ---
 # Virtual Raster
 
@@ -92,6 +95,48 @@ shape and treats an identity mismatch as a cache miss rather than adopting stale
 Applications can use Virtual Raster for DEM, imagery,
 flow fields, classifications, simulation grids, or editable rasters without coupling
 their shaders to tile neighbors or atlas coordinates.
+
+`prepareWebMercatorVirtualRasterSampler(model)` prepares source interpretation as
+CPU metadata with a fixed 1,808-byte uniform layout. It borrows one immutable,
+coherent WebMercator field model and owns a private packed copy. `pack()` returns
+fresh caller-owned bytes; changing those bytes cannot mutate the preparation.
+Preparation performs no GPU allocation, upload, residency publication, or sampling.
+The layout describes source bounds, decoding parameters, local sampling levels,
+pixel-center offsets, and a direct matrix-to-local-level map for the built-in
+WebMercatorQuad range 0–24. Missing matrix ids are explicit sentinels; local level
+indices are not interchangeable with matrix ids. Page offsets retain the source's
+compact row-major coverage identity. Incoherent model ownership fails with
+`GEO_RASTER_SAMPLER_METADATA_INVALID` in the `sampling` phase.
+
+`createWebMercatorVirtualRasterSamplerBinding(model, gpu)` borrows a matching live
+`VirtualRasterGpuState` and owns only its immutable metadata buffer. It initializes
+UNIFORM-only storage through an explicit mapped-creation lease, then releases the
+mapping before exposing the binding. It performs no queue submission or residency
+publication. The returned metadata region, page-table region and atlas view describe
+one coherent source interpretation; `resources` includes all three dependencies.
+`dispose()` releases only metadata and is idempotent. Callers retain the borrowed
+raster and settle every frame using the binding before disposal. A different or
+disposed raster fails with `GEO_RASTER_SAMPLER_BINDING_MISMATCH`; allocation/mapping
+failures retain Scratch diagnostics and release owned partial resources. Disposal of
+the borrowed raster while metadata creation is pending is checked again before return.
+
+`webMercatorVirtualRasterWgslModule(model, options)` accepts an optional distinct
+`metadataBinding` uniform slot. With that slot it reads prepared source parameters
+instead of specializing them into shader constants. Identical namespaces, binding
+slots, coordinate precision and transition-width policy generate identical code
+across coverage, bounds and decoding changes. The binding must carry the model's
+matching coordinate encoding. Without the slot, constant-generated sampling remains
+available for existing consumers and reference proofs.
+`addressCode` and `samplingCode` are explicit composition parts; `code` joins them.
+The address part's coverage lookup belongs to its sampler metadata. Consumers sharing
+one address part must share coordinate encoding and respect that coverage authority;
+each sampler resolves its own page table directly from its local level record.
+Metadata binding includes parameter accessors; constant-generated consumers opt in
+with `parameterAccessors: true`. Default constant-generated WGSL remains unchanged.
+These accessors expose level count, page size, matrix/texel bounds,
+half-texel limbs and source containment without exposing uniform member names to
+extension shaders. Missing, failed, NoData, fallback and full footprint interpolation
+retain their sampling meanings. This introduces no Worker, cache or camera policy.
 
 ## Related decisions
 

@@ -446,7 +446,7 @@ export async function createFlowSpawnIndex(
             throw new RangeError('Flow spawn capacity must cover every input group without truncation')
         }
         validateSnapshot(snapshot)
-        validateTemporalFrame(runtime, temporal.layout, temporalFrame)
+        validateTemporalFrame(runtime, temporal, temporalFrame)
         if (temporalFrame.pairGeneration !== snapshot.generation ||
             temporalFrame.progress !== snapshot.progress) {
             throw new Error('Flow spawn index temporal frame progress is stale')
@@ -686,12 +686,12 @@ function validateTemporalBinding(runtime: GPURuntime, temporal: FlowSpawnTempora
 
 function validateTemporalFrame(
     runtime: GPURuntime,
-    layout: BindLayout,
+    temporal: FlowSpawnTemporalBinding,
     frame: FlowSpawnTemporalFrame
 ): void {
     if (frame?.state !== 'ready' || frame.bindSet?.runtime !== runtime ||
-        frame.bindSet.layout !== layout ||
-        !Array.isArray(frame.resources) || frame.resources.length !== 4 ||
+        frame.bindSet.layout !== temporal.layout ||
+        !Array.isArray(frame.resources) || frame.resources.length !== (temporal.module.bindings.current?.metadata === undefined ? 4 : 6) ||
         frame.resources.some(resource => resource?.runtime !== runtime) ||
         !Number.isSafeInteger(frame.requestedRevision) || frame.requestedRevision <= 0 ||
         !Number.isSafeInteger(frame.pairGeneration) || frame.pairGeneration <= 0 ||

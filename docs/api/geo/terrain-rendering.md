@@ -4,11 +4,14 @@ canonical: true
 apiSources:
   - packages/geoscratch/src/geo/web-mercator-terrain-renderer.ts
   - packages/geoscratch/src/geo/web-mercator-terrain-wgsl.ts
-  - packages/geoscratch/src/geo/web-mercator-virtual-raster-wgsl.ts
 ---
 # Terrain Rendering
 
 [简体中文](./terrain-rendering_zh.md) | [Geo overview](./README.md)
+
+The general raster WGSL and sampler metadata contracts are documented under
+[Virtual Raster](./virtual-raster.md). Terrain continues to compose its existing
+constant-generated height sampler.
 
 `createWebMercatorTerrainRenderer` is Geo's OGC `WebMercatorQuad` terrain
 orchestrator. It composes one `MapFieldLayer`, prepared Virtual Raster runtime,

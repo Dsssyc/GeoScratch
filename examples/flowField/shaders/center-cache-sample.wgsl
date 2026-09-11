@@ -13,10 +13,10 @@ fn FlowCenterCached_coverage(position: FlowVelocityAddressFixedPosition) -> f32 
     let level = boundaryUniform.requestedLevel;
     if (flowCenterCacheConfig.pageCount == 0u || flowCenterCacheConfig.level != level ||
         flowCenterCacheConfig.kill != boundaryUniform.activityKill ||
-        level >= FlowVelocityCurrent_level_count || !FlowVelocity_nearest_zero_gate ||
+        level >= FlowVelocityCurrent_level_count_value() || !FlowVelocity_nearest_zero_gate ||
         !FlowVelocity_source_contains(position)) { return FlowCenter_coverage(position); }
     let registered = FlowVelocityRegistration_position(position, level);
-    let address = FlowVelocityAddress_address(registered, FlowVelocityCurrent_matrix[level]);
+    let address = FlowVelocityAddress_address(registered, FlowVelocityCurrent_matrix_at(level));
     if (address.covered == 0u || address.compact_index >= flowCenterCacheConfig.lookupCount ||
         address.compact_index >= arrayLength(&flowCenterCacheLookup)) { return FlowCenter_coverage(position); }
     let encodedSlot = flowCenterCacheLookup[address.compact_index];
@@ -26,9 +26,9 @@ fn FlowCenterCached_coverage(position: FlowVelocityAddressFixedPosition) -> f32 
     // Owner-known records already prove all four source texels are exact at the
     // cache's current publication epochs. Keep the sampler's spatial transition
     // checks, but do not repeat its eight resolution lookups at every fragment.
-    if (level + 1u < FlowVelocityCurrent_level_count &&
+    if (level + 1u < FlowVelocityCurrent_level_count_value() &&
         FlowVelocityCurrent_edge_blend_weight(registered, level) < 1.0) { return FlowBoundary_hard_coverage(position, level); }
-    if (level + 1u < FlowVelocityNext_level_count &&
+    if (level + 1u < FlowVelocityNext_level_count_value() &&
         FlowVelocityNext_edge_blend_weight(registered, level) < 1.0) { return FlowBoundary_hard_coverage(position, level); }
     var packedSamples: array<u32, 4>;
     var minimum = vec2u(1u);

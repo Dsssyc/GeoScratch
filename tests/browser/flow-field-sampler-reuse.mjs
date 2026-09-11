@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { chromium } from 'playwright'
-import { WebMercatorQuad,tileMatrixCoverage,webMercatorVirtualRasterField } from 'geoscratch/geo'
+import { WebMercatorQuad,tileMatrixCoverage,webMercatorVirtualRasterField,prepareWebMercatorVirtualRasterSampler } from 'geoscratch/geo'
 import { temporalVelocityWgslModule } from '../../examples/flowField/temporal-velocity-raster.ts'
 
 const wrapper=await readFile(new URL('../../examples/flowField/shaders/temporal-velocity.wgsl',import.meta.url),'utf8')
@@ -16,6 +16,10 @@ const model=webMercatorVirtualRasterField({id:'sampler-reuse-proof',addressSpace
 assert.equal(model.addressSpace.levelCount,3)
 const optimized=temporalVelocityWgslModule(model,model,{group:1,currentPageTableBinding:0,currentAtlasBinding:1,
     nextPageTableBinding:2,nextAtlasBinding:3,transitionTexels:4,sampleRegistration:'pixel-center',activitySupport:'nearest-texel-zero',wrapper}).code
+const metadataSource=temporalVelocityWgslModule(model,model,{group:1,currentPageTableBinding:0,currentAtlasBinding:1,
+    nextPageTableBinding:2,nextAtlasBinding:3,currentMetadataBinding:4,nextMetadataBinding:5,transitionTexels:4,
+    sampleRegistration:'pixel-center',activitySupport:'nearest-texel-zero',wrapper}).code
+const metadata=[...prepareWebMercatorVirtualRasterSampler(model).pack()]
 
 // Frozen 8e38f5f no-NoData registration oracle. It deliberately retains the
 // preflight -> core sample_level path, on the SAME real generated Geo samplers.
@@ -163,7 +167,7 @@ let browser
 try {
     browser=await chromium.launch({channel:'chrome',headless:true,args:['--enable-unsafe-webgpu']})
     const page=await browser.newPage();await page.goto(`http://127.0.0.1:${server.address().port}`)
-    const proof=await page.evaluate(async ({codes,fixtures,cases,positions,assets})=>{
+    const proof=await page.evaluate(async ({codes,fixtures,cases,positions,assets,metadata})=>{
         const adapter=await navigator.gpu.requestAdapter();if(!adapter)throw new Error('WebGPU unavailable')
         const device=await adapter.requestDevice(),owned=[],errors=[]
         device.addEventListener('uncapturederror',event=>errors.push(event.error.message));device.pushErrorScope('validation')
@@ -172,7 +176,7 @@ try {
             const visibility=GPUShaderStage.COMPUTE
             const layouts=[device.createBindGroupLayout({entries:[{binding:0,visibility,buffer:{type:'uniform'}}]}),
                 device.createBindGroupLayout({entries:[{binding:0,visibility,buffer:{type:'read-only-storage'}},{binding:1,visibility,texture:{sampleType:'unfilterable-float'}},
-                    {binding:2,visibility,buffer:{type:'read-only-storage'}},{binding:3,visibility,texture:{sampleType:'unfilterable-float'}}]}),
+                    {binding:2,visibility,buffer:{type:'read-only-storage'}},{binding:3,visibility,texture:{sampleType:'unfilterable-float'}},{binding:4,visibility,buffer:{type:'uniform'}},{binding:5,visibility,buffer:{type:'uniform'}}]}),
                 device.createBindGroupLayout({entries:[{binding:0,visibility,buffer:{type:'read-only-storage'}},{binding:1,visibility,buffer:{type:'storage'}}]})]
             const pipelineLayout=device.createPipelineLayout({bindGroupLayouts:layouts}),pipelines=[]
             for(const code of codes) {
@@ -185,40 +189,42 @@ try {
                 const texture=device.createTexture({size:[768,768],format:'rg32float',usage:GPUTextureUsage.TEXTURE_BINDING|GPUTextureUsage.COPY_DST});owned.push(texture)
                 device.queue.writeTexture({texture},Uint8Array.from(atob(base64),c=>c.charCodeAt(0)),{bytesPerRow:6144},[768,768]);textures[key]=texture
             }
+            const metadataBuffer=buffer(new Uint8Array(metadata),GPUBufferUsage.UNIFORM)
             const groups=fixtures.map(fixture=>{
                 const tables=fixture.pages.map(value=>buffer(new Uint32Array(value),GPUBufferUsage.STORAGE))
                 return device.createBindGroup({layout:layouts[1],entries:[{binding:0,resource:{buffer:tables[0]}},{binding:1,resource:textures[`${fixture.field}-0`].createView()},
-                    {binding:2,resource:{buffer:tables[1]}},{binding:3,resource:textures[`${fixture.field}-1`].createView()}]})
+                    {binding:2,resource:{buffer:tables[1]}},{binding:3,resource:textures[`${fixture.field}-1`].createView()},{binding:4,resource:{buffer:metadataBuffer}},{binding:5,resource:{buffer:metadataBuffer}}]})
             })
             const count=positions.length/4,bytes=count*48,positionBuffer=buffer(new Uint32Array(positions),GPUBufferUsage.STORAGE)
             const output=buffer(new Uint8Array(bytes),GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_SRC)
             const outputGroup=device.createBindGroup({layout:layouts[2],entries:[{binding:0,resource:{buffer:positionBuffer}},{binding:1,resource:{buffer:output}}]})
-            const readback=device.createBuffer({size:cases.length*2*bytes,usage:GPUBufferUsage.MAP_READ|GPUBufferUsage.COPY_DST});owned.push(readback)
+            const readback=device.createBuffer({size:cases.length*3*bytes,usage:GPUBufferUsage.MAP_READ|GPUBufferUsage.COPY_DST});owned.push(readback)
             const encoder=device.createCommandEncoder()
             for(const [index,entry] of cases.entries()) {
                 const config=new ArrayBuffer(16),view=new DataView(config)
                 view.setUint32(0,fixtures[entry.fixture].requested,true);view.setFloat32(4,entry.progress,true);view.setFloat32(8,.001,true);view.setUint32(12,Number(entry.owner),true)
                 const uniform=buffer(config,GPUBufferUsage.UNIFORM)
                 const control=device.createBindGroup({layout:layouts[0],entries:[{binding:0,resource:{buffer:uniform}}]})
-                for(let mode=0;mode<2;mode++) {
+                for(let mode=0;mode<3;mode++) {
                     const pass=encoder.beginComputePass();pass.setPipeline(pipelines[mode]);pass.setBindGroup(0,control);pass.setBindGroup(1,groups[entry.fixture]);pass.setBindGroup(2,outputGroup)
-                    pass.dispatchWorkgroups(Math.ceil(count/64));pass.end();encoder.copyBufferToBuffer(output,0,readback,(index*2+mode)*bytes,bytes)
+                    pass.dispatchWorkgroups(Math.ceil(count/64));pass.end();encoder.copyBufferToBuffer(output,0,readback,(index*3+mode)*bytes,bytes)
                 }
             }
             device.queue.submit([encoder.finish()]);await readback.mapAsync(GPUMapMode.READ)
             const data=new DataView(readback.getMappedRange())
-            const rows=cases.map((_,index)=>[0,1].map(mode=>Array.from({length:count},(_,probe)=>{
-                const base=((index*2+mode)*count+probe)*48
+            const rows=cases.map((_,index)=>[0,1,2].map(mode=>Array.from({length:count},(_,probe)=>{
+                const base=((index*3+mode)*count+probe)*48
                 return Array.from({length:12},(_,word)=>word<4?data.getFloat32(base+word*4,true):data.getUint32(base+word*4,true))
             })))
             readback.unmap();await device.queue.onSubmittedWorkDone();const validation=await device.popErrorScope()
             if(validation)throw new Error(validation.message);if(errors.length)throw new Error(errors.join('\n'))
             return {rows,errors,readbacks:1}
         } finally {for(const resource of owned)resource.destroy();device.destroy()}
-    },{codes:[program(previous,true),program(optimized,true)],fixtures,cases,positions,assets})
+    },{codes:[program(previous,true),program(optimized,true),program(metadataSource,true)],fixtures,cases,positions,assets,metadata})
     let maximumValueDifference=0
     for(const [index,entry] of cases.entries())for(let probe=0;probe<probes.length;probe++) {
-        const [old,value]=proof.rows[index].map(rows=>rows[probe])
+        const [old,value,metadataValue]=proof.rows[index].map(rows=>rows[probe])
+        assert.deepEqual(metadataValue.slice(0,6),value.slice(0,6),`${entry.name}/${probes[probe].name}: metadata sampler differs`)
         assert.deepEqual(value.slice(3,6),old.slice(3,6),`${entry.name}/${probes[probe].name}: exact status, resolved level and advectability`)
         for(let channel=0;channel<3;channel++) {
             const difference=Math.abs(value[channel]-old[channel]);maximumValueDifference=Math.max(maximumValueDifference,difference)
@@ -252,10 +258,10 @@ try {
             }
             return {name,fixture:fixtures.find(fixture=>fixture.name===name),positions:samples}
         })
-        const timingCodes=[program(previous,false),program(optimized,false)]
+        const timingCodes=[program(previous,false),program(optimized,false),program(metadataSource,false)]
         assert.ok(timingCodes.every(code=>!code.includes('fixtureResolutionCalls')&&!code.includes('fixtureLoadCalls')&&!code.includes('fixtureTexelLoads')),
             'Timestamp programs contain no diagnostic counters')
-        const timing=await page.evaluate(async ({codes,scenarios,assets,queryCount})=>{
+        const timing=await page.evaluate(async ({codes,scenarios,assets,queryCount,metadata})=>{
             const adapter=await navigator.gpu.requestAdapter();if(!adapter)throw new Error('WebGPU unavailable')
             if(!adapter.features.has('timestamp-query'))return {status:'unsupported',reason:'timestamp-query unavailable'}
             const device=await adapter.requestDevice({requiredFeatures:['timestamp-query']}),owned=[],errors=[]
@@ -265,7 +271,7 @@ try {
                 const visibility=GPUShaderStage.COMPUTE
                 const layouts=[device.createBindGroupLayout({entries:[{binding:0,visibility,buffer:{type:'uniform'}}]}),
                     device.createBindGroupLayout({entries:[{binding:0,visibility,buffer:{type:'read-only-storage'}},{binding:1,visibility,texture:{sampleType:'unfilterable-float'}},
-                        {binding:2,visibility,buffer:{type:'read-only-storage'}},{binding:3,visibility,texture:{sampleType:'unfilterable-float'}}]}),
+                        {binding:2,visibility,buffer:{type:'read-only-storage'}},{binding:3,visibility,texture:{sampleType:'unfilterable-float'}},{binding:4,visibility,buffer:{type:'uniform'}},{binding:5,visibility,buffer:{type:'uniform'}}]}),
                     device.createBindGroupLayout({entries:[{binding:0,visibility,buffer:{type:'read-only-storage'}},{binding:1,visibility,buffer:{type:'storage'}}]})]
                 const pipelineLayout=device.createPipelineLayout({bindGroupLayouts:layouts}),pipelines=[]
                 for(const code of codes) {
@@ -286,36 +292,37 @@ try {
                 const queries=device.createQuerySet({type:'timestamp',count:2});owned.push(queries)
                 const resolved=device.createBuffer({size:16,usage:GPUBufferUsage.QUERY_RESOLVE|GPUBufferUsage.COPY_SRC});owned.push(resolved)
                 const readback=device.createBuffer({size:16,usage:GPUBufferUsage.MAP_READ|GPUBufferUsage.COPY_DST});owned.push(readback)
+                const metadataBuffer=buffer(new Uint8Array(metadata),GPUBufferUsage.UNIFORM)
                 const measurements=[]
                 for(const scenario of scenarios) {
                     const tables=scenario.fixture.pages.map(value=>buffer(new Uint32Array(value),GPUBufferUsage.STORAGE))
                     const fields=device.createBindGroup({layout:layouts[1],entries:[{binding:0,resource:{buffer:tables[0]}},{binding:1,resource:textures[0].createView()},
-                        {binding:2,resource:{buffer:tables[1]}},{binding:3,resource:textures[1].createView()}]})
+                        {binding:2,resource:{buffer:tables[1]}},{binding:3,resource:textures[1].createView()},{binding:4,resource:{buffer:metadataBuffer}},{binding:5,resource:{buffer:metadataBuffer}}]})
                     const positions=buffer(new Uint32Array(scenario.positions),GPUBufferUsage.STORAGE)
                     const resultGroup=device.createBindGroup({layout:layouts[2],entries:[{binding:0,resource:{buffer:positions}},{binding:1,resource:{buffer:output}}]})
-                    const samples=[[],[]]
-                    // ABBA order, four warm-up passes then 24 measured passes.
-                    for(let i=0;i<28;i++) {
-                        const mode=[0,1,1,0][i%4],encoder=device.createCommandEncoder()
+                    const samples=[[],[],[]]
+                    // Mirrored order, six warm-up passes then 36 measured passes.
+                    for(let i=0;i<42;i++) {
+                        const mode=[0,1,2,2,1,0][i%6],encoder=device.createCommandEncoder()
                         const pass=encoder.beginComputePass({timestampWrites:{querySet:queries,beginningOfPassWriteIndex:0,endOfPassWriteIndex:1}})
                         pass.setPipeline(pipelines[mode]);pass.setBindGroup(0,control);pass.setBindGroup(1,fields);pass.setBindGroup(2,resultGroup)
                         pass.dispatchWorkgroups(queryCount/64);pass.end();encoder.resolveQuerySet(queries,0,2,resolved,0)
                         encoder.copyBufferToBuffer(resolved,0,readback,0,16);device.queue.submit([encoder.finish()])
                         await readback.mapAsync(GPUMapMode.READ);const times=new BigUint64Array(readback.getMappedRange())
                         const ms=Number(times[1]-times[0])/1e6;readback.unmap()
-                        if(i>=4)samples[mode].push(ms)
+                        if(i>=6)samples[mode].push(ms)
                     }
                     const summarize=values=>{
                         const sorted=[...values].sort((a,b)=>a-b)
                         return {meanMs:values.reduce((sum,value)=>sum+value,0)/values.length,p50Ms:(sorted[5]+sorted[6])/2,samples:values.length}
                     }
-                    measurements.push({name:scenario.name,previous:summarize(samples[0]),optimized:summarize(samples[1])})
+                    measurements.push({name:scenario.name,previous:summarize(samples[0]),optimized:summarize(samples[1]),metadata:summarize(samples[2])})
                 }
                 await device.queue.onSubmittedWorkDone();const validation=await device.popErrorScope()
                 if(validation)throw new Error(validation.message);if(errors.length)throw new Error(errors.join('\n'))
-                return {status:'measured',counterFree:true,queryCount,measurements,errors}
+                return {status:'measured',counterFree:true,queryCount,measurements,errors,adapter:{vendor:adapter.info.vendor,architecture:adapter.info.architecture,device:adapter.info.device,description:adapter.info.description}}
             } finally {for(const resource of owned)resource.destroy();device.destroy()}
-        },{codes:timingCodes,scenarios,assets:[assets['gradient-0'],assets['gradient-1']],queryCount})
+        },{codes:timingCodes,scenarios,assets:[assets['gradient-0'],assets['gradient-1']],queryCount,metadata})
         console.log(JSON.stringify({benchmark:'registered-sampler-reuse',...timing}))
     }
 } finally {await browser?.close();await new Promise(resolve=>server.close(resolve))}

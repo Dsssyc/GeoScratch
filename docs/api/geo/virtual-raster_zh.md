@@ -2,7 +2,7 @@
 docId: geo.virtual-raster.zh
 canonical: false
 translationOf: ./virtual-raster.md
-canonicalDigest: 99878612e8a682eee8518c8c3c645b9f862b3e95829d25cc24ff4c5696b94e3f
+canonicalDigest: 65e5efd49aa6a95e2ce0490dc1eb29f6dad4e666a7fb66787cd9853696cbfff5
 ---
 # Virtual Raster
 
@@ -82,3 +82,36 @@ grid 或 editable raster，而无需让 shader 与 tile neighbor 或 atlas coord
 - `docs/decisions/ADR-072-worker-context-pool-and-typed-protocols.md`
 - `docs/decisions/ADR-073-virtual-raster-executor-authority.md`
 - `docs/decisions/ADR-085-maplibre-readiness-and-raster-source-boundaries.md`
+
+
+`prepareWebMercatorVirtualRasterSampler(model)` 将数据源解释准备为 CPU 元数据，
+使用固定 1,808 字节的 uniform 布局。它借用一个不可变且内部一致的 WebMercator
+场模型，并拥有私有的打包副本。`pack()` 返回调用方拥有的新字节副本，修改该副本
+不会改变准备产物。准备过程不分配 GPU 资源、不上传、不发布驻留状态，也不执行采样。
+布局描述源范围、解码参数、局部采样层级、像素中心偏移，以及内置 WebMercatorQuad
+0–24 级的矩阵到局部层级直接映射。缺失矩阵 id 使用显式哨兵；局部层级索引不能
+与矩阵 id 混用。页表偏移保留数据源紧凑覆盖的行优先身份。模型所有权不一致会在
+`sampling` 阶段报告 `GEO_RASTER_SAMPLER_METADATA_INVALID`。
+
+`createWebMercatorVirtualRasterSamplerBinding(model, gpu)` 借用匹配且存活的
+`VirtualRasterGpuState`，仅拥有不可变元数据缓冲区。它通过显式创建时映射 lease
+初始化仅具备 UNIFORM 用途的存储，并在暴露绑定前释放映射；不提交队列工作，也不
+发布驻留状态。返回的元数据 region、页表 region 和 atlas view 描述同一份源解释，
+`resources` 列出三者依赖。幂等的 `dispose()` 只释放元数据。调用方须保持借用的
+raster 存活，并在释放绑定前等待使用它的所有帧完成。不同或已释放的 raster 报告
+`GEO_RASTER_SAMPLER_BINDING_MISMATCH`；分配和映射失败保留 Scratch 诊断并清理
+部分自有资源。异步创建元数据期间 raster 被释放，也会在返回前再次检查并拒绝。
+
+`webMercatorVirtualRasterWgslModule(model, options)` 接受可选且独立的
+`metadataBinding` uniform 槽位。指定后，从准备好的元数据读取源参数，不将其固化为
+shader 常量。命名空间、绑定槽位、坐标精度和过渡宽度策略相同的情况下，改变 coverage、
+范围和解码参数生成相同代码；绑定的坐标编码必须与模型匹配。省略该槽位时，现有消费者
+和参考证明仍可使用常量生成路径。
+`addressCode` 和 `samplingCode` 是显式组合部分，`code` 连接两者。地址部分的覆盖
+查询属于该 sampler 的元数据；共享地址部分的消费者必须共享坐标编码并遵守该覆盖
+所有权。每个 sampler 通过自身局部层级记录直接解析自己的页表。元数据绑定包含参数
+访问函数，常量生成消费者可通过 `parameterAccessors: true` 显式包含它们；默认常量
+生成 WGSL 保持不变。参数访问函数
+提供层级数、页尺寸、矩阵/texel 边界、半 texel 整数 limbs 和源包含判断，使扩展 shader
+无需依赖 uniform 成员名。missing、failed、NoData、fallback 与完整 footprint 插值
+保留原有采样含义，不引入 Worker、缓存或相机策略。

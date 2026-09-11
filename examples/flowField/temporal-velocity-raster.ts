@@ -14,6 +14,8 @@ export type TemporalVelocityWgslOptions = Readonly<{
     currentAtlasBinding: number
     nextPageTableBinding: number
     nextAtlasBinding: number
+    currentMetadataBinding?: number
+    nextMetadataBinding?: number
     wrapper: string
     transitionTexels?: number
     sampleRegistration?: 'global-texel-lattice' | 'pixel-center'
@@ -27,8 +29,8 @@ export type TemporalVelocityWgslModule = Readonly<{
     code: string
     bindings: Readonly<{
         group: number
-        current: Readonly<{ pageTable: number, atlas: number }>
-        next: Readonly<{ pageTable: number, atlas: number }>
+        current: Readonly<{ pageTable: number, atlas: number, metadata?: number }>
+        next: Readonly<{ pageTable: number, atlas: number, metadata?: number }>
     }>
 }>
 
@@ -52,11 +54,13 @@ export function temporalVelocityWgslModule(
             'Temporal velocity WGSL sampleRegistration must be global-texel-lattice or pixel-center'
         )
     }
+    const metadata = options?.currentMetadataBinding !== undefined || options?.nextMetadataBinding !== undefined
     const bindings = [
         options?.currentPageTableBinding,
         options?.currentAtlasBinding,
         options?.nextPageTableBinding,
         options?.nextAtlasBinding,
+        ...(metadata ? [options?.currentMetadataBinding, options?.nextMetadataBinding] : []),
     ]
     if (!Number.isSafeInteger(options?.group) || options.group < 0 ||
         bindings.some(value => !Number.isSafeInteger(value) || Number(value) < 0) ||
@@ -65,7 +69,6 @@ export function temporalVelocityWgslModule(
         throw new TypeError('Temporal velocity WGSL requires distinct bindings and its sample wrapper')
     }
     const addressNamespace = 'FlowVelocityAddress'
-    const sharedAddress = current.addressCodec.wgslModule({ namespace: addressNamespace })
     const registrationNamespace = 'FlowVelocityRegistration'
     const currentSamplerNamespace = 'FlowVelocityCurrent'
     const nextSamplerNamespace = 'FlowVelocityNext'
@@ -84,38 +87,38 @@ export function temporalVelocityWgslModule(
         )
     const currentModule = webMercatorVirtualRasterWgslModule(current, {
         namespace: currentSamplerNamespace,
+        parameterAccessors: true,
         addressNamespace,
         group: options.group,
         pageTableBinding: options.currentPageTableBinding,
         atlasBinding: options.currentAtlasBinding,
+        ...(metadata ? {metadataBinding: options.currentMetadataBinding!} : {}),
         ...(options.transitionTexels === undefined
             ? {}
             : { transitionTexels: options.transitionTexels }),
     })
     const nextModule = webMercatorVirtualRasterWgslModule(next, {
         namespace: nextSamplerNamespace,
+        parameterAccessors: true,
         addressNamespace,
         group: options.group,
         pageTableBinding: options.nextPageTableBinding,
         atlasBinding: options.nextAtlasBinding,
+        ...(metadata ? {metadataBinding: options.nextMetadataBinding!} : {}),
         ...(options.transitionTexels === undefined
             ? {}
             : { transitionTexels: options.transitionTexels }),
     })
-    const prefix = sharedAddress + '\n\n'
-    if (!currentModule.code.startsWith(prefix) || !nextModule.code.startsWith(prefix)) {
-        throw new TypeError('Temporal velocity models do not share one public address module')
-    }
     return Object.freeze({
         kind: 'temporal-velocity-wgsl-module',
         sampleRegistration,
         activitySupport,
         code: [
-            sharedAddress,
-            currentModule.code.slice(prefix.length),
-            nextModule.code.slice(prefix.length),
+            currentModule.addressCode,
+            currentModule.samplingCode,
+            nextModule.samplingCode,
             registration,
-            flowVelocitySourceBoundsWgsl(current),
+            flowVelocitySourceBoundsWgsl(),
             `const FlowVelocity_nearest_zero_gate = ${activitySupport === 'nearest-texel-zero'};`,
             flowSpawnSupportWgsl(),
             options.wrapper,
@@ -125,10 +128,12 @@ export function temporalVelocityWgslModule(
             current: Object.freeze({
                 pageTable: options.currentPageTableBinding,
                 atlas: options.currentAtlasBinding,
+                ...(metadata ? {metadata: options.currentMetadataBinding!} : {}),
             }),
             next: Object.freeze({
                 pageTable: options.nextPageTableBinding,
                 atlas: options.nextAtlasBinding,
+                ...(metadata ? {metadata: options.nextMetadataBinding!} : {}),
             }),
         }),
     })
@@ -136,7 +141,7 @@ export function temporalVelocityWgslModule(
 
 function flowSpawnSupportWgsl(): string {
     return `fn FlowVelocity_spawn_possible(position: FlowVelocityAddressFixedPosition, level: u32) -> bool {
-    if (level >= FlowVelocityCurrent_level_count || !FlowVelocity_source_contains(position)) { return false; }
+    if (level >= FlowVelocityCurrent_level_count_value() || !FlowVelocity_source_contains(position)) { return false; }
     let current = FlowVelocityCurrent_load_position(position, level);
     let next = FlowVelocityNext_load_position(position, level);
     if (current.status == 4u || next.status == 4u) { return false; }
@@ -174,30 +179,10 @@ fn ${namespace}_sample_next(
 }`
 }
 
-function flowVelocitySourceBoundsWgsl(model: WebMercatorVirtualRasterField): string {
+function flowVelocitySourceBoundsWgsl(): string {
 
-    const [ west, south, east, north ] = model.geographicBounds
-    const northwest = model.addressCodec.fromLonLat([ west, north ]).fixed.limbs
-    const southeast = model.addressCodec.fromLonLat([ east, south ]).fixed.limbs
-    const axis = (value: Readonly<{ low: number, high: number }>) =>
-        `FlowVelocityAddressFixedAxis(${value.low}u, ${value.high}u)`
-    return `const FlowVelocity_source_west = ${axis(northwest[0]!)};
-const FlowVelocity_source_north = ${axis(northwest[1]!)};
-const FlowVelocity_source_east = ${axis(southeast[0]!)};
-const FlowVelocity_source_south = ${axis(southeast[1]!)};
-
-fn FlowVelocity_axis_less(
-    left: FlowVelocityAddressFixedAxis,
-    right: FlowVelocityAddressFixedAxis,
-) -> bool {
-    return left.high < right.high || (left.high == right.high && left.low < right.low);
-}
-
-fn FlowVelocity_source_contains(position: FlowVelocityAddressFixedPosition) -> bool {
-    return !FlowVelocity_axis_less(position.axes[0], FlowVelocity_source_west) &&
-        !FlowVelocity_axis_less(FlowVelocity_source_east, position.axes[0]) &&
-        !FlowVelocity_axis_less(position.axes[1], FlowVelocity_source_north) &&
-        !FlowVelocity_axis_less(FlowVelocity_source_south, position.axes[1]);
+    return `fn FlowVelocity_source_contains(position: FlowVelocityAddressFixedPosition) -> bool {
+    return FlowVelocityCurrent_source_contains(position) && FlowVelocityNext_source_contains(position);
 }`
 }
 

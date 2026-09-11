@@ -89,6 +89,7 @@ struct FlowVelocityAddressFixedPosition { fixture: u32, }
 struct TestSample { value: vec2f, status: u32, resolved_level: u32, }
 struct TestControl { requested: u32, inside: u32, progress: f32, kill: f32, }
 const FlowVelocityCurrent_level_count = ${levelCount}u;
+fn FlowVelocityCurrent_level_count_value() -> u32 { return FlowVelocityCurrent_level_count; }
 const FlowVelocity_nearest_zero_gate = false;
 @group(0) @binding(0) var<storage, read> controls: array<TestControl>;
 @group(0) @binding(1) var<storage, read> samples: array<TestSample>;

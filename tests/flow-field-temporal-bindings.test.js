@@ -80,6 +80,7 @@ describe('Flow Field temporal bindings', () => {
         expect(current).to.deep.include({ state: 'ready', pairGeneration: 2, progress: 0.4 })
         expect(current.bindSet).to.not.equal(oldSet)
         expect(oldSet.isDisposed).to.equal(false)
+        expect(oldFrame.resources.slice(4).every(resource => !resource.isDisposed)).to.equal(true)
         expect(fixture.events.indexOf('create-set:g2')).to.be.greaterThan(
             fixture.events.indexOf('create-set:g1')
         )
@@ -94,6 +95,7 @@ describe('Flow Field temporal bindings', () => {
         expect(oldSet.isDisposed).to.equal(false)
         oldFrame.release()
         expect(oldSet.isDisposed).to.equal(true)
+        expect(oldFrame.resources.slice(4).every(resource => resource.isDisposed)).to.equal(true)
         expect(fixture.events.indexOf('dispose-set:g1')).to.be.lessThan(
             fixture.events.indexOf('release-capture:g1:c1')
         )
@@ -111,6 +113,7 @@ describe('Flow Field temporal bindings', () => {
         const bindings = frame.bindSet.bindings
         expect(bindings.currentPageTable.buffer).to.equal(bindings.nextPageTable.buffer)
         expect(bindings.currentAtlas).to.equal(bindings.nextAtlas)
+        expect(bindings.currentMetadata.buffer).to.equal(bindings.nextMetadata.buffer)
         expect(frame.resources[0]).to.equal(frame.resources[2])
         expect(frame.resources[1]).to.equal(frame.resources[3])
         expect(frame.progress).to.equal(0)
@@ -119,6 +122,37 @@ describe('Flow Field temporal bindings', () => {
         frame.release()
         await provider.dispose()
         expect(fixture.releaseEvents('g2')).to.have.length(2)
+    })
+
+    it('rotates different coverage through one shader contract and keeps old metadata leased', async () => {
+        const fixture = windowFixture(key => {
+            if (key !== 'C' && key !== 'D') return undefined
+            const coverage = tileMatrixCoverage({tileMatrixSet: WebMercatorQuad, limits: [6, 8, 10].map(matrix => {
+                const tile = WebMercatorQuad.tileFromLonLat([10, 1], String(matrix))
+                return {matrixId: String(matrix), minTileCol: tile.tileCol, maxTileCol: tile.tileCol,
+                    minTileRow: tile.tileRow, maxTileRow: tile.tileRow}
+            })})
+            return webMercatorVirtualRasterField({id: key, addressSpaceId: key, sourceRevision: '1', coverage,
+                geographicBounds: [9.9, .9, 10.1, 1.1], fieldKind: 'vector', channels: 2,
+                sampleType: 'float32', gpuFormat: 'rg32float', interpolation: 'linear'})
+        })
+        const provider = await createFlowTemporalBindings({window: fixture.window, wrapper})
+        const code = provider.wgsl, first = await provider.prepareFrame(1)
+        fixture.rotate('C', 'D', .5)
+        const second = await provider.prepareFrame(2)
+        expect(provider.wgsl).to.equal(code)
+        expect(provider.facts().levelCount).to.equal(3)
+        expect(second.bindSet.layout).to.equal(first.bindSet.layout)
+        expect(first.resources.slice(4).every(resource => !resource.isDisposed)).to.equal(true)
+        expect(second.resources[4].data).to.not.deep.equal(first.resources[4].data)
+        first.release(); second.release()
+        expect(first.resources.slice(4).every(resource => resource.isDisposed)).to.equal(true)
+        fixture.rotate('A', 'B', .25)
+        const third = await provider.prepareFrame(1)
+        expect(provider.wgsl).to.equal(code)
+        expect(provider.facts().levelCount).to.equal(2)
+        third.release(); await provider.dispose()
+        expect(third.resources.slice(4).every(resource => resource.isDisposed)).to.equal(true)
     })
 
     it('never exposes the retained pair for loading, gap, or failed window states', async() => {
@@ -349,7 +383,7 @@ describe('Flow Field temporal bindings', () => {
     })
 })
 
-function windowFixture() {
+function windowFixture(modelForKey) {
 
     const events = []
     const runtime = fakeRuntime(events)
@@ -435,7 +469,7 @@ function windowFixture() {
         if (existing !== undefined && existing.source.sampleRegistration === registration) {
             return existing
         }
-        const created = timeRuntime(runtime, key, registration)
+        const created = timeRuntime(runtime, key, registration, modelForKey?.(key))
         runtimes.set(key, created)
         return created
     }
@@ -451,6 +485,8 @@ function windowFixture() {
                 lowerRuntime.gpu.atlasView.texture,
                 upperRuntime.gpu.pageTable,
                 upperRuntime.gpu.atlasView.texture,
+                ...Object.values(runtime.createdSets().at(-1).bindings).filter(value =>
+                    value?.buffer?.isSamplerMetadata).map(value => value.buffer),
             ]
         },
         releaseEvents(generation) {
@@ -511,17 +547,15 @@ function sample(key, index) {
     })
 }
 
-function timeRuntime(runtime, id, sampleRegistration) {
-
-    const model = velocityModel(id)
+function timeRuntime(runtime, id, sampleRegistration, model = velocityModel(id)) {
     const pageTable = fakeResource(runtime, `${id}-page-table`)
     const atlas = fakeResource(runtime, `${id}-atlas`)
     return {
         source: Object.freeze({ sampleRegistration }),
         model,
         gpu: {
-            runtime,
-            pageTable,
+            runtime, addressSpace: model.addressSpace, plane: model.plane,
+            pageTable, atlas,
             atlasView: Object.freeze({ texture: atlas, id: `${id}-atlas-view` }),
         },
     }
@@ -578,7 +612,20 @@ function fakeRuntime(events) {
     let nextSetGate
     let nextSetFailure
     const createdSets = []
+    let metadataSequence = 0
     return {
+        async createMappedBuffer(descriptor) {
+
+            const buffer = fakeResource(this, 'metadata-' + ++metadataSequence)
+            Object.assign(buffer, {isSamplerMetadata: true, isDisposed: false, state: 'pending',
+                size: descriptor.size, usage: descriptor.usage, contentEpoch: 0,
+                dispose() { this.isDisposed = true },
+            })
+            const view = new ArrayBuffer(descriptor.size)
+            return {buffer, lease: {view, dispose() {
+                buffer.state = 'ready'; buffer.contentEpoch = 1; buffer.data = new Uint8Array(view).slice()
+            }}}
+        },
         async createBindLayout(descriptor) {
 
             return {
