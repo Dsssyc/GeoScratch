@@ -130,6 +130,16 @@ history through its existing lifecycle without resetting particles or advancing
 paused simulation. Changes require the trail-quality browser proof, existing
 history/visual-time/camera-continuity gates and measured high-refresh evidence.
 
+Flow Field velocity sampling follows ADR-134: Geo owns immutable sampler metadata
+uniforms and direct local-level indexing. Compatible coverage, bounds and decoding
+changes replace coherent metadata/page-table/atlas bindings while preserving shader
+and pipeline identity. Temporal frame leases retain the old complete binding until
+its work is settled. Do not replace this with source-specific switch generation,
+per-frame metadata uploads, or in-place edits that reinterpret an older frame.
+Coordinate precision, registration and sampling algorithm remain explicit compatibility
+contracts. Keep constant-generated reference samplers and terrain's default WGSL intact;
+verify native parity and actual particle replay when changing the metadata path.
+
 ## Build, Test, and Development Commands
 
 - `npm install`: install dependencies from `package-lock.json`.

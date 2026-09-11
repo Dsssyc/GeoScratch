@@ -682,7 +682,7 @@ function validateTemporalBinding(runtime: GPURuntime, temporal: FlowContourTempo
         temporal.module.bindings.group !== 1 ||
         temporal.layout?.runtime !== runtime || temporal.layout.group !== 1) {
         throw new TypeError(
-            'Flow contour requires one group-1 temporal sampler and four declared resources'
+            'Flow contour requires one group-1 temporal sampler and its declared resources'
         )
     }
 }
@@ -695,14 +695,14 @@ function validateTemporalFrame(
 
     if (frame?.state !== 'ready' || frame.bindSet?.runtime !== runtime ||
         frame.bindSet.layout !== temporal.layout ||
-        !Array.isArray(frame.resources) || frame.resources.length !== 4 ||
+        !Array.isArray(frame.resources) || frame.resources.length !== (temporal.module.bindings.current?.metadata === undefined ? 4 : 6) ||
         frame.resources.some(resource => resource?.runtime !== runtime) ||
         !Number.isSafeInteger(frame.requestedRevision) || frame.requestedRevision <= 0 ||
         !Number.isSafeInteger(frame.pairGeneration) || frame.pairGeneration <= 0 ||
         !Number.isSafeInteger(frame.requestedLevel) || frame.requestedLevel < 0 ||
         !Number.isFinite(frame.progress) || frame.progress < 0 || frame.progress > 1) {
         throw new TypeError(
-            'Flow contour requires one current temporal set and four declared resources'
+            'Flow contour requires one current temporal set and its declared resources'
         )
     }
 }

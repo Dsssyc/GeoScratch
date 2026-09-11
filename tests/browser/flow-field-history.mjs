@@ -27,12 +27,13 @@ const temporal = temporalVelocityWgslModule(model,model,{
 })
 // Reuse the actual generated wide-fixed position adapter, without its unrelated
 // texture sampler wrappers. The stub below controls texel values explicitly.
-const registrationStart=temporal.code.indexOf('const FlowVelocityRegistration_half_texel')
+const registrationStart=temporal.code.indexOf('fn FlowVelocityRegistration_axis_less(')
 const registrationEnd=temporal.code.indexOf('fn FlowVelocityRegistration_sample_current(')
 assert.ok(registrationStart>=0 && registrationEnd>registrationStart)
 const registration=temporal.code.slice(registrationStart,registrationEnd)
 const camera = model.addressCodec.fromProjected([13_360_000.125,3_503_000.25]).fixed.limbs
-const fixture = `
+const samplerParameters = await readFile(new URL('./support/flow-single-level-stub.wgsl',import.meta.url),'utf8')
+const fixture = samplerParameters + `
 struct FlowVelocityTemporal { progress:f32, activityKill:f32, }
 struct FlowVelocitySample { status:u32, velocity:vec2f, speed:f32, advectable:bool, resolved_level:u32, }
 struct FixtureTexel { status:u32, value:vec4f, resolved_level:u32, }

@@ -1,3 +1,5 @@
+import { createWebMercatorVirtualRasterSamplerBinding } from 'geoscratch/geo'
+import type { WebMercatorVirtualRasterSamplerBinding } from 'geoscratch/geo'
 import type {
     BindLayout,
     BindSet,
@@ -34,11 +36,13 @@ export type FlowTemporalReadyBindingFrame = Readonly<{
     requestedRevision: number
     pairGeneration: number
     bindSet: BindSet
+    /** Endpoint page table/atlas pairs come first; immutable metadata follows when present. */
     resources: readonly [
         BufferResource,
         TextureResource,
         BufferResource,
         TextureResource,
+        ...([] | [BufferResource, BufferResource]),
     ]
     progress: number
     requestedLevel: number
@@ -84,6 +88,7 @@ type BindingState = {
     capture: ReadyPairCapture
     bindSet: BindSet
     resources: FlowTemporalReadyBindingFrame['resources']
+    samplerBindings: readonly WebMercatorVirtualRasterSamplerBinding[]
     frameCount: number
     retiring: boolean
     released: boolean
@@ -156,6 +161,8 @@ export async function createFlowTemporalBindings(
                     viewDimension: '2d',
                     visibility: [ 'compute', 'fragment' ],
                 },
+                { binding: 4, name: 'currentMetadata', type: 'uniform', visibility: [ 'compute', 'fragment' ] },
+                { binding: 5, name: 'nextMetadata', type: 'uniform', visibility: [ 'compute', 'fragment' ] },
             ],
         })
     } catch (error) {
@@ -175,7 +182,7 @@ export async function createFlowTemporalBindings(
         layout.dispose()
         throw error
     }
-    const levelCount = initialCapture.lower.runtime.model.addressSpace.levelCount
+    let levelCount = initialCapture.lower.runtime.model.addressSpace.levelCount
     const retired = new Set<BindingState>()
     const retirementWaiters = new Set<() => void>()
     const cleanupFailures: unknown[] = []
@@ -188,24 +195,33 @@ export async function createFlowTemporalBindings(
     function prepareFrame(requestedLevel: number): Promise<FlowTemporalBindingFrame> {
 
         assertActive()
-        validateRequestedLevel(requestedLevel, levelCount)
         if (suspendPromise !== undefined) {
             throw new Error('Flow temporal bindings are being suspended')
         }
         if (preparing !== undefined) {
             throw new Error('Flow temporal bindings permit one frame preparation at a time')
         }
+        const capture = window.capture()
+        try {
+            validateRequestedLevel(requestedLevel, capture.state === 'ready'
+                ? capture.lower.runtime.model.addressSpace.levelCount : levelCount)
+        } catch (error) {
+            if (capture.state === 'ready') capture.release()
+            throw error
+        }
         let tracked: Promise<FlowTemporalBindingFrame>
-        tracked = prepareFrameOnce(requestedLevel).finally(() => {
+        tracked = prepareFrameOnce(requestedLevel, capture).finally(() => {
             if (preparing === tracked) preparing = undefined
         })
         preparing = tracked
         return tracked
     }
 
-    async function prepareFrameOnce(requestedLevel: number): Promise<FlowTemporalBindingFrame> {
+    async function prepareFrameOnce(
+        requestedLevel: number, capture: FlowTemporalRuntimeCapture<FlowTemporalBindingRuntime>
+    ): Promise<FlowTemporalBindingFrame> {
 
-        let frameCapture = window.capture()
+        let frameCapture = capture
         if (frameCapture.state !== 'ready') {
             if (frameCapture.state === 'gap' && active !== undefined) {
                 const prior = active
@@ -233,6 +249,7 @@ export async function createFlowTemporalBindings(
             }
             const prior = active
             active = replacement
+            levelCount = replacement.capture.lower.runtime.model.addressSpace.levelCount
             refreshCount++
             if (prior !== undefined) retire(prior)
             frameCapture = window.capture()
@@ -304,6 +321,9 @@ export async function createFlowTemporalBindings(
             state.bindSet.dispose()
         } catch (error) {
             recordCleanupFailure(error)
+        }
+        for (const binding of state.samplerBindings) {
+            try { binding.dispose() } catch (error) { recordCleanupFailure(error) }
         }
         try {
             state.capture.release()
@@ -431,6 +451,7 @@ async function createBindingState(
     runtime: GPURuntime
 ): Promise<BindingState> {
 
+    const samplerBindings: WebMercatorVirtualRasterSamplerBinding[] = []
     try {
         if (requireSharedRuntime(capture) !== runtime) {
             throw new TypeError('Flow temporal runtime pair changed its GPURuntime')
@@ -442,30 +463,45 @@ async function createBindingState(
         }
         const lower = capture.lower.runtime
         const upper = capture.upper.runtime
-        const lowerPageTable = lower.gpu.pageTable.region()
-        const upperPageTable = upper.gpu.pageTable.region()
+        const currentBinding = await createWebMercatorVirtualRasterSamplerBinding(lower.model, lower.gpu)
+        samplerBindings.push(currentBinding)
+        const nextBinding = lower === upper ? currentBinding
+            : await createWebMercatorVirtualRasterSamplerBinding(upper.model, upper.gpu)
+        if (nextBinding !== currentBinding) samplerBindings.push(nextBinding)
+        const lowerPageTable = currentBinding.pageTable
+        const upperPageTable = nextBinding.pageTable
         const bindSet = await runtime.createBindSet(layout, {
             currentPageTable: lowerPageTable,
-            currentAtlas: lower.gpu.atlasView,
+            currentAtlas: currentBinding.atlas,
             nextPageTable: upperPageTable,
-            nextAtlas: upper.gpu.atlasView,
+            nextAtlas: nextBinding.atlas,
+            currentMetadata: currentBinding.metadata,
+            nextMetadata: nextBinding.metadata,
         }, { label: `Flow Field temporal velocity pair ${capture.pairGeneration}` })
         return {
             pairGeneration: capture.pairGeneration,
             capture,
             bindSet,
+            samplerBindings,
             resources: Object.freeze([
                 lowerPageTable.buffer,
-                lower.gpu.atlasView.texture,
+                currentBinding.atlas.texture,
                 upperPageTable.buffer,
-                upper.gpu.atlasView.texture,
-            ] as [BufferResource, TextureResource, BufferResource, TextureResource]),
+                nextBinding.atlas.texture,
+                currentBinding.metadata.buffer,
+                nextBinding.metadata.buffer,
+            ] as [BufferResource, TextureResource, BufferResource, TextureResource, BufferResource, BufferResource]),
             frameCount: 0,
             retiring: false,
             released: false,
         }
     } catch (error) {
-        capture.release()
+        const failures: unknown[] = [error]
+        for (const binding of samplerBindings) {
+            try { binding.dispose() } catch (failure) { failures.push(failure) }
+        }
+        try { capture.release() } catch (failure) { failures.push(failure) }
+        if (failures.length > 1) throw new AggregateError(failures, 'Flow temporal binding creation cleanup failed')
         throw error
     }
 }
@@ -489,6 +525,8 @@ function createModule(
         currentAtlasBinding: 1,
         nextPageTableBinding: 2,
         nextAtlasBinding: 3,
+        currentMetadataBinding: 4,
+        nextMetadataBinding: 5,
         wrapper,
         sampleRegistration,
         activitySupport,
