@@ -3,9 +3,9 @@ import { readFile } from 'node:fs/promises'
 import { chromium } from 'playwright'
 
 const base = process.env.FLOW_NORMAL_BASE ?? 'http://127.0.0.1:5173'
-const tiles = process.env.FLOW_NORMAL_TILES ?? 'http://127.0.0.1:8788'
+const tiles = process.env.FLOW_NORMAL_TILES ?? new URL('/api/flow', base).href
 const url = new URL('/flowField/', base)
-if (tiles !== 'http://127.0.0.1:8788') url.searchParams.set('tileServer', tiles)
+if (process.env.FLOW_NORMAL_TILES) url.searchParams.set('tileServer', tiles)
 assert.equal(url.searchParams.has('proof'), false)
 // A valid local PNG supplies deterministic raster responses. The production
 // normal style, sources, MapLibre lifecycle and frame driver remain unchanged.
@@ -44,7 +44,7 @@ try {
     const manifestGate = new Promise(resolve => { releaseManifest = resolve })
     const rasterGate = new Promise(resolve => { releaseRaster = resolve })
     let rasterRequests = 0
-    const manifestUrl = new URL('/manifest.json', tiles).href
+    const manifestUrl = new URL('manifest.json', `${tiles.replace(/\/$/, '')}/`).href
     const manifestRoute = async route => {
         await manifestGate
         await route.continue().catch(() => undefined)

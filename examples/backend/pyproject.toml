@@ -3,27 +3,29 @@ requires = ["setuptools==83.0.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "geoscratch-flow-field-tiles"
-version = "0.8.0"
-description = "Deterministic velocity-only COG collection backend for GeoScratch Flow Field"
+name = "geoscratch-examples-backend"
+version = "0.1.0"
+description = "Shared local data services for GeoScratch examples"
 requires-python = ">=3.12,<3.15"
 dependencies = [
     "fastapi==0.141.1",
     "morecantile==7.0.3",
     "numpy==2.4.6",
+    "Pillow==12.3.0",
     "rasterio==1.5.0",
     "rio-cogeo==7.0.2",
+    "rio-tiler==9.4.2",
     "scipy==1.18.1",
     "uvicorn==0.52.1",
 ]
 
 [project.optional-dependencies]
-test = [
-    "httpx==0.28.1",
-    "pytest==9.1.1",
-]
+test = ["httpx==0.28.1", "pytest==9.1.1"]
 
 [project.scripts]
+examples-backend = "geoscratch_examples_backend.service:main"
+dem-tile-build = "geoscratch_dem_tiles.build:main"
+dem-tile-serve = "geoscratch_dem_tiles.service:main"
 flow-field-tile-build = "geoscratch_flow_field_tiles.build:main"
 flow-field-cog-build = "geoscratch_flow_field_tiles.cog:main"
 flow-field-cog-collection-build = "geoscratch_flow_field_tiles.collection:main"
@@ -37,5 +39,5 @@ package-dir = {"" = "src"}
 where = ["src"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
-addopts = "-ra"
+testpaths = ["tests", "../underwaterTerrain/tile-server/tests", "../flowField/tile-server/tests"]
+addopts = "-ra --import-mode=importlib"

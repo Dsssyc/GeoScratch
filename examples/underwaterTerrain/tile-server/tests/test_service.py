@@ -20,6 +20,23 @@ STANDARD_TILES = (
 )
 
 
+def test_shared_backend_preserves_dem_when_flow_is_missing(built_dem, tmp_path):
+    from geoscratch_examples_backend.service import create_app as shared_app
+
+    route = "/tiles/WebMercatorQuad/10/416/855.png"
+    with TestClient(create_app(built_dem.output_directory)) as direct:
+        expected = direct.get(route)
+    with TestClient(shared_app(built_dem.output_directory, tmp_path / "missing")) as client:
+        actual = client.get("/api/dem" + route)
+        assert actual.status_code == 200
+        assert actual.content == expected.content
+        assert actual.headers == expected.headers
+        assert client.get("/api/flow/manifest.json").status_code == 503
+        assert client.get("/api/dem" + route, headers={
+            "If-None-Match": actual.headers["etag"],
+        }).status_code == 304
+
+
 def decode_tile(content: bytes) -> np.ndarray:
     return np.asarray(Image.open(io.BytesIO(content)).convert("L"), dtype=np.uint8)
 

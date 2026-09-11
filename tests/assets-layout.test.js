@@ -122,7 +122,7 @@ describe('asset layout', () => {
 
         const application = read('examples', 'underwaterTerrain', 'application.ts')
         const backend = read(
-            'examples', 'underwaterTerrain', 'tile-server', 'src', 'geoscratch_dem_tiles', 'build.py'
+            'examples', 'backend', 'src', 'geoscratch_dem_tiles', 'build.py'
         )
         expect(backend).to.include('"assets" / "dem.png"')
         expect(application).not.to.include('./assets/dem.png')

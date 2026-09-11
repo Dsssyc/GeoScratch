@@ -8,7 +8,7 @@ import { chromium } from 'playwright'
 // toggle admits a particle step, so neither image equality nor one bright pixel
 // establishes preservation of the original interior flow.
 const base = process.env.FLOW_BOUNDARY_INTERIOR_BASE ?? 'http://127.0.0.1:5173'
-const tileBase = process.env.FLOW_BOUNDARY_INTERIOR_TILES ?? 'http://127.0.0.1:8788'
+const tileBase = process.env.FLOW_BOUNDARY_INTERIOR_TILES ?? new URL('/api/flow', base).href
 const output = process.env.FLOW_BOUNDARY_INTERIOR_OUTPUT ?? '/tmp/flow-field-boundary-interior'
 const viewport = {width:1512,height:861}, deviceScaleFactor = 2
 const modelTime = 23.54772

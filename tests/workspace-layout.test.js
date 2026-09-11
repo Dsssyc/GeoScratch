@@ -20,7 +20,7 @@ describe('workspace layout', () => {
             'examples',
         ])
         expect(pkg).to.not.have.property('dependencies')
-        expect(pkg.scripts.dev).to.equal('npm --workspace geoscratch run build && npm --workspace examples run dev')
+        expect(pkg.scripts.dev).to.equal('node scripts/examples-dev.mjs all')
         expect(pkg.scripts.build).to.equal('npm --workspace geoscratch run build && npm --workspace examples run build')
         expect(pkg.scripts.test).to.equal('npm --workspace geoscratch run build && mocha "tests/**/*.test.js"')
         expect(pkg.scripts.typecheck).to.equal('npm --workspace geoscratch run build && node node_modules/typescript/bin/tsc -p tsconfig.types.json && npm --workspace examples run typecheck && npm run typecheck:webgpu')

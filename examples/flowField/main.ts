@@ -83,7 +83,9 @@ void lifetime.track(initializePage(), 'flow-field-page-initialization').catch(er
 async function initializePage(): Promise<void> {
 
     const proofMode = parameters.get('proof') === '1'
-    const tileServerUrl = parameters.get('tileServer') ?? 'http://127.0.0.1:8788'
+    const tileServerUrl = new URL(
+        parameters.get('tileServer') ?? '/api/flow/', window.location.href
+    ).href
     const initialRate = finiteRate(parameters.get('rate'), proofMode ? 8 : 0.2)
     const initialLoop = flowLoop(parameters.get('loop'))
     const initialZoom = boundedNumber(parameters.get('zoom'), 0, 18)

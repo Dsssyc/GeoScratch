@@ -7,17 +7,24 @@
     "examples"
   ],
   "scripts": {
-    "dev": "npm --workspace geoscratch run build && npm --workspace examples run dev",
+    "dev": "node scripts/examples-dev.mjs all",
     "build": "npm --workspace geoscratch run build && npm --workspace examples run build",
     "docs:generate": "node scripts/api-docs.mjs generate",
     "docs:translations": "node scripts/api-docs.mjs translations",
     "docs:check": "node scripts/api-docs.mjs check",
-    "serve": "npm --workspace examples run serve",
+    "serve": "node scripts/examples-dev.mjs preview",
     "pretest": "npm run docs:check",
     "test": "npm --workspace geoscratch run build && mocha \"tests/**/*.test.js\"",
     "pretypecheck": "npm run docs:check",
     "typecheck": "npm --workspace geoscratch run build && node node_modules/typescript/bin/tsc -p tsconfig.types.json && npm --workspace examples run typecheck && npm run typecheck:webgpu",
-    "typecheck:webgpu": "node node_modules/typescript-webgpu/bin/tsc -p tsconfig.webgpu-types.json"
+    "typecheck:webgpu": "node node_modules/typescript-webgpu/bin/tsc -p tsconfig.webgpu-types.json",
+    "backend:setup": "python3 -m venv examples/backend/.venv && examples/backend/.venv/bin/python -m pip install -e \"examples/backend[test]\"",
+    "dev:backend": "node scripts/examples-dev.mjs backend",
+    "test:backend": "cd examples/backend && .venv/bin/python -m pytest",
+    "data:dem:build": "examples/backend/.venv/bin/dem-tile-build",
+    "data:flow:plan": "examples/backend/.venv/bin/flow-field-cog-collection-build --all-times --matrix 10 --estimated-snapshot-bytes 11953369 --plan-only",
+    "data:flow:build": "examples/backend/.venv/bin/flow-field-cog-collection-build --all-times --matrix 10 --estimated-snapshot-bytes 11953369 --batch-size 2 --events-stderr",
+    "dev:frontend": "node scripts/examples-dev.mjs frontend"
   },
   "devDependencies": {
     "chai": "^5.1.0",

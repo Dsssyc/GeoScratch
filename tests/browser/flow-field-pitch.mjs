@@ -5,7 +5,7 @@ import { mat4 } from 'wgpu-matrix'
 
 const base = process.env.FLOW_PITCH_BASE ?? 'http://127.0.0.1:5173'
 const output = process.env.FLOW_PITCH_OUTPUT ?? '/tmp/flow-field-pitch'
-const tiles = process.env.FLOW_PITCH_TILES ?? 'http://127.0.0.1:8788'
+const tiles = process.env.FLOW_PITCH_TILES ?? new URL('/api/flow', base).href
 await mkdir(output,{recursive:true})
 const browser = await chromium.launch({channel:'chrome',headless:true,args:['--enable-unsafe-webgpu']})
 try {

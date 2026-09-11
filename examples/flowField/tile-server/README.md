@@ -27,7 +27,7 @@ with `unconfirmed` authority; it never promotes inferred file conventions to aut
 model semantics. Administrative dataset identity remains explicit:
 
 ```bash
-examples/flowField/tile-server/.venv/bin/flow-field-source-describe \
+examples/backend/.venv/bin/flow-field-source-describe \
   --source /path/to/source \
   --output /path/to/source-dataset.json \
   --dataset-id example-flow \
@@ -43,7 +43,7 @@ reviewed exception: it contains 11 coincident pairs and therefore requires the s
 duplicate/bridge policy as the committed descriptor when regenerating it:
 
 ```bash
-examples/flowField/tile-server/.venv/bin/flow-field-source-describe \
+examples/backend/.venv/bin/flow-field-source-describe \
   --source examples/public/json/examples/flow \
   --output /path/to/source-dataset.json \
   --dataset-id geoscratch-flow-field-velocity \
@@ -233,17 +233,17 @@ Planning is read-only and reports the selected grid, complete pyramid work, and 
 logical-work and compressed-staging budgets:
 
 ```bash
-examples/flowField/tile-server/.venv/bin/flow-field-cog-build --plan-only
+examples/backend/.venv/bin/flow-field-cog-build --plan-only
 
 # Builds only uv_0 at the statistically selected source ceiling.
-examples/flowField/tile-server/.venv/bin/flow-field-cog-build --time-index 0
+examples/backend/.venv/bin/flow-field-cog-build --time-index 0
 
 # Explicitly plan or build z10; this is a caller choice, not a budget fallback.
-examples/flowField/tile-server/.venv/bin/flow-field-cog-build --matrix 10 --plan-only
-examples/flowField/tile-server/.venv/bin/flow-field-cog-build --matrix 10 --time-index 0
+examples/backend/.venv/bin/flow-field-cog-build --matrix 10 --plan-only
+examples/backend/.venv/bin/flow-field-cog-build --matrix 10 --time-index 0
 
 # Recomputes marker, manifest, container, encoding, file, and pixel identity.
-examples/flowField/tile-server/.venv/bin/flow-field-cog-build --verify-existing
+examples/backend/.venv/bin/flow-field-cog-build --verify-existing
 ```
 
 Replacing an existing owned `cog-cache` retains the previous snapshot as a sibling backup and
@@ -290,14 +290,14 @@ half-open range, or a comma-separated list:
 
 ```bash
 # Read-only full-product plan. The estimate must come from a measured or justified snapshot.
-examples/flowField/tile-server/.venv/bin/flow-field-cog-collection-build \
+examples/backend/.venv/bin/flow-field-cog-collection-build \
   --all-times \
   --matrix 10 \
   --plan-only \
   --estimated-snapshot-bytes 11953369
 
 # Build every time only after the plan is capacity-approved.
-examples/flowField/tile-server/.venv/bin/flow-field-cog-collection-build \
+examples/backend/.venv/bin/flow-field-cog-collection-build \
   --all-times \
   --matrix 10 \
   --estimated-snapshot-bytes 11953369 \
@@ -305,9 +305,9 @@ examples/flowField/tile-server/.venv/bin/flow-field-cog-collection-build \
   --events-stderr
 
 # Other legal selections create explicit subset collections.
-examples/flowField/tile-server/.venv/bin/flow-field-cog-collection-build \
+examples/backend/.venv/bin/flow-field-cog-collection-build \
   --time-range 0:4 --matrix 10 --estimated-snapshot-bytes 11953369
-examples/flowField/tile-server/.venv/bin/flow-field-cog-collection-build \
+examples/backend/.venv/bin/flow-field-cog-collection-build \
   --time-indices 0,4,9 --matrix 10 --estimated-snapshot-bytes 11953369
 ```
 
@@ -328,7 +328,7 @@ the temporal collection plan. Measure one z10 snapshot first, then use that comp
 rather than the z15 measurement:
 
 ```bash
-examples/flowField/tile-server/.venv/bin/flow-field-cog-collection-build \
+examples/backend/.venv/bin/flow-field-cog-collection-build \
   --all-times \
   --matrix 10 \
   --plan-only \
@@ -347,14 +347,14 @@ before promotion. Incomplete GDAL staging is never deleted because its name look
 The default is fail-closed and preserve; rebuilding it requires explicit authorization:
 
 ```bash
-examples/flowField/tile-server/.venv/bin/flow-field-cog-collection-build \
+examples/backend/.venv/bin/flow-field-cog-collection-build \
   --all-times \
   --matrix 10 \
   --estimated-snapshot-bytes 11953369 \
   --resume
 
 # Only use after inspecting the matching request-owned incomplete work.
-examples/flowField/tile-server/.venv/bin/flow-field-cog-collection-build \
+examples/backend/.venv/bin/flow-field-cog-collection-build \
   --all-times \
   --matrix 10 \
   --estimated-snapshot-bytes 11953369 \
@@ -374,9 +374,9 @@ containers/contracts. Deep verification additionally recomputes every child sema
 and every advertised RG32F runtime page:
 
 ```bash
-examples/flowField/tile-server/.venv/bin/flow-field-cog-collection-build \
+examples/backend/.venv/bin/flow-field-cog-collection-build \
   --verify-existing --identity-only
-examples/flowField/tile-server/.venv/bin/flow-field-cog-collection-build \
+examples/backend/.venv/bin/flow-field-cog-collection-build \
   --verify-existing
 ```
 
@@ -398,17 +398,15 @@ when the COG bytes are identical. With fixed preflight observations, batch-size 
 produce the same collection identity.
 
 ```bash
-python3 -m venv examples/flowField/tile-server/.venv
-examples/flowField/tile-server/.venv/bin/python -m pip install -e \
-  'examples/flowField/tile-server[test]'
-examples/flowField/tile-server/.venv/bin/python -m pytest \
+npm run backend:setup
+examples/backend/.venv/bin/python -m pytest \
   examples/flowField/tile-server/tests -q
 
 # Materializes the full local 835,190,784-byte artifact.
-examples/flowField/tile-server/.venv/bin/flow-field-tile-build
+examples/backend/.venv/bin/flow-field-tile-build
 
 # Recomputes manifest and page integrity checks for the installed artifact.
-examples/flowField/tile-server/.venv/bin/flow-field-tile-build --verify-existing
+examples/backend/.venv/bin/flow-field-tile-build --verify-existing
 ```
 
 Two synthetic builds are compared byte-for-byte by `test_build.py`; this is the lightweight
@@ -518,12 +516,19 @@ verify_velocity_cog_collection(result.output_directory)
 
 ## RG32F service
 
+Ordinary browsing uses `npm run dev`, which serves the collection at `/api/flow/`
+alongside DEM through [the shared backend](../../backend/README.md). Source,
+dependencies, and CLI tools live in `examples/backend/`; this directory retains
+Flow descriptors, generated data, proofs, and focused tests.
+
+For isolated backend tests or an explicit `?tileServer=` URL:
+
 ```bash
 # Current temporal COG collection. This is also the command's default output.
-examples/flowField/tile-server/.venv/bin/flow-field-tile-serve --port 8788
+examples/backend/.venv/bin/flow-field-tile-serve --port 8788
 
 # Historical pre-cut page artifacts remain readable only when explicitly selected.
-examples/flowField/tile-server/.venv/bin/flow-field-tile-serve \
+examples/backend/.venv/bin/flow-field-tile-serve \
   --output /path/to/historical/cache --port 8788
 ```
 

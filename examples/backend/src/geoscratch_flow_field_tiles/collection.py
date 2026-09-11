@@ -77,7 +77,7 @@ from .source import (
 )
 
 
-TILE_SERVER_ROOT = Path(__file__).resolve().parents[2]
+TILE_SERVER_ROOT = Path(__file__).resolve().parents[3] / "flowField" / "tile-server"
 DEFAULT_COG_COLLECTION_DIRECTORY = TILE_SERVER_ROOT / "cog-collection"
 COG_COLLECTION_MARKER = ".flow-field-cog-collection.json"
 COG_COLLECTION_WORK_MARKER = ".flow-field-cog-collection-work.json"

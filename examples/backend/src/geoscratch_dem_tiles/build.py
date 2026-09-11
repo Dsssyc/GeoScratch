@@ -62,7 +62,7 @@ def _tile_matrix_limits() -> tuple[dict[str, int | str], ...]:
 
 WEB_MERCATOR_QUAD_LIMITS = _tile_matrix_limits()
 
-TILE_SERVER_ROOT = Path(__file__).resolve().parents[2]
+TILE_SERVER_ROOT = Path(__file__).resolve().parents[3] / "underwaterTerrain" / "tile-server"
 DEFAULT_SOURCE_PATH = TILE_SERVER_ROOT.parent / "assets" / "dem.png"
 DEFAULT_OUTPUT_DIRECTORY = TILE_SERVER_ROOT / "cache"
 

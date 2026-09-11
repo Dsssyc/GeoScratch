@@ -16,6 +16,25 @@ def _route(page: dict) -> str:
     return "/" + page["path"]
 
 
+def test_shared_backend_preserves_flow_when_dem_is_missing(built_tiles, tmp_path):
+    from geoscratch_examples_backend.service import create_app as shared_app
+
+    route = _route(_first_page(built_tiles))
+    with TestClient(create_app(built_tiles.output_directory)) as direct:
+        expected = direct.get(route)
+        manifest = direct.get("/manifest.json")
+    with TestClient(shared_app(tmp_path / "missing", built_tiles.output_directory)) as client:
+        actual = client.get("/api/flow" + route)
+        assert actual.status_code == 200
+        assert actual.content == expected.content
+        assert actual.headers == expected.headers
+        assert client.get("/api/flow/manifest.json").content == manifest.content
+        assert client.get("/api/dem/manifest.json").status_code == 503
+        assert client.get("/api/flow" + route, headers={
+            "If-None-Match": actual.headers["etag"],
+        }).status_code == 304
+
+
 def test_health_and_manifest_are_revalidated_conditionally(built_tiles):
     with TestClient(create_app(built_tiles.output_directory)) as client:
         health = client.get("/health")

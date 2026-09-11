@@ -2,6 +2,21 @@
 
 Run `npm run dev` from the repository root and open the Vite URL to browse examples. The examples browser lives at `examples/index.html`; each runnable demo also has a standalone page at `examples/<name>/index.html`.
 
+Run `npm run backend:setup` once with Python 3.12–3.14. The root development
+command owns Vite and one shared backend for both Underwater Terrain and Flow
+Field; switching examples never switches processes. `Ctrl+C` stops the owned
+services. A service startup/runtime exit also stops its peer. Use
+`npm run dev:frontend` or `npm run dev:backend` for separate development.
+The workspace's own `npm --workspace examples run dev` remains a frontend-only
+Vite entrypoint for existing tools.
+
+Frontend defaults are same-origin `/api/dem/` and `/api/flow/`. Vite dev and
+preview proxy `/api` to the backend. Its default address is configured in
+`backend/config.json`; set `EXAMPLES_BACKEND_PORT` in the launching shell to
+override the port for both processes. Explicit `?tileServer=` URLs remain
+available for external or standalone services. See the
+[backend guide](./backend/README.md) for data preparation and diagnostics.
+
 Keep example runtime code in `main.ts` and place only page shell concerns, such as the shared canvas and external scripts, in the matching HTML file.
 
 Keep ordinary example assets beside the example that owns them. Use relative asset URLs for images and raw shader imports for WGSL files. Reserve `examples/public/` for large local data that must be loaded by stable absolute URL, such as `/json/examples/flow/station.bin`.

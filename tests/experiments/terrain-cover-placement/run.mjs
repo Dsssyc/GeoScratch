@@ -70,7 +70,7 @@ try {
         if (!response.ok) throw new Error(`Pinned MapLibre asset failed: ${response.status} ${url}`)
         mapLibre[suffix] = Buffer.from(await response.arrayBuffer())
     }
-    tile = spawn(`${serverRoot}/.venv/bin/dem-tile-serve`, ['--port', String(port)], {
+    tile = spawn(`${root}/examples/backend/.venv/bin/dem-tile-serve`, ['--port', String(port)], {
         cwd: serverRoot, stdio: ['ignore', 'pipe', 'pipe'],
     })
     tile.stdout.on('data', bytes => { if (serviceLog.length < 64) serviceLog.push(String(bytes)) })
