@@ -45,6 +45,7 @@ export function mountFlowFieldControls(options: FlowFieldControlOptions): FlowFi
     const view = find<HTMLSelectElement>('view')
     const sample = find<HTMLSelectElement>('sample')
     const boundary = find<HTMLSelectElement>('boundary')
+    const trailQuality = find<HTMLSelectElement>('trail-quality')
     const feather = find<HTMLInputElement>('feather')
     const featherValue = find<HTMLOutputElement>('feather-value')
     const trails = find<HTMLInputElement>('trails')
@@ -60,7 +61,7 @@ export function mountFlowFieldControls(options: FlowFieldControlOptions): FlowFi
     const end = find('end')
     const rateUnit = find('rate-unit')
     const legend = find('legend')
-    const inputs = [ playback, time, rate, loop, view, sample, boundary, feather, trails, contour ]
+    const inputs = [ playback, time, rate, loop, view, sample, boundary, trailQuality, feather, trails, contour ]
     let snapshot: FlowFieldControlSnapshot | undefined
     let currentPresentation = FLOW_FIELD_PRESENTATION
     let state: FlowFieldControlSnapshot['state'] = 'loading'
@@ -83,6 +84,7 @@ export function mountFlowFieldControls(options: FlowFieldControlOptions): FlowFi
         sample.disabled ||= currentPresentation.view === 'particles'
         trails.disabled ||= currentPresentation.view !== 'particles'
         boundary.disabled ||= currentPresentation.view !== 'particles'
+        trailQuality.disabled ||= currentPresentation.view !== 'particles'
         feather.disabled ||= currentPresentation.view !== 'particles' || currentPresentation.boundary === 'hard'
     }
 
@@ -112,6 +114,7 @@ export function mountFlowFieldControls(options: FlowFieldControlOptions): FlowFi
         view.value = currentPresentation.view
         sample.value = currentPresentation.sample
         boundary.value = currentPresentation.boundary
+        trailQuality.value = currentPresentation.trailQuality
         feather.value = String(currentPresentation.sdfFeatherTexels)
         featherValue.textContent = `${currentPresentation.sdfFeatherTexels.toFixed(2)} texel`
         feather.setAttribute('aria-valuetext', `${currentPresentation.sdfFeatherTexels.toFixed(2)} source texel`)
@@ -205,11 +208,12 @@ export function mountFlowFieldControls(options: FlowFieldControlOptions): FlowFi
             contour: contour.checked,
             boundary: boundary.value as FlowFieldPresentation['boundary'],
             sdfFeatherTexels,
+            trailQuality: trailQuality.value as FlowFieldPresentation['trailQuality'],
         })
         renderPresentation()
         invoke(() => options.onPresentation(currentPresentation))
     }
-    for (const input of [ view, sample, boundary, trails, contour ]) {
+    for (const input of [ view, sample, boundary, trailQuality, trails, contour ]) {
         input.addEventListener('change', () => applyPresentation(), eventOptions)
     }
     // Native range input covers pointer dragging and keyboard steps. Do not
@@ -274,6 +278,11 @@ const CONTROL_MARKUP = `
                 <option value="sdf">B · SDF (inward)</option>
                 <option value="sdf-center-linear">C · Center SDF (linear)</option>
                 <option value="sdf-center-smooth">D · Center SDF (smooth)</option>
+            </select></label>
+            <label class="flow-field">Trail quality <select data-flow-control="trail-quality"
+                title="Balanced for smoother playback on large displays; Native for finer trails.">
+                <option value="balanced">Balanced</option>
+                <option value="native">Native</option>
             </select></label>
             <label class="flow-field">Feather <span class="flow-feather">
                 <input type="range" data-flow-control="feather" aria-label="SDF feather width"

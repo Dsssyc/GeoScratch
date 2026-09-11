@@ -75,9 +75,11 @@ import type {
 } from './flow-render-view.ts'
 import {
     createFlowSpawnIndex,
+    prepareFlowSpawnCandidates,
 } from './flow-spawn-index.ts'
 import type {
     FlowSpawnIndex,
+    FlowSpawnCandidates,
 } from './flow-spawn-index.ts'
 import {
     FlowTemporalBindingSupersededError,
@@ -114,11 +116,14 @@ import { createFlowVisualClock } from './flow-visual-clock.ts'
 import type { FlowVisualTime } from './flow-visual-clock.ts'
 import { createFlowScreenInspector } from './flow-screen-inspector.ts'
 import { flowPairViewReady, flowRuntimeViewReady } from './flow-pair-presentation.ts'
+import { flowTrailTextureSize } from './flow-trail-resolution.ts'
 
 export type FlowFieldRendererOptions = Readonly<{
     runtime: GPURuntime
     surface: Surface
     size: SurfaceSize
+    /** Initial reference size for bounded allocation; subsequent frames use their captured viewport. */
+    referenceViewport?: readonly number[]
     temporalWindow: FlowTemporalRuntimeWindow<FlowVelocitySampleRuntime>
     maximumSpeed: number
     presentation?: FlowFieldPresentation
@@ -148,6 +153,7 @@ export type FlowFieldRendererFacts = Readonly<{
     maximumCandidateCount: number
     maximumSpeed: number
     visualTime: FlowVisualTime
+    presentationSize: Readonly<{ width: number, height: number }>
     temporalWindow: ReturnType<FlowTemporalRuntimeWindow<FlowVelocitySampleRuntime>['snapshot']>
     temporal: ReturnType<FlowTemporalBindings['facts']>
     viewDemand: ReturnType<FlowViewDemandAdapter['facts']>
@@ -228,6 +234,8 @@ export async function createFlowFieldRenderer(
     let constructionCapture: ReturnType<typeof temporalWindow.capture> | undefined
     let constructionCaptureReleased = false
     let presentation = flowFieldPresentation(options.presentation ?? FLOW_FIELD_PRESENTATION)
+    let historySize = flowTrailTextureSize(size, options.referenceViewport ?? [size.width, size.height],
+        presentation.view === 'particles' ? presentation.trailQuality : 'native')
     let resetRevision = 0
     let appliedResetRevision = 0
     let presentationRevision = 0
@@ -325,7 +333,7 @@ export async function createFlowFieldRenderer(
         const history = own(await createFlowHistory({
             runtime,
             surface,
-            size,
+            size: historySize,
             mode: 'reproject',
             temporal: temporalBindings,
             addressCodec: model.addressCodec,
@@ -356,6 +364,7 @@ export async function createFlowFieldRenderer(
         } | undefined
         let packedCells: FlowDemandFrame['candidateCells'] | undefined
         let packedCandidates = new Uint8Array(new ArrayBuffer(0))
+        let preparedSpawnCandidates: FlowSpawnCandidates | undefined
 
         async function render(
             frameNumber: number,
@@ -383,12 +392,8 @@ export async function createFlowFieldRenderer(
                 const framePresentation = presentation
                 const frameResetRevision = resetRevision
                 const framePresentationRevision = presentationRevision
-                const nextSize = flowSurfaceSize(capture.presentationSize)
-                if (!sameSize(size, nextSize)) {
-                    surface.resize(nextSize)
-                    await history.resize(nextSize)
-                    size = nextSize
-                }
+                const resizing = resizeForCapture(capture, framePresentation)
+                if (resizing !== undefined) await resizing
                 let prepared
                 try {
                     prepared = await temporalBindings.prepareFrame(requestedLevel)
@@ -508,10 +513,11 @@ export async function createFlowFieldRenderer(
                 visualTime = visualClock.tick(wallTime,particlesEligible && timeline.playing)
                 const particlesAdvancing = particlesEligible && visualTime.referenceSteps > 0
                 renderView.encode(builder, view)
-                if (packedCells !== demandFrame.candidateCells) {
+                if (preparedSpawnCandidates === undefined || packedCells !== demandFrame.candidateCells) {
                     packedCandidates = packFlowCandidateCells(
                         demandFrame.candidateCells, model.addressCodec, cellsPerPageEdge
                     )
+                    preparedSpawnCandidates = prepareFlowSpawnCandidates(packedCandidates)
                     packedCells = demandFrame.candidateCells
                 }
                 const candidates = packedCandidates
@@ -525,7 +531,7 @@ export async function createFlowFieldRenderer(
                 })
                 const spawnFrame = spawn.encode(
                     builder,
-                    candidates,
+                    preparedSpawnCandidates,
                     demandFrame.candidateCells.length,
                     supportSnapshot,
                     prepared
@@ -689,12 +695,8 @@ export async function createFlowFieldRenderer(
             let finishConstruction!: () => void
             constructionInFlight = new Promise(resolve => { finishConstruction = resolve })
             try {
-                const nextSize = flowSurfaceSize(capture.presentationSize)
-                if (!sameSize(size, nextSize)) {
-                    surface.resize(nextSize)
-                    await history.resize(nextSize)
-                    size = nextSize
-                }
+                const resizing = resizeForCapture(capture, presentation)
+                if (resizing !== undefined) await resizing
                 const view = flowFieldViewAdapter.read(capture.view, {
                     frameEpoch: frameNumber,
                     residencySnapshotEpoch: temporalResidencyEpoch,
@@ -766,6 +768,7 @@ export async function createFlowFieldRenderer(
                 disposed,
                 frameCount,
                 visualTime,
+                presentationSize: Object.freeze({ ...size }),
                 cellsPerPageEdge,
                 maximumCandidatePages,
                 maximumCandidateCount,
@@ -797,6 +800,9 @@ export async function createFlowFieldRenderer(
                         failures.push(error)
                     }
                 }
+                preparedSpawnCandidates = undefined
+                packedCandidates = new Uint8Array(new ArrayBuffer(0))
+                packedCells = undefined
                 try {
                     await disposeOwned(owned)
                 } catch (error) {
@@ -812,6 +818,21 @@ export async function createFlowFieldRenderer(
         function assertActive(): void {
 
             if (!initialized || disposed) throw new Error('Flow Field renderer is not active')
+        }
+
+        function resizeForCapture(
+            capture: GeoViewSourceCapture<MapLibrePlanarCameraState>,
+            framePresentation: FlowFieldPresentation
+        ): Promise<void> | undefined {
+            const nextSize = flowSurfaceSize(capture.presentationSize)
+            const nextHistorySize = flowTrailTextureSize(nextSize, capture.view.referenceViewport,
+                framePresentation.view === 'particles' ? framePresentation.trailQuality : 'native')
+            if (!sameSize(size, nextSize)) {
+                surface.resize(nextSize)
+                size = nextSize
+            }
+            if (sameSize(historySize, nextHistorySize)) return undefined
+            return history.resize(nextHistorySize).then(() => { historySize = nextHistorySize })
         }
 
         function resetVisuals(): void {

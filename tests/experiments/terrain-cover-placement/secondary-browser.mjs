@@ -40,15 +40,20 @@ RunLoop.main.run()
 
 // Own exactly one temporary Chrome instance, with no foreground activation or
 // new windows after placement. This is only for the single-page performance suite.
-export async function launchSecondaryBrowser() {
+export async function launchSecondaryBrowser({ deviceScaleFactor = 1, viewport = { width: 1280, height: 800 } } = {}) {
     if (process.platform !== 'darwin') throw new Error('Secondary-display proof requires macOS')
+    if (![1, 2].includes(deviceScaleFactor) || !Number.isSafeInteger(viewport.width) || viewport.width <= 0 ||
+        !Number.isSafeInteger(viewport.height) || viewport.height <= 0) throw new Error('Invalid secondary viewport or DPR')
     const before = probe()
     const display = before.displays.filter(d => !d.main && d.refreshHz >= 100 && d.width >= 1400 && d.height >= 980)
         .sort((a, b) => b.refreshHz - a.refreshHz)[0]
     if (!display || !before.foregroundPid) throw new Error('No verified high-refresh non-main display; use headless')
-    const requested = { left: display.left + 32, top: display.top + 32, width: 1320, height: 920 }
+    const requested = { left: display.left + 32, top: display.top + 32,
+        width: viewport.width + 40, height: viewport.height + 120 }
+    if (requested.width + 32 > display.width || requested.height + 32 > display.height)
+        throw new Error('Requested viewport does not fit the non-main display')
     const profile = await mkdtemp(join(tmpdir(), 'terrain-secondary-chrome-'))
-    let browser, protocol, focus, closed = false
+    let browser, protocol, pageProtocol, focus, closed = false
     const ownedPids = () => execFileSync('ps', ['-axo', 'pid=,args=']).toString().split('\n')
         .filter(line => line.includes(`--user-data-dir=${profile}`)).map(line => Number(line.trim().split(/\s+/)[0]))
     async function close() {
@@ -75,7 +80,7 @@ export async function launchSecondaryBrowser() {
             `--user-data-dir=${profile}`, '--remote-debugging-port=0', '--remote-debugging-address=127.0.0.1',
             '--no-first-run', '--no-default-browser-check', '--disable-sync', '--enable-unsafe-webgpu',
             '--disable-background-timer-throttling', '--disable-backgrounding-occluded-windows',
-            '--disable-renderer-backgrounding', '--force-device-scale-factor=1',
+            '--disable-renderer-backgrounding', `--force-device-scale-factor=${deviceScaleFactor}`,
             `--window-position=${requested.left},${requested.top}`,
             `--window-size=${requested.width},${requested.height}`, 'about:blank'])
         let port
@@ -88,23 +93,32 @@ export async function launchSecondaryBrowser() {
         protocol = await browser.newBrowserCDPSession()
         const context = browser.contexts()[0], page = context?.pages()[0]
         if (!page || context.pages().length !== 1) throw new Error('Dedicated Chrome did not start with exactly one page')
-        await page.setViewportSize({ width: 1280, height: 800 })
-        const pageProtocol = await context.newCDPSession(page)
+        await page.setViewportSize(viewport)
+        pageProtocol = await context.newCDPSession(page)
+        // setViewportSize on an attached context can otherwise select DPR 1.
+        // Keep this session alive until the owned browser closes.
+        await pageProtocol.send('Emulation.setDeviceMetricsOverride', {
+            ...viewport, deviceScaleFactor, mobile: false, dontSetVisibleSize: true,
+        })
+        const actualViewport = await page.evaluate(() => ({
+            width: innerWidth, height: innerHeight, deviceScaleFactor: devicePixelRatio,
+        }))
+        if (actualViewport.width !== viewport.width || actualViewport.height !== viewport.height ||
+            actualViewport.deviceScaleFactor !== deviceScaleFactor) throw new Error('Secondary viewport or DPR did not apply')
         const { targetInfo } = await pageProtocol.send('Target.getTargetInfo')
         const { bounds } = await protocol.send('Browser.getWindowForTarget', { targetId: targetInfo.targetId })
-        await pageProtocol.detach()
         if (!inside(bounds, display)) throw new Error(`Chrome window is outside the selected non-main display: ${JSON.stringify(bounds)}`)
         const after = probe()
         focus.assertActive()
         const own = new Set(ownedPids())
         if (focus.seen.some(pid => own.has(pid)) || own.has(after.foregroundPid))
             throw new Error('Dedicated Chrome became foreground; secondary proof aborted')
-        const evidence = { display, requested, bounds, foregroundBefore: before.foregroundPid,
+        const evidence = { display, requested, bounds, actualViewport, foregroundBefore: before.foregroundPid,
             foregroundAfter: after.foregroundPid, foregroundPreserved: true,
             foregroundChanges: focus.seen, closed: false }
         let contextTaken = false, pageTaken = false
         browser.newContext = async options => {
-            if (contextTaken || options?.deviceScaleFactor !== 1) throw new Error('Secondary proof owns one DPR-1 context')
+            if (contextTaken || options?.deviceScaleFactor !== deviceScaleFactor) throw new Error('Secondary proof owns one configured-DPR context')
             contextTaken = true
             return context
         }

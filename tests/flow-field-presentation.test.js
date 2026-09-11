@@ -10,7 +10,7 @@ describe('Flow Field presentation choices', () => {
     it('defaults to the hard boundary and normalizes older input objects', () => {
         const input = {view:'particles',sample:'interpolated',trails:true,contour:false}
         const normalized = flowFieldPresentation(input)
-        expect(normalized).to.deep.equal({...input,boundary:'hard',sdfFeatherTexels:0.25})
+        expect(normalized).to.deep.equal({...input,boundary:'hard',sdfFeatherTexels:0.25,trailQuality:'balanced'})
         expect(FLOW_FIELD_PRESENTATION).to.deep.equal(normalized)
         expect(Object.isFrozen(normalized)).to.equal(true)
         expect(input).to.not.have.property('boundary')
@@ -35,6 +35,13 @@ describe('Flow Field presentation choices', () => {
     it('keeps the existing validation of view, sample and toggles', () => {
         for (const changed of [{view:'bad'},{sample:'bad'},{trails:0},{contour:null}]) {
             expect(() => flowFieldPresentation({...FLOW_FIELD_PRESENTATION,...changed})).to.throw(TypeError)
+        }
+    })
+
+    it('keeps explicit native trail quality and rejects invalid quality inputs', () => {
+        expect(flowFieldPresentation({...FLOW_FIELD_PRESENTATION,trailQuality:'native'}).trailQuality).to.equal('native')
+        for (const trailQuality of [null,'low','',0,{},[]]) {
+            expect(() => flowFieldPresentation({...FLOW_FIELD_PRESENTATION,trailQuality})).to.throw(TypeError)
         }
     })
 

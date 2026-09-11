@@ -3,11 +3,14 @@ import { chromium } from 'playwright'
 
 // Run alone. This checks simulation admission per submitted frame, not machine FPS.
 const base = process.env.FLOW_CAMERA_CONTINUITY_BASE ?? 'http://127.0.0.1:5173'
+const deviceScaleFactor = Number(process.env.FLOW_CAMERA_CONTINUITY_DPR ?? 1)
+assert.ok([1,2].includes(deviceScaleFactor), 'Camera continuity DPR must be 1 or 2')
 const browser = await chromium.launch({channel:'chrome',headless:true,args:['--enable-unsafe-webgpu']})
 const results = []
 try {
     for (const gesture of ['stationary', 'pan', 'pitch', 'wheel', 'wheel-time']) {
-        const page = await browser.newPage({viewport:{width:1440,height:900}})
+        const inputEventCount = gesture === 'stationary' ? 0 : 144
+        const page = await browser.newPage({viewport:{width:1440,height:900},deviceScaleFactor})
         const errors = []
         const requests = []
         let measuring = false
@@ -88,11 +91,11 @@ try {
         if (gesture === 'stationary') {
             await page.waitForTimeout(2400)
         } else {
-            for (let index = 1; index <= 144; index++) {
+            for (let index = 1; index <= inputEventCount; index++) {
                 // One real input per browser animation opportunity, without
                 // accessing or replacing the application's MapLibre instance.
                 await page.evaluate(() => new Promise(resolve => requestAnimationFrame(resolve)))
-                const progress = index / 144
+                const progress = index / inputEventCount
                 if (gesture === 'pan') {
                     await page.mouse.move(550 + 70 * progress, 500 + 8 * Math.sin(progress * Math.PI * 2))
                 } else if (gesture === 'pitch') {
@@ -128,6 +131,8 @@ try {
         })
         const result = {
             gesture,
+            inputEventCount,
+            deviceScaleFactor,
             durationMs:end.wallTime - start.wallTime,
             submittedFrames:end.submitted - start.submitted,
             observedFrames:end.observed - start.observed,
@@ -168,8 +173,10 @@ try {
         assert.ok(result.advancingRenderedFraction > 0.85,
             `${label}: ${result.stoppedRenderedFrames}/${result.renderedFrames} rendered frames froze simulation`)
         if (label === 'stationary') assert.equal(result.changedCameraFrames, 0)
-        else assert.ok(result.changedCameraFrames > result.renderedFrames * 0.3,
-            `${label}: the camera must actually change throughout the measured gesture`)
+        // CDP input round trips can span several rendered frames. A faster
+        // renderer must not fail simply for producing more intervening frames.
+        else assert.ok(result.changedCameraFrames >= result.inputEventCount * 0.5,
+            `${label}: observe camera changes for at least half of the issued inputs`)
         if (label === 'pitch') assert.ok(result.pitchRange[1] - result.pitchRange[0] > 0.8)
         if (label.startsWith('wheel')) assert.ok(result.zoomRange[1] - result.zoomRange[0] > 0.15)
         assert.equal(result.resetDelta, 0, `${label}: camera input must not reset the particle pool`)

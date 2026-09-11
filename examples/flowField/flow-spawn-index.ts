@@ -129,6 +129,25 @@ export type FlowSpawnIndexFrame = Readonly<{
     reused: boolean
 }>
 
+/** An opaque identity for one privately owned, immutable copy of packed candidates. */
+export type FlowSpawnCandidates = Readonly<{
+    kind: 'flow-spawn-candidates'
+    byteLength: number
+}>
+
+const preparedCandidateBytes = new WeakMap<FlowSpawnCandidates, Uint8Array>()
+
+/** Copies candidates once; callers cannot mutate the retained bytes through this artifact. */
+export function prepareFlowSpawnCandidates(input: ArrayBufferView): FlowSpawnCandidates {
+    if (!ArrayBuffer.isView(input) || input.byteLength % FLOW_SPAWN_CANDIDATE_BYTE_LENGTH !== 0) {
+        throw new RangeError('Flow spawn candidates require complete packed records')
+    }
+    const bytes = new Uint8Array(input.buffer, input.byteOffset, input.byteLength).slice()
+    const prepared = Object.freeze({ kind: 'flow-spawn-candidates' as const, byteLength: bytes.byteLength })
+    preparedCandidateBytes.set(prepared, bytes)
+    return prepared
+}
+
 export type FlowSpawnIndexFacts = Readonly<{
     maximumCandidateCount: number
     capacity: number
@@ -138,6 +157,8 @@ export type FlowSpawnIndexFacts = Readonly<{
     subcellSide: 1 | 2 | 4
     buildCount: number
     cacheHitCount: number
+    /** Full candidate-content comparisons; stable prepared identities need none. */
+    candidateComparisonCount: number
     cacheState: 'empty' | 'encoded' | 'observing' | 'ready' | 'failed'
     generation: number
     currentSnapshotEpoch: number
@@ -159,7 +180,7 @@ export type FlowSpawnIndex = Readonly<{
     resources: FlowSpawnIndexResources
     encode(
         builder: SubmissionBuilder,
-        candidateBytes: ArrayBufferView,
+        candidateBytes: ArrayBufferView | FlowSpawnCandidates,
         candidateCount: number,
         snapshot: FlowSpawnSnapshotParameters,
         temporal: FlowSpawnTemporalFrame
@@ -185,6 +206,7 @@ type SpawnBuildRecord = {
     key: string
     bindSet: BindSet
     commandId: string | undefined
+    candidates: FlowSpawnCandidates | undefined
     submittedId?: string
     observing?: Promise<void>
 }
@@ -385,8 +407,10 @@ export async function createFlowSpawnIndex(
     let nextSnapshotEpoch = 0
     let buildCount = 0
     let cacheHitCount = 0
+    let candidateComparisonCount = 0
     let cacheState: FlowSpawnIndexFacts['cacheState'] = 'empty'
     let committedKey: string | undefined
+    let committedCandidates: FlowSpawnCandidates | undefined
     let committedResources: readonly Readonly<{
         resource: BufferResource
         contentEpoch: number
@@ -398,7 +422,7 @@ export async function createFlowSpawnIndex(
 
     function encode(
         builder: SubmissionBuilder,
-        packedCandidates: ArrayBufferView,
+        packedCandidates: ArrayBufferView | FlowSpawnCandidates,
         nextCandidateCount: number,
         snapshot: FlowSpawnSnapshotParameters,
         temporalFrame: FlowSpawnTemporalFrame
@@ -407,10 +431,14 @@ export async function createFlowSpawnIndex(
         if (builder?.runtime !== runtime) {
             throw new TypeError('Flow spawn index requires a same-runtime SubmissionBuilder')
         }
-        if (!ArrayBuffer.isView(packedCandidates) ||
+        const prepared = ArrayBuffer.isView(packedCandidates) ? undefined : packedCandidates
+        const bytes = prepared === undefined && ArrayBuffer.isView(packedCandidates)
+            ? new Uint8Array(packedCandidates.buffer, packedCandidates.byteOffset, packedCandidates.byteLength)
+            : preparedCandidateBytes.get(prepared!)
+        if (bytes === undefined ||
             !Number.isSafeInteger(nextCandidateCount) || nextCandidateCount < 0 ||
             nextCandidateCount > maximumCandidateCount ||
-            packedCandidates.byteLength !==
+            bytes.byteLength !==
                 nextCandidateCount * FLOW_SPAWN_CANDIDATE_BYTE_LENGTH) {
             throw new RangeError('Flow spawn candidate bytes must match a bounded record count')
         }
@@ -426,18 +454,13 @@ export async function createFlowSpawnIndex(
         if (cacheState === 'observing') {
             throw new Error('Flow spawn index requires its previous observation to settle')
         }
-        // The caller may mutate or replace an ArrayBufferView. Compare owned bytes
-        // even on identity matches; alpha alone does not change endpoint-union support.
-        const bytes = new Uint8Array(
-            packedCandidates.buffer,
-            packedCandidates.byteOffset,
-            packedCandidates.byteLength
-        )
+        // Raw views remain mutable. Only a privately owned preparation artifact
+        // permits identity reuse; alpha alone does not change endpoint support.
         const key = [snapshot.generation, snapshot.currentSnapshotEpoch,
             snapshot.nextSnapshotEpoch, nextCandidateCount, subcellSide].join(':')
         const reused = cacheState === 'ready' && committedKey === key &&
             lastTemporalSet === temporalFrame.bindSet && candidateCount === nextCandidateCount &&
-            equalCandidateBytes(candidateStaging, bytes) && committedResources.every(value =>
+            candidatesMatch() && committedResources.every(value =>
                 value.resource.contentEpoch === value.contentEpoch &&
                 value.resource.allocationVersion === value.allocationVersion)
         candidateCount = nextCandidateCount
@@ -446,9 +469,11 @@ export async function createFlowSpawnIndex(
         nextSnapshotEpoch = snapshot.nextSnapshotEpoch
         if (reused) {
             cacheHitCount++
-            return ticket(undefined, key, temporalFrame.bindSet)
+            committedCandidates = prepared
+            return ticket(undefined, key, temporalFrame.bindSet, prepared)
         }
         committedKey = undefined
+        committedCandidates = undefined
         committedResources = []
         cacheState = 'encoded'
         lastDispatch?.dispose()
@@ -486,10 +511,17 @@ export async function createFlowSpawnIndex(
         builder.clear(clearOverflow)
         builder.compute(pass, [ lastDispatch ])
         buildCount++
-        return ticket(lastDispatch.id, key, temporalFrame.bindSet)
+        return ticket(lastDispatch.id, key, temporalFrame.bindSet, prepared)
+
+        function candidatesMatch(): boolean {
+            if (prepared !== undefined && prepared === committedCandidates) return true
+            candidateComparisonCount++
+            return equalCandidateBytes(candidateStaging, bytes!)
+        }
     }
 
-    function ticket(commandId: string | undefined, key: string, bindSet: BindSet): FlowSpawnIndexFrame {
+    function ticket(commandId: string | undefined, key: string, bindSet: BindSet,
+        candidates: FlowSpawnCandidates | undefined): FlowSpawnIndexFrame {
         const frame = Object.freeze({
             candidateCount,
             generation,
@@ -500,7 +532,7 @@ export async function createFlowSpawnIndex(
             built: commandId !== undefined,
             reused: commandId === undefined,
         })
-        const record = { key, bindSet, commandId }
+        const record = { key, bindSet, commandId, candidates }
         frameRecords.set(frame, record)
         if (commandId !== undefined) latestBuild = record
         return frame
@@ -548,11 +580,13 @@ export async function createFlowSpawnIndex(
                     allocationVersion: epoch.allocationVersion }
             })
             committedKey = record.key
+            committedCandidates = record.candidates
             committedResources = produced
             cacheState = 'ready'
         })().catch(error => {
             if (latestBuild === record) {
                 committedKey = undefined
+                committedCandidates = undefined
                 committedResources = []
                 cacheState = 'failed'
             }
@@ -571,6 +605,7 @@ export async function createFlowSpawnIndex(
             subcellSide,
             buildCount,
             cacheHitCount,
+            candidateComparisonCount,
             cacheState,
             generation,
             currentSnapshotEpoch,
@@ -584,6 +619,8 @@ export async function createFlowSpawnIndex(
     function dispose(): void {
         if (disposed) return
         disposed = true
+        committedCandidates = undefined
+        latestBuild = undefined
         lastDispatch?.dispose()
         graph.pass.dispose()
         graph.pipeline.dispose()

@@ -101,6 +101,7 @@ async function initializePage(): Promise<void> {
         initialPresentation: flowFieldPresentation({
             ...FLOW_FIELD_PRESENTATION,
             view: (parameters.get('view') ?? 'particles') as FlowFieldPresentation['view'],
+            trailQuality: (parameters.get('trailQuality') ?? 'balanced') as FlowFieldPresentation['trailQuality'],
         }),
         onControlSnapshot: controls.update,
         ...(initialZoom === undefined ? {} : { initialZoom }),
