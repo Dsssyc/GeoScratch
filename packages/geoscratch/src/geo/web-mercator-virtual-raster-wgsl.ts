@@ -1,7 +1,9 @@
 import { throwGeoDiagnostic } from './diagnostics.js'
+import { rasterSamplerMetadataCodec, prepareWebMercatorVirtualRasterSampler } from './web-mercator-virtual-raster-sampler-metadata.js'
 import type { WebMercatorVirtualRasterField } from './web-mercator-virtual-raster-field.js'
 import {
     WebMercatorQuad,
+    WEB_MERCATOR_QUAD_MAX_ZOOM,
     type WebMercatorQuadAddressCodec,
 } from './web-mercator-quad.js'
 
@@ -12,6 +14,10 @@ export type WebMercatorVirtualRasterWgslOptions = Readonly<{
     pageTableBinding: number
     atlasBinding: number
     transitionTexels?: number
+    /** Bind immutable prepared sampler metadata as a uniform instead of specializing source data. */
+    metadataBinding?: number
+    /** Includes parameter accessors for extension WGSL; metadata binding always includes them. */
+    parameterAccessors?: boolean
 }>
 
 export type WebMercatorVirtualRasterWgslModule = Readonly<{
@@ -19,10 +25,13 @@ export type WebMercatorVirtualRasterWgslModule = Readonly<{
     namespace: string
     addressNamespace: string
     code: string
+    addressCode: string
+    samplingCode: string
     bindings: Readonly<{
         group: number
         pageTable: number
         atlas: number
+        metadata?: number
     }>
 }>
 
@@ -50,6 +59,15 @@ export function webMercatorVirtualRasterWgslModule(
             })
         }
     }
+    const metadata = options.metadataBinding !== undefined
+    if (options.parameterAccessors !== undefined && typeof options.parameterAccessors !== 'boolean') {
+        return invalidWgsl(namespace, 'Parameter accessor selection must be boolean.', options)
+    }
+    if (metadata && (!Number.isSafeInteger(options.metadataBinding) || options.metadataBinding! < 0 ||
+        options.metadataBinding === options.pageTableBinding || options.metadataBinding === options.atlasBinding)) {
+        return invalidWgsl(namespace, 'Sampler metadata requires a distinct non-negative uniform binding.', options)
+    }
+    const meta = namespace + '_metadata'
     const pageWidth = model.addressSpace.pageSize[0]!
     const pageHeight = model.addressSpace.pageSize[1]!
     if (!Number.isFinite(transitionTexels) || transitionTexels <= 0 ||
@@ -90,10 +108,11 @@ export function webMercatorVirtualRasterWgslModule(
             coveredTexel(southeast, 1, 'maximum', pageHeight) + 'u)'
         )
     }
-    const scale = channelVector(model.plane.scale)
-    const offset = channelVector(model.plane.offset)
-    const rawScale = model.plane.sampleType === 'unorm8' ? '255.0f' : '1.0f'
-    const noData = noDataExpression(model)
+    const scale = metadata ? meta + '.scale' : channelVector(model.plane.scale)
+    const offset = metadata ? meta + '.offset' : channelVector(model.plane.offset)
+    const rawScale = metadata ? meta + '.decoding.x' : model.plane.sampleType === 'unorm8' ? '255.0f' : '1.0f'
+    const noData = metadata ? '(' + meta + '.decoding.y == 1.0 && raw.x == ' + meta + '.decoding.z) || (' +
+        meta + '.decoding.y == 2.0 && abs(raw.x * 255.0 - ' + meta + '.decoding.z) < 0.5)' : noDataExpression(model)
     const fixedPosition = addressNamespace + 'FixedPosition'
     const sample = namespace + 'Sample'
     const lines = [
@@ -286,18 +305,120 @@ export function webMercatorVirtualRasterWgslModule(
             namespace + '_sample_bilinear(position, level); }',
         '',
     ]
+    let addressCode = model.addressCodec.wgslModule({ namespace: addressNamespace })
+    let samplingCode = lines.join('\n')
+    if (metadata) {
+        const coverage = model.coverage.wgslModule({ namespace: addressNamespace })
+        addressCode = addressCode.replace(coverage, metadataCoverageWgsl(addressNamespace, meta))
+        samplingCode = metadataSamplingWgsl(samplingCode, namespace, addressNamespace) + '\n' +
+            metadataLevelIndexWgsl(namespace, meta)
+        samplingCode = metadataDeclarationWgsl(namespace, options.group, options.metadataBinding!) + '\n' + samplingCode
+    }
+    if (metadata || options.parameterAccessors) {
+        samplingCode += samplerParameterAccessors(namespace, metadata, model, addressNamespace)
+    }
     return Object.freeze({
         kind: 'web-mercator-virtual-raster-wgsl-module',
         namespace,
         addressNamespace,
-        code: model.addressCodec.wgslModule({ namespace: addressNamespace }) +
-            '\n\n' + lines.join('\n'),
+        code: addressCode + '\n\n' + samplingCode,
+        addressCode, samplingCode,
         bindings: Object.freeze({
             group: options.group,
             pageTable: options.pageTableBinding,
             atlas: options.atlasBinding,
+            ...(metadata ? { metadata: options.metadataBinding! } : {}),
         }),
     })
+}
+
+function metadataDeclarationWgsl(namespace: string, group: number, binding: number): string {
+
+    const declarations = rasterSamplerMetadataCodec.wgslAccessors({ namespace: namespace + 'Metadata' })
+        .replaceAll('WebMercatorRasterSamplerMetadata', namespace + 'SamplerMetadata')
+        .replaceAll('WebMercatorRasterSamplerLevel', namespace + 'SamplerLevel')
+    return declarations + `\n@group(${group}) @binding(${binding}) var<uniform> ${namespace}_metadata: ${namespace}SamplerMetadata;\n`
+}
+
+function metadataCoverageWgsl(namespace: string, metadata: string): string {
+
+    return `const ${namespace}_not_covered = 0xffffffffu;
+fn ${namespace}_compact_index(matrix: u32, tile: vec2u) -> u32 {
+    if (matrix > ${WEB_MERCATOR_QUAD_MAX_ZOOM}u) { return ${namespace}_not_covered; }
+    let level = ${metadata}.levelForMatrix[matrix / 4u][matrix % 4u];
+    if (level >= ${metadata}.dimensions.x) { return ${namespace}_not_covered; }
+    let record = ${metadata}.levels[level];
+    if (any(tile < record.tileBounds.xy) || any(tile > record.tileBounds.zw)) {
+        return ${namespace}_not_covered;
+    }
+    let local = tile - record.tileBounds.xy;
+    return record.mapping.y + local.y * record.mapping.z + local.x;
+}
+`
+}
+
+function metadataLevelIndexWgsl(namespace: string, metadata: string): string {
+
+    return `fn ${namespace}_index_at_level(level: u32, tile: vec2u) -> u32 {
+    if (level >= ${metadata}.dimensions.x) { return 0xffffffffu; }
+    let record = ${metadata}.levels[level];
+    if (any(tile < record.tileBounds.xy) || any(tile > record.tileBounds.zw)) { return 0xffffffffu; }
+    let local = tile - record.tileBounds.xy;
+    return record.mapping.y + local.y * record.mapping.z + local.x;
+}`
+}
+
+// Lower only the generator's own parameter tokens; callers use the accessors below.
+// Both paths share footprint, status, fallback and interpolation implementation.
+function metadataSamplingWgsl(code: string, namespace: string, addressNamespace: string): string {
+
+    const metadata = namespace + '_metadata'
+    for (const field of ['level_count', 'page_size', 'matrix', 'minimum_texel', 'maximum_texel']) {
+        code = code.replace(new RegExp('^const ' + namespace + '_' + field + ' = [^;]+;\\n', 'm'), '')
+    }
+    for (const [field, member] of [['matrix', 'mapping.x'], ['minimum_texel', 'texelBounds.xy'], ['maximum_texel', 'texelBounds.zw']]) {
+        code = code.replace(new RegExp(namespace + '_' + field + '\\[([^\\]]+)\\]', 'g'),
+            (_match, index: string) => `${metadata}.levels[${index}].${member}`)
+    }
+    return code.replaceAll(namespace + '_level_count', metadata + '.dimensions.x')
+        .replaceAll(namespace + '_page_size', metadata + '.dimensions.yz')
+        .replaceAll(addressNamespace + '_compact_index(matrix, tile)', namespace + '_index_at_level(level, tile)')
+}
+
+function samplerParameterAccessors(
+    namespace: string, metadata: boolean, model: WebMercatorVirtualRasterField, addressNamespace: string
+): string {
+
+    const levelCount = metadata ? namespace + '_metadata.dimensions.x' : namespace + '_level_count'
+    const pageSize = metadata ? namespace + '_metadata.dimensions.yz' : namespace + '_page_size'
+    const record = namespace + '_metadata.levels[level]'
+    const prepared = prepareWebMercatorVirtualRasterSampler(model)
+    const values = prepared.layout.createReadbackView(prepared.pack()).toObject()
+    const vector = (name: string) => metadata ? namespace + '_metadata.' + name
+        : 'vec4u(' + (values[name] as number[]).map(value => value + 'u').join(', ') + ')'
+    const fixed = addressNamespace + 'Fixed'
+    return `
+fn ${namespace}_level_count_value() -> u32 { return ${levelCount}; }
+fn ${namespace}_page_size_value() -> vec2u { return ${pageSize}; }
+fn ${namespace}_matrix_at(level: u32) -> u32 { return ${metadata ? record + '.mapping.x' : namespace + '_matrix[level]'}; }
+fn ${namespace}_minimum_texel_at(level: u32) -> vec2u { return ${metadata ? record + '.texelBounds.xy' : namespace + '_minimum_texel[level]'}; }
+fn ${namespace}_maximum_texel_at(level: u32) -> vec2u { return ${metadata ? record + '.texelBounds.zw' : namespace + '_maximum_texel[level]'}; }
+fn ${namespace}_half_texel_at(level: u32) -> vec2u {
+    ${metadata ? 'return ' + record + '.halfTexel.xy;' : `let shift = ${model.addressCodec.coordinateBits}u - ${namespace}_matrix_at(level) - 9u;
+    if (shift < 32u) { return vec2u(1u << shift, 0u); }
+    return vec2u(0u, 1u << (shift - 32u));`}
+}
+fn ${namespace}_source_contains(position: ${fixed}Position) -> bool {
+    let west_north = ${vector('sourceWestNorth')};
+    let east_south = ${vector('sourceEastSouth')};
+    let x = vec2u(position.axes[0].low, position.axes[0].high);
+    let y = vec2u(position.axes[1].low, position.axes[1].high);
+    return !(x.y < west_north.y || (x.y == west_north.y && x.x < west_north.x)) &&
+        !(east_south.y < x.y || (east_south.y == x.y && east_south.x < x.x)) &&
+        !(y.y < west_north.w || (y.y == west_north.w && y.x < west_north.z)) &&
+        !(east_south.w < y.y || (east_south.w == y.y && east_south.z < y.x));
+}
+`
 }
 
 function assertModel(model: WebMercatorVirtualRasterField): void {

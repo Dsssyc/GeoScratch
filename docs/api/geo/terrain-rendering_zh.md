@@ -2,11 +2,14 @@
 docId: geo.terrain-rendering.zh
 canonical: false
 translationOf: ./terrain-rendering.md
-canonicalDigest: 0ab6715095ad6736c3568667db96ef9a700a9d2cf638d91bfa0757ac146282b0
+canonicalDigest: 332b74e4a624d2705ea614640c767a4dfcadd5768ac7c18de059f19869a18a4f
 ---
 # 地形渲染
 
 [English](./terrain-rendering.md) | [Geo 概览](./README_zh.md)
+
+通用 raster WGSL 和 sampler 元数据契约见 [Virtual Raster](./virtual-raster_zh.md)。
+地形继续组合现有的常量生成高度采样器。
 
 `createWebMercatorTerrainRenderer` 是 Geo 的 OGC `WebMercatorQuad` 地形编排器。
 它组合一个 `MapFieldLayer`、已准备的 Virtual Raster runtime、

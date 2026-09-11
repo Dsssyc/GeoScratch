@@ -131,6 +131,7 @@ const geoValues = [
     'createVirtualRasterRuntime',
     'createVirtualRasterWorkerExecutor',
     'createWebMercatorTerrainRenderer',
+    'createWebMercatorVirtualRasterSamplerBinding',
     'decodeGpuWebMercatorQuadCoverFeedback',
     'decodeGpuWebMercatorQuadDemandProjectionFeedback',
     'discardOwnedVirtualRasterPagePayload',

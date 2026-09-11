@@ -41,14 +41,14 @@ fn FlowVelocity_sample_support(
     temporal: FlowVelocityTemporal,
     zero_owner: bool,
 ) -> FlowVelocitySample {
-    if (requested_level >= FlowVelocityCurrent_level_count) {
+    if (requested_level >= FlowVelocityCurrent_level_count_value()) {
         return FlowVelocitySample(4u, vec2f(0.0), 0.0f, false, requested_level);
     }
     if (!FlowVelocity_source_contains(position)) {
         return FlowVelocitySample(0u, vec2f(0.0), 0.0f, false, requested_level);
     }
     var common_level = requested_level;
-    for (var iteration = 0u; iteration < FlowVelocityCurrent_level_count; iteration++) {
+    for (var iteration = 0u; iteration < FlowVelocityCurrent_level_count_value(); iteration++) {
         let registered_position = FlowVelocityRegistration_position(position, common_level);
         let current = FlowVelocityRegistration_sample_current(
             registered_position,
@@ -99,7 +99,7 @@ fn FlowVelocity_sample_support(
         }
         let resolved_level = max(current.resolved_level, next.resolved_level);
         if (resolved_level <= common_level ||
-            resolved_level >= FlowVelocityCurrent_level_count) {
+            resolved_level >= FlowVelocityCurrent_level_count_value()) {
             return FlowVelocitySample(4u, vec2f(0.0), 0.0f, false, common_level);
         }
         common_level = resolved_level;

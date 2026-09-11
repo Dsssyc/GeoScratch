@@ -76,13 +76,7 @@ export function flowPixelCenterRegistrationWgslModule(
     const positionFunction = `${namespace}_position`
     const currentSampleFunction = `${namespace}_sample_current`
     const nextSampleFunction = `${namespace}_sample_next`
-    const offsets = levels.map(({ halfTexelQuanta }) =>
-        `${fixedNamespace}Axis(${halfTexelQuanta.low}u, ${halfTexelQuanta.high}u)`
-    ).join(', ')
-    const code = `const ${namespace}_half_texel = array<${fixedNamespace}Axis, ` +
-        `${levels.length}>(${offsets});
-
-fn ${namespace}_axis_less(
+    const code = `fn ${namespace}_axis_less(
     left: ${fixedNamespace}Axis,
     right: ${fixedNamespace}Axis,
 ) -> bool {
@@ -103,7 +97,8 @@ fn ${positionFunction}(
     position: ${fixedNamespace}Position,
     level: u32,
 ) -> ${fixedNamespace}Position {
-    let half_texel = ${namespace}_half_texel[level];
+    let half = ${currentSamplerNamespace}_half_texel_at(level);
+    let half_texel = ${fixedNamespace}Axis(half.x, half.y);
     var registered = position;
     registered.axes[0] = ${namespace}_subtract_clamped(position.axes[0], half_texel);
     registered.axes[1] = ${namespace}_subtract_clamped(position.axes[1], half_texel);
@@ -146,8 +141,8 @@ function registeredSamplerWgsl(
     position: ${addressNamespace}FixedPosition,
     level: u32,
 ) -> ${samplerNamespace}Sample {
-    let address = ${addressNamespace}_address(position, ${samplerNamespace}_matrix[level]);
-    let base = vec2i(address.tile * ${samplerNamespace}_page_size + address.texel);
+    let address = ${addressNamespace}_address(position, ${samplerNamespace}_matrix_at(level));
+    let base = vec2i(address.tile * ${samplerNamespace}_page_size_value() + address.texel);
     // The factory forbids a payload NoData sentinel. These loaded samples carry
     // the same metadata statuses as resolution_global, plus reusable values.
     let tl = ${samplerNamespace}_load_global(base, level);
@@ -164,13 +159,13 @@ function registeredSamplerWgsl(
         return ${samplerNamespace}Sample(vec4f(0.0), 3u, level, level);
     }
     let resolved_level = max(max(tl.resolved_level, tr.resolved_level), max(bl.resolved_level, br.resolved_level));
-    if (resolved_level < level || resolved_level >= ${samplerNamespace}_level_count) {
+    if (resolved_level < level || resolved_level >= ${samplerNamespace}_level_count_value()) {
         return ${samplerNamespace}_failed(level);
     }
     if (resolved_level > level) {
         return ${samplerNamespace}Sample(vec4f(0.0), 2u, level, resolved_level);
     }
-    if (level + 1u < ${samplerNamespace}_level_count &&
+    if (level + 1u < ${samplerNamespace}_level_count_value() &&
         ${samplerNamespace}_edge_blend_weight(position, level) < 1.0f) {
         return ${samplerNamespace}Sample(vec4f(0.0), 2u, level, level + 1u);
     }

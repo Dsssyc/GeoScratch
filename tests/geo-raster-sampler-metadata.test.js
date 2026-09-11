@@ -1,9 +1,12 @@
 import { expect } from 'chai'
-import { createLayoutReadbackView } from 'geoscratch/scratch'
+import { createLayoutReadbackView, GPURuntime } from 'geoscratch/scratch'
 import {
     GeoDiagnosticError, WebMercatorQuad, tileMatrixCoverage,
     webMercatorVirtualRasterField, prepareWebMercatorVirtualRasterSampler,
+    webMercatorVirtualRasterWgslModule, createWebMercatorVirtualRasterSamplerBinding,
+    VirtualRasterGpuState,
 } from 'geoscratch/geo'
+import { createFakeGpu } from './scratch-test-utils.js'
 
 describe('WebMercator raster sampler metadata', () => {
 
@@ -62,6 +65,79 @@ describe('WebMercator raster sampler metadata', () => {
             return
         }
         throw new Error('Mixed model was accepted')
+    })
+
+    it('generates identical shader code when coverage, bounds and decoding data change', () => {
+        const a = field(['4', '6']), b = field(['2', '7'], {bounds: [5, -4, 8, 4], scale: [2, 3], offset: [-4, 7], noData: -99})
+        const options = {namespace: 'Sampler', group: 0, pageTableBinding: 0, atlasBinding: 1, metadataBinding: 2}
+        const first = webMercatorVirtualRasterWgslModule(a, options)
+        const second = webMercatorVirtualRasterWgslModule(b, options)
+        expect(first.code).to.equal(second.code)
+        expect(first.code).to.equal(first.addressCode + '\n\n' + first.samplingCode)
+        expect(first.bindings.metadata).to.equal(2)
+        expect(first.code).to.not.include('const Sampler_matrix =')
+        expect(first.code).to.not.include('const SamplerAddress_limit_count =')
+        expect(first.code).to.include('Sampler_index_at_level(level, tile)')
+        expect(webMercatorVirtualRasterWgslModule(a, {...options, metadataBinding: undefined}).code)
+            .to.not.include('fn Sampler_level_count_value(')
+        expect(() => webMercatorVirtualRasterWgslModule(a, {...options, metadataBinding: 1})).to.throw(GeoDiagnosticError)
+    })
+
+    it('initializes immutable uniform storage and never owns the borrowed raster', async () => {
+        const fake = createFakeGpu(), runtime = await GPURuntime.create({gpu: fake.gpu})
+        const model = field(['4'])
+        const gpu = await VirtualRasterGpuState.create(runtime, {addressSpace: model.addressSpace, plane: model.plane, maxPhysicalPages: 4})
+        const first = await createWebMercatorVirtualRasterSamplerBinding(model, gpu)
+        const second = await createWebMercatorVirtualRasterSamplerBinding(model, gpu)
+        expect(first.metadata.buffer).to.not.equal(second.metadata.buffer)
+        expect(first.metadata.buffer.usage).to.equal(0x40)
+        expect(first.metadata.buffer.contentEpoch).to.equal(1)
+        expect(first.metadata.buffer.state).to.equal('ready')
+        expect(first.metadata.buffer.gpuBuffer.data).to.deep.equal(prepareWebMercatorVirtualRasterSampler(model).pack())
+        expect(first.pageTable.buffer).to.equal(gpu.pageTable)
+        expect(first.atlas).to.equal(gpu.atlasView)
+        first.dispose()
+        first.dispose()
+        expect(first.metadata.buffer.isDisposed).to.equal(true)
+        expect(second.metadata.buffer.isDisposed).to.equal(false)
+        expect(gpu.atlas.isDisposed).to.equal(false)
+        expect(gpu.pageTable.isDisposed).to.equal(false)
+        try { await createWebMercatorVirtualRasterSamplerBinding(field(['5']), gpu); throw new Error('accepted foreign raster') }
+        catch (error) { expect(error.diagnostic?.code).to.equal('GEO_RASTER_SAMPLER_BINDING_MISMATCH') }
+        second.dispose(); gpu.dispose(); await runtime.dispose()
+    })
+
+    for (const method of ['getMappedRange', 'unmap']) it(`cleans owned metadata when native ${method} fails`, async () => {
+        const fake = createFakeGpu(), runtime = await GPURuntime.create({gpu: fake.gpu})
+        const model = field(['4']), gpu = await VirtualRasterGpuState.create(runtime, {
+            addressSpace: model.addressSpace, plane: model.plane, maxPhysicalPages: 4,
+        })
+        const before = fake.calls.bufferDestroys.length
+        fake.errors.throwNext(method, new Error('sampler native failure'))
+        let failure
+        try { await createWebMercatorVirtualRasterSamplerBinding(model, gpu) } catch (error) { failure = error }
+        expect(failure).to.be.instanceOf(Error)
+        expect(fake.calls.bufferDestroys.length).to.equal(before + 1)
+        expect(gpu.pageTable.isDisposed).to.equal(false)
+        expect(gpu.atlas.isDisposed).to.equal(false)
+        gpu.dispose(); await runtime.dispose()
+    })
+
+    it('rejects disposal of the borrowed raster during asynchronous metadata creation', async () => {
+        const fake = createFakeGpu(), runtime = await GPURuntime.create({gpu: fake.gpu})
+        const model = field(['4']), gpu = await VirtualRasterGpuState.create(runtime, {
+            addressSpace: model.addressSpace, plane: model.plane, maxPhysicalPages: 4,
+        })
+        const create = runtime.createMappedBuffer.bind(runtime)
+        let allocated
+        runtime.createMappedBuffer = async descriptor => {
+            const result = await create(descriptor); allocated = result.buffer; gpu.dispose(); return result
+        }
+        let failure
+        try { await createWebMercatorVirtualRasterSamplerBinding(model, gpu) } catch (error) { failure = error }
+        expect(failure?.diagnostic?.code).to.equal('GEO_RASTER_SAMPLER_BINDING_MISMATCH')
+        expect(allocated.isDisposed).to.equal(true)
+        await runtime.dispose()
     })
 })
 

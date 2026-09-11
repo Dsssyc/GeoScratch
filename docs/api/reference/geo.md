@@ -2,7 +2,7 @@
 
 # geoscratch/geo API Reference
 
-Public symbols: 324.
+Public symbols: 326.
 
 ## `packages/geoscratch/src/geo/coordinate-domain.ts`
 
@@ -3458,6 +3458,30 @@ Kind: `Type Alias`.
 type WebMercatorVirtualRasterFieldDescriptor = Readonly<{ addressSpaceId: string; auxiliaryAxes?: readonly Readonly<{ name: string; value: string | number }>[]; channels: 1 | 2 | 3 | 4; coordinateBits?: number; coverage: TileMatrixCoverage; fieldKind: VirtualRasterFieldKind; geographicBounds: readonly [number, number, number, number]; gpuFormat: GPUTextureFormat; id: string; interpolation: GeoFieldInterpolation; label?: string; noData?: number; offset?: number | readonly number[]; sampleType: VirtualRasterSampleType; scale?: number | readonly number[]; sourceRevision: string; unit?: string }>
 ```
 
+## `packages/geoscratch/src/geo/web-mercator-virtual-raster-sampler-binding.ts`
+
+### `createWebMercatorVirtualRasterSamplerBinding`
+
+Kind: `Function`.
+
+Owns immutable uniform metadata and borrows one matching raster; replacement never mutates an older binding.
+
+```ts
+Function createWebMercatorVirtualRasterSamplerBinding
+```
+
+```ts
+createWebMercatorVirtualRasterSamplerBinding(model: WebMercatorVirtualRasterField, gpu: VirtualRasterGpuState): Promise<Readonly<{ atlas: TextureViewSpec; gpu: VirtualRasterGpuState; kind: "web-mercator-virtual-raster-sampler-binding"; metadata: BufferRegion; model: WebMercatorVirtualRasterField; pageTable: BufferRegion; resources: readonly (TextureResource | BufferResource)[]; dispose: any }>>
+```
+
+### `WebMercatorVirtualRasterSamplerBinding`
+
+Kind: `Type Alias`.
+
+```ts
+type WebMercatorVirtualRasterSamplerBinding = Readonly<{ atlas: TextureViewSpec; gpu: VirtualRasterGpuState; kind: "web-mercator-virtual-raster-sampler-binding"; metadata: BufferRegion; model: WebMercatorVirtualRasterField; pageTable: BufferRegion; resources: readonly (BufferResource | TextureResource)[]; dispose: any }>
+```
+
 ## `packages/geoscratch/src/geo/web-mercator-virtual-raster-sampler-metadata.ts`
 
 ### `PreparedWebMercatorVirtualRasterSampler`
@@ -3503,7 +3527,7 @@ webMercatorVirtualRasterWgslModule(model: WebMercatorVirtualRasterField, options
 Kind: `Type Alias`.
 
 ```ts
-type WebMercatorVirtualRasterWgslModule = Readonly<{ addressNamespace: string; bindings: Readonly<{ atlas: number; group: number; pageTable: number }>; code: string; kind: "web-mercator-virtual-raster-wgsl-module"; namespace: string }>
+type WebMercatorVirtualRasterWgslModule = Readonly<{ addressCode: string; addressNamespace: string; bindings: Readonly<{ atlas: number; group: number; metadata?: number; pageTable: number }>; code: string; kind: "web-mercator-virtual-raster-wgsl-module"; namespace: string; samplingCode: string }>
 ```
 
 ### `WebMercatorVirtualRasterWgslOptions`
@@ -3511,5 +3535,5 @@ type WebMercatorVirtualRasterWgslModule = Readonly<{ addressNamespace: string; b
 Kind: `Type Alias`.
 
 ```ts
-type WebMercatorVirtualRasterWgslOptions = Readonly<{ addressNamespace?: string; atlasBinding: number; group: number; namespace?: string; pageTableBinding: number; transitionTexels?: number }>
+type WebMercatorVirtualRasterWgslOptions = Readonly<{ addressNamespace?: string; atlasBinding: number; group: number; metadataBinding?: number; namespace?: string; pageTableBinding: number; parameterAccessors?: boolean; transitionTexels?: number }>
 ```

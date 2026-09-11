@@ -1,10 +1,10 @@
 override FLOW_CENTER_SMOOTH = false;
 
 fn FlowCenter_support(global: vec2i, level: u32) -> vec2f {
-    if (any(global < vec2i(FlowVelocityCurrent_minimum_texel[level])) ||
-        any(global > vec2i(FlowVelocityCurrent_maximum_texel[level])) ||
-        any(global < vec2i(FlowVelocityNext_minimum_texel[level])) ||
-        any(global > vec2i(FlowVelocityNext_maximum_texel[level]))) { return vec2f(-1.0); }
+    if (any(global < vec2i(FlowVelocityCurrent_minimum_texel_at(level))) ||
+        any(global > vec2i(FlowVelocityCurrent_maximum_texel_at(level))) ||
+        any(global < vec2i(FlowVelocityNext_minimum_texel_at(level))) ||
+        any(global > vec2i(FlowVelocityNext_maximum_texel_at(level)))) { return vec2f(-1.0); }
     let lower = FlowVelocityCurrent_load_global(global, level);
     let upper = FlowVelocityNext_load_global(global, level);
     if (lower.status != 1u || upper.status != 1u ||
@@ -15,12 +15,12 @@ fn FlowCenter_support(global: vec2i, level: u32) -> vec2f {
 
 fn FlowCenter_coverage(position: FlowVelocityAddressFixedPosition) -> f32 {
     let level = boundaryUniform.requestedLevel;
-    if (!FlowVelocity_nearest_zero_gate || level >= FlowVelocityCurrent_level_count ||
+    if (!FlowVelocity_nearest_zero_gate || level >= FlowVelocityCurrent_level_count_value() ||
         !FlowVelocity_source_contains(position)) { return FlowBoundary_hard_coverage(position, level); }
     if (!FlowBoundary_exact_residency(position, level)) { return FlowBoundary_hard_coverage(position, level); }
     let registered = FlowVelocityRegistration_position(position, level);
-    let address = FlowVelocityAddress_address(registered, FlowVelocityCurrent_matrix[level]);
-    let base = vec2i(address.tile * FlowVelocityCurrent_page_size + address.texel);
+    let address = FlowVelocityAddress_address(registered, FlowVelocityCurrent_matrix_at(level));
+    let base = vec2i(address.tile * FlowVelocityCurrent_page_size_value() + address.texel);
     var support: array<vec2f, 16>;
     var minimum = vec2f(1.0);
     var maximum = vec2f(0.0);

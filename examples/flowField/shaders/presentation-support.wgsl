@@ -8,18 +8,18 @@ fn FlowPresentation_endpoint_support(velocity: vec2f, kill: f32) -> f32 {
 fn FlowPresentation_stationary_coverage(
     position: FlowVelocityAddressFixedPosition, level: u32, progress: f32, kill: f32,
 ) -> f32 {
-    if (!FlowVelocity_nearest_zero_gate || level >= FlowVelocityCurrent_level_count ||
+    if (!FlowVelocity_nearest_zero_gate || level >= FlowVelocityCurrent_level_count_value() ||
         !FlowVelocity_source_contains(position)) { return 0.0; }
     // Use the sampler's wide-fixed half-texel registration. Subtracting .5 from
     // an already rounded f32 fraction can select the wrong lattice cell.
     let registered = FlowVelocityRegistration_position(position, level);
-    let address = FlowVelocityAddress_address(registered, FlowVelocityCurrent_matrix[level]);
-    let base = vec2i(address.tile * FlowVelocityCurrent_page_size + address.texel);
-    let original = FlowVelocityAddress_address(position, FlowVelocityCurrent_matrix[level]);
-    let owner = vec2i(original.tile * FlowVelocityCurrent_page_size + original.texel);
+    let address = FlowVelocityAddress_address(registered, FlowVelocityCurrent_matrix_at(level));
+    let base = vec2i(address.tile * FlowVelocityCurrent_page_size_value() + address.texel);
+    let original = FlowVelocityAddress_address(position, FlowVelocityCurrent_matrix_at(level));
+    let owner = vec2i(original.tile * FlowVelocityCurrent_page_size_value() + original.texel);
     // Validate the complete 2x2 rectangle once, before any clamping load.
-    let minimum = max(vec2i(FlowVelocityCurrent_minimum_texel[level]), vec2i(FlowVelocityNext_minimum_texel[level]));
-    let maximum = min(vec2i(FlowVelocityCurrent_maximum_texel[level]), vec2i(FlowVelocityNext_maximum_texel[level]));
+    let minimum = max(vec2i(FlowVelocityCurrent_minimum_texel_at(level)), vec2i(FlowVelocityNext_minimum_texel_at(level)));
+    let maximum = min(vec2i(FlowVelocityCurrent_maximum_texel_at(level)), vec2i(FlowVelocityNext_maximum_texel_at(level)));
     if (any(base < minimum) || any(base + vec2i(1) > maximum)) { return 0.0; }
     if (any(owner < base) || any(owner > base + vec2i(1))) { return 0.0; }
     let lower_owner = FlowVelocityCurrent_load_global(owner, level);
