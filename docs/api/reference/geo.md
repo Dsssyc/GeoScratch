@@ -2,7 +2,7 @@
 
 # geoscratch/geo API Reference
 
-Public symbols: 322.
+Public symbols: 324.
 
 ## `packages/geoscratch/src/geo/coordinate-domain.ts`
 
@@ -3456,6 +3456,30 @@ Kind: `Type Alias`.
 
 ```ts
 type WebMercatorVirtualRasterFieldDescriptor = Readonly<{ addressSpaceId: string; auxiliaryAxes?: readonly Readonly<{ name: string; value: string | number }>[]; channels: 1 | 2 | 3 | 4; coordinateBits?: number; coverage: TileMatrixCoverage; fieldKind: VirtualRasterFieldKind; geographicBounds: readonly [number, number, number, number]; gpuFormat: GPUTextureFormat; id: string; interpolation: GeoFieldInterpolation; label?: string; noData?: number; offset?: number | readonly number[]; sampleType: VirtualRasterSampleType; scale?: number | readonly number[]; sourceRevision: string; unit?: string }>
+```
+
+## `packages/geoscratch/src/geo/web-mercator-virtual-raster-sampler-metadata.ts`
+
+### `PreparedWebMercatorVirtualRasterSampler`
+
+Kind: `Type Alias`.
+
+```ts
+type PreparedWebMercatorVirtualRasterSampler = Readonly<{ kind: "prepared-web-mercator-virtual-raster-sampler"; layout: LayoutCodec; model: WebMercatorVirtualRasterField; pack: any }>
+```
+
+### `prepareWebMercatorVirtualRasterSampler`
+
+Kind: `Function`.
+
+Prepares one immutable source interpretation; packing owns no GPU resources or residency.
+
+```ts
+Function prepareWebMercatorVirtualRasterSampler
+```
+
+```ts
+prepareWebMercatorVirtualRasterSampler(model: WebMercatorVirtualRasterField): PreparedWebMercatorVirtualRasterSampler
 ```
 
 ## `packages/geoscratch/src/geo/web-mercator-virtual-raster-wgsl.ts`

@@ -2,7 +2,7 @@
 docId: geo.virtual-raster.zh
 canonical: false
 translationOf: ./virtual-raster.md
-canonicalDigest: 99878612e8a682eee8518c8c3c645b9f862b3e95829d25cc24ff4c5696b94e3f
+canonicalDigest: b72844f14a68d4a65d5608141da76a8b7a7b5ffb9c24362e921a7c41d257626f
 ---
 # Virtual Raster
 
@@ -82,3 +82,13 @@ grid 或 editable raster，而无需让 shader 与 tile neighbor 或 atlas coord
 - `docs/decisions/ADR-072-worker-context-pool-and-typed-protocols.md`
 - `docs/decisions/ADR-073-virtual-raster-executor-authority.md`
 - `docs/decisions/ADR-085-maplibre-readiness-and-raster-source-boundaries.md`
+
+
+`prepareWebMercatorVirtualRasterSampler(model)` 将数据源解释准备为 CPU 元数据，
+使用固定 1,808 字节的 uniform 布局。它借用一个不可变且内部一致的 WebMercator
+场模型，并拥有私有的打包副本。`pack()` 返回调用方拥有的新字节副本，修改该副本
+不会改变准备产物。准备过程不分配 GPU 资源、不上传、不发布驻留状态，也不执行采样。
+布局描述源范围、解码参数、局部采样层级、像素中心偏移，以及内置 WebMercatorQuad
+0–24 级的矩阵到局部层级直接映射。缺失矩阵 id 使用显式哨兵；局部层级索引不能
+与矩阵 id 混用。页表偏移保留数据源紧凑覆盖的行优先身份。模型所有权不一致会在
+`sampling` 阶段报告 `GEO_RASTER_SAMPLER_METADATA_INVALID`。

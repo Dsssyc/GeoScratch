@@ -10,6 +10,7 @@ apiSources:
   - packages/geoscratch/src/geo/virtual-raster-transfer.ts
   - packages/geoscratch/src/geo/virtual-raster-worker-executor.ts
   - packages/geoscratch/src/geo/virtual-raster.ts
+  - packages/geoscratch/src/geo/web-mercator-virtual-raster-sampler-metadata.ts
 ---
 # Virtual Raster
 
@@ -92,6 +93,18 @@ shape and treats an identity mismatch as a cache miss rather than adopting stale
 Applications can use Virtual Raster for DEM, imagery,
 flow fields, classifications, simulation grids, or editable rasters without coupling
 their shaders to tile neighbors or atlas coordinates.
+
+`prepareWebMercatorVirtualRasterSampler(model)` prepares source interpretation as
+CPU metadata with a fixed 1,808-byte uniform layout. It borrows one immutable,
+coherent WebMercator field model and owns a private packed copy. `pack()` returns
+fresh caller-owned bytes; changing those bytes cannot mutate the preparation.
+Preparation performs no GPU allocation, upload, residency publication, or sampling.
+The layout describes source bounds, decoding parameters, local sampling levels,
+pixel-center offsets, and a direct matrix-to-local-level map for the built-in
+WebMercatorQuad range 0–24. Missing matrix ids are explicit sentinels; local level
+indices are not interchangeable with matrix ids. Page offsets retain the source's
+compact row-major coverage identity. Incoherent model ownership fails with
+`GEO_RASTER_SAMPLER_METADATA_INVALID` in the `sampling` phase.
 
 ## Related decisions
 

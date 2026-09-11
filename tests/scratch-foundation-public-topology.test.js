@@ -147,6 +147,7 @@ const geoValues = [
     'ownedVirtualRasterPagePayload',
     'planarTileSpatialProfile',
     'prepareVirtualRasterPageTransfer',
+    'prepareWebMercatorVirtualRasterSampler',
     'regularQuadTileTopology',
     'surfaceDomain',
     'tileMatrixCoverage',

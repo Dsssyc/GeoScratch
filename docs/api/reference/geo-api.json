@@ -2467,6 +2467,20 @@
         "declaration": "type PreparedVirtualRasterPageTransfer = Readonly<{ transferables: readonly [ArrayBuffer]; value: VirtualRasterPageTransfer }>"
       },
       {
+        "id": "geoscratch/geo#PreparedWebMercatorVirtualRasterSampler",
+        "name": "PreparedWebMercatorVirtualRasterSampler",
+        "kind": "Type Alias",
+        "source": "packages/geoscratch/src/geo/web-mercator-virtual-raster-sampler-metadata.ts",
+        "sources": [
+          "packages/geoscratch/src/geo/web-mercator-virtual-raster-sampler-metadata.ts"
+        ],
+        "locations": [
+          "packages/geoscratch/src/geo/web-mercator-virtual-raster-sampler-metadata.ts:32"
+        ],
+        "summary": "",
+        "declaration": "type PreparedWebMercatorVirtualRasterSampler = Readonly<{ kind: \"prepared-web-mercator-virtual-raster-sampler\"; layout: LayoutCodec; model: WebMercatorVirtualRasterField; pack: any }>"
+      },
+      {
         "id": "geoscratch/geo#prepareVirtualRasterPageTransfer",
         "name": "prepareVirtualRasterPageTransfer",
         "kind": "Function",
@@ -2481,6 +2495,23 @@
         "declaration": "Function prepareVirtualRasterPageTransfer",
         "signatures": [
           "prepareVirtualRasterPageTransfer(descriptor: VirtualRasterPagePayloadDescriptor): PreparedVirtualRasterPageTransfer"
+        ]
+      },
+      {
+        "id": "geoscratch/geo#prepareWebMercatorVirtualRasterSampler",
+        "name": "prepareWebMercatorVirtualRasterSampler",
+        "kind": "Function",
+        "source": "packages/geoscratch/src/geo/web-mercator-virtual-raster-sampler-metadata.ts",
+        "sources": [
+          "packages/geoscratch/src/geo/web-mercator-virtual-raster-sampler-metadata.ts"
+        ],
+        "locations": [
+          "packages/geoscratch/src/geo/web-mercator-virtual-raster-sampler-metadata.ts:41"
+        ],
+        "summary": "Prepares one immutable source interpretation; packing owns no GPU resources or residency.",
+        "declaration": "Function prepareWebMercatorVirtualRasterSampler",
+        "signatures": [
+          "prepareWebMercatorVirtualRasterSampler(model: WebMercatorVirtualRasterField): PreparedWebMercatorVirtualRasterSampler"
         ]
       },
       {

@@ -1,4 +1,6 @@
 export { MercatorCoordinate } from './mercatorCoordinate.js'
+export { prepareWebMercatorVirtualRasterSampler } from './web-mercator-virtual-raster-sampler-metadata.js'
+export type { PreparedWebMercatorVirtualRasterSampler } from './web-mercator-virtual-raster-sampler-metadata.js'
 export {
     GeoDiagnosticError,
     createGeoDiagnostic,
