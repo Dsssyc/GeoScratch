@@ -252,10 +252,18 @@ export async function startFlowFieldApplication(
     if (initialOutcome.status !== 'ready') {
         throw new Error(`Flow Field initial temporal selection was ${initialOutcome.status}`)
     }
+    const viewSource = mapLibrePlanarViewSource({
+        id: 'flow-field-maplibre-view-source',
+        adapter: flowFieldViewAdapter,
+        map,
+        presentationSize: () => canvasPixelSize(canvas),
+        minimumElevationMeters: 0,
+    })
     const renderer = await lifetime.acquire(createFlowFieldRenderer({
         runtime,
         surface,
         size,
+        referenceViewport: viewSource.capture().view.referenceViewport,
         temporalWindow,
         maximumSpeed: dataset.maximumSpeed,
         presentation,
@@ -269,13 +277,6 @@ export async function startFlowFieldApplication(
         readiness: readyReadiness(timeline.snapshot().selectionRevision),
     })
 
-    const viewSource = mapLibrePlanarViewSource({
-        id: 'flow-field-maplibre-view-source',
-        adapter: flowFieldViewAdapter,
-        map,
-        presentationSize: () => canvasPixelSize(canvas),
-        minimumElevationMeters: 0,
-    })
     frameController = createGeoFrameController<
         FlowFieldApplicationFrame,
         GeoViewSourceCapture<MapLibrePlanarCameraState>

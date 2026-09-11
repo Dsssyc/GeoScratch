@@ -4,6 +4,24 @@ import { mountFlowFieldControls } from '../examples/flowField/control-panel.ts'
 import { FLOW_FIELD_PRESENTATION } from '../examples/flowField/flow-presentation.ts'
 
 describe('Flow Field boundary controls (Node DOM fixture)', () => {
+    it('defaults to balanced trails and retains native quality through inspection views', () => {
+        const fixture = controlsFixture()
+        fixture.controls.update(fixture.snapshot)
+        expect(fixture.find('trail-quality').value).to.equal('balanced')
+        fixture.change('trail-quality','native')
+        expect(fixture.events.at(-1).trailQuality).to.equal('native')
+        fixture.change('view','status')
+        expect(fixture.find('trail-quality').disabled).to.equal(true)
+        fixture.change('view','particles')
+        expect(fixture.find('trail-quality').disabled).to.equal(false)
+        expect(fixture.find('trail-quality').value).to.equal('native')
+        expect(fixture.events.at(-1).trailQuality).to.equal('native')
+        const count = fixture.events.length
+        fixture.controls.dispose()
+        fixture.change('trail-quality','balanced')
+        expect(fixture.events.length).to.equal(count)
+    })
+
     it('defaults to A and only enables the boundary choice for particles', () => {
         const fixture = controlsFixture()
         const boundary = fixture.find('boundary')
@@ -92,7 +110,7 @@ describe('Flow Field boundary controls (Node DOM fixture)', () => {
         expect(fixture.find('boundary').value).to.equal('hard')
         expect(legacy).to.not.have.property('boundary')
         fixture.change('boundary', 'sdf')
-        expect(fixture.events.at(-1)).to.deep.equal({...legacy,boundary:'sdf',sdfFeatherTexels:0.25})
+        expect(fixture.events.at(-1)).to.deep.equal({...legacy,boundary:'sdf',sdfFeatherTexels:0.25,trailQuality:'balanced'})
         fixture.controls.setStatus('stopped')
         expect(fixture.find('boundary').disabled).to.equal(true)
         expect(fixture.find('feather').disabled).to.equal(true)

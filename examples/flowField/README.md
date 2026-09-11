@@ -27,6 +27,28 @@ Activity contour is an optional velocity threshold overlay and does not enter tr
 The Boundary selector offers four explicit comparisons. A remains the default;
 C/D are opt-in center-field reconstructions, described after the existing A/B rules.
 
+## Trail quality
+
+The inspector's **Trail quality** defaults to **Balanced** for smoother playback
+on large/high-DPR displays. Only trail history and particle overlap depth are
+limited to one texel per reference pixel and a 1080p pixel budget; the Surface,
+basemap, text, contour overlay and diagnostic views remain at native resolution.
+**Native** retains the original fine trail rasterization. You can also open
+`/flowField/?trailQuality=native` to choose it at startup.
+
+Balanced trades trail detail for lower GPU work, and may change line thickness
+and density. It does not lower the raster's source resolution, alter camera cover,
+or reduce particle count. Changing quality only reallocates history when the
+resolved dimensions differ. That clears existing ink without resetting particles;
+while paused, trails can remain empty until playback resumes. See
+[ADR-133](../../docs/decisions/ADR-133-flow-trail-pixel-budget.md).
+
+With the development server and prepared Flow dataset running, verify with:
+
+```sh
+node tests/browser/flow-field-trail-quality.mjs
+```
+
 ## Visual time and paused inspection
 
 Particle motion and trail decay use a **60 Hz visual reference**, separately from

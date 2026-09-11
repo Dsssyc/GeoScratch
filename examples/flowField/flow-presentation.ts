@@ -4,6 +4,7 @@ import type { FlowTemporalFrameSnapshot } from './flow-frame-provenance.ts'
 export type FlowFieldViewMode = 'particles' | 'speed' | 'direction' | 'u' | 'v' | 'status'
 export type FlowFieldSampleView = 'interpolated' | 'lower' | 'upper' | 'delta'
 export type FlowFieldBoundaryMode = 'hard' | 'sdf' | 'sdf-center-linear' | 'sdf-center-smooth'
+export type FlowFieldTrailQuality = 'balanced' | 'native'
 
 /** Source-texel feather bounds shared by UI validation and history presentation. */
 export const FLOW_FIELD_SDF_FEATHER = Object.freeze({ minimum: 0.05, maximum: 0.35, default: 0.25 })
@@ -15,13 +16,15 @@ export type FlowFieldPresentation = Readonly<{
     contour: boolean
     boundary: FlowFieldBoundaryMode
     sdfFeatherTexels: number
+    trailQuality: FlowFieldTrailQuality
 }>
 
 /** Display defaults are applied at the input boundary; normalized choices are complete. */
 export type FlowFieldPresentationInput = Readonly<
-    Omit<FlowFieldPresentation, 'boundary' | 'sdfFeatherTexels'> & {
+    Omit<FlowFieldPresentation, 'boundary' | 'sdfFeatherTexels' | 'trailQuality'> & {
         boundary?: FlowFieldBoundaryMode
         sdfFeatherTexels?: number
+        trailQuality?: FlowFieldTrailQuality
     }
 >
 
@@ -29,6 +32,7 @@ export type FlowFieldPresentationInput = Readonly<
 export const FLOW_FIELD_PRESENTATION: FlowFieldPresentation = Object.freeze({
     view: 'particles', sample: 'interpolated', trails: true, contour: false, boundary: 'hard',
     sdfFeatherTexels: FLOW_FIELD_SDF_FEATHER.default,
+    trailQuality: 'balanced',
 })
 
 export type FlowFieldControlSnapshot = Readonly<{
@@ -51,15 +55,17 @@ export type FlowFieldControlSnapshot = Readonly<{
 /** Validates a whole presentation choice before changing the active rendering graph. */
 export function flowFieldPresentation(value: FlowFieldPresentationInput): FlowFieldPresentation {
     const boundary = value?.boundary === undefined ? 'hard' : value.boundary
+    const trailQuality = value?.trailQuality === undefined ? 'balanced' : value.trailQuality
     const sdfFeatherTexels = flowFieldSdfFeatherTexels(value?.sdfFeatherTexels === undefined
         ? FLOW_FIELD_SDF_FEATHER.default : value.sdfFeatherTexels)
     if (!['particles', 'speed', 'direction', 'u', 'v', 'status'].includes(value?.view) ||
         !['interpolated', 'lower', 'upper', 'delta'].includes(value?.sample) ||
         typeof value.trails !== 'boolean' || typeof value.contour !== 'boolean' ||
-        !['hard', 'sdf', 'sdf-center-linear', 'sdf-center-smooth'].includes(boundary)) {
+        !['hard', 'sdf', 'sdf-center-linear', 'sdf-center-smooth'].includes(boundary) ||
+        !['balanced', 'native'].includes(trailQuality)) {
         throw new TypeError('Flow Field presentation is invalid')
     }
-    return Object.freeze({ ...value, boundary, sdfFeatherTexels })
+    return Object.freeze({ ...value, boundary, sdfFeatherTexels, trailQuality })
 }
 
 /** Validates a source-texel display width without changing or quantizing the caller's value. */
