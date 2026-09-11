@@ -75,9 +75,11 @@ import type {
 } from './flow-render-view.ts'
 import {
     createFlowSpawnIndex,
+    prepareFlowSpawnCandidates,
 } from './flow-spawn-index.ts'
 import type {
     FlowSpawnIndex,
+    FlowSpawnCandidates,
 } from './flow-spawn-index.ts'
 import {
     FlowTemporalBindingSupersededError,
@@ -356,6 +358,7 @@ export async function createFlowFieldRenderer(
         } | undefined
         let packedCells: FlowDemandFrame['candidateCells'] | undefined
         let packedCandidates = new Uint8Array(new ArrayBuffer(0))
+        let preparedSpawnCandidates: FlowSpawnCandidates | undefined
 
         async function render(
             frameNumber: number,
@@ -508,10 +511,11 @@ export async function createFlowFieldRenderer(
                 visualTime = visualClock.tick(wallTime,particlesEligible && timeline.playing)
                 const particlesAdvancing = particlesEligible && visualTime.referenceSteps > 0
                 renderView.encode(builder, view)
-                if (packedCells !== demandFrame.candidateCells) {
+                if (preparedSpawnCandidates === undefined || packedCells !== demandFrame.candidateCells) {
                     packedCandidates = packFlowCandidateCells(
                         demandFrame.candidateCells, model.addressCodec, cellsPerPageEdge
                     )
+                    preparedSpawnCandidates = prepareFlowSpawnCandidates(packedCandidates)
                     packedCells = demandFrame.candidateCells
                 }
                 const candidates = packedCandidates
@@ -525,7 +529,7 @@ export async function createFlowFieldRenderer(
                 })
                 const spawnFrame = spawn.encode(
                     builder,
-                    candidates,
+                    preparedSpawnCandidates,
                     demandFrame.candidateCells.length,
                     supportSnapshot,
                     prepared
@@ -797,6 +801,9 @@ export async function createFlowFieldRenderer(
                         failures.push(error)
                     }
                 }
+                preparedSpawnCandidates = undefined
+                packedCandidates = new Uint8Array(new ArrayBuffer(0))
+                packedCells = undefined
                 try {
                     await disposeOwned(owned)
                 } catch (error) {

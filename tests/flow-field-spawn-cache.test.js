@@ -1,7 +1,7 @@
 import { expect } from 'chai'
 import { readFile } from 'node:fs/promises'
 import { GPURuntime } from 'geoscratch/scratch'
-import { createFlowSpawnIndex } from '../examples/flowField/flow-spawn-index.ts'
+import { createFlowSpawnIndex, prepareFlowSpawnCandidates } from '../examples/flowField/flow-spawn-index.ts'
 
 describe('Flow Field observed endpoint-union spawn cache', () => {
     let originalFetch
@@ -49,6 +49,55 @@ describe('Flow Field observed endpoint-union spawn cache', () => {
             unaligned[31] ^= 1
             expect(context.encode({ bytes: unaligned }).frame.built).to.equal(true)
         } finally { context.index.dispose() }
+    })
+
+    it('owns prepared bytes and reuses their observed identity without scanning', async() => {
+        const context = await fixture()
+        try {
+            const prepared = prepareFlowSpawnCandidates(context.bytes)
+            expect(Object.isFrozen(prepared)).to.equal(true)
+            const first = context.encode({ bytes: prepared })
+            await context.index.observe(first.frame, context.submit(first.builder))
+            context.bytes[0] ^= 1
+            for (let index = 0; index < 100; index++) {
+                const next = context.encode({ bytes: prepared, progress: index / 100 })
+                expect(next.frame.reused).to.equal(true)
+                await context.index.observe(next.frame, context.submit(next.builder))
+            }
+            expect(context.index.facts()).to.include({ buildCount: 1, candidateComparisonCount: 0 })
+            // A changed raw source remains detectable; preparation did not borrow it.
+            expect(context.encode().frame.built).to.equal(true)
+        } finally { context.index.dispose() }
+    })
+
+    it('compares an equal replacement artifact once before promoting its identity', async() => {
+        const context = await fixture()
+        try {
+            const first = context.encode({ bytes: prepareFlowSpawnCandidates(context.bytes) })
+            await context.index.observe(first.frame, context.submit(first.builder))
+            const replacement = prepareFlowSpawnCandidates(context.bytes)
+            expect(context.encode({ bytes: replacement }).frame.reused).to.equal(true)
+            expect(context.encode({ bytes: replacement }).frame.reused).to.equal(true)
+            expect(context.index.facts().candidateComparisonCount).to.equal(1)
+            expect(() => context.encode({ bytes: { ...replacement } })).to.throw('bounded record count')
+            context.index.resources.output.buffer.contentEpoch++
+            expect(context.encode({ bytes: replacement }).frame.built).to.equal(true)
+        } finally { context.index.dispose() }
+    })
+
+    it('never promotes a prepared identity before its native build succeeds', async() => {
+        const context = await fixture()
+        try {
+            const bytes = prepareFlowSpawnCandidates(context.bytes)
+            context.encode({ bytes })
+            const next = context.encode({ bytes })
+            expect(next.frame.built).to.equal(true)
+            await expectRejected(context.index.observe(next.frame, context.submit(next.builder, {
+                nativeOutcome: Promise.resolve({ status: 'observed-failed' }),
+            })), 'observed-failed')
+            expect(context.encode({ bytes }).frame.built).to.equal(true)
+        } finally { context.index.dispose() }
+        expect(() => prepareFlowSpawnCandidates(new Uint8Array(33))).to.throw('complete packed records')
     })
 
     it('invalidates on either publication, pair identity, bind set, or candidate count', async() => {

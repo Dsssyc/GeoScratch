@@ -6,6 +6,12 @@ collection at `/api/flow/` alongside Underwater Terrain; switching examples
 requires no restart. Missing collections require explicit preparation as
 described in the [backend guide](../backend/README.md#prepare-flow-data).
 
+Stable spatial demand prepares one privately owned spawn-candidate artifact.
+Observed support can reuse its identity without scanning the packed bytes on
+every animation frame. The mutable-view spawn API still detects in-place edits;
+`renderer.spawn.candidateComparisonCount` distinguishes content checks from
+prepared identity reuse. See [ADR-132](../../docs/decisions/ADR-132-flow-prepared-spawn-candidates.md).
+
 The default is Flow Layer-style colored particle trails over MapLibre. The bottom
 timeline controls play/pause, continuous model-time seeking, signed playback rate,
 and loop/clamp. Requested and presented times remain distinct while data loads.
