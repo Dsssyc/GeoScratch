@@ -42,19 +42,25 @@ validation and C/D's explicit unmasked sampling choice. See
 
 ## Trail quality
 
-The inspector's **Trail quality** defaults to **Balanced** for smoother playback
-on large/high-DPR displays. Only trail history and particle overlap depth are
-limited to one texel per reference pixel and a 1080p pixel budget; the Surface,
-basemap, text, contour overlay and diagnostic views remain at native resolution.
-**Native** retains the original fine trail rasterization. You can also open
-`/flowField/?trailQuality=native` to choose it at startup.
+The inspector's **Trail quality** defaults to **Native**, preserving the full
+physical trail resolution. **Balanced** limits only trail history to one texel per
+reference pixel and a 1080p pixel budget; the Surface, basemap, text, contour overlay
+and diagnostic views remain native. Use `/flowField/?trailQuality=balanced` when
+the lower trail budget is desired.
+
+Particle segments use explicit pixel coverage at 0.5 reference-pixel width, with
+filtered edges and fractional-length opacity. Transparent segments blend without
+the former overlap-depth texture. Balanced output and retained images use linear
+upscaling; Native presentation preserves exact texel reads. This smooths line
+edges without changing the underlying velocity field or its source ceiling.
+See [ADR-137](../../docs/decisions/ADR-137-flow-analytic-line-coverage.md).
 
 Balanced trades trail detail for lower GPU work, and may change line thickness
 and density. It does not lower the raster's source resolution, alter camera cover,
 or reduce particle count. Changing quality only reallocates history when the
 resolved dimensions differ. That clears existing ink without resetting particles;
-while paused, trails can remain empty until playback resumes. See
-[ADR-133](../../docs/decisions/ADR-133-flow-trail-pixel-budget.md).
+while paused, trails can remain empty until playback resumes. The original budget
+decision is [ADR-133](../../docs/decisions/ADR-133-flow-trail-pixel-budget.md).
 
 With the development server and prepared Flow dataset running, verify with:
 

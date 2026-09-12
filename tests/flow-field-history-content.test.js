@@ -191,7 +191,7 @@ async function fixture(run) {
         resources.push(value)
         return value
     }
-    for (const name of ['createBuffer','createTexture','createBindLayout','createShaderModule','createRenderPipeline']) runtime[name] = async descriptor => leaf(descriptor)
+    for (const name of ['createBuffer','createTexture','createSampler','createBindLayout','createShaderModule','createRenderPipeline']) runtime[name] = async descriptor => leaf(descriptor)
     for (const name of ['createUploadCommand','createProgram','createRenderPass','createDrawCommand']) runtime[name] = descriptor => leaf(descriptor)
     runtime.createBindSet = async (layout, bindings, descriptor) => leaf({...descriptor,layout,bindings})
     const cache = {builds:0,observations:0,disposed:false,wgsl:'',coverageWgsl:'',layout:{},bindSet:{},resources:[],
@@ -199,7 +199,7 @@ async function fixture(run) {
         facts() { return {builds:this.builds} },
         async observe() { this.observations++ },dispose() { this.disposed=true } }
     runtime.createTestCenterCache = () => cache
-    const history = await createFlowHistory({runtime,surface:{runtime,format:'rgba8unorm'},size:{width:32,height:8},
+    const history = await createFlowHistory({runtime,surface:{runtime,format:'rgba8unorm',size:{width:32,height:8}},size:{width:32,height:8},
         temporal:{layout:{runtime,group:1},wgsl:'fixture'},addressCodec:{},activityKill:.0001,
         mode:'clear',centerCache:{addressSpace:{},capacity:1}})
     const view = {kind:'geo-view-snapshot',clipFromRelativeWorld:[1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1],

@@ -552,6 +552,7 @@ export async function createFlowFieldRenderer(
                     // so stable frames place all hot uploads before simulation.
                     content = contentBuilder => {
                         if (particlesAdvancing) {
+                            particleRender.encode(contentBuilder, historySize, view.referenceViewport)
                             if (presentationReady) {
                                 if (populatedParticleView === undefined) {
                                     populatedParticleView = view

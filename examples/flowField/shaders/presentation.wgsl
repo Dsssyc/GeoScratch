@@ -1,4 +1,6 @@
 @group(0) @binding(0) var historyTexture: texture_2d<f32>;
+@group(0) @binding(1) var historySampler: sampler;
+@group(0) @binding(2) var<uniform> presentationUniform: FlowFieldHistoryUniform;
 
 struct VertexOutput {
     @builtin(position) position: vec4f,
@@ -27,6 +29,9 @@ fn vMain(@builtin(vertex_index) vertexIndex: u32) -> VertexOutput {
 
 @fragment
 fn fMain(input: VertexOutput) -> @location(0) vec4f {
+    if (presentationUniform.presentationFilter != 0u) {
+        return textureSampleLevel(historyTexture, historySampler, input.texcoords, 0.0);
+    }
     let dimensions = vec2i(textureDimensions(historyTexture, 0));
     let pixel = clamp(
         vec2i(vec2f(dimensions) * input.texcoords),

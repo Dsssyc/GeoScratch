@@ -11,7 +11,7 @@ const shaderPath = path.join(
 
 describe('Flow Field particle line draw', () => {
 
-    it('borrows canonical particle and shared view resources through two bind groups', () => {
+    it('borrows canonical particles/view and owns independent raster coverage inputs', () => {
 
         const source = fs.readFileSync(sourcePath, 'utf8')
         expect(source).to.include('particles: Pick<FlowParticles')
@@ -19,7 +19,7 @@ describe('Flow Field particle line draw', () => {
         expect(source).to.include("type: 'read-storage'")
         expect(source).to.include('group: 0')
         expect(source).to.include('view: FlowRenderViewBinding')
-        expect(source).to.include('bindLayouts: [ particleLayout, view.bindLayout ]')
+        expect(source).to.include('bindLayouts: [ particleLayout, view.bindLayout, rasterLayout ]')
         expect(source).to.include('{ set: view.bindSet }')
         expect(source).to.include('...currentReads(view.resources)')
         expect(source).to.not.include('particles.resources.particles.dispose()')
@@ -27,12 +27,12 @@ describe('Flow Field particle line draw', () => {
         expect(source).to.not.include('view.bindLayout.dispose()')
     })
 
-    it('creates one rgba8unorm history-compatible line-list draw', () => {
+    it('creates one rgba8unorm history-compatible instanced quad draw', () => {
 
         const source = fs.readFileSync(sourcePath, 'utf8')
         expect(source).to.include("targetFormat = options.targetFormat ?? 'rgba8unorm'")
-        expect(source).to.include("primitive: { topology: 'line-list' }")
-        expect(source).to.include('count: { vertexCount: particleCount * 2 }')
+        expect(source).to.include("primitive: { topology: 'triangle-strip' }")
+        expect(source).to.include('count: { vertexCount: 4, instanceCount: particleCount }')
         expect(source).to.include("contentEpoch: 'current-at-step'")
         expect(source).to.not.match(/readback|runtime\.(?:device|queue)/i)
         expect(source).to.not.match(/packages\/geoscratch\/src|flowLayer/)

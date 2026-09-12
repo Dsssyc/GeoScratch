@@ -122,10 +122,12 @@ current CPU renderer as GPU.
 Flow Field retains its GPU cover and observed spatial reuse. Stable spawn input
 uses an opaque immutable preparation artifact; mutable ArrayBufferView inputs
 still require content comparison. Do not replace mutable-content validation with
-raw object identity. Balanced trail quality bounds only history/depth textures to
-one texel per reference pixel and a 1080p pixel budget. Keep the Surface, map,
+raw object identity. Native trail quality is the default. Balanced bounds only the two
+history textures to one texel per reference pixel and a 1080p pixel budget. Keep the Surface, map,
 diagnostic views, camera cover and raster source precision independent from that
-budget, and retain Native as an explicit quality choice. Quality resizing clears
+budget, and retain both quality choices. Analytic line coverage must blend without
+occluding overlap depth, clip before perspective division, and filter scaled
+presentation without feeding that filter back into raw ink. Quality resizing clears
 history through its existing lifecycle without resetting particles or advancing
 paused simulation. Changes require the trail-quality browser proof, existing
 history/visual-time/camera-continuity gates and measured high-refresh evidence.

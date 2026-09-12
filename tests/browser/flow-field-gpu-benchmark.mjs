@@ -104,7 +104,7 @@ function installAudit() {
 }
 
 try {
-    for(const variant of (process.env.FLOW_GPU_BENCH_VARIANTS??'layer,field-C').split(',')) {
+    for(const variant of (process.env.FLOW_GPU_BENCH_VARIANTS??'layer,field-A').split(',')) {
         assert.ok(['layer','field-C','field-A','field-C-original'].includes(variant),'Unknown benchmark variant')
         const reference=variant==='layer'
         const page=await browser.newPage({viewport:{width:1512,height:861},deviceScaleFactor:dpr})
@@ -123,7 +123,7 @@ try {
             await route.fulfill({response,body:body.replace('advanceFieldState(graph, state);','')
                 .replace('progressRate: state.progress / (FRAMES_PER_FIELD - 1)','progressRate: 0.277')})
         })
-        await page.goto(`http://127.0.0.1:5173/${reference?'flowLayer':'flowField'}/?proof=1&rate=0.000000001&zoom=9`)
+        await page.goto(`http://127.0.0.1:5173/${reference?'flowLayer':'flowField'}/?proof=1&rate=0.000000001&zoom=9&trailQuality=native`)
         await page.waitForFunction(reference=>document.body.dataset.status==='error'||document.body.dataset.status==='ready'&&(reference
             ?window.__FLOW_LAYER_PROOF__?.facts()?.observedFrames>120
             :window.__FLOW_FIELD_PROOF__?.facts()?.lastFrame.presentationReady),reference,{timeout:90000})
@@ -132,7 +132,7 @@ try {
             const before=await page.evaluate(variant=>{
                 const p=window.__FLOW_FIELD_PROOF__,n=p.facts().renderer.particles.encodedSteps
                 p.seek(.277);p.setPresentation({view:'particles',sample:'interpolated',trails:true,contour:false,
-                    boundary:variant.startsWith('field-A')?'hard':'sdf-center-linear',sdfFeatherTexels:.25});return n
+                    boundary:variant.startsWith('field-A')?'hard':'sdf-center-linear',sdfFeatherTexels:.25,trailQuality:'native'});return n
             },variant)
             await page.waitForFunction(before=>{const f=window.__FLOW_FIELD_PROOF__.facts();return f.lastFrame.presentationReady&&f.workers.activeTaskCount===0&&f.renderer.particles.encodedSteps>before+150},before,{timeout:90000})
         }

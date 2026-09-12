@@ -127,14 +127,14 @@ fn FlowVelocity_sample(p:FlowVelocityAddressFixedPosition,l:u32,t:FlowVelocityTe
 }`}]}))
             const freshProgram = own(runtime.createProgram({vertex:{module:freshModule,entryPoint:'vs'},fragment:{module:freshModule,entryPoint:'fs'}}))
             const freshPipeline = own(await runtime.createRenderPipeline({program:freshProgram,targets:[{format:'rgba8unorm'}],
-                primitive:{topology:'triangle-strip'},depthStencil:{format:'depth32float',depthWriteEnabled:false,depthCompare:'less'}}))
+                primitive:{topology:'triangle-strip'}}))
             const fresh = own(runtime.createDrawCommand({pipeline:freshPipeline,count:{vertexCount:4},resources:{read:[],write:[]},whenMissing:'throw'}))
             let width=32,height=8,submissions=0
             const view = shift => ({kind:'geo-view-snapshot',
                 clipFromRelativeWorld:[1,0,0,0,0,1,0,0,0,0,-1,0,0,0,0,1],
                 cameraHigh:[13_360_000,3_503_000,.5],cameraLow:[.125+shift,.25,0],referenceViewport:[width,height]})
             async function submit({values=[1,0,1,0],seed=false,retained=false,shift=0,inspector=false,boundary='hard',feather=.25,
-                commonInterior=false,coverageMode=commonInterior?1:0,progress=prepared.progress}={}) {
+                commonInterior=false,coverageMode=commonInterior?1:0,progress=prepared.progress,draw=fresh}={}) {
                 await new Promise(resolve=>requestAnimationFrame(resolve))
                 velocityCodec.write(velocityBytes,{value:values})
                 velocityCodec.write(supportBytes,{value:[coverageMode,0,0,0]})
@@ -142,7 +142,7 @@ fn FlowVelocity_sample(p:FlowVelocityAddressFixedPosition,l:u32,t:FlowVelocityTe
                 const builder=runtime.createSubmission({validation:'throw'})
                 if (!retained) builder.upload(upload).upload(supportUpload)
                 const frame=retained ? history.presentRetained(builder,view(shift))
-                    : history.encode(builder,view(shift),seed?[fresh]:[],true,inspector?undefined:prepared,boundary,feather)
+                    : history.encode(builder,view(shift),seed?[draw]:[],true,inspector?undefined:prepared,boundary,feather)
                 const work=builder.submit()
                 // Read the actual presented Surface. Raw textures remain private.
                 // Snapshot in the acquisition task, before awaiting native scopes:
@@ -305,7 +305,7 @@ fn FlowVelocity_sample(p:FlowVelocityAddressFixedPosition,l:u32,t:FlowVelocityTe
             const inkProgram=ownProducer(runtime.createProgram({vertex:{module:inkModule,entryPoint:'vs'},fragment:{module:inkModule,entryPoint:'fs'}}))
             const inkPipeline=ownProducer(await runtime.createRenderPipeline({program:inkProgram,layout:{mode:'explicit',bindLayouts:[inkLayout]},
                 targets:[{format:'rgba8unorm'}],primitive:{topology:'triangle-strip'},
-                depthStencil:{format:'depth32float',depthWriteEnabled:false,depthCompare:'less'}}))
+                }))
             const inkDraw=ownProducer(runtime.createDrawCommand({pipeline:inkPipeline,bindSets:[{set:inkSet}],count:{vertexCount:4},
                 resources:{read:[{resource:generatedInk,contentEpoch:'current-at-step'}],write:[]},whenMissing:'throw'}))
             async function producerFrame(deferred,boundary,value) {
@@ -376,6 +376,43 @@ fn FlowVelocity_sample(p:FlowVelocityAddressFixedPosition,l:u32,t:FlowVelocityTe
             const recoveredProducer=await producerFrame(true,'hard',.2)
             require(recoveredProducer.pixels[0]===51,'Producer guard is released after all failure paths')
             for (const resource of producerOwned.reverse()) resource.dispose()
+            const patternModule=own(await runtime.createShaderModule({sourceParts:[{code:`
+@vertex fn vs(@builtin(vertex_index) i:u32)->@builtin(position) vec4f {
+    let p=array<vec2f,4>(vec2f(-1,-1),vec2f(-1,1),vec2f(1,-1),vec2f(1,1));return vec4f(p[i],0,1);
+}
+@fragment fn fs(@builtin(position) p:vec4f)->@location(0) vec4f {
+    return vec4f(f32(select(32u,224u,u32(p.x)%2u!=0u)),f32(select(64u,192u,u32(p.y)%2u!=0u)),128.0,255.0)/255.0;
+}`}]}))
+            const patternProgram=own(runtime.createProgram({vertex:{module:patternModule,entryPoint:'vs'},fragment:{module:patternModule,entryPoint:'fs'}}))
+            const patternPipeline=own(await runtime.createRenderPipeline({program:patternProgram,targets:[{format:'rgba8unorm'}],primitive:{topology:'triangle-strip'}}))
+            const pattern=own(runtime.createDrawCommand({pipeline:patternPipeline,count:{vertexCount:4},resources:{read:[],write:[]},whenMissing:'throw'}))
+            await history.resize({width:width/2,height:height/2})
+            history.reset()
+            const scaledReady=await submit({seed:true,draw:pattern}),scaledA=await submit({retained:true})
+            const scaledB=await submit({retained:true,shift:.25}),scaledA2=await submit({retained:true})
+            const maximumDifference=(a,b)=>Math.max(...a.pixels.map((value,i)=>Math.abs(value-b.pixels[i])))
+            require(maximumDifference(scaledReady,scaledA)<=1,'Scaled ready and retained presentation use the same linear reconstruction')
+            require(same(scaledA,scaledA2)&&!same(scaledA,scaledB),'Scaled retained A-B-A gathers one unchanged visible image')
+            let maximumFilterError=0
+            const channel=(coordinate,limit,a,b)=>{
+                const p=Math.max(0,Math.min(limit-1,coordinate*.5-.25)),lo=Math.floor(p),hi=Math.min(limit-1,lo+1),t=p-lo
+                return Math.round((lo%2?b:a)*(1-t)+(hi%2?b:a)*t)
+            }
+            for(let y=0;y<height;y++)for(let x=0;x<width;x++){
+                const pixel=(y*width+x)*4,expected=[channel(x,width/2,32,224),channel(y,height/2,64,192),128,255]
+                expected.forEach((value,c)=>{maximumFilterError=Math.max(maximumFilterError,Math.abs(scaledReady.pixels[pixel+c]-value))})
+            }
+            require(maximumFilterError<=1,'Scaled checkerboard matches a CPU bilinear oracle including clamped edges')
+            const afterRetention=await submit()
+            history.reset();await submit({seed:true,draw:pattern});const directDecay=await submit()
+            require(same(afterRetention,directDecay),'Scaled retained filtering never blurs or decays raw history')
+            await history.resize({width,height});history.reset()
+            const nativePattern=await submit({seed:true,draw:pattern})
+            require(same(nativePattern,await submit({retained:true})),'Native retained presentation stays byte-exact')
+            for(let y=0;y<height;y++)for(let x=0;x<width;x++){
+                const expected=[x%2?224:32,y%2?192:64,128,255],pixel=(y*width+x)*4
+                require(expected.every((value,c)=>nativePattern.pixels[pixel+c]===value),'Native presentation preserves source bytes')
+            }
             history.dispose();history=undefined
             // Verify the graph released its own textures/buffer but not the
             // borrowed temporal buffers. All other graph objects dispose below.
@@ -384,6 +421,7 @@ fn FlowVelocity_sample(p:FlowVelocityAddressFixedPosition,l:u32,t:FlowVelocityTe
                 `History leaked owned resources: ${JSON.stringify(graphResources)}`)
             const stats={submissions,initial:energy(initial),recovery:energy(recovery),half:halfEnergy,
                 resumed:energy(resumed),retainedABAExact:true,sdfCases,expired:energy(expired),facts,
+                scaledPresentation:{maximumFilterError,readyRetainedMaximumDifference:maximumDifference(scaledReady,scaledA),retainedABAExact:true,rawDecayExact:true,nativeExact:true},
                 commonInterior:{hard:energy(interiorA),sdf:energy(interiorB),recovered:energy(interiorRecovered),
                     sharedEndpointABExact:true,expired:energy(interiorExpired)},
                 contentProducer:{cases:producerCases,failuresPreserveHistory:true,retainedExact:true}}

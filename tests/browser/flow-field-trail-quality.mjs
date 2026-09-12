@@ -16,7 +16,7 @@ try {
         window.__FLOW_TRAIL_ALLOCATIONS__ = []
         const create = GPUDevice.prototype.createTexture
         GPUDevice.prototype.createTexture = function (descriptor) {
-            if (/^Flow Field (history [AB]|particle overlap depth)/.test(descriptor.label ?? '')) {
+            if (/^Flow Field history [AB]/.test(descriptor.label ?? '')) {
                 const size = descriptor.size
                 window.__FLOW_TRAIL_ALLOCATIONS__.push({
                     width: size.width ?? size[0], height: size.height ?? size[1],
@@ -25,7 +25,7 @@ try {
             return create.call(this, descriptor)
         }
     })
-    await page.goto(`${base}/flowField/?proof=1&rate=0.000001&zoom=9`)
+    await page.goto(`${base}/flowField/?proof=1&rate=0.000001&zoom=9&trailQuality=balanced`)
     await ready(page)
     await settleTrails(page)
     const balanced = await facts(page)
@@ -34,7 +34,7 @@ try {
     assert.equal(balanced.quality, 'balanced')
     assert.equal(balanced.comparisons, 0)
     const allocations = await page.evaluate(() => window.__FLOW_TRAIL_ALLOCATIONS__)
-    assert.ok(allocations.length >= 3, 'Observe both history textures and overlap depth')
+    assert.ok(allocations.length >= 2, 'Observe both history textures')
     assert.ok(allocations.every(size => size.width === 1280 && size.height === 800),
         'Balanced allocation must be bounded from construction, not only after first resize')
     results.push({ name: 'balanced', ...balanced })

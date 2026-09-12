@@ -26,6 +26,8 @@ struct FlowFieldHistoryUniform {
     activityKill: f32,
     presentationFeather: f32,
     decaySteps: u32,
+    // 0 native, 1 scaled final presentation, 2 scaled retained presentation.
+    presentationFilter: u32,
 };
 
 struct HistoryProjection {
@@ -131,6 +133,10 @@ fn fMain(input: VertexOutput) -> @location(0) vec4f {
     let pixel = vec2i(correctedPixel(dim * input.texcoords, dim));
     var color = textureLoad(historyTexture, pixel, 0);
     var historyUv = input.texcoords;
+    if (cleanupUniform.presentationFilter == 2u) {
+        let historyPixel = clamp(historyUv * dim - vec2f(0.5), vec2f(0.0), dim - vec2f(1.0));
+        color = linearSampling(historyTexture, historyPixel, dim);
+    }
     if (cleanupUniform.historyMode > 1.5 && cleanupUniform.historyReprojecting > 0.5) {
         if (cleanupUniform.historyValid < 0.5) {
             return vec4f(0.0);

@@ -4,6 +4,11 @@ Baseline: `a5ef873`. Investigation: 2026-09-12. Frozen Flow Layer and backend
 datasets remain comparison inputs. The goal is to reduce Native rendering cost,
 preserve source semantics, and improve trail quality with explicit frame ownership.
 
+The user reports concurrent local small-model testing in `my-precious-skill`,
+which can share this machine's GPU. Treat changing absolute timings as potentially
+contended; use interleaved same-input controls and separate correctness from timing.
+Do not attribute a slower batch to code without a controlled comparison.
+
 ## Complete Source Support
 
 ADR-135 reuses the existing center cache for full-support A pixels. Fixed-input
@@ -40,10 +45,25 @@ zero-footprint, particle-reference, retained-history and visual-time native gate
 No source data or public library ABI changed. Captured reference and replay data
 are retained under ignored `output/flow-sampling-reuse/`.
 
+## Analytic Trail Coverage
+
+ADR-137 makes Native the default, adds clipped screen-space quad coverage and
+linear upscaling, and removes the false occlusion/depth allocation from transparent
+ink. Forty angle/phase/DPR cases pass; subdividing a segment differs by at most one
+rgba8 byte. Same-pass near-zero-halo overlap is exactly invariant under reversed
+order, and camera-plane crossing bounds agree with native line clipping within
+one pixel. The half-resolution checkerboard has zero error against the CPU linear
+oracle, exact ready/retained agreement, unchanged raw decay and exact Native bytes.
+
+Passed: 1,812 Node tests (two opt-in gates pending), typecheck, documentation gates,
+build, 54 particle/reference cases, 833 history-time passes, normal/delayed/warm
+startup, quality controls, retained history, visual time and all five DPR 2 camera
+gestures. Native 144 Hz observations were 90.41/101.41 updates/s; Balanced was
+140.27/139.13. These are shared-machine observations without a paired old-raster
+control, not a claimed speedup. Stable frames retained one native submission.
+
 ## Remaining Work
 
-- Add explicit line coverage and filtered presentation while separating source
-  precision from history resolution.
 - Permit a measured bounded frame pipeline with correct uniforms, publications,
   cache builds and temporal leases.
 - Maintain controlled Native comparison, source/presentation distinctions and

@@ -19,6 +19,11 @@ try {
     const context = await browser.newContext({viewport,deviceScaleFactor:2})
     const page = await context.newPage()
     const errors = []
+    await page.addInitScript(()=>{
+        window.__flowSubmissions={enabled:false,count:0}
+        const submit=GPUQueue.prototype.submit
+        GPUQueue.prototype.submit=function(buffers){if(window.__flowSubmissions.enabled)window.__flowSubmissions.count++;return submit.call(this,buffers)}
+    })
     page.on('pageerror',error=>errors.push(error.message))
     page.on('console',message=>{if(message.type()==='error')errors.push(message.text())})
     await page.goto(`${base}/flowField/?proof=1&rate=0.000000001&zoom=9`)
@@ -37,29 +42,35 @@ try {
             const facts=()=>{
                 const f=window.__FLOW_FIELD_PROOF__.facts()
                 return {steps:f.renderer.particles.encodedSteps,referenceSteps:f.renderer.particles.simulatedReferenceSteps,
+                    submitted:f.frames.submittedFrameCount,
                     observed:f.frames.observedFrameCount,workers:f.workers.activeTaskCount,
                     comparisons:f.renderer.spawn.candidateComparisonCount,spatialBuilds:f.renderer.viewDemand.buildCount,
                     presentationSize:f.renderer.presentationSize,historySize:f.renderer.history.size}
             }
             const before=facts(),timestamps=[]
+            window.__flowSubmissions.count=0;window.__flowSubmissions.enabled=true
             let active=true,handle
             const tick=time=>{if(active){timestamps.push(time);handle=requestAnimationFrame(tick)}}
             handle=requestAnimationFrame(tick)
             const started=performance.now()
             await new Promise(resolve=>setTimeout(resolve,7000))
             const elapsed=performance.now()-started,after=facts()
+            window.__flowSubmissions.enabled=false
             active=false;cancelAnimationFrame(handle)
             const intervals=timestamps.slice(1).map((value,index)=>value-timestamps[index]).sort((a,b)=>a-b)
             return {quality,elapsedMs:elapsed,updatesPerSecond:(after.steps-before.steps)*1000/elapsed,
                 observedPerSecond:(after.observed-before.observed)*1000/elapsed,
                 referenceStepsPerSecond:(after.referenceSteps-before.referenceSteps)*1000/elapsed,
                 rafPerSecond:timestamps.length*1000/elapsed,rafP95Ms:intervals[Math.floor(intervals.length*.95)],
+                nativeSubmissions:window.__flowSubmissions.count,
                 dpr:devicePixelRatio,viewport:[innerWidth,innerHeight],before,after}
         },quality)
         assert.equal(result.before.workers,0)
         assert.equal(result.after.workers,0)
         assert.equal(result.before.comparisons,result.after.comparisons)
         assert.equal(result.before.spatialBuilds,result.after.spatialBuilds)
+        assert.ok(Math.abs(result.nativeSubmissions-(result.after.submitted-result.before.submitted))<=1,
+            'Stable frames retain one native submission with all uploads before GPU work')
         assert.deepEqual(result.after.presentationSize,{width:3520,height:1760})
         assert.deepEqual(result.after.historySize,quality==='native'
             ?{width:3520,height:1760}:{width:1760,height:880})
