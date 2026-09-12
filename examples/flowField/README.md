@@ -34,6 +34,12 @@ against the current source publications, so this avoids repeated interior querie
 without changing clipping, particle sampling or resolution. See
 [ADR-135](../../docs/decisions/ADR-135-flow-cached-full-support.md).
 
+Pixel-center velocity sampling reuses each already-loaded footprint corner for its
+nearest-owner zero check. The ordinary two-endpoint query reads eight texels;
+exceptional owner addresses retain the full lookup. This preserves new-position
+validation and C/D's explicit unmasked sampling choice. See
+[ADR-136](../../docs/decisions/ADR-136-flow-footprint-owner-reuse.md).
+
 ## Trail quality
 
 The inspector's **Trail quality** defaults to **Balanced** for smoother playback

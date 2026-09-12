@@ -106,6 +106,16 @@ fn FlowVelocityRegistration_sample_current(position: FlowVelocityAddressFixedPos
 fn FlowVelocityRegistration_sample_next(position: FlowVelocityAddressFixedPosition, level: u32) -> TestSample {
     return samples[position.fixture * ${levelCount * 2}u + level * 2u + 1u];
 }
+// This status-arbitration fixture disables owner gating. Footprint/owner
+// equivalence is checked against real samplers in flow-field-sampler-reuse.
+fn FlowVelocityRegistration_sample_current_support(position: FlowVelocityAddressFixedPosition,
+    original: FlowVelocityAddressFixedPosition, level: u32, zero_owner: bool) -> TestSample {
+    return FlowVelocityRegistration_sample_current(position, level);
+}
+fn FlowVelocityRegistration_sample_next_support(position: FlowVelocityAddressFixedPosition,
+    original: FlowVelocityAddressFixedPosition, level: u32, zero_owner: bool) -> TestSample {
+    return FlowVelocityRegistration_sample_next(position, level);
+}
 fn FlowVelocityCurrent_load_position(position: FlowVelocityAddressFixedPosition, level: u32) -> TestSample {
     return FlowVelocityRegistration_sample_current(position, level);
 }

@@ -126,7 +126,7 @@ describe('Flow Field pixel-center registration', () => {
         expect(module.code).to.not.match(/(?:page_table|textureLoad|_atlas)/)
         const order = ['let br = ProofCurrent_load_global(', 'tl.status == 4u', 'tl.status == 0u',
             'tl.status == 3u', 'if (resolved_level < level', 'if (resolved_level > level)',
-            'ProofCurrent_edge_blend_weight(position, level)', 'let value = mix(']
+            'ProofCurrent_edge_blend_weight(position, level)', 'var value = mix(']
         for (let index = 1; index < order.length; index++) {
             expect(sampler.indexOf(order[index - 1]), order[index - 1]).to.be.at.least(0)
             expect(sampler.indexOf(order[index - 1]), `${order[index - 1]} before ${order[index]}`)

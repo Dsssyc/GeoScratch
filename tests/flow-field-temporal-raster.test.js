@@ -62,10 +62,10 @@ describe('Flow Field temporal velocity WGSL', () => {
             'return FlowVelocityNext_sample_compute(position, level);'
         )
         expect(module.code).to.include(
-            'let current = FlowVelocityRegistration_sample_current('
+            'let current = FlowVelocityRegistration_sample_current_support('
         )
         expect(module.code).to.include(
-            'let next = FlowVelocityRegistration_sample_next('
+            'let next = FlowVelocityRegistration_sample_next_support('
         )
         expect(module.code).to.include('resolved_level <= common_level')
         expect(module.code).to.include(
@@ -132,9 +132,9 @@ describe('Flow Field temporal velocity WGSL', () => {
         )
         const loop = module.code.slice(module.code.indexOf('fn FlowVelocity_sample_support('))
         expect(loop.indexOf('FlowVelocityRegistration_position(position, common_level)'))
-            .to.be.lessThan(loop.indexOf('FlowVelocityRegistration_sample_current('))
-        expect(loop.indexOf('FlowVelocityRegistration_sample_current('))
-            .to.be.lessThan(loop.indexOf('FlowVelocityRegistration_sample_next('))
+            .to.be.lessThan(loop.indexOf('FlowVelocityRegistration_sample_current_support('))
+        expect(loop.indexOf('FlowVelocityRegistration_sample_current_support('))
+            .to.be.lessThan(loop.indexOf('FlowVelocityRegistration_sample_next_support('))
         expect(loop).to.not.include(
             'FlowVelocityCurrent_sample_compute(position, common_level)'
         )

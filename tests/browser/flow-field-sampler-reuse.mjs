@@ -47,10 +47,22 @@ fn FlowVelocityRegistration_sample_${slot}(position:FlowVelocityAddressFixedPosi
         return ${sampler}Sample(vec4f(0.0),2u,level,level+1u);
     }
     return ${sampler}_sample_level(position,level);
+}
+fn FlowVelocityRegistration_sample_${slot}_support(
+    position:FlowVelocityAddressFixedPosition,original:FlowVelocityAddressFixedPosition,level:u32,zero_owner:bool,
+)->${sampler}Sample {
+    var sample=FlowVelocityRegistration_sample_${slot}(position,level);
+    if(zero_owner && sample.resolved_level==level && (sample.status==1u||sample.status==2u)){
+        let owner=${sampler}_load_position(original,level);
+        if(all(owner.value.xy==vec2f(0.0))){sample.value=vec4f(0.0,0.0,sample.value.z,sample.value.w);}
+    }
+    return sample;
 }`
 }
 const previous=optimized.replace('fn FlowVelocityRegistration_sample_current(', 'fn Fixture_unused_current(')
-    .replace('fn FlowVelocityRegistration_sample_next(', 'fn Fixture_unused_next(')+oldAdapter('current')+oldAdapter('next')
+    .replace('fn FlowVelocityRegistration_sample_next(', 'fn Fixture_unused_next(')
+    .replace('fn FlowVelocityRegistration_sample_current_support(', 'fn Fixture_unused_current_support(')
+    .replace('fn FlowVelocityRegistration_sample_next_support(', 'fn Fixture_unused_next_support(')+oldAdapter('current')+oldAdapter('next')
 function program(source,counting) {
     let code=source
     if(counting)for(const name of ['FlowVelocityCurrent','FlowVelocityNext']) {
@@ -241,6 +253,9 @@ try {
     }
     assert.deepEqual(counts[0].old,{resolution:16,load:8,texel:8})
     assert.deepEqual(counts[0].optimized,{resolution:0,load:8,texel:8})
+    const ownerCounts=row('fully-resident','interior',true)
+    assert.equal(ownerCounts[0][8],10,'The old A sampler loads two additional owner texels')
+    assert.equal(ownerCounts[1][8],8,'A reuses owners already loaded in its two footprints')
     const cornerA=row('owner-zero','zero-owner-corner',true)[1],cornerC=row('owner-zero','zero-owner-corner')[1]
     assert.equal(cornerA[2],0);assert.ok(cornerC[2]>0,'C/D must retain positive center interpolation where A/B veto a zero owner')
     assert.equal(row('owner-zero','zero-source-center')[1][2],0)
