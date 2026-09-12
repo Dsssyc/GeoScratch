@@ -304,7 +304,9 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
         const hardModule = own(await runtime.createShaderModule({
             label: 'Flow Field hard boundary presentation shader',
             sourceParts: [ { code: temporal.wgsl }, { code: screenProjection },
-                { code: codec.wgslAccessors() }, { code: presentationSupportShader },
+                { code: codec.wgslAccessors() }, { code: centerCache ? presentationSupportShader.replace(
+                    'fn FlowPresentation_coverage(', 'fn FlowPresentation_coverage_direct(') : presentationSupportShader },
+                ...(centerCache ? [{code:centerCache.coverageWgsl}] : []),
                 { code: historySupportShader }, { code: hardBoundaryShader } ],
         }))
         const presentationModule = own(await runtime.createShaderModule({
@@ -374,7 +376,8 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
         }))
         const hardPipeline = own(await runtime.createRenderPipeline({
             label: 'Flow Field hard boundary presentation pipeline', program: hardProgram,
-            layout: { mode: 'explicit', bindLayouts: [ uniformLayout, temporal.layout, historyLayout ] },
+            layout: { mode: 'explicit', bindLayouts: [ uniformLayout, temporal.layout, historyLayout,
+                ...(centerCache ? [centerCache.layout] : []) ] },
             targets: [{ format: historyA.format }],
             primitive: { topology: 'triangle-strip' },
         }))
@@ -604,7 +607,7 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
             } finally {
                 producingContent = false
             }
-            if (prepared && (requestedBoundary === 'sdf-center-linear' || requestedBoundary === 'sdf-center-smooth')) {
+            if (prepared && requestedBoundary !== 'sdf') {
                 centerCache?.encode(builder,prepared,centerCacheInput)
             }
             // Temporal clipping owns visibility, never the next frame's raw ink.
@@ -655,7 +658,7 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
             const pipeline = boundary === 'sdf-center-linear' ? centerPipelines[0]!
                 : boundary === 'sdf-center-smooth' ? centerPipelines[1]!
                 : boundary === 'sdf' ? sdfPipeline : hardPipeline
-            const cache = boundary === 'sdf-center-linear' || boundary === 'sdf-center-smooth' ? centerCache : undefined
+            const cache = boundary !== 'sdf' ? centerCache : undefined
             // Presentation reads the newly composed target, opposite to history's source.
             const presentA = composeCommand(runtime, pipeline, uniformSet, historyAToB,
                 uniformBuffer, historyA, prepared, `Present Flow Field ${boundary} A`, cache)

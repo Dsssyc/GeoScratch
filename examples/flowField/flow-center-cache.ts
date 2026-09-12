@@ -4,6 +4,7 @@ import type { FlowTemporalReadyBindingFrame } from './flow-temporal-bindings.ts'
 import { FLOW_CENTER_CACHE_EDGE, flowCenterCachePlan } from './flow-center-cache-plan.ts'
 import buildShader from './shaders/center-cache-build.wgsl?raw'
 import sampleShader from './shaders/center-cache-sample.wgsl?raw'
+import coverageShader from './shaders/coverage-cache.wgsl?raw'
 
 export type FlowCenterCacheInput = Readonly<{
     pages: readonly VirtualRasterPageIdentity[]
@@ -28,6 +29,7 @@ export type FlowCenterCacheFacts = Readonly<{
 
 export type FlowCenterCache = Readonly<{
     wgsl: string
+    coverageWgsl: string
     layout: BindLayout
     bindSet: BindSet
     resources: readonly BufferResource[]
@@ -247,7 +249,7 @@ export async function createFlowCenterCache(options: Readonly<{
             command?.dispose()
             for(const value of owned.reverse())value.dispose()
         }
-        return Object.freeze({wgsl:sampleShader,layout,bindSet,resources,encode,observe,facts,dispose})
+        return Object.freeze({wgsl:sampleShader,coverageWgsl:coverageShader,layout,bindSet,resources,encode,observe,facts,dispose})
     } catch(error) {
         command?.dispose()
         for(const value of owned.reverse())value.dispose()

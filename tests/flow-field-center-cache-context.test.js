@@ -6,7 +6,7 @@ import { virtualRasterAddressSpace } from 'geoscratch/geo'
 
 const directory=new URL('../examples/flowField/',import.meta.url)
 let source=await readFile(new URL('flow-center-cache.ts',directory),'utf8')
-for(const [name,file] of [['buildShader','center-cache-build.wgsl'],['sampleShader','center-cache-sample.wgsl']]) {
+for(const [name,file] of [['buildShader','center-cache-build.wgsl'],['sampleShader','center-cache-sample.wgsl'],['coverageShader','coverage-cache.wgsl']]) {
     const shader=await readFile(new URL(`shaders/${file}`,directory),'utf8')
     source=source.replace(new RegExp(`import ${name} from '[^']+'`),`const ${name} = ${JSON.stringify(shader)}`)
 }

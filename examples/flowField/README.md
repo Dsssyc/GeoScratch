@@ -27,6 +27,13 @@ Activity contour is an optional velocity threshold overlay and does not enter tr
 The Boundary selector offers four explicit comparisons. A remains the default;
 C/D are opt-in center-field reconstructions, described after the existing A/B rules.
 
+Default A reuses the source-center cache's exact support bits for complete wet
+footprints at both temporal endpoints. Mixed, dry, unknown, fallback and missing
+cache entries retain full direct coverage evaluation. The cache is validated
+against the current source publications, so this avoids repeated interior queries
+without changing clipping, particle sampling or resolution. See
+[ADR-135](../../docs/decisions/ADR-135-flow-cached-full-support.md).
+
 ## Trail quality
 
 The inspector's **Trail quality** defaults to **Balanced** for smoother playback

@@ -7,9 +7,9 @@ import { temporalVelocityWgslModule } from '../../examples/flowField/temporal-ve
 import { flowScreenProjectionWgsl } from '../../examples/flowField/flow-screen-projection.ts'
 
 const read=name=>readFile(new URL(`../../examples/flowField/shaders/${name}.wgsl`,import.meta.url),'utf8')
-const [wrapper,history,displaySupport,distance,activity,boundary,centerDistance,centerBoundary,build,cached]=await Promise.all([
+const [wrapper,history,displaySupport,distance,activity,boundary,centerDistance,centerBoundary,build,cached,coverage]=await Promise.all([
     'temporal-velocity','history','presentation-support','boundary-distance','boundary-activity','boundary-sdf',
-    'boundary-center-distance','boundary-center','center-cache-build','center-cache-sample',
+    'boundary-center-distance','boundary-center','center-cache-build','center-cache-sample','coverage-cache',
 ].map(read))
 const model=webMercatorVirtualRasterField({
     id:'center-cache-proof',addressSpaceId:'center-cache-proof-space',sourceRevision:'v1',
@@ -29,9 +29,11 @@ assert.ok(temporal.code.includes('FlowVelocityCurrent_minimum_texel = array<vec2
 const buildCode=temporal.code+'\n'+build
 // Instrument entry counts only; original function bodies and generated samplers
 // stay intact. This catches a "cached" path that silently always calls direct.
-const probeCode=[temporal.code,flowScreenProjectionWgsl(model.addressCodec),uniformStruct,displaySupport,distance,activity,
+const probeCode=[temporal.code,flowScreenProjectionWgsl(model.addressCodec),uniformStruct,
+    displaySupport.replace('fn FlowPresentation_coverage(', 'fn FlowPresentation_coverage_direct('),distance,activity,
     boundary.replace('fn FlowBoundary_hard_coverage(', 'fn Fixture_hard_coverage('),centerDistance,
-    centerBoundary.replace('fn FlowCenter_coverage(', 'fn Fixture_direct_coverage('),cached,`
+    centerBoundary.replace('fn FlowCenter_coverage(', 'fn Fixture_direct_coverage('),cached,
+    coverage.slice(coverage.indexOf('fn FlowCoverageCached_fullSupport(')),`
 var<private> fixtureDirectCalls:u32;
 var<private> fixtureHardCalls:u32;
 fn FlowCenter_coverage(position:FlowVelocityAddressFixedPosition)->f32 {
@@ -49,11 +51,15 @@ fn test_cached_boundary(@builtin(global_invocation_id) id:vec3u) {
     fixtureDirectCalls=0u;fixtureHardCalls=0u;
     let value=FlowCenterCached_coverage(position);
     let directCalls=fixtureDirectCalls;let hardCalls=fixtureHardCalls;
-    fixtureResults[id.x*2u]=vec4f(value,Fixture_direct_coverage(position),
+    fixtureResults[id.x*3u]=vec4f(value,Fixture_direct_coverage(position),
         Fixture_hard_coverage(position,boundaryUniform.requestedLevel),f32(directCalls));
     let sample=FlowVelocity_sample_centers(position,boundaryUniform.requestedLevel,
         FlowVelocityTemporal(boundaryUniform.progress,boundaryUniform.activityKill));
-    fixtureResults[id.x*2u+1u]=vec4f(f32(hardCalls),f32(sample.status),f32(sample.resolved_level),sample.speed);
+    fixtureResults[id.x*3u+1u]=vec4f(f32(hardCalls),f32(sample.status),f32(sample.resolved_level),sample.speed);
+    fixtureResults[id.x*3u+2u]=vec4f(
+        FlowPresentation_coverage(position,boundaryUniform.requestedLevel,boundaryUniform.progress,boundaryUniform.activityKill),
+        FlowPresentation_coverage_direct(position,boundaryUniform.requestedLevel,boundaryUniform.progress,boundaryUniform.activityKill),
+        f32(FlowCoverageCached_fullSupport(position,boundaryUniform.requestedLevel,boundaryUniform.activityKill)),0.0);
 }`].join('\n')
 const quanta=model.addressCodec.worldQuanta/512n
 const position=(x,y)=>model.addressCodec.fromWorldQuanta([BigInt(Math.round(x*Number(quanta))),BigInt(Math.round(y*Number(quanta)))])
@@ -71,6 +77,9 @@ function velocity(field,x,y) {
     if(field==='zero')return 0
     if(field==='wet')return 2
     if(field==='reverse')return -2
+    if(field==='threshold')return Math.fround(.001)
+    if(field==='threshold-reverse')return -Math.fround(.001)
+    if(field==='below-threshold')return Math.fround(.0009999)
     if(field==='diagonal')return y<=x-191?2:0
     if(field==='shifted')return x===256&&y===65?0:2
     return x===254&&y===65?0:2
@@ -79,11 +88,17 @@ const fixtures=[
     {name:'hole',lower:'hole',upper:'hole'},
     {name:'diagonal',lower:'diagonal',upper:'diagonal'},
     {name:'reversal',lower:'wet',upper:'reverse'},
+    {name:'threshold',lower:'threshold',upper:'threshold'},
+    {name:'threshold-reversal',lower:'threshold',upper:'threshold-reverse'},
+    {name:'below-threshold',lower:'below-threshold',upper:'below-threshold'},
+    {name:'threshold-mixed',lower:'below-threshold',upper:'threshold'},
     {name:'growth',lower:'zero',upper:'wet'},
     {name:'join-before',lower:'hole',upper:'diagonal'},
     {name:'join-after',lower:'diagonal',upper:'shifted'},
     {name:'missing-lower',lower:'hole',upper:'hole',missing:[0]},
     {name:'missing-upper',lower:'hole',upper:'hole',missing:[1]},
+    {name:'failed-lower',lower:'wet',upper:'wet',failed:[0]},
+    {name:'failed-upper',lower:'wet',upper:'wet',failed:[1]},
     {name:'wet-unknown-halo',lower:'wet',upper:'wet',missing:[0,1]},
     {name:'dry-unknown-halo',lower:'zero',upper:'zero',missing:[0,1]},
     {name:'growth-unknown-halo',lower:'zero',upper:'wet',missing:[0,1]},
@@ -92,6 +107,7 @@ const fixtures=[
 ].map(fixture=>({...fixture,pages:[0,1].map(endpoint=>{
     const pages=table.slice()
     if(fixture.missing?.includes(endpoint))pages[rightEntry*8+3]=0
+    if(fixture.failed?.includes(endpoint))pages[rightEntry*8+3]=4
     if(fixture.coarse?.includes(endpoint))pages.set([2,0,1,2,0,0,0,0],rightEntry*8)
     return [...pages]
 })}))
@@ -130,7 +146,7 @@ fixtures.forEach((fixture,fixtureIndex)=>{
     }
 })
 function supportAt(fixture,endpoint,x,y) {
-    if(x<0||x>511||y<1||y>255||(fixture.missing?.includes(endpoint)||fixture.coarse?.includes(endpoint))&&x>=256)return undefined
+    if(x<0||x>511||y<1||y>255||(fixture.missing?.includes(endpoint)||fixture.failed?.includes(endpoint)||fixture.coarse?.includes(endpoint))&&x>=256)return undefined
     return Number(Math.abs(velocity(endpoint?fixture.upper:fixture.lower,x,y))>=.001)
 }
 function expectedByte(fixture,endpoint,x,y) {
@@ -199,7 +215,7 @@ if(process.argv.includes('--prepare-only')) {
                     owned.push(texture);textures[name]=texture
                     device.queue.writeTexture({texture},Uint8Array.from(atob(base64),c=>c.charCodeAt(0)),{bytesPerRow:6144},[768,256])
                 }
-                const pageRecords=257*257,cacheBytes=2*pageRecords*4,count=positions.length/4,rowBytes=count*32
+                const pageRecords=257*257,cacheBytes=2*pageRecords*4,count=positions.length/4,rowBytes=count*48
                 const records=buffer(new Uint8Array(cacheBytes),GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_SRC)
                 const jobs=buffer(new Uint32Array([1,0,1,0,0,0,0,0]),GPUBufferUsage.STORAGE)
                 const buildGroup=device.createBindGroup({layout:buildLayout,entries:[{binding:0,resource:{buffer:jobs}},{binding:1,resource:{buffer:records}}]})
@@ -240,13 +256,13 @@ if(process.argv.includes('--prepare-only')) {
                 const packed=new Uint32Array(mapped,0,fixtures.length*cacheBytes/4)
                 const values=new Float32Array(mapped,fixtures.length*cacheBytes,cases.length*rowBytes/4)
                 const recordResults=fixtures.map((_,index)=>Array.from(packed.slice(index*2*pageRecords,(index+1)*2*pageRecords)))
-                const rows=cases.map((_,caseIndex)=>Array.from({length:count},(_,index)=>Array.from(values.slice((caseIndex*count+index)*8,(caseIndex*count+index+1)*8))))
+                const rows=cases.map((_,caseIndex)=>Array.from({length:count},(_,index)=>Array.from(values.slice((caseIndex*count+index)*12,(caseIndex*count+index+1)*12))))
                 readback.unmap();await device.queue.onSubmittedWorkDone();const validation=await device.popErrorScope()
                 if(validation)throw new Error(validation.message);if(errors.length)throw new Error(errors.join('\n'))
                 return {recordResults,rows,builds,errors,readbacks:1}
             } finally {for(const value of owned)value.destroy();device.destroy()}
         },{buildCode,probeCode,fixtures,cases,positions,atlases,lookupLength:lookup.length})
-        let maximumCoverageDifference=0,cachedReads=0,directMisses=0,sourceFallbacks=0
+        let maximumCoverageDifference=0,cachedReads=0,directMisses=0,sourceFallbacks=0,hardSupportHits=0
         for(const [fixtureIndex,fixture] of fixtures.entries())for(const {slot,x,y} of recordProbes) {
             const packed=proof.recordResults[fixtureIndex][slot*66049+y*257+x]
             const expected=expectedByte(fixture,0,slot*256+x,y)|(expectedByte(fixture,1,slot*256+x,y)<<8)
@@ -256,6 +272,9 @@ if(process.argv.includes('--prepare-only')) {
             const row=proof.rows[caseIndex][probeIndex],difference=Math.abs(row[0]-row[1])
             maximumCoverageDifference=Math.max(maximumCoverageDifference,difference)
             assert.ok(Number.isFinite(row[0])&&difference<2e-6,`${entry.name}/${entry.mode}/${entry.alpha}/${entry.smoothed}/${probe.name}: cache ${row[0]} != direct ${row[1]}`)
+            assert.equal(row[8],row[9],`${entry.name}/${entry.mode}/${entry.alpha}/${probe.name}: cached A must match complete direct coverage`)
+            if(entry.mode!=='normal')assert.equal(row[10],0,'Incompatible or missing cache cannot certify support')
+            hardSupportHits+=row[10]
             if(entry.mode!=='normal'){assert.equal(row[3],1,'Cache misses use the direct C/D authority');directMisses++}
             else if(row[3]===0){cachedReads++;if(row[4]>0)sourceFallbacks++}
         }
@@ -283,7 +302,8 @@ if(process.argv.includes('--prepare-only')) {
         }
         for(const smoothed of [false,true])for(const probe of probes)assert.ok(Math.abs(result('join-before',probe.name,1,smoothed)[0]-result('join-after',probe.name,0,smoothed)[0])<1e-7,'Cached endpoint distance is identical across time-pair joins')
         assert.equal(proof.builds,fixtures.length,'Alpha, C/D kernel, and lookup-only variants reuse each cache build')
+        assert.ok(hardSupportHits>0,'Known complete support must avoid the direct A sampler')
         console.log(JSON.stringify({status:'passed',fixtures:fixtures.length,cacheBuilds:proof.builds,displayCases:cases.length,totalProbes:cases.length*probes.length,
-            packedRecordProbes:fixtures.length*recordProbes.length,maximumCoverageDifference,cachedReads,directMisses,sourceFallbacks,readbacks:proof.readbacks,errors:proof.errors}))
+            packedRecordProbes:fixtures.length*recordProbes.length,maximumCoverageDifference,cachedReads,directMisses,sourceFallbacks,hardSupportHits,readbacks:proof.readbacks,errors:proof.errors}))
     } finally {await browser?.close();await new Promise(resolve=>server.close(resolve))}
 }
