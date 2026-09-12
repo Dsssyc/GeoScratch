@@ -110,3 +110,26 @@ handoffs had no buffering or gaps over 100 ms. Quality and speculative-failure
 fixtures now explicitly await visible foreground readiness instead of assuming
 that queued readiness or background failure also means a completed foreground
 frame. The existing pixel, no-retry and paused-simulation assertions are retained.
+
+## Drag Follow-Up: Candidate CPU Work
+
+The user subsequently reported stutter and map/overlay skew in both Native and
+Balanced. Previous camera-continuity checks proved simulation admission and cleanup,
+not actual camera freshness. A controlled 40 ms delay of completion notification
+(without extra GPU work) made captured camera age reach 60-74 ms and projected pan
+skew reach roughly 6-9 reference pixels. The renderer parked an already captured
+camera behind full spatial observation; that requires a separate presentation fix.
+
+Native CPU profiling also found an independent drag bottleneck: candidate selection
+and cell materialization, packing, and equality comparison consumed about 73% of
+the renderer's CPU samples. Camera priority invalidated immutable cell geometry even
+when selected pages were unchanged. ADR-139 separates that geometry from fresh
+priority/provenance metadata. The same 120-input drag's capture-to-submit median
+fell from 17.5 to 2.7 ms and P95 from 38.6 to 9.0 ms. The three redundant paths no
+longer appeared among hot functions. These are two profiling observations, not an
+isolated-GPU frame-rate guarantee or proof that camera waiting was fixed.
+
+Verified: 36 focused demand/packing/spawn tests, typecheck, 1,818 full tests (two
+opt-in gates pending, ten-second Mocha default limit), production build, and the
+real drag with clean browser/disposal outcomes. Raw CPU profiles and capture records
+are retained under ignored `output/playwright/flow-camera-lag/`.

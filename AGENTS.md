@@ -122,7 +122,10 @@ current CPU renderer as GPU.
 Flow Field retains its GPU cover and observed spatial reuse. Stable spawn input
 uses an opaque immutable preparation artifact; mutable ArrayBufferView inputs
 still require content comparison. Do not replace mutable-content validation with
-raw object identity. Native trail quality is the default. Balanced bounds only the two
+raw object identity. Candidate page/cell geometry retains identity across camera
+priority changes only when its address-space owner, ordered page geometry and cell
+grid match (ADR-139); refresh demand priorities and provenance independently.
+Native trail quality is the default. Balanced bounds only the two
 history textures to one texel per reference pixel and a 1080p pixel budget. Keep the Surface, map,
 diagnostic views, camera cover and raster source precision independent from that
 budget, and retain both quality choices. Analytic line coverage must blend without
