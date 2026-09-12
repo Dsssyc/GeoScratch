@@ -36,11 +36,13 @@ try{
             await page.locator('[data-flow-control="contour"]').check()
             await page.waitForFunction(()=>window.__FLOW_FIELD_PROOF__.facts().renderer.contour.candidateCount>0,undefined,{timeout:30000})
         }
-        const count=scenario==='contour'?1:2
+        const count=2
         const before=await page.evaluate(count=>{window.__flightProof.remaining=count;return window.__FLOW_FIELD_PROOF__.facts().frames.submittedFrameCount},count)
         await page.waitForFunction(count=>window.__flightProof.gates.length===count&&window.__FLOW_FIELD_PROOF__.facts().frames.inFlightFrameCount===count,count,{timeout:30000})
         const held=await facts(page)
-        assert.equal(held.rendererInFlight,count);assert.equal(held.activeFrames,count)
+        assert.equal(held.rendererInFlight,count)
+        assert.equal(held.activeFrames,scenario==='contour'?1:count,
+            'Contour overflow has one content owner; its second slot may only present that content')
         assert.ok(held.submitted>=before+count)
         await page.evaluate(()=>new Promise(resolve=>setTimeout(resolve,120)))
         assert.equal((await facts(page)).submitted,held.submitted,'A third frame cannot pass the two-slot budget')
@@ -64,7 +66,9 @@ try{
             else {await page.mouse.move(180,350);await page.mouse.down();await page.mouse.move(220,370,{steps:3});await page.mouse.up()}
             assert.deepEqual((await facts(page)).history,held.history)
             await page.evaluate(()=>window.__flightProof.gates[0].resolve())
-            await page.waitForFunction(()=>window.__FLOW_FIELD_PROOF__.facts().frames.rendering,undefined,{timeout:30000})
+            if(scenario==='camera')await page.waitForFunction(cameraFrames=>
+                window.__FLOW_FIELD_PROOF__.facts().renderer.cameraPresentationCount>cameraFrames,held.cameraFrames,{timeout:30000})
+            else await page.waitForFunction(()=>window.__FLOW_FIELD_PROOF__.facts().frames.rendering,undefined,{timeout:30000})
             const waiting=await facts(page)
             assert.deepEqual(waiting.history,held.history,'Resize must wait for both old native frames')
             assert.equal(waiting.spatialBuilds,held.spatialBuilds,'Spatial rebuild cannot overwrite an outstanding reused cut')
@@ -80,7 +84,7 @@ try{
             const cleanup=await page.evaluate(()=>window.__FLOW_FIELD_PROOF__.dispose());assert.deepEqual(cleanup.cleanupFailures,[])
         }else if(scenario==='contour'){
             await page.evaluate(()=>window.__FLOW_FIELD_PROOF__.pause())
-            await page.evaluate(()=>window.__flightProof.gates[0].resolve())
+            await page.evaluate(()=>window.__flightProof.gates.forEach(gate=>gate.resolve()))
             await idle(page)
             const final=await facts(page)
             results.push({scenario,held,final})
@@ -127,7 +131,7 @@ try{
 }finally{await browser.close()}
 
 async function idle(page){
-    await page.waitForFunction(()=>{const f=window.__FLOW_FIELD_PROOF__.facts();return !f.timeline.playing&&!f.frames.rendering&&f.frames.inFlightFrameCount===0},undefined,{timeout:30000})
+    await page.waitForFunction(()=>{const f=window.__FLOW_FIELD_PROOF__.facts();return !f.timeline.playing&&!f.frames.rendering&&f.frames.inFlightFrameCount===0&&f.lastFrame.state==='rendered'&&f.lastFrame.presentationReady},undefined,{timeout:30000})
 }
 async function facts(page){
     return page.evaluate(()=>{const f=window.__FLOW_FIELD_PROOF__.facts();return {
@@ -135,6 +139,7 @@ async function facts(page){
         activeFrames:f.renderer.temporal.activeFrameCount,history:f.renderer.history.size,presented:f.presented,
         steps:f.renderer.particles.encodedSteps,resets:f.renderer.particles.resetCount,ownedRuntimes:f.temporalWindow.ownedRuntimeCount,
         spatialBuilds:f.renderer.viewDemand.buildCount,
+        cameraFrames:f.renderer.cameraPresentationCount,
         nativeSubmissions:window.__flightProof.nativeSubmissions,
     }})
 }

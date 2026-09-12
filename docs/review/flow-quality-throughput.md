@@ -133,3 +133,44 @@ Verified: 36 focused demand/packing/spawn tests, typecheck, 1,818 full tests (tw
 opt-in gates pending, ten-second Mocha default limit), production build, and the
 real drag with clean browser/disposal outcomes. Raw CPU profiles and capture records
 are retained under ignored `output/playwright/flow-camera-lag/`.
+
+## Drag Follow-Up: Camera Presentation
+
+ADR-140 adds camera-only submissions through the existing controller. Pending
+content observations retain their resources while visible history and optional
+contour segments are reprojected from the current host capture. The next full
+update consumes elapsed visual time; camera presentation does not reset that clock.
+
+The new pixel proof holds one completed GPU frame's observation and then pans by
+80 reference pixels. Native/Balanced, with and without contour, match the translated
+image at about 0.73 mean channel error out of 255, versus 27-28 for the unshifted
+control. No paused particle step, reset, resize, spatial rebuild or extra temporal
+lease occurs. Releasing the hold converges even when paused. Disabling the camera
+path fails at the new-presentation gate, as intended.
+
+In matched headless drag scenarios, a 40 ms observation delay previously produced
+72-74 ms P95 capture-to-submit age and roughly 6 reference pixels of skew **at
+submission**. The repaired scenarios measured 3.5-3.7 ms P95 and numerical-zero
+submission skew. This is distinct from compositor/display latency. The timing
+harness verifies that every measured submission has its actual capture timestamp.
+
+The physical secondary screen was verified as 3840x2160, 144 Hz, backing scale 2.
+The completed DPR 2 native run measured 4.0/4.6 ms P95 capture-to-submit age for
+Native/Balanced without injected delay, with approximately 72/88 presentations/s
+under that run's shared-machine conditions. It did not reach 144 presentations/s.
+A DPR 1 control reached approximately 143 presentations/s, but is not the actual
+4K-quality result. A later DPR 2 rerun could not establish the required non-main
+high-refresh display and did not launch a browser. Both completed native runs
+verified background placement and closed their owned Chrome instance.
+
+Final source verification passed documentation generation/translation/check,
+typecheck, 1,818 Node tests (two opt-in gates pending, ten-second default Mocha
+timeout), and production build. The fixed-source DPR 2 camera-continuity proof
+measured 59.97-60.02 accepted reference steps/s across all five gestures, one
+particle update per content frame, zero resets and zero history clears. Pure
+presentations are counted separately so they cannot disguise simulation starvation.
+Final browser gates also passed camera pixel latency, eight frame-pipeline scenarios,
+trail quality, retained history, visual time, inspector handoff, speculative failure,
+forward/reverse lookahead and normal/delayed/warm startup. All owned browser sessions
+completed their cleanup. An earlier camera-continuity run was interrupted by Vite HMR;
+the final run used unchanged source and completed all five gestures.

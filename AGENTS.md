@@ -139,9 +139,15 @@ Flow Field admits at most two submitted frames and one construction (ADR-138).
 Stable observed spatial/cache state can overlap. Source acknowledgement stays
 separate from full frame observation; wait for acknowledgement before republishing.
 Changed publications and spawn/center builds may follow stable work in GPU FIFO,
-then block later frames until fully observed. Spatial rebuilds, contour readback
-reuse and camera/pair/presentation, resize or reset changes require draining before
-encoding with the new state.
+then block later content frames until fully observed. ADR-140 permits synchronous
+camera-only presentation through the same controller while content observation is
+pending: read existing visible ink/contour segments, preserve raw history and visual
+time, and perform no publication, spatial build, contour compute or readback. Count
+these frames separately from content; their observation must not overwrite observed
+model time or block spatial/contour builds. Rebuilds drain content frames; viewport,
+size, presentation and reset changes retain their normal preparation/full drain.
+Verify actual translated pixels while content completion is held, plus accepted
+visual time during continuous input; particle counts alone do not prove camera sync.
 Keep synchronous upload-to-submit ordering, per-frame temporal leases and newest
 observed presentation facts. Borrow the application lifetime signal to cancel
 construction after awaits without cancelling observation of already queued work.

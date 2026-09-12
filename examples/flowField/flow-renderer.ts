@@ -147,12 +147,27 @@ export type FlowFieldRendererFrame = Readonly<{
     visualTime: FlowVisualTime
 }>
 
+/** A new camera presentation of existing visible content; it makes no new source demand. */
+export type FlowFieldCameraFrame = Readonly<{
+    state: 'presented'
+    submitted: SubmittedWork
+    view: GeoViewSnapshot
+    temporal: FlowTemporalFrameSnapshot
+    history: FlowHistoryFrame
+    presentationReady: boolean
+    particlesAdvancing: false
+    visualTime: FlowVisualTime
+}>
+
 export type FlowFieldRendererFacts = Readonly<{
     initialized: boolean
     disposed: boolean
     frameCount: number
     maximumInFlightFrames: 2
     inFlightFrameCount: number
+    /** Full source/particle graph submissions, excluding camera-only presentations. */
+    contentFrameCount: number
+    cameraPresentationCount: number
     cellsPerPageEdge: number
     maximumCandidatePages: number
     maximumCandidateCount: number
@@ -170,6 +185,11 @@ export type FlowFieldRendererFacts = Readonly<{
 }>
 
 export type FlowFieldRenderer = Readonly<{
+    /** Submits a current-camera image synchronously when content observation is still pending. */
+    tryPresentCamera(
+        frameNumber: number,
+        capture: GeoViewSourceCapture<MapLibrePlanarCameraState>
+    ): GeoFrameResult<FlowFieldCameraFrame> | undefined
     render(
         frameNumber: number,
         capture: GeoViewSourceCapture<MapLibrePlanarCameraState>,
@@ -239,7 +259,11 @@ export async function createFlowFieldRenderer(
     let frameCount = 0
     let constructionInFlight: Promise<void> | undefined
     const framesInFlight = new Set<Promise<unknown>>()
+    const contentFrames = new Set<Promise<unknown>>()
     const barrierFrames = new Set<Promise<unknown>>()
+    let contentFrameCount = 0
+    let cameraPresentationCount = 0
+    let lastContentFrame: FlowFieldRendererFrame | undefined
     let sourceAcknowledgement: Promise<void> = Promise.resolve()
     let frameFailure: { reason: unknown } | undefined
     let lastQueued: Readonly<{ view: MapLibrePlanarCameraState, size: SurfaceSize,
@@ -379,6 +403,46 @@ export async function createFlowFieldRenderer(
         let packedCandidates = new Uint8Array(new ArrayBuffer(0))
         let preparedSpawnCandidates: FlowSpawnCandidates | undefined
 
+        function tryPresentCamera(
+            frameNumber: number,
+            capture: GeoViewSourceCapture<MapLibrePlanarCameraState>
+        ): GeoFrameResult<FlowFieldCameraFrame> | undefined {
+            assertActive()
+            if (lastQueued === undefined || lastContentFrame === undefined ||
+                constructionInFlight !== undefined || contentFrames.size === 0 ||
+                framesInFlight.size >= FLOW_FIELD_MAXIMUM_IN_FLIGHT_FRAMES ||
+                presentation !== lastQueued.presentation || resetRevision !== lastQueued.resetRevision ||
+                !sameSize(size,capture.presentationSize) || !history.facts().hasPreviousView ||
+                capture.view.referenceViewport[0] !== lastQueued.view.referenceViewport[0] ||
+                capture.view.referenceViewport[1] !== lastQueued.view.referenceViewport[1] ||
+                (barrierFrames.size === 0 && flowCameraDecisionEquals(capture.view,lastQueued.view))) return undefined
+            if (!Number.isSafeInteger(frameNumber) || frameNumber <= frameCount) {
+                throw new TypeError('Flow camera presentation requires a monotonic frame number')
+            }
+            const view = flowFieldViewAdapter.read(capture.view, {
+                frameEpoch: frameNumber, residencySnapshotEpoch: temporalResidencyEpoch,
+            })
+            const builder = runtime.createSubmission({validation:'throw'})
+            const drawContour = presentation.contour && lastContentFrame.presentationReady
+            if (drawContour) renderView.encode(builder,view)
+            // Only FIFO-safe history reads and a snapshotted uniform upload. No
+            // source publication, spatial producer, particle step or clock reset.
+            const historyFrame = history.presentCamera(builder,view)
+            if (drawContour) builder.render(overlayPass,[contour.draw])
+            const submitted = builder.submit()
+            const observation = trackFrame(observeFlowSubmittedWork(submitted),false,undefined,true)
+            frameCount = frameNumber
+            cameraPresentationCount++
+            return Object.freeze({
+                observation, needsFollowUp:false,
+                value:Object.freeze({state:'presented' as const,submitted,view,
+                    temporal:lastContentFrame.temporal,history:historyFrame,
+                    presentationReady:lastContentFrame.presentationReady,
+                    particlesAdvancing:false as const,
+                    visualTime:Object.freeze({referenceSteps:0,wholeSteps:0,discardedSeconds:0})}),
+            })
+        }
+
         async function render(
             frameNumber: number,
             capture: GeoViewSourceCapture<MapLibrePlanarCameraState>,
@@ -405,11 +469,13 @@ export async function createFlowFieldRenderer(
                 const framePresentation = presentation
                 const frameResetRevision = resetRevision
                 const framePresentationRevision = presentationRevision
-                if (framesInFlight.size > 0 && (barrierFrames.size > 0 || lastQueued === undefined ||
+                if (framesInFlight.size > 0 && (lastQueued === undefined ||
                     framePresentation !== lastQueued.presentation || frameResetRevision !== lastQueued.resetRevision ||
-                    framePresentation.contour || !sameSize(capture.presentationSize,lastQueued.size) ||
-                    !flowCameraDecisionEquals(capture.view,lastQueued.view))) {
+                    !sameSize(capture.presentationSize,lastQueued.size))) {
                     await drainFrames()
+                } else if (contentFrames.size > 0 && (barrierFrames.size > 0 || framePresentation.contour ||
+                    !flowCameraDecisionEquals(capture.view,lastQueued!.view))) {
+                    await drainContentFrames()
                 }
                 // No-op publications can acknowledge before drawing completes.
                 // Reusing that fact permits overlap without double publication.
@@ -437,8 +503,8 @@ export async function createFlowFieldRenderer(
                     if (prepared.state === 'failed') throw prepared.error
                     throw new FlowTemporalFrameUnavailableError(prepared.state)
                 }
-                if (framesInFlight.size > 0 && prepared.pairGeneration !== lastQueued?.pairGeneration) {
-                    await drainFrames()
+                if (contentFrames.size > 0 && prepared.pairGeneration !== lastQueued?.pairGeneration) {
+                    await drainContentFrames()
                 }
                 assertActive()
                 if (frameResetRevision !== resetRevision || framePresentation !== presentation) {
@@ -654,21 +720,17 @@ export async function createFlowFieldRenderer(
                     resetRevision:frameResetRevision,pairGeneration:prepared.pairGeneration}
                 const settlement = reconciliations.then(value => flowDemandSettlement(value, prefetchReconciliation))
                 frameCount = frameNumber
+                contentFrameCount++
+                lastContentFrame = Object.freeze({
+                    state: 'rendered' as const, submitted, view, temporal: frameTemporal,
+                    demand: demandFrame, history: historyFrame, presentationReady,
+                    particlesAdvancing, visualTime,
+                })
                 return Object.freeze({
                     observation,
                     settlement,
                     needsFollowUp: needsViewFollowUp || prepared.requestedLevel !== requestedLevel || refilledParticleView,
-                    value: Object.freeze({
-                        state: 'rendered' as const,
-                        submitted,
-                        view,
-                        temporal: frameTemporal,
-                        demand: demandFrame,
-                        history: historyFrame,
-                        presentationReady,
-                        particlesAdvancing,
-                        visualTime,
-                    }),
+                    value: lastContentFrame,
                 })
             } catch (error) {
                 if (!(error instanceof FlowTemporalFrameUnavailableError) && !disposed &&
@@ -806,6 +868,8 @@ export async function createFlowFieldRenderer(
                 frameCount,
                 maximumInFlightFrames: FLOW_FIELD_MAXIMUM_IN_FLIGHT_FRAMES,
                 inFlightFrameCount: framesInFlight.size,
+                contentFrameCount,
+                cameraPresentationCount,
                 visualTime,
                 presentationSize: Object.freeze({ ...size }),
                 cellsPerPageEdge,
@@ -862,7 +926,14 @@ export async function createFlowFieldRenderer(
             if (frameFailure !== undefined) throw frameFailure.reason
         }
 
-        function trackFrame(work: Promise<unknown>, barrier: boolean, release: () => void = () => {}): Promise<unknown> {
+        async function drainContentFrames(): Promise<void> {
+            const settled = await Promise.allSettled([...contentFrames])
+            throwSettledFailures(settled, 'Flow Field content frame drain failed')
+            if (frameFailure !== undefined) throw frameFailure.reason
+        }
+
+        function trackFrame(work: Promise<unknown>, barrier: boolean, release: () => void = () => {},
+            presentationOnly = false): Promise<unknown> {
             const released = work.then(value => { release(); return value }, error => {
                 try { release() } catch (cleanupError) {
                     throw new AggregateError([error,cleanupError], 'Flow Field frame release failed')
@@ -875,9 +946,11 @@ export async function createFlowFieldRenderer(
                 throw error
             }).finally(() => {
                 framesInFlight.delete(observation)
+                contentFrames.delete(observation)
                 barrierFrames.delete(observation)
             })
             framesInFlight.add(observation)
+            if (!presentationOnly) contentFrames.add(observation)
             if (barrier) barrierFrames.add(observation)
             return observation
         }
@@ -921,7 +994,7 @@ export async function createFlowFieldRenderer(
         }
 
         return Object.freeze({
-            render, suspendTemporal, presentRetained, setPresentation, resetVisuals, resetVisualClock,
+            render, tryPresentCamera, suspendTemporal, presentRetained, setPresentation, resetVisuals, resetVisualClock,
             flushResidency, facts, dispose,
         })
     } catch (error) {

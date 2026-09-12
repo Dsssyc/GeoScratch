@@ -98,6 +98,8 @@ export type FlowHistory = Readonly<{
     resize(size: SurfaceSize): Promise<void>
     reset(): void
     presentRetained(builder: SubmissionBuilder, view: GeoViewSnapshot): FlowHistoryFrame
+    /** Reprojects visible ink without changing raw history or retiring temporal commands. */
+    presentCamera(builder: SubmissionBuilder, view: GeoViewSnapshot): FlowHistoryFrame
     /** Commits a derived cache only after its actual GPU build succeeds. */
     observe(submitted: SubmittedWork): Promise<void>
     /**
@@ -742,13 +744,18 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
         }
 
         function presentRetained(builder: SubmissionBuilder, view: GeoViewSnapshot): FlowHistoryFrame {
+            const frame = presentCamera(builder, view)
+            for (const command of presentationPair?.commands ?? []) command.dispose()
+            presentationPair = undefined
+            return frame
+        }
+
+        function presentCamera(builder: SubmissionBuilder, view: GeoViewSnapshot): FlowHistoryFrame {
             assertActive()
             if (resizePending) throw new Error('Flow Field history cannot encode during resize')
             if (builder?.runtime !== runtime) {
                 throw new TypeError('Flow Field history requires a same-runtime SubmissionBuilder')
             }
-            for (const command of presentationPair?.commands ?? []) command.dispose()
-            presentationPair = undefined
             const currentView = historyViewFacts(view)
             const cameraChanged = previousView !== undefined && !sameView(previousView, currentView)
             const reprojecting = mode === 'reproject' && cameraChanged
@@ -775,7 +782,7 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
                 cleared: display === undefined, resizeGeneration, boundary, sdfFeatherTexels })
         }
 
-        return Object.freeze({ resize, reset, encode, presentRetained, facts, dispose,
+        return Object.freeze({ resize, reset, encode, presentRetained, presentCamera, facts, dispose,
             observe: (submitted: SubmittedWork) => {
                 assertNotProducing()
                 return centerCache?.observe(submitted) ?? Promise.resolve()

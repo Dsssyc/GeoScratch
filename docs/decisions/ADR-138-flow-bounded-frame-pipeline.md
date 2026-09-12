@@ -5,6 +5,7 @@
 Accepted. Supersedes the single-frame application discipline mentioned in
 ADR-118. Cache builds still require successful observation before reuse. Scratch,
 Geo, Virtual Raster publication contracts and the frozen Flow Layer are unchanged.
+The camera/contour waiting policy is subsequently refined by ADR-140.
 
 ## Context
 

@@ -367,11 +367,17 @@ reference mapping and the numerical differences introduced by tiled sampling.
 
 Stable Flow playback permits two submitted frames with one construction. Source
 acknowledgement precedes the next publication, while each temporal lease remains
-alive through its own complete frame observation. Camera, temporal-pair, quality,
-reset and presentation changes drain outstanding work before changing shared
-resources. Spatial/cache builds and the contour's single-slot overflow readback
-remain exclusive. A stopped page cancels waiting construction without abandoning
-issued GPU work. See [ADR-138](../../docs/decisions/ADR-138-flow-bounded-frame-pipeline.md).
+alive through its own complete frame observation. While a content observation is
+pending, the same controller can synchronously reproject existing visible ink to
+the newest captured camera. Those `presented` frames do not simulate particles,
+decay history or build spatial/cache/contour data. Existing contour segments may
+be drawn with the new camera without reusing the overflow readback. Full spatial
+and contour builds wait for content observations; quality, reset, presentation
+and allocation changes retain their full drain. `lastContentFrame` and
+`contentFrameCount` distinguish source/particle work from camera-only presentation.
+A stopped page cancels waiting construction without abandoning issued GPU work.
+See [ADR-138](../../docs/decisions/ADR-138-flow-bounded-frame-pipeline.md) and
+[ADR-140](../../docs/decisions/ADR-140-flow-camera-presentation-during-content-observation.md).
 
 Focused native proofs:
 
@@ -384,6 +390,7 @@ node tests/browser/flow-field-history-retained.mjs
 node tests/browser/flow-field-history-time.mjs
 node tests/browser/flow-field-visual-time.mjs
 node tests/browser/flow-field-frame-pipeline.mjs
+node tests/browser/flow-field-camera-latency.mjs
 node tests/browser/flow-field-slack-interior.mjs
 node tests/browser/flow-field-controls.mjs
 node tests/browser/flow-field-contour-order.mjs
@@ -419,6 +426,13 @@ option it stays headless and makes no physical-display cadence claim. The bound
 override exists only in the isolated test response; production has one two-slot
 policy. Concurrent local model work can contend for the GPU, so compare the
 interleaved controls and lifecycle facts rather than unrelated absolute timings.
+
+`FLOW_CAMERA_TIMING_NATIVE=1 node tests/browser/flow-field-camera-timing.mjs`
+records real drag capture-to-submit age and projected camera differences on a
+verified background secondary display. DPR defaults to 2; the report includes the
+chosen DPR, and a DPR 1 result is not a 4K-performance claim. The separate 40 ms
+completion-notification delay adds no GPU work and exposes observation-dependent
+camera waits. These timing records do not prove atomic browser presentation.
 
 Run the motion benchmark alone: it compares high-DPR submission frequency against
 frozen Flow Layer and an isolated eager-presentation-support counterfactual. Also

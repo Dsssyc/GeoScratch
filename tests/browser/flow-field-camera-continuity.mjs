@@ -46,6 +46,9 @@ try {
                     observed:f.frames.observedFrameCount,
                     rendererFrame:f.renderer.frameCount,
                     steps:f.renderer.particles.encodedSteps,
+                    contentFrames:f.renderer.contentFrameCount,
+                    cameraFrames:f.renderer.cameraPresentationCount,
+                    referenceSteps:f.renderer.particles.simulatedReferenceSteps,
                     resets:f.renderer.particles.resetCount,
                     pair:f.temporalWindow.pairGeneration,
                     state:frame.state,
@@ -144,6 +147,10 @@ try {
             stoppedRenderedFrames,
             simulationSteps:end.steps - start.steps,
             stepsPerSubmittedFrame:(end.steps - start.steps) / (end.submitted - start.submitted),
+            contentFrames:end.contentFrames - start.contentFrames,
+            cameraPresentationFrames:end.cameraFrames - start.cameraFrames,
+            stepsPerContentFrame:(end.steps - start.steps) / (end.contentFrames - start.contentFrames),
+            referenceStepsPerSecond:(end.referenceSteps - start.referenceSteps) * 1000 / (end.wallTime - start.wallTime),
             advancingRenderedFraction:1 - stoppedRenderedFrames / rendered.length,
             resetDelta:end.resets - start.resets,
             clearedFrames:records.filter(value => value.cleared).length,
@@ -168,8 +175,10 @@ try {
         assert.ok(result.renderedFrames >= 20, `${label}: collect enough distinct rendered frames`)
         assert.ok(result.uniqueSubmitted >= 20 && result.uniqueObserved >= 20,
             `${label}: observe actual submissions and native completion`)
-        assert.ok(result.stepsPerSubmittedFrame > 0.85,
-            `${label}: only ${result.stepsPerSubmittedFrame.toFixed(3)} particle steps per submitted frame`)
+        assert.ok(result.stepsPerContentFrame > 0.85,
+            `${label}: only ${result.stepsPerContentFrame.toFixed(3)} particle steps per content frame`)
+        assert.ok(result.referenceStepsPerSecond > 54 && result.referenceStepsPerSecond < 64,
+            `${label}: camera presentation must not starve or accelerate simulation (${result.referenceStepsPerSecond.toFixed(2)} reference steps/s)`)
         assert.ok(result.advancingRenderedFraction > 0.85,
             `${label}: ${result.stoppedRenderedFrames}/${result.renderedFrames} rendered frames froze simulation`)
         if (label === 'stationary') assert.equal(result.changedCameraFrames, 0)
