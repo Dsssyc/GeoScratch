@@ -23,6 +23,7 @@ import type { FlowFieldRuntimeBudgetFacts } from './flow-runtime-budgets.ts'
 import {
     FlowTemporalFrameUnavailableError,
     createFlowFieldRenderer,
+    FLOW_FIELD_MAXIMUM_IN_FLIGHT_FRAMES,
 } from './flow-renderer.ts'
 import type {
     FlowFieldRenderer,
@@ -93,6 +94,8 @@ export type FlowFieldApplicationFrame =
     }>
 
 export type FlowFieldApplicationFacts = Readonly<{
+    /** Last observed visible time, independent of the latest queued render. */
+    presented: FlowTemporalFrameSnapshot | undefined
     timeline: FlowTimelineSnapshot
     temporalWindow: FlowTemporalRuntimeWindowSnapshot
     handshake: Readonly<{
@@ -238,6 +241,7 @@ export async function startFlowFieldApplication(
     let frameController: GeoFrameController | undefined
     let presentation = flowFieldPresentation(options.initialPresentation ?? FLOW_FIELD_PRESENTATION)
     let presented: FlowTemporalFrameSnapshot | undefined
+    let latestObservedFrame = 0
     let latestHandshake: WindowHandshake
     let lastFrame: FlowFieldApplicationFrame = Object.freeze({
         state: 'loading',
@@ -262,6 +266,7 @@ export async function startFlowFieldApplication(
     const renderer = await lifetime.acquire(createFlowFieldRenderer({
         runtime,
         surface,
+        signal: lifetime.signal,
         size,
         referenceViewport: viewSource.capture().view.referenceViewport,
         temporalWindow,
@@ -282,7 +287,7 @@ export async function startFlowFieldApplication(
         GeoViewSourceCapture<MapLibrePlanarCameraState>
     >({
         track: (work, label) => lifetime.track(work, label),
-        maximumInFlightFrames: 1,
+        maximumInFlightFrames: FLOW_FIELD_MAXIMUM_IN_FLIGHT_FRAMES,
         driver: mapLibreFrameDriver({
             id: 'flow-field-maplibre-frames',
             map,
@@ -350,16 +355,21 @@ export async function startFlowFieldApplication(
                 return { ...retained, value: setLoadingFrame(latest, latestHandshake) }
             }
         },
-        onObserved({ value }) {
+        onSubmitted() {
+            if (frameController?.snapshot().state !== 'running') return
+            if (timeline.snapshot().needsTick) frameController.invalidate()
+        },
+        onObserved({ value, frameNumber }) {
 
             if (frameController?.snapshot().state !== 'running') return
+            if (frameNumber < latestObservedFrame) return
+            latestObservedFrame = frameNumber
             if (value.state === 'rendered' && value.presentationReady) presented = value.temporal
             else if (value.state === 'gap') presented = undefined
-            setStatus(lastFrame.state === 'rendered'
-                ? lastFrame.presentationReady ? 'ready' : 'loading' : lastFrame.state)
+            setStatus(value.state === 'rendered'
+                ? value.presentationReady ? 'ready' : 'loading' : value.state)
             emitControls()
             updatePrefetch(timeline.snapshot())
-            if (timeline.snapshot().needsTick) frameController.invalidate()
         },
         onError(error) {
 
@@ -647,6 +657,7 @@ export async function startFlowFieldApplication(
                 status: latestHandshake.status,
             }),
             lastFrame,
+            presented,
             budgets: FLOW_FIELD_RUNTIME_BUDGETS,
             frames: frameController!.snapshot(),
             renderer: renderer.facts(),

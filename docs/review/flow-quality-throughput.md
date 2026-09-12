@@ -62,9 +62,51 @@ gestures. Native 144 Hz observations were 90.41/101.41 updates/s; Balanced was
 140.27/139.13. These are shared-machine observations without a paired old-raster
 control, not a claimed speedup. Stable frames retained one native submission.
 
-## Remaining Work
+## Bounded Frame Pipeline
 
-- Permit a measured bounded frame pipeline with correct uniforms, publications,
-  cache builds and temporal leases.
-- Maintain controlled Native comparison, source/presentation distinctions and
-  cleanup evidence across the final combined behavior.
+ADR-138 permits two stable submitted frames with one construction, separates
+source acknowledgement from native observation, and retains independent frame
+leases and observed spatial provenance. Resource changes use explicit barriers;
+already-issued work remains observable through stop and failure.
+
+Eight native lifecycle scenarios pass, including reversed completion, paused
+resize, camera and temporal changes, contour serialization, ordinary disposal,
+disposal during blocked construction and injected native failure. The added
+construction-disposal case caught and now guards cancellation after async waits:
+the application lifetime signal prevents both extra submission and history resize,
+while all already queued work is still drained and its leases released.
+
+Native one/two/two/one admission comparison at 3520x1760 on the verified 144 Hz
+secondary display measured 42.99/61.28/51.00/46.71 updates/s (one-slot mean 44.85,
+two-slot mean 56.14, approximately 25% higher in this batch). Native submissions
+matched admitted frames exactly in all four windows, and the in-flight peak never
+exceeded the selected bound. Accepted simulation time stayed 59.93-59.99 reference
+steps/s. No new spatial builds, spawn-content comparisons or active workers
+occurred during measurement.
+
+These absolute rates are shared-machine observations under possible contention,
+not an isolated-machine target or a comparison against earlier phases: the third window's rAF cadence
+also fell to 129 Hz. Two slots trade additional queued latency for throughput:
+queue-completion medians were 15.7-17.9 ms with one and 28.3-35.9 ms with two;
+P95 reached 45.6 ms in the slowest two-slot window. Camera/control transitions
+drain this bounded backlog before encoding changed state. Do not increase the
+bound on this evidence. Full measurements and placement/cleanup facts are saved
+by `tests/browser/flow-field-frame-throughput.mjs`.
+
+Final verification: documentation generation, translation revision checks,
+`npm run typecheck`, `npm test -- --timeout 10000 --reporter dot` (1,814 passing,
+two opt-in gates pending), and `npm run build` passed. The first default-timeout
+run exceeded the API reflection test's 30-second limit and the repository-name
+scan's two-second limit. Reflection passed in isolation; the complete rerun raised
+only Mocha's default waiting limit to ten seconds, with no assertion/test-source
+change for either documentation check.
+
+Passed native browser proofs: frame pipeline, trail quality, retained history,
+visual time, center-cache coherence, inspector handoff, prefetch failure, lookahead,
+normal/delayed/warm startup and all five DPR 2 camera-continuity gestures. Every
+camera gesture encoded one particle update per admitted frame, with zero resets,
+zero history clears and complete cleanup. Seven ordinary forward/reverse temporal
+handoffs had no buffering or gaps over 100 ms. Quality and speculative-failure
+fixtures now explicitly await visible foreground readiness instead of assuming
+that queued readiness or background failure also means a completed foreground
+frame. The existing pixel, no-retry and paused-simulation assertions are retained.

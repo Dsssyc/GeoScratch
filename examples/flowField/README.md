@@ -365,6 +365,14 @@ example. The former `flowLayer` is a frozen rendering reference. See
 [ADR-098](../../docs/decisions/ADR-098-flow-field-reference-presentation.md) for the
 reference mapping and the numerical differences introduced by tiled sampling.
 
+Stable Flow playback permits two submitted frames with one construction. Source
+acknowledgement precedes the next publication, while each temporal lease remains
+alive through its own complete frame observation. Camera, temporal-pair, quality,
+reset and presentation changes drain outstanding work before changing shared
+resources. Spatial/cache builds and the contour's single-slot overflow readback
+remain exclusive. A stopped page cancels waiting construction without abandoning
+issued GPU work. See [ADR-138](../../docs/decisions/ADR-138-flow-bounded-frame-pipeline.md).
+
 Focused native proofs:
 
 ```sh
@@ -375,6 +383,7 @@ node tests/browser/flow-field-history-recovery.mjs
 node tests/browser/flow-field-history-retained.mjs
 node tests/browser/flow-field-history-time.mjs
 node tests/browser/flow-field-visual-time.mjs
+node tests/browser/flow-field-frame-pipeline.mjs
 node tests/browser/flow-field-slack-interior.mjs
 node tests/browser/flow-field-controls.mjs
 node tests/browser/flow-field-contour-order.mjs
@@ -402,6 +411,14 @@ node tests/browser/flow-field-lookahead.mjs
 node tests/browser/flow-field-prefetch-failure.mjs
 node tests/browser/scratch-flow-field.mjs
 ```
+
+Run `FLOW_FRAME_THROUGHPUT_NATIVE=1 node tests/browser/flow-field-frame-throughput.mjs`
+alone for a one/two/two/one admission comparison at Native resolution. It verifies a
+background browser on a non-main high-refresh display. Without the environment
+option it stays headless and makes no physical-display cadence claim. The bound
+override exists only in the isolated test response; production has one two-slot
+policy. Concurrent local model work can contend for the GPU, so compare the
+interleaved controls and lifecycle facts rather than unrelated absolute timings.
 
 Run the motion benchmark alone: it compares high-DPR submission frequency against
 frozen Flow Layer and an isolated eager-presentation-support counterfactual. Also

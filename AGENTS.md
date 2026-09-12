@@ -132,6 +132,19 @@ history through its existing lifecycle without resetting particles or advancing
 paused simulation. Changes require the trail-quality browser proof, existing
 history/visual-time/camera-continuity gates and measured high-refresh evidence.
 
+Flow Field admits at most two submitted frames and one construction (ADR-138).
+Stable observed spatial/cache state can overlap. Source acknowledgement stays
+separate from full frame observation; wait for acknowledgement before republishing.
+Changed publications and spawn/center builds may follow stable work in GPU FIFO,
+then block later frames until fully observed. Spatial rebuilds, contour readback
+reuse and camera/pair/presentation, resize or reset changes require draining before
+encoding with the new state.
+Keep synchronous upload-to-submit ordering, per-frame temporal leases and newest
+observed presentation facts. Borrow the application lifetime signal to cancel
+construction after awaits without cancelling observation of already queued work.
+Disposal during blocked construction must not resize or submit new work. Bound
+changes require the frame-pipeline and interleaved native throughput proofs.
+
 Flow Field velocity sampling follows ADR-134: Geo owns immutable sampler metadata
 uniforms and direct local-level indexing. Compatible coverage, bounds and decoding
 changes replace coherent metadata/page-table/atlas bindings while preserving shader

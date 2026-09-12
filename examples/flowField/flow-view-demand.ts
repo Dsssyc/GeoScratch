@@ -5,6 +5,7 @@ import {
 } from 'geoscratch/geo'
 import type {
     GeoViewSnapshot,
+    GeoViewSnapshotDescriptor,
     GpuWebMercatorQuadCoverFeedback,
     GpuWebMercatorQuadCoverFrame,
     GpuWebMercatorQuadCoverPolicy,
@@ -53,6 +54,8 @@ export type FlowViewDemandFacts = Readonly<{
     projectionId: string
     initialized: boolean
     pending: boolean
+    pendingBuild: boolean
+    pendingObservationCount: number
     hasSettledFeedback: boolean
     latestSettledFrameEpoch: number
     /** Complete spatial build batches encoded, not native-success observations. */
@@ -84,6 +87,7 @@ type StagedFrame = {
 type PendingFrame = StagedFrame & {
     demandFrame?: GpuWebMercatorQuadDemandProjectionFrame
     settlement?: Promise<FlowViewDemandSettlement>
+    submitted?: SubmittedWork
 }
 
 type SettledSpatialFrame = Readonly<{
@@ -141,6 +145,7 @@ export async function createFlowViewDemandAdapter(
     let initialized = false
     let staged: StagedFrame | undefined
     let pending: PendingFrame | undefined
+    const observingFrames = new Set<PendingFrame>()
     let latestDemandFeedback: GpuWebMercatorQuadDemandProjectionFeedback | undefined
     let latestSettlement: Promise<FlowViewDemandSettlement> | undefined
     let latestSettledFrameEpoch = 0
@@ -154,7 +159,8 @@ export async function createFlowViewDemandAdapter(
     const coverHook: FlowDemandCoverHook<FlowViewDemandCoverFrame> = Object.freeze({
         encode(builder: SubmissionBuilder, view: GeoViewSnapshot): FlowViewDemandCoverFrame {
             assertActive()
-            if (staged !== undefined || pending !== undefined) {
+            if (staged !== undefined || pending !== undefined ||
+                [...observingFrames].some(frame=>frame.reused===undefined)) {
                 throw new Error('Flow GPU view demand already has an unsettled frame')
             }
             if (builder?.runtime !== runtime || builder.isSubmitted) {
@@ -178,6 +184,9 @@ export async function createFlowViewDemandAdapter(
             }
             // A new spatial build may overwrite parity resources; only its own
             // successful feedback can restore reuse, including an A-B-A return.
+            if (observingFrames.size > 0) {
+                throw new Error('Flow GPU spatial rebuild requires settled reuse frames')
+            }
             reusable = undefined
             if (!initialized) cover.initialize(builder)
             const viewToken = cover.writeView(view)
@@ -238,6 +247,8 @@ export async function createFlowViewDemandAdapter(
 
     async function observe(submitted: SubmittedWork): Promise<FlowViewDemandSettlement> {
         assertActive()
+        const previous = [...observingFrames].find(frame=>frame.submitted===submitted)
+        if (previous !== undefined) return previous.settlement!
         const active = pending
         if (active === undefined) {
             throw new Error('Flow GPU view demand has no encoded frame to observe')
@@ -247,6 +258,9 @@ export async function createFlowViewDemandAdapter(
             reusable = undefined
             throw new TypeError('Flow GPU view demand requires an owning SubmittedWork receipt')
         }
+        pending = undefined
+        active.submitted = submitted
+        observingFrames.add(active)
         const feedback = active.reused === undefined ? Promise.all([
             cover.feedback(active.coverFrame, submitted),
             projection.feedback(active.demandFrame!, submitted),
@@ -284,8 +298,7 @@ export async function createFlowViewDemandAdapter(
             initialized = false
             throw error
         }).finally(() => {
-            active.viewToken?.dispose()
-            if (pending === active) pending = undefined
+            try { active.viewToken?.dispose() } finally { observingFrames.delete(active) }
         })
         active.settlement = observing
         latestSettlement = observing
@@ -306,7 +319,11 @@ export async function createFlowViewDemandAdapter(
             coverId: cover.id,
             projectionId: projection.id,
             initialized,
-            pending: staged !== undefined || pending !== undefined,
+            pending: staged !== undefined || pending !== undefined || observingFrames.size > 0,
+            pendingBuild: (staged !== undefined && staged.reused === undefined) ||
+                (pending !== undefined && pending.reused === undefined) ||
+                [...observingFrames].some(frame=>frame.reused===undefined),
+            pendingObservationCount: observingFrames.size,
             hasSettledFeedback: latestDemandFeedback !== undefined,
             latestSettledFrameEpoch,
             buildCount,
@@ -320,17 +337,11 @@ export async function createFlowViewDemandAdapter(
         disposed = true
         reusable = undefined
         disposePromise = (async() => {
-            const settling = pending?.settlement
-            if (settling !== undefined) {
-                try {
-                    await settling
-                } catch {
-                    // Disposal still releases both public GPU owners after failed feedback.
-                }
-            } else {
-                staged?.viewToken?.dispose()
-                pending?.viewToken?.dispose()
-            }
+            // Every reuse receipt retains its own observation. A later completion
+            // cannot make disposal forget an earlier still-pending native frame.
+            await Promise.allSettled([...observingFrames].map(frame=>frame.settlement!))
+            staged?.viewToken?.dispose()
+            pending?.viewToken?.dispose()
             staged = undefined
             pending = undefined
             projection.dispose()
@@ -356,14 +367,21 @@ export async function createFlowViewDemandAdapter(
 
 /** Compares one view identity and all camera facts, excluding only per-frame/residency epochs. */
 export function flowViewDecisionEquals(left: GeoViewSnapshot, right: GeoViewSnapshot): boolean {
+    return left.id === right.id && flowCameraDecisionEquals(left, right)
+}
+
+/** Compares camera geometry without fabricating view identities or submission epochs. */
+export function flowCameraDecisionEquals(
+    left: Omit<GeoViewSnapshotDescriptor, 'id' | 'frameEpoch' | 'residencySnapshotEpoch'>,
+    right: Omit<GeoViewSnapshotDescriptor, 'id' | 'frameEpoch' | 'residencySnapshotEpoch'>
+): boolean {
     const keys = [ 'clipFromRelativeWorld', 'cameraHigh', 'cameraLow', 'referenceViewport' ] as const
-    return left.id === right.id && left.zoomHint === right.zoomHint &&
-        left.verticalFovRadians === right.verticalFovRadians &&
-        left.cameraLatitudeRadians === right.cameraLatitudeRadians &&
-        left.cameraPitchRadians === right.cameraPitchRadians &&
-        keys.every(key => {
-            const a = left[key]
-            const b = right[key]
-            return a.length === b.length && a.every((value, index) => value === b[index])
-        })
+    if (left.zoomHint !== right.zoomHint || left.verticalFovRadians !== right.verticalFovRadians ||
+        left.cameraLatitudeRadians !== right.cameraLatitudeRadians || left.cameraPitchRadians !== right.cameraPitchRadians) return false
+    for (const key of keys) {
+        const a = left[key], b = right[key]
+        if (a.length !== b.length) return false
+        for (let index = 0; index < a.length; index++) if (a[index] !== b[index]) return false
+    }
+    return true
 }

@@ -678,8 +678,9 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
                 boundary,
                 commands: Object.freeze([ presentA, presentB ]) as readonly [DrawCommand, DrawCommand],
             })
-            // The renderer admits one native frame at a time and holds the borrowed
-            // temporal frame until submission settles. Only our commands retire here.
+            // Submitted commands are already encoded; retiring their descriptions
+            // does not release borrowed resources. Each frame retains its temporal
+            // binding through native settlement; only our commands retire here.
             for (const command of previous?.commands ?? []) command.dispose()
             return presentationPair.commands
         }

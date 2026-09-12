@@ -104,8 +104,8 @@ async function ready(page, size) {
     await page.waitForFunction(size => {
         const f = window.__FLOW_FIELD_PROOF__?.facts()
         if (document.body.dataset.status === 'error') return true
-        return f?.lastFrame.presentationReady && f.workers.activeTaskCount === 0 &&
-            f.frames.inFlightFrameCount === 0 && (!size ||
+        return document.body.dataset.status === 'ready' && f?.lastFrame.presentationReady && f.workers.activeTaskCount === 0 &&
+            (f.timeline.playing ? f.frames.observedFrameCount > 0 : !f.frames.rendering && f.frames.inFlightFrameCount === 0) && (!size ||
                 f.renderer.history.size.width === size.width && f.renderer.history.size.height === size.height)
     }, size, { timeout: 90_000 })
     assert.equal(await page.locator('body').getAttribute('data-status'), 'ready',
