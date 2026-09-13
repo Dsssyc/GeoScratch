@@ -136,6 +136,14 @@ are retained under ignored `output/playwright/flow-camera-lag/`.
 
 ## Drag Follow-Up: Camera Presentation
 
+The following Native/DPR 2 screenshots show the repaired implementation before
+and after an 80-reference-pixel pan while content completion is held. They are a
+camera-following proof, not an old/new implementation or frame-rate comparison.
+
+![Before the pan](../assets/flow-field/camera-before.png)
+
+![After the pan with content completion held](../assets/flow-field/camera-after.png)
+
 ADR-140 adds camera-only submissions through the existing controller. Pending
 content observations retain their resources while visible history and optional
 contour segments are reprojected from the current host capture. The next full
