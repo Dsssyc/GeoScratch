@@ -10,7 +10,7 @@ describe('Flow Field presentation choices', () => {
     it('defaults to the hard boundary and normalizes older input objects', () => {
         const input = {view:'particles',sample:'interpolated',trails:true,contour:false}
         const normalized = flowFieldPresentation(input)
-        expect(normalized).to.deep.equal({...input,boundary:'hard',sdfFeatherTexels:0.25,trailQuality:'balanced'})
+        expect(normalized).to.deep.equal({...input,boundary:'hard',sdfFeatherTexels:0.25,trailQuality:'native'})
         expect(FLOW_FIELD_PRESENTATION).to.deep.equal(normalized)
         expect(Object.isFrozen(normalized)).to.equal(true)
         expect(input).to.not.have.property('boundary')

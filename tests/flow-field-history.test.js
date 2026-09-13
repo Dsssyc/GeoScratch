@@ -96,7 +96,8 @@ describe('Flow Field viewport history', () => {
         expect(velocity).to.include('let advectable = speed > 0.0 && speed >= temporal.activityKill')
         const source = read(sourcePath)
         expect(source).to.include("import presentationSupportShader from './shaders/presentation-support.wgsl?raw'")
-        expect(source.match(/\{ code: presentationSupportShader \}/g)).to.have.length(3)
+        expect(source.match(/\{ code: presentationSupportShader \}/g)).to.have.length(2)
+        expect(source).to.include("'fn FlowPresentation_coverage_direct('")
         expect(velocity).to.include('return FlowVelocity_sample_support(position, requested_level, temporal, FlowVelocity_nearest_zero_gate)')
     })
 

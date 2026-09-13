@@ -27,21 +27,40 @@ Activity contour is an optional velocity threshold overlay and does not enter tr
 The Boundary selector offers four explicit comparisons. A remains the default;
 C/D are opt-in center-field reconstructions, described after the existing A/B rules.
 
+Default A reuses the source-center cache's exact support bits for complete wet
+footprints at both temporal endpoints. Mixed, dry, unknown, fallback and missing
+cache entries retain full direct coverage evaluation. The cache is validated
+against the current source publications, so this avoids repeated interior queries
+without changing clipping, particle sampling or resolution. See
+[ADR-135](../../docs/decisions/ADR-135-flow-cached-full-support.md).
+
+Pixel-center velocity sampling reuses each already-loaded footprint corner for its
+nearest-owner zero check. The ordinary two-endpoint query reads eight texels;
+exceptional owner addresses retain the full lookup. This preserves new-position
+validation and C/D's explicit unmasked sampling choice. See
+[ADR-136](../../docs/decisions/ADR-136-flow-footprint-owner-reuse.md).
+
 ## Trail quality
 
-The inspector's **Trail quality** defaults to **Balanced** for smoother playback
-on large/high-DPR displays. Only trail history and particle overlap depth are
-limited to one texel per reference pixel and a 1080p pixel budget; the Surface,
-basemap, text, contour overlay and diagnostic views remain at native resolution.
-**Native** retains the original fine trail rasterization. You can also open
-`/flowField/?trailQuality=native` to choose it at startup.
+The inspector's **Trail quality** defaults to **Native**, preserving the full
+physical trail resolution. **Balanced** limits only trail history to one texel per
+reference pixel and a 1080p pixel budget; the Surface, basemap, text, contour overlay
+and diagnostic views remain native. Use `/flowField/?trailQuality=balanced` when
+the lower trail budget is desired.
+
+Particle segments use explicit pixel coverage at 0.5 reference-pixel width, with
+filtered edges and fractional-length opacity. Transparent segments blend without
+the former overlap-depth texture. Balanced output and retained images use linear
+upscaling; Native presentation preserves exact texel reads. This smooths line
+edges without changing the underlying velocity field or its source ceiling.
+See [ADR-137](../../docs/decisions/ADR-137-flow-analytic-line-coverage.md).
 
 Balanced trades trail detail for lower GPU work, and may change line thickness
 and density. It does not lower the raster's source resolution, alter camera cover,
 or reduce particle count. Changing quality only reallocates history when the
 resolved dimensions differ. That clears existing ink without resetting particles;
-while paused, trails can remain empty until playback resumes. See
-[ADR-133](../../docs/decisions/ADR-133-flow-trail-pixel-budget.md).
+while paused, trails can remain empty until playback resumes. The original budget
+decision is [ADR-133](../../docs/decisions/ADR-133-flow-trail-pixel-budget.md).
 
 With the development server and prepared Flow dataset running, verify with:
 
@@ -346,6 +365,20 @@ example. The former `flowLayer` is a frozen rendering reference. See
 [ADR-098](../../docs/decisions/ADR-098-flow-field-reference-presentation.md) for the
 reference mapping and the numerical differences introduced by tiled sampling.
 
+Stable Flow playback permits two submitted frames with one construction. Source
+acknowledgement precedes the next publication, while each temporal lease remains
+alive through its own complete frame observation. While a content observation is
+pending, the same controller can synchronously reproject existing visible ink to
+the newest captured camera. Those `presented` frames do not simulate particles,
+decay history or build spatial/cache/contour data. Existing contour segments may
+be drawn with the new camera without reusing the overflow readback. Full spatial
+and contour builds wait for content observations; quality, reset, presentation
+and allocation changes retain their full drain. `lastContentFrame` and
+`contentFrameCount` distinguish source/particle work from camera-only presentation.
+A stopped page cancels waiting construction without abandoning issued GPU work.
+See [ADR-138](../../docs/decisions/ADR-138-flow-bounded-frame-pipeline.md) and
+[ADR-140](../../docs/decisions/ADR-140-flow-camera-presentation-during-content-observation.md).
+
 Focused native proofs:
 
 ```sh
@@ -356,6 +389,8 @@ node tests/browser/flow-field-history-recovery.mjs
 node tests/browser/flow-field-history-retained.mjs
 node tests/browser/flow-field-history-time.mjs
 node tests/browser/flow-field-visual-time.mjs
+node tests/browser/flow-field-frame-pipeline.mjs
+node tests/browser/flow-field-camera-latency.mjs
 node tests/browser/flow-field-slack-interior.mjs
 node tests/browser/flow-field-controls.mjs
 node tests/browser/flow-field-contour-order.mjs
@@ -383,6 +418,21 @@ node tests/browser/flow-field-lookahead.mjs
 node tests/browser/flow-field-prefetch-failure.mjs
 node tests/browser/scratch-flow-field.mjs
 ```
+
+Run `FLOW_FRAME_THROUGHPUT_NATIVE=1 node tests/browser/flow-field-frame-throughput.mjs`
+alone for a one/two/two/one admission comparison at Native resolution. It verifies a
+background browser on a non-main high-refresh display. Without the environment
+option it stays headless and makes no physical-display cadence claim. The bound
+override exists only in the isolated test response; production has one two-slot
+policy. Concurrent local model work can contend for the GPU, so compare the
+interleaved controls and lifecycle facts rather than unrelated absolute timings.
+
+`FLOW_CAMERA_TIMING_NATIVE=1 node tests/browser/flow-field-camera-timing.mjs`
+records real drag capture-to-submit age and projected camera differences on a
+verified background secondary display. DPR defaults to 2; the report includes the
+chosen DPR, and a DPR 1 result is not a 4K-performance claim. The separate 40 ms
+completion-notification delay adds no GPU work and exposes observation-dependent
+camera waits. These timing records do not prove atomic browser presentation.
 
 Run the motion benchmark alone: it compares high-DPR submission frequency against
 frozen Flow Layer and an isolated eager-presentation-support counterfactual. Also

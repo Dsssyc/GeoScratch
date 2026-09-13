@@ -16,7 +16,7 @@ try {
         window.__FLOW_TRAIL_ALLOCATIONS__ = []
         const create = GPUDevice.prototype.createTexture
         GPUDevice.prototype.createTexture = function (descriptor) {
-            if (/^Flow Field (history [AB]|particle overlap depth)/.test(descriptor.label ?? '')) {
+            if (/^Flow Field history [AB]/.test(descriptor.label ?? '')) {
                 const size = descriptor.size
                 window.__FLOW_TRAIL_ALLOCATIONS__.push({
                     width: size.width ?? size[0], height: size.height ?? size[1],
@@ -25,7 +25,7 @@ try {
             return create.call(this, descriptor)
         }
     })
-    await page.goto(`${base}/flowField/?proof=1&rate=0.000001&zoom=9`)
+    await page.goto(`${base}/flowField/?proof=1&rate=0.000001&zoom=9&trailQuality=balanced`)
     await ready(page)
     await settleTrails(page)
     const balanced = await facts(page)
@@ -34,7 +34,7 @@ try {
     assert.equal(balanced.quality, 'balanced')
     assert.equal(balanced.comparisons, 0)
     const allocations = await page.evaluate(() => window.__FLOW_TRAIL_ALLOCATIONS__)
-    assert.ok(allocations.length >= 3, 'Observe both history textures and overlap depth')
+    assert.ok(allocations.length >= 2, 'Observe both history textures')
     assert.ok(allocations.every(size => size.width === 1280 && size.height === 800),
         'Balanced allocation must be bounded from construction, not only after first resize')
     results.push({ name: 'balanced', ...balanced })
@@ -104,8 +104,8 @@ async function ready(page, size) {
     await page.waitForFunction(size => {
         const f = window.__FLOW_FIELD_PROOF__?.facts()
         if (document.body.dataset.status === 'error') return true
-        return f?.lastFrame.presentationReady && f.workers.activeTaskCount === 0 &&
-            f.frames.inFlightFrameCount === 0 && (!size ||
+        return document.body.dataset.status === 'ready' && f?.lastFrame.presentationReady && f.workers.activeTaskCount === 0 &&
+            (f.timeline.playing ? f.frames.observedFrameCount > 0 : !f.frames.rendering && f.frames.inFlightFrameCount === 0) && (!size ||
                 f.renderer.history.size.width === size.width && f.renderer.history.size.height === size.height)
     }, size, { timeout: 90_000 })
     assert.equal(await page.locator('body').getAttribute('data-status'), 'ready',

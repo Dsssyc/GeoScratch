@@ -28,11 +28,11 @@ export type FlowFieldPresentationInput = Readonly<
     }
 >
 
-/** Example-owned presentation choices, with the frozen Flow Layer particle view as default. */
+/** Example-owned particle presentation defaults to complete native trail resolution. */
 export const FLOW_FIELD_PRESENTATION: FlowFieldPresentation = Object.freeze({
     view: 'particles', sample: 'interpolated', trails: true, contour: false, boundary: 'hard',
     sdfFeatherTexels: FLOW_FIELD_SDF_FEATHER.default,
-    trailQuality: 'balanced',
+    trailQuality: 'native',
 })
 
 export type FlowFieldControlSnapshot = Readonly<{
@@ -55,7 +55,7 @@ export type FlowFieldControlSnapshot = Readonly<{
 /** Validates a whole presentation choice before changing the active rendering graph. */
 export function flowFieldPresentation(value: FlowFieldPresentationInput): FlowFieldPresentation {
     const boundary = value?.boundary === undefined ? 'hard' : value.boundary
-    const trailQuality = value?.trailQuality === undefined ? 'balanced' : value.trailQuality
+    const trailQuality = value?.trailQuality === undefined ? FLOW_FIELD_PRESENTATION.trailQuality : value.trailQuality
     const sdfFeatherTexels = flowFieldSdfFeatherTexels(value?.sdfFeatherTexels === undefined
         ? FLOW_FIELD_SDF_FEATHER.default : value.sdfFeatherTexels)
     if (!['particles', 'speed', 'direction', 'u', 'v', 'status'].includes(value?.view) ||

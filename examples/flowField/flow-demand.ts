@@ -112,6 +112,23 @@ export type FlowDemandCoordinatorOptions<CoverFrame> = Readonly<{
     maximumCandidateCells: number
 }>
 
+type SpatialPageGeometry = Readonly<{
+    matrixLevel: number
+    tileRow: number
+    tileCol: number
+}>
+
+// Cheap selection output. Desired and source levels remain current frame metadata
+// rather than geometry: only matrix level, row, column, cell grid, derived masks,
+// and address-space ownership define reusable page/cell identity.
+type SpatialSelection = Readonly<{
+    matrixLevel: number
+    tileRow: number
+    tileCol: number
+    requestedLevel: number
+    sourceLevelCeiling: number
+}>
+
 type SpatialCandidate = Readonly<{
     matrixLevel: number
     tileRow: number
@@ -121,9 +138,11 @@ type SpatialCandidate = Readonly<{
     priorityScore: number
 }>
 
-type CandidateBuild = Readonly<{
-    public: FlowDemandCandidates
-    spatial: readonly SpatialCandidate[]
+type CandidateGeometry = Readonly<{
+    addressSpace: VirtualRasterAddressSpace
+    cellsPerPageEdge: number
+    pages: readonly SpatialPageGeometry[]
+    candidates: FlowDemandCandidates
 }>
 
 type FrameRecord = {
@@ -146,7 +165,9 @@ export function createFlowDemandCandidates(
     options: FlowDemandCandidateOptions
 ): FlowDemandCandidates {
 
-    return buildCandidates(options).public
+    validateCandidateOptions(options)
+    validateBatchDemands(options)
+    return materializeCandidates(options, selectSpatialCandidates(options))
 }
 
 /** Coordinates one bounded view-derived spatial demand set across an immutable temporal pair. */
@@ -158,11 +179,7 @@ export function createFlowDemandCoordinator<CoverFrame>(
     const owner = Object.freeze({ kind: 'flow-demand-coordinator-owner' })
     let generation = 0
     let latestFrame: FlowDemandFrame | undefined
-    let cachedCandidates: Readonly<{
-        addressSpace: VirtualRasterAddressSpace
-        key: string
-        build: CandidateBuild
-    }> | undefined
+    let cachedCandidates: CandidateGeometry | undefined
     let disposed = false
     let disposePromise: Promise<void> | undefined
 
@@ -186,20 +203,28 @@ export function createFlowDemandCoordinator<CoverFrame>(
             cellsPerPageEdge: options.cellsPerPageEdge,
             maximumCandidateCells: options.maximumCandidateCells,
         }
-        // Epochs still validate on cache hits. Only immutable spatial work is reused;
-        // each frame and producer demand receives its current provenance below.
+        // Epochs and demand provenance validate on every frame, including cache hits.
+        // Spatial selection is camera-independent and cheap; only immutable page/cell
+        // geometry identified by that fresh selection is reused. Camera-derived
+        // priorities and current desired/source levels are rebuilt below.
         validateCandidateOptions(candidateOptions)
         validateBatchDemands(candidateOptions)
-        const key = candidateCacheKey(candidateOptions)
-        if (cachedCandidates?.addressSpace !== candidateOptions.addressSpace ||
-            cachedCandidates.key !== key) {
+        const selection = selectSpatialCandidates(candidateOptions)
+        if (cachedCandidates === undefined || !candidateGeometryMatches(cachedCandidates,
+            candidateOptions.addressSpace, candidateOptions.cellsPerPageEdge, selection)) {
             cachedCandidates = Object.freeze({
                 addressSpace: candidateOptions.addressSpace,
-                key,
-                build: buildCandidates(candidateOptions),
+                cellsPerPageEdge: candidateOptions.cellsPerPageEdge,
+                pages: Object.freeze(selection.map(page => Object.freeze({
+                    matrixLevel: page.matrixLevel,
+                    tileRow: page.tileRow,
+                    tileCol: page.tileCol,
+                }))),
+                candidates: materializeCandidates(candidateOptions, selection),
             })
         }
-        const candidates = cachedCandidates.build
+        const candidates = cachedCandidates.candidates
+        const spatial = spatialCandidatesForView(view, selection)
         const frame = Object.freeze({
             view,
             generation: ++generation,
@@ -207,14 +232,14 @@ export function createFlowDemandCoordinator<CoverFrame>(
             pairGeneration: temporal.pairGeneration,
             sampleKeys: Object.freeze(members.map(member => member.sampleKey)) as
                 readonly [string] | readonly [string, string],
-            requestedLevel: candidates.public.requestedLevel,
-            candidatePages: candidates.public.candidatePages,
-            candidateCells: candidates.public.candidateCells,
+            requestedLevel: candidates.requestedLevel,
+            candidatePages: candidates.candidatePages,
+            candidateCells: candidates.candidateCells,
         })
         frameRecords.set(frame, {
             owner,
             members,
-            spatial: candidates.spatial,
+            spatial,
             reconciled: false,
         })
         latestFrame = frame
@@ -282,16 +307,16 @@ export function createFlowDemandCoordinator<CoverFrame>(
     return Object.freeze({ encode, reconcile, reconcilePrefetch, dispose })
 }
 
-function buildCandidates(options: FlowDemandCandidateOptions): CandidateBuild {
+function selectSpatialCandidates(
+    options: FlowDemandCandidateOptions
+): readonly SpatialSelection[] {
 
-    validateCandidateOptions(options)
-    validateBatchDemands(options)
     const coverage = options.addressSpace.tileCoverage!
     const pageCapacity = Math.min(options.maximumCandidatePages,
         Math.floor(options.maximumCandidateCells / options.cellsPerPageEdge ** 2))
     const maximumRequestedMatrix = Math.max(...options.batch.demands
         .map(demand => demand.requestMatrixLevel), Number(coverage.limits[0]!.matrixId))
-    let selected: readonly SpatialCandidate[] | undefined
+    let selected: readonly SpatialSelection[] | undefined
     if (options.batch.overflowCount > 0) {
         // Truncated feedback cannot describe the complete viewport. Cover the whole
         // declared source at the finest level that fits instead of silently dropping it.
@@ -315,8 +340,19 @@ function buildCandidates(options: FlowDemandCandidateOptions): CandidateBuild {
         if (complete !== undefined && complete[0]!.matrixLevel > finestSelected &&
             complete[0]!.matrixLevel <= maximumRequestedMatrix) selected = complete
     }
-    const spatial = Object.freeze([...selected].sort(compareSpatial))
-    const candidatePages = Object.freeze(spatial.map(candidate =>
+    return Object.freeze([...selected].sort(compareSpatial))
+}
+
+// Selection above never reads camera priority: priorities only order otherwise equal
+// demands, and equal geometry always yields one identical priority for one view, so
+// the selected page geometry is camera-independent. This function is therefore the
+// only expensive step, and its result is reusable while that geometry is unchanged.
+function materializeCandidates(
+    options: FlowDemandCandidateOptions,
+    selection: readonly SpatialSelection[]
+): FlowDemandCandidates {
+
+    const candidatePages = Object.freeze(selection.map(candidate =>
         options.addressSpace.pageFromTile({
             matrixId: String(candidate.matrixLevel),
             tileRow: candidate.tileRow,
@@ -327,9 +363,12 @@ function buildCandidates(options: FlowDemandCandidateOptions): CandidateBuild {
     for (let pageIndex = 0; pageIndex < candidatePages.length; pageIndex++) {
         const page = candidatePages[pageIndex]!
         const requestedLevel = options.addressSpace.levelForMatrix(
-            String(spatial[pageIndex]!.matrixLevel)
+            String(selection[pageIndex]!.matrixLevel)
         )
-        const refinedCells = refinedCellMask(spatial[pageIndex]!, spatial,
+        // Refined coarse footprint masks are a deterministic function of the sorted
+        // selected page geometry and the cell grid, so equal selection geometry
+        // derives the same omissions on every materialization.
+        const refinedCells = refinedCellMask(selection[pageIndex]!, selection,
             options.cellsPerPageEdge)
         for (let cellY = 0; cellY < options.cellsPerPageEdge; cellY++) {
             for (let cellX = 0; cellX < options.cellsPerPageEdge; cellX++) {
@@ -342,21 +381,58 @@ function buildCandidates(options: FlowDemandCandidateOptions): CandidateBuild {
         (finest, candidate) => Math.min(finest, candidate.requestedLevel),
         options.addressSpace.levelCount - 1
     )
-    return Object.freeze({
-        public: Object.freeze({ requestedLevel, candidatePages,
-            candidateCells: Object.freeze(candidateCells) }),
-        spatial,
-    })
+    return Object.freeze({ requestedLevel, candidatePages,
+        candidateCells: Object.freeze(candidateCells) })
+}
+
+function candidateGeometryMatches(
+    cached: CandidateGeometry,
+    addressSpace: VirtualRasterAddressSpace,
+    cellsPerPageEdge: number,
+    selection: readonly SpatialSelection[]
+): boolean {
+
+    // Ownership, page order, matrix level, row, column, and cell grid fully define
+    // the immutable geometry, including the derived refined coarse footprint masks.
+    // Current desired/source levels and priorities deliberately stay out of this
+    // comparison so they can refresh without repacking unchanged spawn geometry.
+    if (cached.addressSpace !== addressSpace || cached.cellsPerPageEdge !== cellsPerPageEdge ||
+        cached.pages.length !== selection.length) return false
+    for (let index = 0; index < selection.length; index++) {
+        const page = cached.pages[index]!
+        const fresh = selection[index]!
+        if (page.matrixLevel !== fresh.matrixLevel || page.tileRow !== fresh.tileRow ||
+            page.tileCol !== fresh.tileCol) return false
+    }
+    return true
+}
+
+function spatialCandidatesForView(
+    view: GeoViewSnapshot,
+    selection: readonly SpatialSelection[]
+): readonly SpatialCandidate[] {
+
+    // Rebuilt for every frame, including geometry cache hits, so reconciliation
+    // always carries this view's priorities and current desired/source levels.
+    return Object.freeze(selection.map(candidate => Object.freeze({
+        matrixLevel: candidate.matrixLevel,
+        tileRow: candidate.tileRow,
+        tileCol: candidate.tileCol,
+        requestedLevel: candidate.requestedLevel,
+        sourceLevelCeiling: candidate.sourceLevelCeiling,
+        priorityScore: cameraPriority(view, candidate.requestedLevel, candidate.matrixLevel,
+            candidate.tileRow, candidate.tileCol),
+    })))
 }
 
 function expandCandidates(
     options: FlowDemandCandidateOptions,
     cap: number,
     capacity: number
-): readonly SpatialCandidate[] | undefined {
+): readonly SpatialSelection[] | undefined {
 
     const coverage = options.addressSpace.tileCoverage!
-    const spatialByKey = new Map<string, SpatialCandidate>()
+    const spatialByKey = new Map<string, SpatialSelection>()
     const demands = options.batch.demands.map(demand => {
         const requestMatrixLevel = Math.min(cap, demand.requestMatrixLevel)
         const divisor = 2 ** (demand.requestMatrixLevel - requestMatrixLevel)
@@ -405,13 +481,6 @@ function expandCandidates(
                     tileCol,
                     requestedLevel: demand.desiredSampleLevel,
                     sourceLevelCeiling: demand.sourceLevelCeiling,
-                    priorityScore: cameraPriority(
-                        options.view,
-                        demand.desiredSampleLevel,
-                        demand.requestMatrixLevel,
-                        tileRow,
-                        tileCol
-                    ),
                 })
                 // Raster parents provide fallback while descendants retain local detail.
                 // Geometry's prefix-free cut must not suppress overlapping raster pages.
@@ -429,8 +498,8 @@ function expandCandidates(
 }
 
 function refinedCellMask(
-    page: SpatialCandidate,
-    spatial: readonly SpatialCandidate[],
+    page: SpatialPageGeometry,
+    spatial: readonly SpatialPageGeometry[],
     cellsPerPageEdge: number
 ): Uint8Array | undefined {
 
@@ -463,7 +532,7 @@ function refinedCellMask(
 function completeCoverageFallback(
     options: FlowDemandCandidateOptions,
     capacity: number
-): readonly SpatialCandidate[] | undefined {
+): readonly SpatialSelection[] | undefined {
 
     const coverage = options.addressSpace.tileCoverage!
     const sourceLevelCeiling = Number(coverage.limits.at(-1)!.matrixId)
@@ -474,14 +543,11 @@ function completeCoverageFallback(
             (limit.maxTileCol - limit.minTileCol + 1)
         if (count > capacity) continue
         const matrixLevel = Number(limit.matrixId)
-        const spatial: SpatialCandidate[] = []
+        const spatial: SpatialSelection[] = []
         for (let tileRow = limit.minTileRow; tileRow <= limit.maxTileRow; tileRow++) {
             for (let tileCol = limit.minTileCol; tileCol <= limit.maxTileCol; tileCol++) {
                 spatial.push(Object.freeze({ matrixLevel, tileRow, tileCol,
-                    requestedLevel, sourceLevelCeiling,
-                    priorityScore: cameraPriority(options.view, requestedLevel,
-                        matrixLevel, tileRow, tileCol),
-                }))
+                    requestedLevel, sourceLevelCeiling }))
             }
         }
         return spatial
@@ -556,19 +622,6 @@ function validateBatchDemands(options: FlowDemandCandidateOptions): void {
             tileCol: demand.tileCol,
         })) throw new RangeError('Flow projected demand is outside velocity source coverage')
     }
-}
-
-function candidateCacheKey(options: FlowDemandCandidateOptions): string {
-
-    return JSON.stringify([
-        options.view.cameraHigh, options.view.cameraLow,
-        options.maximumCandidatePages, options.maximumCandidateCells,
-        options.cellsPerPageEdge, options.maximumDisplacementMeters,
-        options.batch.overflowCount,
-        options.batch.demands.map(demand => [demand.requestMatrixLevel,
-            demand.tileRow, demand.tileCol, demand.desiredSampleLevel,
-            demand.sourceLevelCeiling]),
-    ])
 }
 
 function validateProjectedDemand(
@@ -763,24 +816,24 @@ function haloColumns(
     return Object.freeze([ ...columns ].sort((left, right) => left - right))
 }
 
-function betterCandidate(left: SpatialCandidate, right: SpatialCandidate): boolean {
+function betterCandidate(left: SpatialSelection, right: SpatialSelection): boolean {
 
+    // Camera priority is not consulted here: for one spatial key and equal requested
+    // and source levels every demand derives the identical priority for one view, so
+    // the former priority tiebreak could never change which demand wins.
     return left.requestedLevel > right.requestedLevel ||
         (left.requestedLevel === right.requestedLevel &&
-            left.sourceLevelCeiling > right.sourceLevelCeiling) ||
-        (left.requestedLevel === right.requestedLevel &&
-            left.sourceLevelCeiling === right.sourceLevelCeiling &&
-            left.priorityScore > right.priorityScore)
+            left.sourceLevelCeiling > right.sourceLevelCeiling)
 }
 
-function compareSpatial(left: SpatialCandidate, right: SpatialCandidate): number {
+function compareSpatial(left: SpatialPageGeometry, right: SpatialPageGeometry): number {
 
     return left.matrixLevel - right.matrixLevel ||
         left.tileRow - right.tileRow ||
         left.tileCol - right.tileCol
 }
 
-function spatialKey(candidate: Pick<SpatialCandidate, 'matrixLevel' | 'tileRow' | 'tileCol'>): string {
+function spatialKey(candidate: SpatialPageGeometry): string {
 
     return `${candidate.matrixLevel}/${candidate.tileRow}/${candidate.tileCol}`
 }

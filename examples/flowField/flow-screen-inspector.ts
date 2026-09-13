@@ -110,7 +110,6 @@ export async function createFlowScreenInspector(options: FlowScreenInspectorOpti
             // Store straight RGBA; the history presenter applies alpha once at the Surface.
             targets: [ { format: 'rgba8unorm' } ],
             primitive: { topology: 'triangle-list' },
-            depthStencil: { format: 'depth32float', depthWriteEnabled: false, depthCompare: 'always' },
         }))
 
         function encode(

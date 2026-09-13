@@ -104,6 +104,38 @@ function projected(view, overrides = {}) {
     })
 }
 
+// Re-issues one geometry decision under another view's current provenance epochs.
+function projectedAt(view, demand) {
+
+    return projected(view, {
+        requestMatrixLevel: demand.requestMatrixLevel,
+        desiredSampleLevel: demand.desiredSampleLevel,
+        sourceLevelCeiling: demand.sourceLevelCeiling,
+        tileRow: demand.tileRow,
+        tileCol: demand.tileCol,
+    })
+}
+
+// Comparable identity of the immutable candidate geometry a frame exposes.
+function candidateShape(candidates) {
+
+    return {
+        requestedLevel: candidates.requestedLevel,
+        pages: candidates.candidatePages.map(page => [
+            page.addressSpaceId,
+            page.tile.matrixId,
+            page.tile.tileRow,
+            page.tile.tileCol,
+        ]),
+        cells: candidates.candidateCells.map(cell => [
+            cell.page.tile.key,
+            cell.requestedLevel,
+            cell.cellX,
+            cell.cellY,
+        ]),
+    }
+}
+
 function batch(view, demands) {
 
     return Object.freeze({
@@ -402,7 +434,7 @@ describe('Flow Field demand', () => {
         expect(result.candidateCells).to.have.length(36 * 4)
     })
 
-    it('reuses static spatial cells across epochs but refreshes camera priority and validates provenance', async () => {
+    it('reuses unchanged candidate geometry across camera moves but refreshes priority and provenance', async () => {
         const view = viewAt(4, 0)
         const runtime = fakeRuntime('cached', 'cached-demand')
         const graph = hooks(batch(view, [projected(view)]))
@@ -415,17 +447,215 @@ describe('Flow Field demand', () => {
         graph.setBatch(batch(secondView, [projected(secondView)]))
         const second = coordinator.encode({}, secondView, temporal)
         expect(second.candidateCells).to.equal(first.candidateCells)
+        expect(second.candidatePages).to.equal(first.candidatePages)
         await coordinator.reconcile(second)
         expect(runtime.reconciliations[0].demands[0].source.frameEpoch).to.equal(13)
         const movedView = viewAt(4, 1, { frameEpoch: 14, residencySnapshotEpoch: 8 })
         graph.setBatch(batch(movedView, [projected(movedView)]))
         const moved = coordinator.encode({}, movedView, temporal)
-        expect(moved.candidateCells).not.to.equal(first.candidateCells)
+        // The camera move changes priority only: the selected page geometry and the
+        // opaque immutable packed artifact stay identical.
+        expect(moved.candidateCells).to.equal(first.candidateCells)
+        expect(moved.candidatePages).to.equal(first.candidatePages)
         await coordinator.reconcile(moved)
-        expect(runtime.reconciliations[1].demands.map(demand => demand.priority.score))
-            .not.to.deep.equal(runtime.reconciliations[0].demands.map(demand => demand.priority.score))
+        const [ stillDemands, movedDemands ] = runtime.reconciliations.map(set => set.demands)
+        expect(movedDemands.map(demand => demand.priority.score))
+            .not.to.deep.equal(stillDemands.map(demand => demand.priority.score))
+        // Both reconciliations carry their own frame, residency, and view provenance.
+        for (const [ index, frameView ] of [ secondView, movedView ].entries()) {
+            expect(runtime.reconciliations[index].demands.every(demand =>
+                demand.source.viewId === frameView.id &&
+                demand.source.frameEpoch === frameView.frameEpoch &&
+                demand.source.residencySnapshotEpoch === frameView.residencySnapshotEpoch))
+                .to.equal(true)
+        }
+        // The moved camera ranks the nearest column above the wrapped far column.
+        const scoreByColumn = new Map(movedDemands
+            .filter(demand => demand.page.tile.tileRow === 4)
+            .map(demand => [ demand.page.tile.tileCol, demand.priority.score ]))
+        expect(scoreByColumn.get(1)).to.be.greaterThan(scoreByColumn.get(0))
+        expect(scoreByColumn.get(0)).to.be.greaterThan(scoreByColumn.get(7))
         graph.setBatch(batch(movedView, [projected(secondView)]))
         expect(() => coordinator.encode({}, movedView, temporal)).to.throw(/frame provenance/i)
+        await coordinator.dispose()
+    })
+
+    it('refreshes desired and source levels on a geometry cache hit', async () => {
+        const view = viewAt(4, 0)
+        const runtime = fakeRuntime('metadata', 'metadata-demand')
+        const graph = hooks(batch(view, [projected(view)]))
+        const coordinator = createFlowDemandCoordinator({ cover: graph.cover,
+            projection: graph.projection, maximumDisplacementMeters: 0,
+            maximumCandidatePages: 64, cellsPerPageEdge: 2, maximumCandidateCells: 256 })
+        const temporal = readyCapture(runtime, runtime)
+        const first = coordinator.encode({}, view, temporal)
+        await coordinator.reconcile(first)
+        const refinedView = viewAt(4, 0, { frameEpoch: 13, residencySnapshotEpoch: 8 })
+        const refinedDemand = projected(refinedView, { desiredSampleLevel: 4, sourceLevelCeiling: 4 })
+        graph.setBatch(batch(refinedView, [ refinedDemand ]))
+        const refined = coordinator.encode({}, refinedView, temporal)
+        // Desired and source levels are frame metadata, not geometry: the resolved
+        // page level and both reusable arrays stay identical.
+        expect(refined.requestedLevel).to.equal(first.requestedLevel)
+        expect(refined.candidatePages).to.equal(first.candidatePages)
+        expect(refined.candidateCells).to.equal(first.candidateCells)
+        await coordinator.reconcile(refined)
+        const [ baseDemands, refinedDemands ] = runtime.reconciliations.map(set => set.demands)
+        expect(baseDemands.every(demand => demand.desiredSampleLevel === 3 &&
+            demand.sourceLevelCeiling === 3)).to.equal(true)
+        // Neither the cached record's levels nor its priorities may leak into this view.
+        expect(refinedDemands.every(demand => demand.desiredSampleLevel === 4 &&
+            demand.sourceLevelCeiling === 4 &&
+            demand.reason === 'flow-velocity-required:z4')).to.equal(true)
+        expect(refinedDemands.map(demand => demand.priority.score))
+            .not.to.deep.equal(baseDemands.map(demand => demand.priority.score))
+        await coordinator.dispose()
+    })
+
+    it('invalidates reused geometry when the selected pages or coarse refinement change', async () => {
+        const view = viewAt(4, 4)
+        const runtime = fakeRuntime('geometry', 'geometry-demand', 47, collectionCoverage)
+        const policy = {
+            maximumDisplacementMeters: 3.6142587121574894 * 50 * 4,
+            maximumCandidatePages: 47,
+            cellsPerPageEdge: 64,
+            maximumCandidateCells: 47 * 64 ** 2,
+        }
+        const coarse = projected(view, { requestMatrixLevel: 4, desiredSampleLevel: 4,
+            sourceLevelCeiling: 10, tileRow: 6, tileCol: 13 })
+        const fine = projected(view, { requestMatrixLevel: 10, desiredSampleLevel: 10,
+            sourceLevelCeiling: 10, tileRow: 418, tileCol: 857 })
+        const options = candidateOptions(view, [ coarse, fine ], {
+            addressSpace: runtime.addressSpace, ...policy })
+        const graph = hooks(batch(view, [ coarse, fine ]))
+        const coordinator = createFlowDemandCoordinator({ cover: graph.cover,
+            projection: graph.projection, ...policy })
+        const temporal = readyCapture(runtime, runtime)
+        const encodeAt = (targetView, demands) => {
+            const frameBatch = batch(targetView, demands.map(demand => projectedAt(targetView, demand)))
+            graph.setBatch(frameBatch)
+            return {
+                frameOptions: { ...options, view: targetView, batch: frameBatch },
+                frame: coordinator.encode({}, targetView, temporal),
+            }
+        }
+        const first = encodeAt(view, [ coarse, fine ]).frame
+        const finePages = first.candidatePages.filter(page => page.tile.matrixId === '10')
+        expect(finePages).to.have.length(25)
+        expect(first.candidateCells.filter(cell => cell.page.tile.matrixId === '4'))
+            .to.have.length(64 ** 2 - finePages.length)
+        expect(candidateShape(first)).to.deep.equal(candidateShape(
+            createFlowDemandCandidates(options)))
+
+        // Identical selected geometry under fresh epochs still reuses both arrays.
+        const epochView = viewAt(4, 4, { frameEpoch: 13, residencySnapshotEpoch: 8 })
+        const epoch = encodeAt(epochView, [ coarse, fine ])
+        expect(epoch.frame.candidatePages).to.equal(first.candidatePages)
+        expect(epoch.frame.candidateCells).to.equal(first.candidateCells)
+
+        // Same page count but different fine tiles is still a geometry change.
+        const movedFineView = viewAt(4, 4, { frameEpoch: 14, residencySnapshotEpoch: 8 })
+        const movedFine = encodeAt(movedFineView, [ coarse, projected(view, {
+            requestMatrixLevel: 10, desiredSampleLevel: 10, sourceLevelCeiling: 10,
+            tileRow: 418, tileCol: 858 }) ])
+        expect(movedFine.frame.candidatePages).to.have.length(first.candidatePages.length)
+        expect(movedFine.frame.candidateCells).not.to.equal(first.candidateCells)
+        expect(candidateShape(movedFine.frame)).to.deep.equal(candidateShape(
+            createFlowDemandCandidates(movedFine.frameOptions)))
+
+        // Dropping the fine page is a pure geometry change, not a metadata refresh.
+        const coarseOnlyView = viewAt(4, 4, { frameEpoch: 15, residencySnapshotEpoch: 8 })
+        const coarseOnly = encodeAt(coarseOnlyView, [ coarse ])
+        expect(coarseOnly.frame.candidateCells).not.to.equal(first.candidateCells)
+        expect(coarseOnly.frame.candidateCells).to.have.length(64 ** 2)
+        expect(candidateShape(coarseOnly.frame)).to.deep.equal(candidateShape(
+            createFlowDemandCandidates(coarseOnly.frameOptions)))
+
+        // A different finer level partially refines the same coarse parent page.
+        const refinedView = viewAt(4, 4, { frameEpoch: 16, residencySnapshotEpoch: 8 })
+        const refined = encodeAt(refinedView, [ coarse, projected(view, { requestMatrixLevel: 7,
+            desiredSampleLevel: 7, sourceLevelCeiling: 10, tileRow: 52, tileCol: 106 }) ])
+        expect(refined.frame.candidateCells).not.to.equal(first.candidateCells)
+        expect(refined.frame.candidateCells.filter(cell => cell.page.tile.matrixId === '4'))
+            .to.have.length(64 ** 2 - 6 * 64)
+        expect(candidateShape(refined.frame)).to.deep.equal(candidateShape(
+            createFlowDemandCandidates(refined.frameOptions)))
+        await coordinator.dispose()
+    })
+
+    it('rebuilds pages instead of reusing another address-space owner geometry', async () => {
+        const view = viewAt(4, 0)
+        const ownerA = fakeRuntime('owner-a', 'owner-a-demand')
+        const ownerB = fakeRuntime('owner-b', 'owner-b-demand')
+        const graph = hooks(batch(view, [ projected(view) ]))
+        const coordinator = createFlowDemandCoordinator({ cover: graph.cover,
+            projection: graph.projection, maximumDisplacementMeters: 0,
+            maximumCandidatePages: 64, cellsPerPageEdge: 2, maximumCandidateCells: 256 })
+        const first = coordinator.encode({}, view, readyCapture(ownerA, ownerA))
+        await coordinator.reconcile(first)
+        const secondView = viewAt(4, 0, { frameEpoch: 13, residencySnapshotEpoch: 8 })
+        graph.setBatch(batch(secondView, [ projected(secondView) ]))
+        const second = coordinator.encode({}, secondView, readyCapture(ownerB, ownerB))
+        // Tile keys match, but ownership differs: pages must belong to the new owner.
+        expect(second.candidatePages.map(page => page.tile.key))
+            .to.deep.equal(first.candidatePages.map(page => page.tile.key))
+        expect(second.candidateCells).not.to.equal(first.candidateCells)
+        expect(second.candidateCells.every(cell =>
+            cell.page.addressSpaceId === 'flow-owner-b')).to.equal(true)
+        await coordinator.reconcile(second)
+        expect(ownerB.reconciliations[0].demands.every(demand =>
+            demand.page.addressSpaceId === 'flow-owner-b' &&
+            demand.source.producerId === 'owner-b-demand')).to.equal(true)
+        // Returning to the original owner rebuilds instead of serving the newer pages.
+        const thirdView = viewAt(4, 0, { frameEpoch: 14, residencySnapshotEpoch: 8 })
+        graph.setBatch(batch(thirdView, [ projected(thirdView) ]))
+        const third = coordinator.encode({}, thirdView, readyCapture(ownerA, ownerA))
+        expect(third.candidatePages.map(page => page.tile.key))
+            .to.deep.equal(first.candidatePages.map(page => page.tile.key))
+        expect(third.candidateCells).not.to.equal(second.candidateCells)
+        expect(third.candidateCells.every(cell =>
+            cell.page.addressSpaceId === 'flow-owner-a')).to.equal(true)
+        // An equal public id does not make a separately constructed owner identical.
+        const replacement = fakeRuntime('owner-a', 'owner-a-replacement-demand')
+        expect(replacement.addressSpace.id).to.equal(ownerA.addressSpace.id)
+        expect(replacement.addressSpace).not.to.equal(ownerA.addressSpace)
+        const replacementView = viewAt(4, 0, { frameEpoch: 15, residencySnapshotEpoch: 8 })
+        graph.setBatch(batch(replacementView, [ projected(replacementView) ]))
+        const replaced = coordinator.encode({}, replacementView, readyCapture(replacement, replacement))
+        expect(replaced.candidatePages.map(page => page.tile.key))
+            .to.deep.equal(third.candidatePages.map(page => page.tile.key))
+        expect(replaced.candidatePages).not.to.equal(third.candidatePages)
+        expect(replaced.candidateCells).not.to.equal(third.candidateCells)
+        await coordinator.dispose()
+    })
+
+    it('keeps rejecting stale or invalid input on a geometry cache hit', async () => {
+        const view = viewAt(4, 0)
+        const runtime = fakeRuntime('hit', 'hit-demand')
+        const graph = hooks(batch(view, [ projected(view) ]))
+        const coordinator = createFlowDemandCoordinator({ cover: graph.cover,
+            projection: graph.projection, maximumDisplacementMeters: 0,
+            maximumCandidatePages: 64, cellsPerPageEdge: 2, maximumCandidateCells: 256 })
+        const temporal = readyCapture(runtime, runtime)
+        const first = coordinator.encode({}, view, temporal)
+        await coordinator.reconcile(first)
+        // Every rejection below would otherwise match the cached geometry exactly.
+        const staleView = viewAt(4, 0, { frameEpoch: 13, residencySnapshotEpoch: 8 })
+        graph.setBatch(batch(staleView, [ projected(view) ]))
+        expect(() => coordinator.encode({}, staleView, temporal)).to.throw(/frame provenance/i)
+        graph.setBatch(batch(view, [ projected(view, { residencySnapshotEpoch: 1 }) ]))
+        expect(() => coordinator.encode({}, view, temporal)).to.throw(/residency provenance/i)
+        graph.setBatch(batch(view, [ projected(view, { tileRow: 40 }) ]))
+        expect(() => coordinator.encode({}, view, temporal))
+            .to.throw(/outside velocity source coverage/i)
+        graph.setBatch(Object.freeze({ ...batch(view, [ projected(view) ]), overflowCount: -1 }))
+        expect(() => coordinator.encode({}, view, temporal))
+            .to.throw(/bounded WebMercator projection facts/i)
+        // The rejected frames left the valid geometry cache untouched.
+        graph.setBatch(batch(view, [ projected(view) ]))
+        const reused = coordinator.encode({}, view, temporal)
+        expect(reused.candidatePages).to.equal(first.candidatePages)
+        expect(reused.candidateCells).to.equal(first.candidateCells)
         await coordinator.dispose()
     })
 

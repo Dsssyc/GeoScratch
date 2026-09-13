@@ -33,13 +33,15 @@ describe('Flow Field application shell', () => {
         expect(source).to.not.match(/packages\/geoscratch\/src|flowLayer/)
     })
 
-    it('uses the public MapLibre view source driver and one conservative frame slot', () => {
+    it('uses the public MapLibre driver and the bounded renderer frame policy', () => {
 
         const source = fs.readFileSync(applicationPath, 'utf8')
         expect(source).to.include('mapLibrePlanarViewSource({')
         expect(source).to.include('mapLibreFrameDriver({')
         expect(source).to.include('createGeoFrameController<')
-        expect(source).to.include('maximumInFlightFrames: 1')
+        expect(source).to.include('maximumInFlightFrames: FLOW_FIELD_MAXIMUM_IN_FLIGHT_FRAMES')
+        expect(source).to.include('onSubmitted()')
+        expect(source).to.include('frameNumber < latestObservedFrame')
         expect(source).to.include('renderer.render(frameNumber, captured, current, wallTime)')
         expect(source).to.include('renderer.resetVisualClock()')
         expect(source.match(/await renderer\.suspendTemporal\(\)/g)?.length).to.be.at.least(3)

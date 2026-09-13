@@ -23,10 +23,12 @@ import type { FlowFieldRuntimeBudgetFacts } from './flow-runtime-budgets.ts'
 import {
     FlowTemporalFrameUnavailableError,
     createFlowFieldRenderer,
+    FLOW_FIELD_MAXIMUM_IN_FLIGHT_FRAMES,
 } from './flow-renderer.ts'
 import type {
     FlowFieldRenderer,
     FlowFieldRendererFrame,
+    FlowFieldCameraFrame,
 } from './flow-renderer.ts'
 import { createFlowTemporalRuntimeWindow } from './flow-temporal-runtime-window.ts'
 import type {
@@ -70,6 +72,7 @@ export type { FlowFieldRuntimeBudgetFacts } from './flow-runtime-budgets.ts'
 
 export type FlowFieldApplicationFrame =
     | FlowFieldRendererFrame
+    | FlowFieldCameraFrame
     | Readonly<{
         state: 'loading'
         timelineRevision: number
@@ -93,6 +96,8 @@ export type FlowFieldApplicationFrame =
     }>
 
 export type FlowFieldApplicationFacts = Readonly<{
+    /** Last observed visible time, independent of the latest queued render. */
+    presented: FlowTemporalFrameSnapshot | undefined
     timeline: FlowTimelineSnapshot
     temporalWindow: FlowTemporalRuntimeWindowSnapshot
     handshake: Readonly<{
@@ -102,6 +107,8 @@ export type FlowFieldApplicationFacts = Readonly<{
         status: 'pending' | FlowTemporalRequestResult['status']
     }>
     lastFrame: FlowFieldApplicationFrame
+    /** Latest full source/particle submission, independent of camera-only presentations. */
+    lastContentFrame: FlowFieldRendererFrame | undefined
     budgets: FlowFieldRuntimeBudgetFacts
     frames: ReturnType<GeoFrameController['snapshot']>
     renderer: ReturnType<FlowFieldRenderer['facts']>
@@ -238,6 +245,8 @@ export async function startFlowFieldApplication(
     let frameController: GeoFrameController | undefined
     let presentation = flowFieldPresentation(options.initialPresentation ?? FLOW_FIELD_PRESENTATION)
     let presented: FlowTemporalFrameSnapshot | undefined
+    let lastContentFrame: FlowFieldRendererFrame | undefined
+    let latestObservedFrame = 0
     let latestHandshake: WindowHandshake
     let lastFrame: FlowFieldApplicationFrame = Object.freeze({
         state: 'loading',
@@ -262,6 +271,7 @@ export async function startFlowFieldApplication(
     const renderer = await lifetime.acquire(createFlowFieldRenderer({
         runtime,
         surface,
+        signal: lifetime.signal,
         size,
         referenceViewport: viewSource.capture().view.referenceViewport,
         temporalWindow,
@@ -282,7 +292,7 @@ export async function startFlowFieldApplication(
         GeoViewSourceCapture<MapLibrePlanarCameraState>
     >({
         track: (work, label) => lifetime.track(work, label),
-        maximumInFlightFrames: 1,
+        maximumInFlightFrames: FLOW_FIELD_MAXIMUM_IN_FLIGHT_FRAMES,
         driver: mapLibreFrameDriver({
             id: 'flow-field-maplibre-frames',
             map,
@@ -291,6 +301,11 @@ export async function startFlowFieldApplication(
         async render(frameNumber, captured) {
 
             lifetime.assertActive()
+            const cameraFrame = renderer.tryPresentCamera(frameNumber,captured)
+            if (cameraFrame !== undefined) {
+                lastFrame = cameraFrame.value
+                return cameraFrame
+            }
             const wallTime = readWallTime(options)
             const before = timeline.snapshot()
             let current = timeline.tick({
@@ -329,6 +344,7 @@ export async function startFlowFieldApplication(
             try {
                 const rendered = await renderer.render(frameNumber, captured, current, wallTime)
                 lastFrame = rendered.value
+                lastContentFrame = rendered.value
                 return rendered
             } catch (error) {
                 if (!(error instanceof FlowTemporalFrameUnavailableError)) throw error
@@ -350,16 +366,26 @@ export async function startFlowFieldApplication(
                 return { ...retained, value: setLoadingFrame(latest, latestHandshake) }
             }
         },
-        onObserved({ value }) {
+        onSubmitted() {
+            if (frameController?.snapshot().state !== 'running') return
+            if (timeline.snapshot().needsTick) frameController.invalidate()
+        },
+        onObserved({ value, frameNumber }) {
 
             if (frameController?.snapshot().state !== 'running') return
+            // Camera-only completion must neither supersede a content observation
+            // nor advance the displayed model time. A settling content frame wakes
+            // paused camera convergence even if newer presentations already ran.
+            if (value.state === 'presented') return
+            if (lastFrame.state === 'presented') frameController.invalidate()
+            if (frameNumber < latestObservedFrame) return
+            latestObservedFrame = frameNumber
             if (value.state === 'rendered' && value.presentationReady) presented = value.temporal
             else if (value.state === 'gap') presented = undefined
-            setStatus(lastFrame.state === 'rendered'
-                ? lastFrame.presentationReady ? 'ready' : 'loading' : lastFrame.state)
+            setStatus(value.state === 'rendered'
+                ? value.presentationReady ? 'ready' : 'loading' : value.state)
             emitControls()
             updatePrefetch(timeline.snapshot())
-            if (timeline.snapshot().needsTick) frameController.invalidate()
         },
         onError(error) {
 
@@ -458,9 +484,9 @@ export async function startFlowFieldApplication(
     function updatePrefetch(snapshot: FlowTimelineSnapshot): void {
         if (!snapshot.playing || snapshot.selection.kind === 'gap') {
             temporalWindow.prefetch(undefined)
-        } else if (temporalWindow.snapshot().state === 'ready' && lastFrame.state === 'rendered' &&
-            (lastFrame.presentationReady || lastFrame.particlesAdvancing) &&
-            lastFrame.temporal.selectionRevision === snapshot.selectionRevision) {
+        } else if (temporalWindow.snapshot().state === 'ready' && lastContentFrame !== undefined &&
+            (lastContentFrame.presentationReady || lastContentFrame.particlesAdvancing) &&
+            lastContentFrame.temporal.selectionRevision === snapshot.selectionRevision) {
             temporalWindow.prefetch(flowPrefetchSample(dataset.timeAxis, snapshot))
         }
     }
@@ -567,6 +593,7 @@ export async function startFlowFieldApplication(
         )
         lifetime.assertActive()
         lastFrame = rendered.value
+        lastContentFrame = rendered.value
         await lifetime.track(rendered.observation, `flow-field-terminal-${phase}-observation`)
         lifetime.assertActive()
         if (rendered.value.presentationReady) presented = rendered.value.temporal
@@ -647,6 +674,8 @@ export async function startFlowFieldApplication(
                 status: latestHandshake.status,
             }),
             lastFrame,
+            lastContentFrame,
+            presented,
             budgets: FLOW_FIELD_RUNTIME_BUDGETS,
             frames: frameController!.snapshot(),
             renderer: renderer.facts(),
@@ -671,7 +700,7 @@ export async function startFlowFieldApplication(
             presented,
             state: frameController?.snapshot().state === 'stopped' ? 'stopped'
                 : windowState.state === 'disposed' ? 'stopped'
-                    : windowState.state === 'ready' && lastFrame.state === 'rendered' &&
+                    : windowState.state === 'ready' && (lastFrame.state === 'rendered' || lastFrame.state === 'presented') &&
                         !lastFrame.presentationReady ? 'loading' : windowState.state,
             runtimeCount: windowState.ownedRuntimeCount,
             presentation,

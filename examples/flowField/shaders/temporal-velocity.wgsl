@@ -50,13 +50,17 @@ fn FlowVelocity_sample_support(
     var common_level = requested_level;
     for (var iteration = 0u; iteration < FlowVelocityCurrent_level_count_value(); iteration++) {
         let registered_position = FlowVelocityRegistration_position(position, common_level);
-        let current = FlowVelocityRegistration_sample_current(
+        let current = FlowVelocityRegistration_sample_current_support(
             registered_position,
+            position,
             common_level,
+            zero_owner,
         );
-        let next = FlowVelocityRegistration_sample_next(
+        let next = FlowVelocityRegistration_sample_next_support(
             registered_position,
+            position,
             common_level,
+            zero_owner,
         );
         if (current.status == 0u || current.status == 3u || current.status == 4u ||
             next.status == 0u || next.status == 3u || next.status == 4u) {
@@ -69,16 +73,8 @@ fn FlowVelocity_sample_support(
             );
         }
         if (current.resolved_level == common_level && next.resolved_level == common_level) {
-            var current_velocity = current.value.xy;
-            var next_velocity = next.value.xy;
-            if (zero_owner) {
-                // These nearest texels belong to the already-resolved common
-                // footprint. Zero support occupies a whole texel, not just its center.
-                let current_center = FlowVelocityCurrent_load_position(position, common_level);
-                let next_center = FlowVelocityNext_load_position(position, common_level);
-                if (all(current_center.value.xy == vec2f(0.0))) { current_velocity = vec2f(0.0); }
-                if (all(next_center.value.xy == vec2f(0.0))) { next_velocity = vec2f(0.0); }
-            }
+            let current_velocity = current.value.xy;
+            let next_velocity = next.value.xy;
             let velocity = mix(current_velocity, next_velocity, temporal.progress);
             let speed = length(velocity);
             let advectable = speed > 0.0 && speed >= temporal.activityKill;

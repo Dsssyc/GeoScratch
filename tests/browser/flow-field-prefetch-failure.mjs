@@ -14,8 +14,13 @@ try {
         return route.fulfill({status:404,body:'Intentional future-page failure'})
     })
     await page.goto(`${base}/flowField/index.html?proof=1&rate=0.001&zoom=10`)
-    await page.waitForFunction(()=>window.__FLOW_FIELD_PROOF__?.facts()?.temporalWindow.prefetchState==='failed',
-        undefined,{timeout:60000})
+    // Failed speculation can settle before foreground pages. Establish the
+    // resident visible pair before measuring continued playback and no retries.
+    await page.waitForFunction(()=>{
+        const f=window.__FLOW_FIELD_PROOF__?.facts()
+        return f?.temporalWindow.prefetchState==='failed'&&f.lastFrame.presentationReady&&
+            document.body.dataset.status==='ready'
+    },undefined,{timeout:60000})
     await page.waitForTimeout(200)
     const before=await page.evaluate(()=>window.__FLOW_FIELD_PROOF__.facts().renderer.particles.encodedSteps)
     const failed=failedRequests

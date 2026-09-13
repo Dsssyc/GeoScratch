@@ -458,8 +458,7 @@ try {
             layout: 'auto',
             vertex: { module: renderModule, entryPoint: 'vParticle' },
             fragment: { module: renderModule, entryPoint: 'fParticle', targets: [ { format: 'rgba8unorm' } ] },
-            primitive: { topology: 'line-list' },
-            depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'less' },
+            primitive: { topology: 'triangle-strip' },
         })
         const origin = cases[0].origin
         const renderRecord = new ArrayBuffer(56)
@@ -482,6 +481,7 @@ try {
         const renderView = new DataView(viewBytes)
         for (const offset of [ 0, 20, 40, 60 ]) renderView.setFloat32(offset, 1, true)
         renderView.setFloat32(56, 0.5, true)
+        renderView.setFloat32(52, -1/16, true)
         origin.forEach((limb, index) => renderView.setUint32(64 + index * 4, limb, true))
         renderView.setFloat32(88, quantum, true)
         const viewBuffer = device.createBuffer({ size: 112, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
@@ -492,22 +492,24 @@ try {
         const viewGroup = device.createBindGroup({ layout: renderPipeline.getBindGroupLayout(1), entries: [
             { binding: 0, resource: { buffer: viewBuffer } },
         ] })
+        const rasterBuffer = device.createBuffer({size:16,usage:GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST})
+        device.queue.writeBuffer(rasterBuffer,0,new Float32Array([16,16,1,.5]))
+        const rasterGroup = device.createBindGroup({layout:renderPipeline.getBindGroupLayout(2),entries:[{binding:0,resource:{buffer:rasterBuffer}}]})
         const colors = []
         for (const speed of [ 0, 0.25, 0.5, 1, 2, 3, 4 ]) {
             renderData.setFloat32(32, speed, true)
             device.queue.writeBuffer(renderBuffer, 0, renderRecord)
             const target = device.createTexture({ size: [ 16, 16 ], format: 'rgba8unorm', usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC })
-            const depth = device.createTexture({ size: [ 16, 16 ], format: 'depth32float', usage: GPUTextureUsage.RENDER_ATTACHMENT })
             const pixels = device.createBuffer({ size: 256 * 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ })
             const encoder = device.createCommandEncoder()
             const pass = encoder.beginRenderPass({
                 colorAttachments: [ { view: target.createView(), loadOp: 'clear', storeOp: 'store', clearValue: [ 0, 0, 0, 0 ] } ],
-                depthStencilAttachment: { view: depth.createView(), depthLoadOp: 'clear', depthStoreOp: 'store', depthClearValue: 1 },
             })
             pass.setPipeline(renderPipeline)
             pass.setBindGroup(0, particleGroup)
             pass.setBindGroup(1, viewGroup)
-            pass.draw(2)
+            pass.setBindGroup(2, rasterGroup)
+            pass.draw(4,1)
             pass.end()
             encoder.copyTextureToBuffer({ texture: target }, { buffer: pixels, bytesPerRow: 256 }, [ 16, 16 ])
             device.queue.submit([ encoder.finish() ])
@@ -517,17 +519,17 @@ try {
             for (let y = 0; y < 16; y++) {
                 for (let x = 0; x < 16; x++) {
                     const offset = y * 256 + x * 4
-                    if (bytes[offset + 3] > 0) color = Array.from(bytes.slice(offset, offset + 4))
+                    if (bytes[offset + 3] > (color?.[3]??0)) color = Array.from(bytes.slice(offset, offset + 4))
                 }
             }
             colors.push({ speed, color })
             pixels.unmap()
             pixels.destroy()
             target.destroy()
-            depth.destroy()
         }
         renderBuffer.destroy()
         viewBuffer.destroy()
+        rasterBuffer.destroy()
         const validation = await device.popErrorScope()
         if (validation !== null) throw new Error(validation.message)
         device.destroy()

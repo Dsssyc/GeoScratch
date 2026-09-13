@@ -189,6 +189,36 @@ describe('Flow Field public GPU view demand', () => {
         })
     })
 
+    it('observes two reused frames independently and keeps spatial rebuilds exclusive',async()=>{
+        await adapterFixture(async f=>{
+            const first=f.encode(decisionView(1)),original=await f.adapter.observe(f.receipt(first.builder))
+            const a=f.encode(decisionView(2)),gateA=f.gate({status:'observed-succeeded'}),receiptA=f.receipt(a.builder,gateA.promise)
+            const observedA=f.adapter.observe(receiptA)
+            const b=f.encode(decisionView(3)),gateB=f.gate({status:'observed-succeeded'}),observedB=f.adapter.observe(f.receipt(b.builder,gateB.promise))
+            expect(f.adapter.facts()).to.include({pending:true,pendingBuild:false,pendingObservationCount:2,buildCount:1,reuseCount:2})
+            expect(()=>f.encode(decisionView(4,{zoomHint:9}))).to.throw('settled reuse')
+            gateB.resolve({status:'observed-succeeded'});expect(await observedB).to.equal(original)
+            expect(f.adapter.facts().pendingObservationCount).to.equal(1)
+            expect(()=>f.encode(decisionView(4,{zoomHint:9}))).to.throw('settled reuse')
+            gateA.resolve({status:'observed-succeeded'});expect(await observedA).to.equal(original)
+            const changed=f.encode(decisionView(4,{zoomHint:9}));await f.adapter.observe(f.receipt(changed.builder))
+            expect(f.adapter.facts()).to.include({pending:false,pendingObservationCount:0,buildCount:2})
+        })
+    })
+
+    it('drains every held reuse observation during disposal',async()=>{
+        await adapterFixture(async f=>{
+            const first=f.encode(decisionView(1));await f.adapter.observe(f.receipt(first.builder))
+            const a=f.encode(decisionView(2)),ga=f.gate({status:'observed-succeeded'}),oa=f.adapter.observe(f.receipt(a.builder,ga.promise))
+            const b=f.encode(decisionView(3)),gb=f.gate({status:'observed-succeeded'}),ob=f.adapter.observe(f.receipt(b.builder,gb.promise))
+            let complete=false;const disposing=f.adapter.dispose().then(()=>{complete=true})
+            gb.resolve({status:'observed-succeeded'});await ob
+            expect(complete).to.equal(false);expect(f.calls).not.to.include('cover:dispose')
+            ga.resolve({status:'observed-succeeded'});await Promise.all([oa,disposing])
+            expect(complete).to.equal(true);expect(f.adapter.facts()).to.include({pending:false,disposed:true})
+        })
+    })
+
     it('never reuses staged or unobserved feedback and keeps hook ownership strict', async() => {
         await adapterFixture(async fixture => {
             const {adapter,newBuilder,receipt,gate} = fixture

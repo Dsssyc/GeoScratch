@@ -27,7 +27,7 @@ export type FlowPixelCenterRegistrationWgslOptions = Readonly<{
 const WGSL_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/
 const U32_MASK = 0xffff_ffffn
 
-/** Generates exact half-texel registration and reuses each no-NoData footprint load for readiness and interpolation. */
+/** Generates exact registration and shares no-NoData footprint loads across readiness, interpolation and owner support. */
 export function flowPixelCenterRegistrationWgslModule(
     model: WebMercatorVirtualRasterField,
     options: FlowPixelCenterRegistrationWgslOptions
@@ -141,6 +141,15 @@ function registeredSamplerWgsl(
     position: ${addressNamespace}FixedPosition,
     level: u32,
 ) -> ${samplerNamespace}Sample {
+    return ${namespace}_sample_${slot}_support(position, position, level, false);
+}
+
+fn ${namespace}_sample_${slot}_support(
+    position: ${addressNamespace}FixedPosition,
+    original: ${addressNamespace}FixedPosition,
+    level: u32,
+    zero_owner: bool,
+) -> ${samplerNamespace}Sample {
     let address = ${addressNamespace}_address(position, ${samplerNamespace}_matrix_at(level));
     let base = vec2i(address.tile * ${samplerNamespace}_page_size_value() + address.texel);
     // The factory forbids a payload NoData sentinel. These loaded samples carry
@@ -171,8 +180,24 @@ function registeredSamplerWgsl(
     }
     // Fallback is a signal to the temporal owner: it must re-register the
     // original canonical position at the new shared level, not this position.
-    let value = mix(mix(tl.value, tr.value, address.sub_texel.x),
+    var value = mix(mix(tl.value, tr.value, address.sub_texel.x),
         mix(bl.value, br.value, address.sub_texel.x), address.sub_texel.y);
+    if (zero_owner) {
+        let owner = ${addressNamespace}_address(original, ${samplerNamespace}_matrix_at(level));
+        let offset = vec2i(owner.tile * ${samplerNamespace}_page_size_value() + owner.texel) - base;
+        var owner_value: vec4f;
+        if (all(offset >= vec2i(0)) && all(offset <= vec2i(1))) {
+            // The exact unregistered owner is already one of the loaded corners.
+            owner_value = select(select(tl.value, tr.value, offset.x != 0),
+                select(bl.value, br.value, offset.x != 0), offset.y != 0);
+        } else {
+            // Preserve the complete owner lookup for an exceptional footprint.
+            owner_value = ${samplerNamespace}_load_position(original, level).value;
+        }
+        if (owner_value.x == 0.0 && owner_value.y == 0.0) {
+            value = vec4f(0.0, 0.0, value.z, value.w);
+        }
+    }
     return ${samplerNamespace}Sample(value, max(max(tl.status, tr.status), max(bl.status, br.status)), level, level);
 }`
 }

@@ -72,12 +72,12 @@ describe('Flow history synchronous content ownership', () => {
         for (const invalid of [undefined, null, {}, Promise.resolve([]), 'draws']) {
             await fixture(async f => {
                 f.history.encode(f.builder(), f.view, [], true, f.prepared)
-                const before = f.history.facts(), disposal = f.disposals.length, builder = f.builder()
+                const before = f.history.facts(), disposal = f.disposals.length, builds = f.cache.builds, builder = f.builder()
                 assert.throws(() => f.history.encode(builder, f.changedView, () => invalid,
                     false, f.prepared, 'sdf-center-linear'), /synchronously return/)
                 assert.deepEqual(f.history.facts(), before)
                 assert.equal(f.disposals.length, disposal, 'Existing presentation commands are still owned')
-                assert.equal(f.cache.builds, 0)
+                assert.equal(f.cache.builds, builds)
                 assert.deepEqual(builder.steps.map(step => step.kind), ['upload'])
                 const next = f.history.encode(f.builder(), f.view, [], true, f.prepared)
                 assert.equal(next.cleared, false, 'Failed non-accumulation/change did not set clearPending')
@@ -191,15 +191,15 @@ async function fixture(run) {
         resources.push(value)
         return value
     }
-    for (const name of ['createBuffer','createTexture','createBindLayout','createShaderModule','createRenderPipeline']) runtime[name] = async descriptor => leaf(descriptor)
+    for (const name of ['createBuffer','createTexture','createSampler','createBindLayout','createShaderModule','createRenderPipeline']) runtime[name] = async descriptor => leaf(descriptor)
     for (const name of ['createUploadCommand','createProgram','createRenderPass','createDrawCommand']) runtime[name] = descriptor => leaf(descriptor)
     runtime.createBindSet = async (layout, bindings, descriptor) => leaf({...descriptor,layout,bindings})
-    const cache = {builds:0,observations:0,disposed:false,wgsl:'',layout:{},bindSet:{},resources:[],
+    const cache = {builds:0,observations:0,disposed:false,wgsl:'',coverageWgsl:'',layout:{},bindSet:{},resources:[],
         encode(builder) { this.builds++;builder.steps.push({kind:'cache'}) },
         facts() { return {builds:this.builds} },
         async observe() { this.observations++ },dispose() { this.disposed=true } }
     runtime.createTestCenterCache = () => cache
-    const history = await createFlowHistory({runtime,surface:{runtime,format:'rgba8unorm'},size:{width:32,height:8},
+    const history = await createFlowHistory({runtime,surface:{runtime,format:'rgba8unorm',size:{width:32,height:8}},size:{width:32,height:8},
         temporal:{layout:{runtime,group:1},wgsl:'fixture'},addressCodec:{},activityKill:.0001,
         mode:'clear',centerCache:{addressSpace:{},capacity:1}})
     const view = {kind:'geo-view-snapshot',clipFromRelativeWorld:[1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1],

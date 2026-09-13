@@ -15,6 +15,7 @@ import type {
     ProgramBufferLayoutRequirement,
     RenderPassSpec,
     RenderPipeline,
+    SamplerResource,
     ShaderModule,
     SubmissionBuilder,
     SubmittedWork,
@@ -97,6 +98,8 @@ export type FlowHistory = Readonly<{
     resize(size: SurfaceSize): Promise<void>
     reset(): void
     presentRetained(builder: SubmissionBuilder, view: GeoViewSnapshot): FlowHistoryFrame
+    /** Reprojects visible ink without changing raw history or retiring temporal commands. */
+    presentCamera(builder: SubmissionBuilder, view: GeoViewSnapshot): FlowHistoryFrame
     /** Commits a derived cache only after its actual GPU build succeeds. */
     observe(submitted: SubmittedWork): Promise<void>
     /**
@@ -142,6 +145,7 @@ type HistoryUniformValues = {
     activityKill: number
     presentationFeather: number
     decaySteps: number
+    presentationFilter: number
 }
 
 type HistoryViewFacts = Readonly<{
@@ -168,6 +172,7 @@ type OwnedGraph = Readonly<{
     pipelines: readonly RenderPipeline[]
     passes: readonly RenderPassSpec[]
     commands: readonly DrawCommand[]
+    sampler: SamplerResource
 }>
 
 const IDENTITY_MATRIX = Object.freeze([
@@ -257,16 +262,6 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
             format: 'rgba8unorm',
             usage: sampledTargetUsage,
         }))
-        const depth = own(await runtime.createTexture({
-            label: 'Flow Field particle overlap depth',
-            size,
-            format: 'depth32float',
-            usage: GPUTextureUsage.RENDER_ATTACHMENT,
-        }))
-        const depthAttachment = {
-            target: depth.view(), depthLoad: 'clear' as const,
-            depthStore: 'store' as const, depthClear: 1,
-        }
         const historyAView = historyA.view({ label: 'Flow Field history A view' })
         const historyBView = historyB.view({ label: 'Flow Field history B view' })
         const uniformLayout = own(await runtime.createBindLayout({
@@ -281,7 +276,13 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
             } ],
         }))
         const historyLayout = own(await textureLayout(runtime, 2, 'Flow Field history source layout'))
-        const presentationLayout = own(await textureLayout(runtime, 0, 'Flow Field history presentation layout'))
+        const sampler = own(await runtime.createSampler({label:'Flow history linear presentation sampler',
+            magFilter:'linear',minFilter:'linear',addressModeU:'clamp-to-edge',addressModeV:'clamp-to-edge'}))
+        const presentationLayout = own(await runtime.createBindLayout({group:0,label:'Flow Field history presentation layout',entries:[
+            {binding:0,name:'historyTexture',type:'texture',sampleType:'float',viewDimension:'2d',visibility:['fragment']},
+            {binding:1,name:'historySampler',type:'sampler',samplerType:'filtering',visibility:['fragment']},
+            {binding:2,name:'presentationUniform',type:'uniform',visibility:['fragment'],minBindingSize:codec.byteLength()},
+        ]}))
         const uniformSet = own(await runtime.createBindSet(uniformLayout, {
             cleanupUniform: uniformRegion,
         }, { label: 'Flow Field history uniforms' }))
@@ -293,9 +294,13 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
         }, { label: 'Flow Field history A to B source' }))
         const presentationA = own(await runtime.createBindSet(presentationLayout, {
             historyTexture: historyAView,
+            historySampler: sampler,
+            presentationUniform: uniformRegion,
         }, { label: 'Flow Field history A presentation' }))
         const presentationB = own(await runtime.createBindSet(presentationLayout, {
             historyTexture: historyBView,
+            historySampler: sampler,
+            presentationUniform: uniformRegion,
         }, { label: 'Flow Field history B presentation' }))
         const historyModule = own(await runtime.createShaderModule({
             label: 'Flow Field history shader',
@@ -304,12 +309,14 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
         const hardModule = own(await runtime.createShaderModule({
             label: 'Flow Field hard boundary presentation shader',
             sourceParts: [ { code: temporal.wgsl }, { code: screenProjection },
-                { code: codec.wgslAccessors() }, { code: presentationSupportShader },
+                { code: codec.wgslAccessors() }, { code: centerCache ? presentationSupportShader.replace(
+                    'fn FlowPresentation_coverage(', 'fn FlowPresentation_coverage_direct(') : presentationSupportShader },
+                ...(centerCache ? [{code:centerCache.coverageWgsl}] : []),
                 { code: historySupportShader }, { code: hardBoundaryShader } ],
         }))
         const presentationModule = own(await runtime.createShaderModule({
             label: 'Flow Field history presentation shader',
-            sourceParts: [ { code: presentationShader } ],
+            sourceParts: [ { code: codec.wgslAccessors() }, { code: presentationShader } ],
         }))
         const sdfModule = own(await runtime.createShaderModule({
             label: 'Flow Field inward SDF presentation shader',
@@ -351,6 +358,7 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
             label: 'Flow Field history presentation program',
             vertex: { module: presentationModule, entryPoint: 'vMain' },
             fragment: { module: presentationModule, entryPoint: 'fMain' },
+            layoutRequirements: [{...requirement,binding:2}],
         }))
         const sdfProgram = own(runtime.createProgram({
             label: 'Flow Field inward SDF presentation program',
@@ -370,11 +378,11 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
             layout: { mode: 'explicit', bindLayouts: [ uniformLayout, historyLayout ] },
             targets: [ { format: historyA.format } ],
             primitive: { topology: 'triangle-strip' },
-            depthStencil: { format: 'depth32float', depthWriteEnabled: false, depthCompare: 'less' },
         }))
         const hardPipeline = own(await runtime.createRenderPipeline({
             label: 'Flow Field hard boundary presentation pipeline', program: hardProgram,
-            layout: { mode: 'explicit', bindLayouts: [ uniformLayout, temporal.layout, historyLayout ] },
+            layout: { mode: 'explicit', bindLayouts: [ uniformLayout, temporal.layout, historyLayout,
+                ...(centerCache ? [centerCache.layout] : []) ] },
             targets: [{ format: historyA.format }],
             primitive: { topology: 'triangle-strip' },
         }))
@@ -416,12 +424,10 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
         const passBToA = own(runtime.createRenderPass({
             label: 'Flow Field history B to A',
             color: [ { target: historyAView, load: 'clear', store: 'store', clear: [ 0, 0, 0, 0 ] } ],
-            depth: depthAttachment,
         }))
         const passAToB = own(runtime.createRenderPass({
             label: 'Flow Field history A to B',
             color: [ { target: historyBView, load: 'clear', store: 'store', clear: [ 0, 0, 0, 0 ] } ],
-            depth: depthAttachment,
         }))
         const presentationPass = own(runtime.createRenderPass({
             label: 'Flow Field history presentation',
@@ -440,11 +446,11 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
         ]
         const presentA = own(presentationCommand(
             runtime, presentationPipeline, presentationA, historyA,
-            'Present Flow Field history A'
+            'Present Flow Field history A', uniformBuffer
         ))
         const presentB = own(presentationCommand(
             runtime, presentationPipeline, presentationB, historyB,
-            'Present Flow Field history B'
+            'Present Flow Field history B', uniformBuffer
         ))
         const directionBToA: FlowHistoryDirection = Object.freeze({
             label: 'Flow Field history B to A',
@@ -473,7 +479,8 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
             uniformSet, historyBToA, historyAToB, presentationA, presentationB,
         ])
         const graph: OwnedGraph = Object.freeze({
-            textures: Object.freeze([ historyA, historyB, depth ]),
+            sampler,
+            textures: Object.freeze([ historyA, historyB ]),
             uniformBuffer,
             uniformUpload,
             bindLayouts: Object.freeze([ uniformLayout, historyLayout, presentationLayout ]),
@@ -513,7 +520,6 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
             try {
                 await historyA.resize(normalized)
                 await historyB.resize(normalized)
-                await depth.resize(normalized)
                 await prepareStaleBindSets(historyBindSets)
                 size = normalized
                 resizeGeneration++
@@ -581,6 +587,7 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
                 prepared,
                 presentationFeather: feather,
                 decaySteps: requestedDecaySteps,
+                presentationFilter: size.width === surface.size.width && size.height === surface.size.height ? 0 : 1,
             }))
             const direction = directions[directionIndex]!
             builder.upload(uniformUpload)
@@ -604,7 +611,7 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
             } finally {
                 producingContent = false
             }
-            if (prepared && (requestedBoundary === 'sdf-center-linear' || requestedBoundary === 'sdf-center-smooth')) {
+            if (prepared && requestedBoundary !== 'sdf') {
                 centerCache?.encode(builder,prepared,centerCacheInput)
             }
             // Temporal clipping owns visibility, never the next frame's raw ink.
@@ -655,7 +662,7 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
             const pipeline = boundary === 'sdf-center-linear' ? centerPipelines[0]!
                 : boundary === 'sdf-center-smooth' ? centerPipelines[1]!
                 : boundary === 'sdf' ? sdfPipeline : hardPipeline
-            const cache = boundary === 'sdf-center-linear' || boundary === 'sdf-center-smooth' ? centerCache : undefined
+            const cache = boundary !== 'sdf' ? centerCache : undefined
             // Presentation reads the newly composed target, opposite to history's source.
             const presentA = composeCommand(runtime, pipeline, uniformSet, historyAToB,
                 uniformBuffer, historyA, prepared, `Present Flow Field ${boundary} A`, cache)
@@ -673,8 +680,9 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
                 boundary,
                 commands: Object.freeze([ presentA, presentB ]) as readonly [DrawCommand, DrawCommand],
             })
-            // The renderer admits one native frame at a time and holds the borrowed
-            // temporal frame until submission settles. Only our commands retire here.
+            // Submitted commands are already encoded; retiring their descriptions
+            // does not release borrowed resources. Each frame retains its temporal
+            // binding through native settlement; only our commands retire here.
             for (const command of previous?.commands ?? []) command.dispose()
             return presentationPair.commands
         }
@@ -711,6 +719,7 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
             for (const shaderModule of graph.shaderModules) shaderModule.dispose()
             for (const bindSet of graph.bindSets) bindSet.dispose()
             for (const bindLayout of graph.bindLayouts) bindLayout.dispose()
+            graph.sampler.dispose()
             graph.uniformBuffer.dispose()
             for (const texture of graph.textures) texture.dispose()
             centerCache?.dispose()
@@ -735,13 +744,18 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
         }
 
         function presentRetained(builder: SubmissionBuilder, view: GeoViewSnapshot): FlowHistoryFrame {
+            const frame = presentCamera(builder, view)
+            for (const command of presentationPair?.commands ?? []) command.dispose()
+            presentationPair = undefined
+            return frame
+        }
+
+        function presentCamera(builder: SubmissionBuilder, view: GeoViewSnapshot): FlowHistoryFrame {
             assertActive()
             if (resizePending) throw new Error('Flow Field history cannot encode during resize')
             if (builder?.runtime !== runtime) {
                 throw new TypeError('Flow Field history requires a same-runtime SubmissionBuilder')
             }
-            for (const command of presentationPair?.commands ?? []) command.dispose()
-            presentationPair = undefined
             const currentView = historyViewFacts(view)
             const cameraChanged = previousView !== undefined && !sameView(previousView, currentView)
             const reprojecting = mode === 'reproject' && cameraChanged
@@ -753,6 +767,7 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
                 currentInverseMatrix: screenView.relativeWorldFromClip, activityKill, screenView,
                 prepared: undefined, presentationFeather: sdfFeatherTexels,
                 decaySteps: 0,
+                presentationFilter: size.width === surface.size.width && size.height === surface.size.height ? 0 : 2,
             }))
             builder.upload(uniformUpload)
             const display = retainedTextureIndex === undefined || clearPending || (mode === 'clear' && cameraChanged)
@@ -767,7 +782,7 @@ export async function createFlowHistory(options: FlowHistoryOptions): Promise<Fl
                 cleared: display === undefined, resizeGeneration, boundary, sdfFeatherTexels })
         }
 
-        return Object.freeze({ resize, reset, encode, presentRetained, facts, dispose,
+        return Object.freeze({ resize, reset, encode, presentRetained, presentCamera, facts, dispose,
             observe: (submitted: SubmittedWork) => {
                 assertNotProducing()
                 return centerCache?.observe(submitted) ?? Promise.resolve()
@@ -808,6 +823,7 @@ function historyUniformCodec(): LayoutCodec {
         { name: 'activityKill', type: 'f32' },
         { name: 'presentationFeather', type: 'f32' },
         { name: 'decaySteps', type: 'u32' },
+        { name: 'presentationFilter', type: 'u32' },
     ]
     return layoutCodec({ name: 'FlowFieldHistoryUniform', fields }, { usage: [ 'uniform' ] })
 }
@@ -864,7 +880,8 @@ function presentationCommand(
     pipeline: RenderPipeline,
     bindSet: BindSet,
     source: TextureResource,
-    label: string
+    label: string,
+    uniformBuffer: BufferResource
 ): DrawCommand {
     return runtime.createDrawCommand({
         label,
@@ -872,7 +889,8 @@ function presentationCommand(
         bindSets: [ { set: bindSet } ],
         count: { vertexCount: 4 },
         resources: {
-            read: [ { resource: source, contentEpoch: 'current-at-step' } ],
+            read: [ { resource: source, contentEpoch: 'current-at-step' },
+                { resource: uniformBuffer, contentEpoch: 'current-at-step' } ],
             write: [],
         },
         whenMissing: 'throw',
@@ -914,6 +932,7 @@ function uniformValues(
         prepared?: FlowTemporalReadyBindingFrame
         presentationFeather?: number
         decaySteps?: number
+        presentationFilter?: 0 | 1 | 2
     }>
 ): HistoryUniformValues {
     const currentView = current ?? {
@@ -946,6 +965,7 @@ function uniformValues(
         activityKill: options.activityKill,
         presentationFeather: options.presentationFeather ?? FLOW_FIELD_SDF_FEATHER.default,
         decaySteps: options.decaySteps ?? 1,
+        presentationFilter: options.presentationFilter ?? 0,
     }
 }
 

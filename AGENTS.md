@@ -122,13 +122,37 @@ current CPU renderer as GPU.
 Flow Field retains its GPU cover and observed spatial reuse. Stable spawn input
 uses an opaque immutable preparation artifact; mutable ArrayBufferView inputs
 still require content comparison. Do not replace mutable-content validation with
-raw object identity. Balanced trail quality bounds only history/depth textures to
-one texel per reference pixel and a 1080p pixel budget. Keep the Surface, map,
+raw object identity. Candidate page/cell geometry retains identity across camera
+priority changes only when its address-space owner, ordered page geometry and cell
+grid match (ADR-139); refresh demand priorities and provenance independently.
+Native trail quality is the default. Balanced bounds only the two
+history textures to one texel per reference pixel and a 1080p pixel budget. Keep the Surface, map,
 diagnostic views, camera cover and raster source precision independent from that
-budget, and retain Native as an explicit quality choice. Quality resizing clears
+budget, and retain both quality choices. Analytic line coverage must blend without
+occluding overlap depth, clip before perspective division, and filter scaled
+presentation without feeding that filter back into raw ink. Quality resizing clears
 history through its existing lifecycle without resetting particles or advancing
 paused simulation. Changes require the trail-quality browser proof, existing
 history/visual-time/camera-continuity gates and measured high-refresh evidence.
+
+Flow Field admits at most two submitted frames and one construction (ADR-138).
+Stable observed spatial/cache state can overlap. Source acknowledgement stays
+separate from full frame observation; wait for acknowledgement before republishing.
+Changed publications and spawn/center builds may follow stable work in GPU FIFO,
+then block later content frames until fully observed. ADR-140 permits synchronous
+camera-only presentation through the same controller while content observation is
+pending: read existing visible ink/contour segments, preserve raw history and visual
+time, and perform no publication, spatial build, contour compute or readback. Count
+these frames separately from content; their observation must not overwrite observed
+model time or block spatial/contour builds. Rebuilds drain content frames; viewport,
+size, presentation and reset changes retain their normal preparation/full drain.
+Verify actual translated pixels while content completion is held, plus accepted
+visual time during continuous input; particle counts alone do not prove camera sync.
+Keep synchronous upload-to-submit ordering, per-frame temporal leases and newest
+observed presentation facts. Borrow the application lifetime signal to cancel
+construction after awaits without cancelling observation of already queued work.
+Disposal during blocked construction must not resize or submit new work. Bound
+changes require the frame-pipeline and interleaved native throughput proofs.
 
 Flow Field velocity sampling follows ADR-134: Geo owns immutable sampler metadata
 uniforms and direct local-level indexing. Compatible coverage, bounds and decoding

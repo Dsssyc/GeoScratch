@@ -176,7 +176,21 @@ fn ${namespace}_sample_next(
     level: u32,
 ) -> ${nextSamplerNamespace}Sample {
     return ${nextSamplerNamespace}_sample_compute(position, level);
-}`
+}
+
+${[currentSamplerNamespace,nextSamplerNamespace].map((sampler,index)=>`
+fn ${namespace}_sample_${index===0?'current':'next'}_support(
+    position: ${fixedNamespace}Position, original: ${fixedNamespace}Position,
+    level: u32, zero_owner: bool,
+) -> ${sampler}Sample {
+    var sample = ${sampler}_sample_compute(position, level);
+    if (zero_owner && sample.resolved_level == level && (sample.status == 1u || sample.status == 2u)) {
+        let owner = ${sampler}_load_position(original, level);
+        if (all(owner.value.xy == vec2f(0.0))) { sample.value = vec4f(0.0,0.0,sample.value.z,sample.value.w); }
+    }
+    return sample;
+}`).join('\n')}
+`
 }
 
 function flowVelocitySourceBoundsWgsl(): string {

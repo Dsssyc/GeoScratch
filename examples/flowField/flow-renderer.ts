@@ -99,6 +99,7 @@ import type {
 } from './flow-timeline.ts'
 import {
     createFlowViewDemandAdapter,
+    flowCameraDecisionEquals,
 } from './flow-view-demand.ts'
 import type {
     FlowViewDemandAdapter,
@@ -121,6 +122,8 @@ import { flowTrailTextureSize } from './flow-trail-resolution.ts'
 export type FlowFieldRendererOptions = Readonly<{
     runtime: GPURuntime
     surface: Surface
+    /** Borrowed admission cancellation; already submitted frames still settle fully. */
+    signal?: AbortSignal
     size: SurfaceSize
     /** Initial reference size for bounded allocation; subsequent frames use their captured viewport. */
     referenceViewport?: readonly number[]
@@ -144,10 +147,27 @@ export type FlowFieldRendererFrame = Readonly<{
     visualTime: FlowVisualTime
 }>
 
+/** A new camera presentation of existing visible content; it makes no new source demand. */
+export type FlowFieldCameraFrame = Readonly<{
+    state: 'presented'
+    submitted: SubmittedWork
+    view: GeoViewSnapshot
+    temporal: FlowTemporalFrameSnapshot
+    history: FlowHistoryFrame
+    presentationReady: boolean
+    particlesAdvancing: false
+    visualTime: FlowVisualTime
+}>
+
 export type FlowFieldRendererFacts = Readonly<{
     initialized: boolean
     disposed: boolean
     frameCount: number
+    maximumInFlightFrames: 2
+    inFlightFrameCount: number
+    /** Full source/particle graph submissions, excluding camera-only presentations. */
+    contentFrameCount: number
+    cameraPresentationCount: number
     cellsPerPageEdge: number
     maximumCandidatePages: number
     maximumCandidateCount: number
@@ -165,6 +185,11 @@ export type FlowFieldRendererFacts = Readonly<{
 }>
 
 export type FlowFieldRenderer = Readonly<{
+    /** Submits a current-camera image synchronously when content observation is still pending. */
+    tryPresentCamera(
+        frameNumber: number,
+        capture: GeoViewSourceCapture<MapLibrePlanarCameraState>
+    ): GeoFrameResult<FlowFieldCameraFrame> | undefined
     render(
         frameNumber: number,
         capture: GeoViewSourceCapture<MapLibrePlanarCameraState>,
@@ -193,6 +218,9 @@ type FlowFramePublication = Readonly<{
 type FlowFramePublications = readonly FlowFramePublication[]
 
 type Disposable = Readonly<{ dispose(): void | Promise<void> }>
+
+/** Bounds submitted Flow frames; resource-changing work remains an observation barrier. */
+export const FLOW_FIELD_MAXIMUM_IN_FLIGHT_FRAMES = 2
 
 const DEFAULT_CELLS_PER_PAGE_EDGE = 64
 const DEFAULT_PARTICLE_COUNT = 262_144
@@ -230,7 +258,16 @@ export async function createFlowFieldRenderer(
     let disposePromise: Promise<void> | undefined
     let frameCount = 0
     let constructionInFlight: Promise<void> | undefined
-    let frameInFlight: Promise<unknown> | undefined
+    const framesInFlight = new Set<Promise<unknown>>()
+    const contentFrames = new Set<Promise<unknown>>()
+    const barrierFrames = new Set<Promise<unknown>>()
+    let contentFrameCount = 0
+    let cameraPresentationCount = 0
+    let lastContentFrame: FlowFieldRendererFrame | undefined
+    let sourceAcknowledgement: Promise<void> = Promise.resolve()
+    let frameFailure: { reason: unknown } | undefined
+    let lastQueued: Readonly<{ view: MapLibrePlanarCameraState, size: SurfaceSize,
+        presentation: FlowFieldPresentation, resetRevision: number, pairGeneration: number }> | undefined
     let constructionCapture: ReturnType<typeof temporalWindow.capture> | undefined
     let constructionCaptureReleased = false
     let presentation = flowFieldPresentation(options.presentation ?? FLOW_FIELD_PRESENTATION)
@@ -366,6 +403,46 @@ export async function createFlowFieldRenderer(
         let packedCandidates = new Uint8Array(new ArrayBuffer(0))
         let preparedSpawnCandidates: FlowSpawnCandidates | undefined
 
+        function tryPresentCamera(
+            frameNumber: number,
+            capture: GeoViewSourceCapture<MapLibrePlanarCameraState>
+        ): GeoFrameResult<FlowFieldCameraFrame> | undefined {
+            assertActive()
+            if (lastQueued === undefined || lastContentFrame === undefined ||
+                constructionInFlight !== undefined || contentFrames.size === 0 ||
+                framesInFlight.size >= FLOW_FIELD_MAXIMUM_IN_FLIGHT_FRAMES ||
+                presentation !== lastQueued.presentation || resetRevision !== lastQueued.resetRevision ||
+                !sameSize(size,capture.presentationSize) || !history.facts().hasPreviousView ||
+                capture.view.referenceViewport[0] !== lastQueued.view.referenceViewport[0] ||
+                capture.view.referenceViewport[1] !== lastQueued.view.referenceViewport[1] ||
+                (barrierFrames.size === 0 && flowCameraDecisionEquals(capture.view,lastQueued.view))) return undefined
+            if (!Number.isSafeInteger(frameNumber) || frameNumber <= frameCount) {
+                throw new TypeError('Flow camera presentation requires a monotonic frame number')
+            }
+            const view = flowFieldViewAdapter.read(capture.view, {
+                frameEpoch: frameNumber, residencySnapshotEpoch: temporalResidencyEpoch,
+            })
+            const builder = runtime.createSubmission({validation:'throw'})
+            const drawContour = presentation.contour && lastContentFrame.presentationReady
+            if (drawContour) renderView.encode(builder,view)
+            // Only FIFO-safe history reads and a snapshotted uniform upload. No
+            // source publication, spatial producer, particle step or clock reset.
+            const historyFrame = history.presentCamera(builder,view)
+            if (drawContour) builder.render(overlayPass,[contour.draw])
+            const submitted = builder.submit()
+            const observation = trackFrame(observeFlowSubmittedWork(submitted),false,undefined,true)
+            frameCount = frameNumber
+            cameraPresentationCount++
+            return Object.freeze({
+                observation, needsFollowUp:false,
+                value:Object.freeze({state:'presented' as const,submitted,view,
+                    temporal:lastContentFrame.temporal,history:historyFrame,
+                    presentationReady:lastContentFrame.presentationReady,
+                    particlesAdvancing:false as const,
+                    visualTime:Object.freeze({referenceSteps:0,wholeSteps:0,discardedSeconds:0})}),
+            })
+        }
+
         async function render(
             frameNumber: number,
             capture: GeoViewSourceCapture<MapLibrePlanarCameraState>,
@@ -380,8 +457,8 @@ export async function createFlowFieldRenderer(
                     'Flow Field render requires one monotonic view and admitted timeline'
                 )
             }
-            if (constructionInFlight !== undefined || frameInFlight !== undefined) {
-                throw new Error('Flow Field renderer permits exactly one frame in flight')
+            if (constructionInFlight !== undefined || framesInFlight.size >= FLOW_FIELD_MAXIMUM_IN_FLIGHT_FRAMES) {
+                throw new Error('Flow Field renderer permits one construction and at most two frames in flight')
             }
             let finishConstruction!: () => void
             constructionInFlight = new Promise(resolve => { finishConstruction = resolve })
@@ -392,12 +469,26 @@ export async function createFlowFieldRenderer(
                 const framePresentation = presentation
                 const frameResetRevision = resetRevision
                 const framePresentationRevision = presentationRevision
+                if (framesInFlight.size > 0 && (lastQueued === undefined ||
+                    framePresentation !== lastQueued.presentation || frameResetRevision !== lastQueued.resetRevision ||
+                    !sameSize(capture.presentationSize,lastQueued.size))) {
+                    await drainFrames()
+                } else if (contentFrames.size > 0 && (barrierFrames.size > 0 || framePresentation.contour ||
+                    !flowCameraDecisionEquals(capture.view,lastQueued!.view))) {
+                    await drainContentFrames()
+                }
+                // No-op publications can acknowledge before drawing completes.
+                // Reusing that fact permits overlap without double publication.
+                await sourceAcknowledgement
+                assertActive()
                 const resizing = resizeForCapture(capture, framePresentation)
                 if (resizing !== undefined) await resizing
+                assertActive()
                 let prepared
                 try {
                     prepared = await temporalBindings.prepareFrame(requestedLevel)
                 } catch (error) {
+                    if (options.signal?.aborted) throw options.signal.reason
                     if (error instanceof FlowTemporalBindingSupersededError) {
                         throw new FlowTemporalFrameUnavailableError(
                             'superseded',
@@ -406,11 +497,19 @@ export async function createFlowFieldRenderer(
                     }
                     throw error
                 }
+                if (prepared.state === 'ready') temporalFrame = prepared
+                assertActive()
                 if (prepared.state !== 'ready') {
                     if (prepared.state === 'failed') throw prepared.error
                     throw new FlowTemporalFrameUnavailableError(prepared.state)
                 }
-                temporalFrame = prepared
+                if (contentFrames.size > 0 && prepared.pairGeneration !== lastQueued?.pairGeneration) {
+                    await drainContentFrames()
+                }
+                assertActive()
+                if (frameResetRevision !== resetRevision || framePresentation !== presentation) {
+                    throw new FlowTemporalFrameUnavailableError('superseded')
+                }
                 try {
                     assertFlowTemporalCapture(timeline, prepared.temporal)
                 } catch (error) {
@@ -552,6 +651,7 @@ export async function createFlowFieldRenderer(
                     // so stable frames place all hot uploads before simulation.
                     content = contentBuilder => {
                         if (particlesAdvancing) {
+                            particleRender.encode(contentBuilder, historySize, view.referenceViewport)
                             if (presentationReady) {
                                 if (populatedParticleView === undefined) {
                                     populatedParticleView = view
@@ -590,47 +690,52 @@ export async function createFlowFieldRenderer(
                 ) : history.presentRetained(builder, view)
                 if (presentationReady && framePresentation.contour) builder.render(overlayPass, [contour.draw])
                 const submitted = builder.submit()
-                const reconciliations = demand.reconcile(demandFrame).then(
+                const reconciliations = Promise.resolve().then(() => demand.reconcile(demandFrame)).then(
                     requireFlowDemandReconciliations
                 )
+                const acknowledgement = acknowledgePublications(submitted, publications)
+                sourceAcknowledgement = acknowledgement
                 const observing = settleFrameObservations(
                     submitted,
-                    publications,
+                    acknowledgement,
                     reconciliations,
                     viewDemand,
                     presentationReady && framePresentation.contour ? contour : undefined,
-                    Promise.all([Promise.resolve().then(() => spawn.observe(spawnFrame, submitted)),history.observe(submitted)]).then(()=>undefined)
+                    Promise.all([Promise.resolve().then(() => spawn.observe(spawnFrame, submitted)),
+                        Promise.resolve().then(() => history.observe(submitted))]).then(()=>undefined)
                 )
-                let observation: Promise<unknown>
-                observation = observing.then(() => {
+                const observingPrefetch = observing.then(() => {
                     if (observedPrefetchPlan !== undefined && prefetchPlan === observedPrefetchPlan) {
-                        observedPrefetchPlan.observedReady = prefetchPagesResident
+                        observedPrefetchPlan.observedReady ||= prefetchPagesResident
                     }
-                }).finally(() => {
+                })
+                const barrier = framePresentation.contour || publications.some(value=>value.publication.changed) ||
+                    viewDemand.facts().pendingBuild || spawn.facts().cacheState !== 'ready' || history.facts().centerCache?.pending === true
+                const observation = trackFrame(observingPrefetch, barrier, () => {
                     prepared.release()
                     prefetchFrame?.release()
-                    if (frameInFlight === observation) frameInFlight = undefined
                 })
                 frameOwnershipTransferred = true
-                frameInFlight = observation
+                lastQueued = {view:capture.view,size:capture.presentationSize,presentation:framePresentation,
+                    resetRevision:frameResetRevision,pairGeneration:prepared.pairGeneration}
                 const settlement = reconciliations.then(value => flowDemandSettlement(value, prefetchReconciliation))
                 frameCount = frameNumber
+                contentFrameCount++
+                lastContentFrame = Object.freeze({
+                    state: 'rendered' as const, submitted, view, temporal: frameTemporal,
+                    demand: demandFrame, history: historyFrame, presentationReady,
+                    particlesAdvancing, visualTime,
+                })
                 return Object.freeze({
                     observation,
                     settlement,
                     needsFollowUp: needsViewFollowUp || prepared.requestedLevel !== requestedLevel || refilledParticleView,
-                    value: Object.freeze({
-                        state: 'rendered' as const,
-                        submitted,
-                        view,
-                        temporal: frameTemporal,
-                        demand: demandFrame,
-                        history: historyFrame,
-                        presentationReady,
-                        particlesAdvancing,
-                        visualTime,
-                    }),
+                    value: lastContentFrame,
                 })
+            } catch (error) {
+                if (!(error instanceof FlowTemporalFrameUnavailableError) && !disposed &&
+                    !(options.signal?.aborted && error === options.signal.reason)) frameFailure ??= {reason:error}
+                throw error
             } finally {
                 if (temporalFrame !== undefined && !frameOwnershipTransferred) {
                     temporalFrame.release()
@@ -665,12 +770,9 @@ export async function createFlowFieldRenderer(
 
             assertActive()
             if (constructionInFlight !== undefined) await constructionInFlight
-            if (frameInFlight !== undefined) {
-                const settlement = await Promise.allSettled([ frameInFlight ])
-                if (settlement[0]?.status === 'rejected') throw settlement[0].reason
-            }
+            await drainFrames()
             assertActive()
-            if (constructionInFlight !== undefined || frameInFlight !== undefined) {
+            if (constructionInFlight !== undefined || framesInFlight.size > 0) {
                 throw new Error('Flow Field temporal suspension could not acquire the renderer')
             }
             let finishConstruction!: () => void
@@ -689,14 +791,17 @@ export async function createFlowFieldRenderer(
         ): Promise<GeoFrameResult<undefined>> {
             resetVisualClock()
             assertActive()
-            if (constructionInFlight !== undefined || frameInFlight !== undefined) {
+            if (constructionInFlight !== undefined) {
                 throw new Error('Flow retained presentation requires an idle renderer')
             }
             let finishConstruction!: () => void
             constructionInFlight = new Promise(resolve => { finishConstruction = resolve })
             try {
+                await drainFrames()
+                assertActive()
                 const resizing = resizeForCapture(capture, presentation)
                 if (resizing !== undefined) await resizing
+                assertActive()
                 const view = flowFieldViewAdapter.read(capture.view, {
                     frameEpoch: frameNumber,
                     residencySnapshotEpoch: temporalResidencyEpoch,
@@ -708,11 +813,7 @@ export async function createFlowFieldRenderer(
                 }
                 history.presentRetained(builder, view)
                 const submitted = builder.submit()
-                let observation: Promise<unknown>
-                observation = observeFlowSubmittedWork(submitted).finally(() => {
-                    if (frameInFlight === observation) frameInFlight = undefined
-                })
-                frameInFlight = observation
+                const observation = trackFrame(observeFlowSubmittedWork(submitted), true)
                 frameCount = frameNumber
                 return Object.freeze({
                     observation, needsFollowUp: false, value: undefined,
@@ -727,7 +828,7 @@ export async function createFlowFieldRenderer(
         async function flushResidency(): Promise<void> {
 
             assertActive()
-            if (constructionInFlight !== undefined || frameInFlight !== undefined) {
+            if (constructionInFlight !== undefined || framesInFlight.size > 0) {
                 throw new Error('Flow Field residency flush requires an idle renderer')
             }
             let finishConstruction!: () => void
@@ -736,24 +837,22 @@ export async function createFlowFieldRenderer(
             let transferred = false
             try {
                 const captured = await temporalBindings.prepareFrame(requestedLevel)
+                if (captured.state === 'ready') prepared = captured
+                assertActive()
                 if (captured.state !== 'ready') {
                     if (captured.state === 'failed') throw captured.error
                     throw new FlowTemporalFrameUnavailableError(captured.state)
                 }
-                prepared = captured
                 const publications = takeFramePublications(captured)
                 const builder = runtime.createSubmission({ validation: 'throw' })
                 encodePublications(builder, publications)
                 const submitted = builder.submit()
                 const flushing = settlePublicationObservations(submitted, publications, true)
-                let tracked: Promise<void>
-                tracked = flushing.finally(() => {
+                const tracked = trackFrame(flushing, true, () => {
                     captured.release()
-                    if (frameInFlight === tracked) frameInFlight = undefined
                 })
                 transferred = true
-                frameInFlight = tracked
-                return await tracked
+                await tracked
             } finally {
                 if (!transferred) prepared?.release()
                 finishConstruction()
@@ -767,6 +866,10 @@ export async function createFlowFieldRenderer(
                 initialized,
                 disposed,
                 frameCount,
+                maximumInFlightFrames: FLOW_FIELD_MAXIMUM_IN_FLIGHT_FRAMES,
+                inFlightFrameCount: framesInFlight.size,
+                contentFrameCount,
+                cameraPresentationCount,
                 visualTime,
                 presentationSize: Object.freeze({ ...size }),
                 cellsPerPageEdge,
@@ -793,13 +896,8 @@ export async function createFlowFieldRenderer(
             disposePromise = (async() => {
                 const failures: unknown[] = []
                 if (constructionInFlight !== undefined) await constructionInFlight
-                if (frameInFlight !== undefined) {
-                    try {
-                        await frameInFlight
-                    } catch (error) {
-                        failures.push(error)
-                    }
-                }
+                const settled = await Promise.allSettled([...framesInFlight])
+                failures.push(...settled.flatMap(result=>result.status==='rejected'?[result.reason]:[]))
                 preparedSpawnCandidates = undefined
                 packedCandidates = new Uint8Array(new ArrayBuffer(0))
                 packedCells = undefined
@@ -817,7 +915,44 @@ export async function createFlowFieldRenderer(
 
         function assertActive(): void {
 
+            if (options.signal?.aborted) throw options.signal.reason
             if (!initialized || disposed) throw new Error('Flow Field renderer is not active')
+            if (frameFailure !== undefined) throw frameFailure.reason
+        }
+
+        async function drainFrames(): Promise<void> {
+            const settled = await Promise.allSettled([...framesInFlight])
+            throwSettledFailures(settled, 'Flow Field frame drain failed')
+            if (frameFailure !== undefined) throw frameFailure.reason
+        }
+
+        async function drainContentFrames(): Promise<void> {
+            const settled = await Promise.allSettled([...contentFrames])
+            throwSettledFailures(settled, 'Flow Field content frame drain failed')
+            if (frameFailure !== undefined) throw frameFailure.reason
+        }
+
+        function trackFrame(work: Promise<unknown>, barrier: boolean, release: () => void = () => {},
+            presentationOnly = false): Promise<unknown> {
+            const released = work.then(value => { release(); return value }, error => {
+                try { release() } catch (cleanupError) {
+                    throw new AggregateError([error,cleanupError], 'Flow Field frame release failed')
+                }
+                throw error
+            })
+            let observation: Promise<unknown>
+            observation = released.catch(error => {
+                frameFailure ??= {reason:error}
+                throw error
+            }).finally(() => {
+                framesInFlight.delete(observation)
+                contentFrames.delete(observation)
+                barrierFrames.delete(observation)
+            })
+            framesInFlight.add(observation)
+            if (!presentationOnly) contentFrames.add(observation)
+            if (barrier) barrierFrames.add(observation)
+            return observation
         }
 
         function resizeForCapture(
@@ -859,7 +994,7 @@ export async function createFlowFieldRenderer(
         }
 
         return Object.freeze({
-            render, suspendTemporal, presentRetained, setPresentation, resetVisuals, resetVisualClock,
+            render, tryPresentCamera, suspendTemporal, presentRetained, setPresentation, resetVisuals, resetVisualClock,
             flushResidency, facts, dispose,
         })
     } catch (error) {
@@ -959,7 +1094,7 @@ async function settlePublicationObservations(
 
 async function settleFrameObservations(
     submitted: SubmittedWork,
-    publications: FlowFramePublications,
+    acknowledgement: Promise<void>,
     reconciliations: Promise<FlowDemandReconciliations>,
     viewDemand: FlowViewDemandAdapter,
     contour: FlowContour | undefined,
@@ -967,14 +1102,20 @@ async function settleFrameObservations(
 ): Promise<unknown> {
 
     const settlements = await Promise.allSettled([
-        settlePublicationObservations(submitted, publications),
+        observeFlowSubmittedWork(submitted),
+        acknowledgement,
         viewDemand.observe(submitted),
         contour?.observeOverflow(submitted),
         reconciliations,
         spawnObservation,
     ])
     throwSettledFailures(settlements, 'Flow Field frame observation failed')
-    return settlements[1]!.status === 'fulfilled' ? settlements[1]!.value : undefined
+    return settlements[2]!.status === 'fulfilled' ? settlements[2]!.value : undefined
+}
+
+async function acknowledgePublications(submitted: SubmittedWork, publications: FlowFramePublications): Promise<void> {
+    const settled = await Promise.allSettled(publications.map(({runtime,publication})=>runtime.acknowledge(publication,submitted)))
+    throwSettledFailures(settled, 'Flow Field source acknowledgement failed')
 }
 
 function throwSettledFailures(
